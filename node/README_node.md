@@ -111,3 +111,6 @@ npx prisma migrate dev --create-only --name constraint
 ```powershell
 npx prisma migrate dev --name constraint
 ```
+# HTTPS deployment note
+
+In the integrated product, Node remains an internal HTTP upstream on `127.0.0.1:3000`. The Nginx ingress exposes the dashboard and API over HTTPS and forwards `X-Forwarded-Proto`; set `TRUST_PROXY=true` when using that ingress. Use `node/.env.example` as the starting point for development configuration.

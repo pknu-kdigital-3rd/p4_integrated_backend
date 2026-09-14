@@ -23,3 +23,11 @@
 - Routing/tracking Python compile check: passed.
 - Go relay: not run because Go is not installed on this machine.
 - Vision/YOLO and Android streaming: not run; the user explicitly excluded GPU-related tests because this is not the original environment.
+
+## HTTPS migration
+
+- Added Nginx TLS ingress configuration for Node, Vision, WSS playback, and Android signaling.
+- Internal upstreams are loopback HTTP: Node `3000`, Vision `39011`, routing `8000`, relay `39012`.
+- Added production HTTPS URL validation, proxy-aware Node/Vision settings, secure Android network policy, and a development CA generator.
+- Generated development certificate verified against its CA with SAN `IP:10.174.96.95`.
+- Nginx binary is not installed on this Windows host, so ingress startup and browser/device trust remain deployment prerequisites.

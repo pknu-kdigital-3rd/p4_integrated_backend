@@ -4,8 +4,9 @@ This project uses:
 
 | Purpose | Protocol and ports |
 | --- | --- |
-| Go relay signaling (Android) | TCP `39002` |
-| FastAPI playback/HTTPS | TCP `39001` |
+| HTTPS ingress for dashboard, Vision/WSS, and Android signaling | TCP `443` |
+| Internal Go relay signaling | loopback TCP `39012` |
+| Internal FastAPI playback | loopback TCP `39011` |
 | Coturn listener | UDP/TCP `3478` |
 | Coturn TLS listener (optional) | TCP `5349` |
 | Coturn relay allocations | UDP `40000-40255` |
@@ -67,8 +68,7 @@ systemctl cat coturn
 ## 2. Linux firewall
 
 ```bash
-sudo ufw allow 39001/tcp
-sudo ufw allow 39002/tcp
+sudo ufw allow 443/tcp
 sudo ufw allow 3478/udp
 sudo ufw allow 3478/tcp
 sudo ufw allow 5349/tcp
@@ -82,8 +82,7 @@ allowing them from all addresses.
 
 The NAT router and any cloud security group must forward/allow the same ports:
 
-- TCP `39001` to the FastAPI playback host
-- TCP `39002` to the Go relay for Android signaling
+- TCP `443` to the HTTPS ingress
 - UDP/TCP `3478` to coturn
 - TCP `5349` to coturn when TLS is used
 - UDP `40000-40255` to coturn
@@ -101,21 +100,21 @@ export TURN_PASSWORD='pass'
 These are also the application defaults. Override them with environment
 variables when deploying outside this development network.
 
-Start the Python playback server on port `39001`:
+Start the Python playback server as a loopback HTTP upstream on port `39011`:
 
 ```bash
 cd /path/to/poc-server-webrtc/server
 uv sync
-export TLS_CERT_FILE="$PWD/certs/poc-cert.pem"
-export TLS_KEY_FILE="$PWD/certs/poc-key.pem"
-uv run python run.py
+export HOST=127.0.0.1
+export PORT=39011
+uv run python run.py --no-tls
 ```
 
-Start the Go relay separately on port `39002`:
+Start the Go relay separately on loopback port `39012`:
 
 ```bash
 cd /path/to/poc-server-webrtc/relay-go
-go run .
+RELAY_LISTEN_ADDR=127.0.0.1:39012 go run .
 ```
 
 The Python feed connection retries until the relay socket exists, and the
@@ -132,6 +131,7 @@ them on the Gradle command line:
 turn.url=turn:10.174.96.95:3478?transport=udp
 turn.username=user
 turn.password=pass
+relay.url=https://10.174.96.95
 ```
 
 Build the APK:
@@ -141,8 +141,8 @@ cd E:\project4\poc-server-webrtc\android
 .\gradlew.bat :app:assembleDebug
 ```
 
-The app uses the Go relay URL, defaulting to `http://192.168.0.2:39002`.
-Change that host for the actual relay address or hostname.
+The app uses the HTTPS ingress URL, defaulting to `https://10.174.96.95`.
+The ingress forwards `/offer/android` to the loopback Go relay.
 
 ## 5. Verify TURN is being used
 
@@ -156,7 +156,6 @@ The SDP exchanged by the clients should contain candidates with `typ relay`.
 Browser diagnostics are available at `chrome://webrtc-internals`; coturn
 should also show an allocation and relay traffic in its journal.
 
-If the page loads but video remains black, first check that Android can reach
-`http://<PUBLIC_HOST>:39002` and that the browser can reach
-`https://<PUBLIC_HOST>:39001`; then confirm the NAT forwarding and cloud
+If the page loads but video remains black, first check that Android and the browser can reach
+`https://<PUBLIC_HOST>` with a trusted certificate; then confirm the ingress, NAT forwarding, and cloud
 firewall rules for the coturn listener and relay range.
