@@ -53,7 +53,7 @@ export function createApp() {
 	app.use("/api/v1/bootstrap", bootstrapRouter);
 	app.use("/api/v1/tracking", trackingRouter);
 
-	const operatorWeb = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../operator-web");
+	const operatorWeb = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../operator-web");
 	app.use("/operator", express.static(operatorWeb));
 
 	app.get("/openapi.json", (_req, res) => {
