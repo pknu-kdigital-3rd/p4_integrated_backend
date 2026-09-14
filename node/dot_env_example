@@ -2,3 +2,4 @@ DATABASE_URL="postgresql://app:app@localhost:5432/vehicle_platform?schema=public
 VISION_PUBLIC_BASE_URL="https://127.0.0.1:8001"
 LIVE_VIEW_URL="https://127.0.0.1:8001/"
 ROUTING_TRACKING_BASE_URL="http://127.0.0.1:8000"
+OPERATOR_DEMO_PUBLIC=true

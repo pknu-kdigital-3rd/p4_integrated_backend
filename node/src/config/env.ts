@@ -25,6 +25,7 @@ const envSchema = z.object({
     VISION_PUBLIC_BASE_URL: z.url().default("http://127.0.0.1:8001"),
     LIVE_VIEW_URL: z.url().optional(),
     ROUTING_TRACKING_BASE_URL: z.url().default("http://127.0.0.1:8000"),
+    OPERATOR_DEMO_PUBLIC: z.coerce.boolean().default(false),
 });
 
 export const env = envSchema.parse(process.env)
