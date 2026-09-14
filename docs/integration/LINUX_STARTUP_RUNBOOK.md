@@ -22,6 +22,32 @@ Terminology: Vision is the Python WebRTC/YOLO server. Route/tracking is the
 second Python service. There is no separate fourth Python server in this
 repository; the other backend process is the Node control API.
 
+## One-command path
+
+After copying and editing the central environment file described below, the
+entire setup and startup sequence can be run with:
+
+```bash
+cd /home/user/p4_integrated_backend
+chmod +x scripts/run-linux-stack.sh
+./scripts/run-linux-stack.sh all
+```
+
+The command does not report success until PostgreSQL, Node, route/tracking, the
+Go relay, Vision/CUDA, Nginx, and both public HTTPS origins pass their checks.
+Useful lifecycle commands are:
+
+```bash
+./scripts/run-linux-stack.sh status
+./scripts/run-linux-stack.sh stop
+./scripts/run-linux-stack.sh start
+./scripts/run-linux-stack.sh down
+```
+
+Logs and PID files are kept under the ignored `.runtime/` directory. `stop`
+leaves PostgreSQL running; `down` stops it too. The script may prompt for
+`sudo` when validating, starting, reloading, or stopping Nginx.
+
 ## 0. One-time host prerequisites
 
 Install and verify Docker Engine/Compose, `uv`, Node/npm, Go, OpenSSL, and
