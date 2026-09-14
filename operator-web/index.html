@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ITS Operator Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header><h1>ITS Operator Dashboard</h1><span id="connection">Signed out</span></header>
+  <main>
+    <section id="map"></section>
+    <aside>
+      <form id="login"><h2>Operator login</h2><input name="loginId" placeholder="Login ID" required><input name="password" type="password" placeholder="Password" required><button>Sign in</button></form>
+      <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view">Live View</button><p id="route-label">Planned Route: unavailable</p></section>
+      <p id="error" role="alert"></p>
+    </aside>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
