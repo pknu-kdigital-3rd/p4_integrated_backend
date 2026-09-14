@@ -12,10 +12,14 @@
     <section id="map"></section>
     <aside>
       <form id="login"><h2>Operator login</h2><input name="loginId" placeholder="Login ID" required><input name="password" type="password" placeholder="Password" required><button>Sign in</button></form>
-      <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view">Live View</button><p id="route-label">Planned Route: unavailable</p></section>
+      <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view" type="button">Live View</button><p id="route-label">Planned Route: unavailable</p></section>
       <p id="error" role="alert"></p>
     </aside>
   </main>
+  <section id="live-view-panel" hidden>
+    <header><h2>Live View</h2><button id="close-live-view" type="button">Close</button></header>
+    <iframe id="live-view-frame" title="Vehicle live view" allow="autoplay; camera; microphone; fullscreen"></iframe>
+  </section>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="app.js"></script>
 </body>
