@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="100%" viewBox="0 0 1000 720" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Vehicle vision architecture: direct Android-to-Tauri media plane, FastAPI vision plane, Node Express control plane</title>
+  <defs>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="5.8" markerHeight="5.8" orient="auto-start-reverse" markerUnits="strokeWidth">
+      <path d="M1.2 1.4 L9.2 5 L1.2 8.6 L3.25 5 Z" fill="#534AB7"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="5.8" markerHeight="5.8" orient="auto-start-reverse" markerUnits="strokeWidth">
+      <path d="M1.2 1.4 L9.2 5 L1.2 8.6 L3.25 5 Z" fill="#0F6E56"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9.2" refY="5" markerWidth="5.8" markerHeight="5.8" orient="auto-start-reverse" markerUnits="strokeWidth">
+      <path d="M1.2 1.4 L9.2 5 L1.2 8.6 L3.25 5 Z" fill="#B47814"/>
+    </marker>
+  </defs>
+  <text x="500" y="24" text-anchor="middle" fill="#444441" font-size="18" font-weight="700" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Vehicle Vision &amp; Control Architecture</text>
+  <text x="500" y="43" text-anchor="middle" fill="#777570" font-size="10.5" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Direct media plane • FastAPI vision plane • Node/Express control plane</text>
+  <rect x="370" y="62" width="260" height="88" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="500" y="83" text-anchor="middle" fill="#444441" font-size="15" font-weight="700" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Android Device (CameraX)</text>
+  <text x="500" y="103" text-anchor="middle" fill="#5F5E5A" font-size="9.3" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Frame source • capture identity • local recording</text>
+  <rect x="390" y="116" width="104" height="22" rx="5" fill="#FFFFFF" stroke="#B8B6B0" stroke-width="0.6" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="442" y="130" text-anchor="middle" fill="#6A6863" font-size="8.5" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">FrameEnvelope</text>
+  <rect x="506" y="116" width="104" height="22" rx="5" fill="#FFF7E9" stroke="#B47814" stroke-width="0.6" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="558" y="130" text-anchor="middle" fill="#8C5A0A" font-size="8.5" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Local H.264 + PTS</text>
+  <g transform="matrix(1, 0, 0, 1, 76.953323, 0.749296)">
+    <rect x="80.209" y="210" width="149.14" height="94.713" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.8" font-family="Arial, Helvetica, sans-serif" style=""/>
+    <text x="155" y="234" text-anchor="middle" fill="#085041" font-size="15" font-weight="700" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Node / Express</text>
+    <text x="155" y="253" text-anchor="middle" fill="#0F6E56" font-size="9.8" font-weight="600" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Control / Business Plane</text>
+    <text x="155" y="274" text-anchor="middle" fill="#356E60" font-size="8.8" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Auth • RBAC • Service Discovery</text>
+    <text x="155" y="292" text-anchor="middle" fill="#356E60" font-size="8.8" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Business • History • Replay API</text>
+  </g>
+  <g transform="matrix(1, 0, 0, 1, -3.980347, 2.210999)">
+    <rect x="387.69" y="208.538" width="229.484" height="100.31" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1.0" font-family="Arial, Helvetica, sans-serif" style=""/>
+    <text x="500" y="229" text-anchor="middle" fill="#085041" font-size="14.5" font-weight="700" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">FastAPI Vision Service + GPU</text>
+    <text x="500" y="249" text-anchor="middle" fill="#0F6E56" font-size="9.5" font-weight="600" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Vision gRPC Endpoint • HTTP / Health</text>
+    <line x1="395" y1="260" x2="605" y2="260" stroke="#A9CFC3" stroke-width="0.6" font-family="Arial, Helvetica, sans-serif"/>
+    <text x="500" y="279" text-anchor="middle" fill="#356E60" font-size="9.2" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Inference • Tracking • Distance</text>
+    <text x="500" y="297" text-anchor="middle" fill="#356E60" font-size="9" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Detection Stream • Risk Evaluation</text>
+  </g>
+  <g transform="matrix(1, 0, 0, 1, 76.511063, -7.076168)">
+    <rect x="74.459" y="398" width="159.312" height="76.732" rx="10" fill="#EEEDFE" stroke="#534AB7" stroke-width="0.8" font-family="Arial, Helvetica, sans-serif" style=""/>
+    <text x="155" y="421" text-anchor="middle" fill="#3C3489" font-size="13.5" font-weight="700" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">PostgreSQL + PostGIS</text>
+    <text x="155" y="445" text-anchor="middle" fill="#534AB7" font-size="9" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Business + Inference Metadata</text>
+    <text x="155" y="464" text-anchor="middle" fill="#7068B5" font-size="8.4" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">Shared Database</text>
+  </g>
+  <rect x="662.224" y="264.705" width="141.696" height="99.017" rx="10" fill="#FEF3E1" stroke="#B47814" stroke-width="0.8" font-family="Arial, Helvetica, sans-serif" style="stroke-width: 0.8;"/>
+  <text x="733.515" y="301.972" text-anchor="middle" fill="#8C5A0A" font-size="13.5" font-weight="700" style="white-space: pre; font-size: 13.5px; stroke-width: 1;" font-family="Arial, Helvetica, sans-serif">Object Storage</text>
+  <text x="735.284" y="330.606" text-anchor="middle" fill="#B47814" font-size="8.9" style="white-space: pre; font-size: 8.9px; stroke-width: 1;" font-family="Arial, Helvetica, sans-serif">H.264 • Images • Replay Media</text>
+  <rect x="374.865" y="456.452" width="260" height="104" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="0.8" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="504.865" y="480.452" text-anchor="middle" fill="#444441" font-size="15" font-weight="700" style="white-space: pre; font-size: 15px;" font-family="Arial, Helvetica, sans-serif">Tauri Dashboard</text>
+  <text x="504.865" y="500.452" text-anchor="middle" fill="#5F5E5A" font-size="9.2" style="white-space: pre; font-size: 9.2px;" font-family="Arial, Helvetica, sans-serif">Native gRPC + HTTPS REST</text>
+  <line x1="504.865" y1="511.452" x2="504.865" y2="548.452" stroke="#C4C2BC" stroke-width="0.6" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="439.865" y="526.452" text-anchor="middle" fill="#0F6E56" font-size="9.3" font-weight="700" style="white-space: pre; font-size: 9.3px;" font-family="Arial, Helvetica, sans-serif">Live</text>
+  <text x="439.865" y="543.452" text-anchor="middle" fill="#777570" font-size="8.2" style="white-space: pre; font-size: 8.2px;" font-family="Arial, Helvetica, sans-serif">Frame + Detection Join</text>
+  <text x="569.865" y="526.452" text-anchor="middle" fill="#B47814" font-size="9.3" font-weight="700" style="white-space: pre; font-size: 9.3px;" font-family="Arial, Helvetica, sans-serif">Replay</text>
+  <text x="569.865" y="543.452" text-anchor="middle" fill="#777570" font-size="8.2" style="white-space: pre; font-size: 8.2px;" font-family="Arial, Helvetica, sans-serif">Video + Timeline</text>
+  <path d="M 369.558 91.769 L 302.039 91.769 L 215.356 179.41 L 214.754 210.368" fill="none" marker-end="url(#arrow-purple)" stroke="#534AB7" stroke-width="1.4" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="257.542" y="121.219" text-anchor="end" fill="#534AB7" font-size="9.1" font-weight="700" style="white-space: pre; font-size: 9.1px;" font-family="Arial, Helvetica, sans-serif">1. HTTPS Control</text>
+  <path d="M 255.885 210.103 L 256.143 180.914 L 317.617 123.788 L 369.558 123.346" fill="none" marker-end="url(#arrow-purple)" stroke="#534AB7" stroke-width="1.25" stroke-dasharray="5 3" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="300.85" y="170.289" fill="#534AB7" font-size="8.7" font-weight="700" style="white-space: pre; font-size: 8.7px;" font-family="Arial, Helvetica, sans-serif">2. Bootstrap</text>
+  <line x1="500" y1="150" x2="500.443" y2="209.423" marker-end="url(#arrow-green)" stroke="#0F6E56" stroke-width="2.1" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="514" y="174" fill="#0F6E56" font-size="9.2" font-weight="700" style="white-space: pre;" font-family="Arial, Helvetica, sans-serif">3. gRPC Inference</text>
+  <path d="M 630.884 102.231 L 831.966 101.347 L 832.407 525.409 L 634.865 524.526" fill="none" marker-end="url(#arrow-purple)" stroke="#534AB7" stroke-width="2.4" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="678.772" y="92.344" fill="#534AB7" font-size="9.3" font-weight="700" style="white-space: pre; font-size: 9.3px;" font-family="Arial, Helvetica, sans-serif">4. Direct gRPC Frames</text>
+  <path d="M 609.656 125.975 L 733.759 125.975 L 734.643 263.995" fill="none" marker-end="url(#arrow-orange)" stroke="#B47814" stroke-width="1.6" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="743.99" y="196.192" fill="#B47814" font-size="9.0" font-weight="700" style="white-space: pre; font-size: 9px;" font-family="Arial, Helvetica, sans-serif">5. H.264 PUT</text>
+  <path d="M 501.401 309.732 L 501.844 456.01" fill="none" marker-end="url(#arrow-green)" stroke="#0F6E56" stroke-width="1.8" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="507.652" y="392.884" fill="#0F6E56" font-size="9.2" font-weight="700" style="white-space: pre; font-size: 9.2px;" font-family="Arial, Helvetica, sans-serif">6. gRPC Detections</text>
+  <path d="M 383.71 262.56 L 340.688 262.561 L 341.131 428.406 L 308.514 428.848" fill="none" marker-end="url(#arrow-green)" stroke="#0F6E56" stroke-width="1.4" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="347.823" y="359.116" fill="#0F6E56" font-size="8.6" font-weight="700" style="white-space: pre; font-size: 8.6px;" font-family="Arial, Helvetica, sans-serif">Async Metadata</text>
+  <line x1="231.511" y1="306.924" x2="231.511" y2="390.924" marker-end="url(#arrow-purple)" stroke="#534AB7" stroke-width="1.35" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="164.511" y="351.924" fill="#534AB7" font-size="8.6" font-weight="700" style="white-space: pre; font-size: 8.6px;" font-family="Arial, Helvetica, sans-serif">Business DB</text>
+  <path d="M 157.604 264 L 118.317 264 L 115.221 518.01 L 374.423 517.568" fill="none" marker-start="url(#arrow-purple)" marker-end="url(#arrow-purple)" stroke="#534AB7" stroke-width="1.55" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="212.462" y="513.155" fill="#534AB7" font-size="8.9" font-weight="700" style="white-space: pre; font-size: 8.9px;" font-family="Arial, Helvetica, sans-serif">7. HTTPS REST</text>
+  <path d="M 742.358 364.339 L 634.422 490.075" fill="none" marker-end="url(#arrow-orange)" stroke="#B47814" stroke-width="1.35" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="698.735" y="430.14" fill="#B47814" font-size="8.7" font-weight="700" style="white-space: pre; font-size: 8.7px;" font-family="Arial, Helvetica, sans-serif">8. Range GET</text>
+  <rect x="374.865" y="574.452" width="260" height="36" rx="6" fill="#F7F6F2" stroke="#C7C5BF" stroke-width="0.5" font-family="Arial, Helvetica, sans-serif"/>
+  <text x="504.865" y="589.452" text-anchor="middle" fill="#444441" font-size="8.9" font-weight="700" style="white-space: pre; font-size: 8.9px;" font-family="Arial, Helvetica, sans-serif">Frame Sync: session_id + frame_id</text>
+  <text x="504.865" y="602.452" text-anchor="middle" fill="#777570" font-size="8.1" style="white-space: pre; font-size: 8.1px;" font-family="Arial, Helvetica, sans-serif">Flow details and ownership: companion table</text>
+</svg>
