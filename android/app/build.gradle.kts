@@ -9,6 +9,8 @@ val turnUrl = providers.gradleProperty("turn.url").orNull
     ?: "turn:10.174.96.95:3478?transport=udp"
 val turnUsername = providers.gradleProperty("turn.username").orNull ?: "user"
 val turnPassword = providers.gradleProperty("turn.password").orNull ?: "pass"
+val relayUrl = providers.gradleProperty("relay.url").orNull
+    ?: "https://10.174.96.95"
 
 android {
     namespace = "com.example.webrtccamera"
@@ -23,8 +25,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // Android Emulator -> host machine. For a physical phone, enter the PC's LAN IP.
-        buildConfigField("String", "DEFAULT_SERVER_URL", "\"http://10.174.96.95:39002\"")
+        buildConfigField("String", "DEFAULT_SERVER_URL", buildConfigString(relayUrl))
         buildConfigField("String", "TURN_URL", buildConfigString(turnUrl))
         buildConfigField("String", "TURN_USERNAME", buildConfigString(turnUsername))
         buildConfigField("String", "TURN_PASSWORD", buildConfigString(turnPassword))

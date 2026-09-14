@@ -27,12 +27,26 @@ function browserReachableUrl(configuredUrl){
 }
 document.querySelector('#live-view').addEventListener('click',()=>{
   if(!bootstrap)return;
-  document.querySelector('#live-view-frame').src=browserReachableUrl(bootstrap.liveViewUrl);
+  const liveViewUrl=browserReachableUrl(bootstrap.liveViewUrl);
+  const diagnostic=document.querySelector('#live-view-diagnostic');
+  diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
+  if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
+  document.querySelector('#live-view-frame').src=liveViewUrl;
   document.querySelector('#live-view-panel').hidden=false;
+});
+document.querySelector('#live-view-frame').addEventListener('load',event=>{
+  if(document.querySelector('#live-view-panel').hidden)return;
+  const diagnostic=document.querySelector('#live-view-diagnostic');
+  try{
+    diagnostic.textContent+=event.currentTarget.contentWindow.isSecureContext?' — secure context ready':' — iframe is not a secure context';
+  }catch{
+    diagnostic.textContent+=' — iframe loaded; inspect its console if playback does not start';
+  }
 });
 document.querySelector('#close-live-view').addEventListener('click',()=>{
   document.querySelector('#live-view-panel').hidden=true;
   document.querySelector('#live-view-frame').src='about:blank';
+  document.querySelector('#live-view-diagnostic').textContent='';
 });
 async function boot(){
   try{demoMode=true;await start();return}catch{demoMode=false}

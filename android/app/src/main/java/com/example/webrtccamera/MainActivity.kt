@@ -485,7 +485,7 @@ class MainActivity : AppCompatActivity() {
         val withScheme = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
             trimmed
         } else {
-            "http://$trimmed"
+            "https://$trimmed"
         }
         val parsed = Uri.parse(withScheme)
         if (parsed.host.isNullOrBlank() || parsed.port == 0) return null

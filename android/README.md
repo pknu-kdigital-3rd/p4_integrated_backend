@@ -1,14 +1,14 @@
 # WebRTC camera client
 
 This app publishes the Android camera to the Go relay at
-`POST /offer/android` (default port `39002`) using a WebRTC video track and an
-HTTP SDP offer/answer exchange. The Go relay forwards the encoded H.264 access
+`POST /offer/android` through the HTTPS ingress using a WebRTC video track and an
+HTTPS SDP offer/answer exchange. The Go relay forwards the encoded H.264 access
 units to the Python inference server over its local reliable feed.
 
 ## Run the servers
 
-Start the Go relay on port `39002` and the Python inference/playback server on
-port `39001`. Either server may start first; both sides retry their local
+Start the Go relay internally on `127.0.0.1:39012` and the Python inference/playback server on
+`127.0.0.1:39011`, then start the HTTPS ingress. Either server may start first; both sides retry their local
 connection until the other process is available.
 
 ## Run the Android app
@@ -20,10 +20,10 @@ The debug APK can also be built with:
 .\gradlew.bat :app:assembleDebug
 ```
 
-The default URL is `http://10.0.2.2:39002`, which reaches the host computer
-from the Android Emulator. For a physical phone, enter the relay's LAN
-address, for example `http://192.168.0.10:39002`, and allow port 39002 through
-the computer firewall if necessary.
+The default URL is `https://10.174.96.95`. Override it with the Gradle property
+`relay.url=https://its.example.internal` when using DNS. Install the deployment
+CA certificate on the development device before connecting. Debug builds trust
+user-installed CAs; release builds trust system CAs only. Cleartext HTTP is disabled.
 
 The phone and server must be reachable on the same network. This prototype
 uses host ICE candidates and does not configure a STUN/TURN server.
