@@ -4,7 +4,8 @@ This project uses:
 
 | Purpose | Protocol and ports |
 | --- | --- |
-| HTTPS ingress for dashboard, Vision/WSS, and Android signaling | TCP `443` |
+| HTTPS ingress for the operator dashboard | TCP `39001` |
+| HTTPS ingress for Vision/WSS and Android signaling | TCP `39002` |
 | Internal Go relay signaling | loopback TCP `39012` |
 | Internal FastAPI playback | loopback TCP `39011` |
 | Coturn listener | UDP/TCP `3478` |
@@ -68,7 +69,8 @@ systemctl cat coturn
 ## 2. Linux firewall
 
 ```bash
-sudo ufw allow 443/tcp
+sudo ufw allow 39001/tcp
+sudo ufw allow 39002/tcp
 sudo ufw allow 3478/udp
 sudo ufw allow 3478/tcp
 sudo ufw allow 5349/tcp
@@ -82,7 +84,8 @@ allowing them from all addresses.
 
 The NAT router and any cloud security group must forward/allow the same ports:
 
-- TCP `443` to the HTTPS ingress
+- TCP `39001` to the operator HTTPS ingress
+- TCP `39002` to the Vision/signaling HTTPS ingress
 - UDP/TCP `3478` to coturn
 - TCP `5349` to coturn when TLS is used
 - UDP `40000-40255` to coturn
@@ -131,7 +134,7 @@ them on the Gradle command line:
 turn.url=turn:10.174.96.95:3478?transport=udp
 turn.username=user
 turn.password=pass
-relay.url=https://10.174.96.95
+relay.url=https://10.174.96.95:39002
 ```
 
 Build the APK:
@@ -141,7 +144,7 @@ cd E:\project4\poc-server-webrtc\android
 .\gradlew.bat :app:assembleDebug
 ```
 
-The app uses the HTTPS ingress URL, defaulting to `https://10.174.96.95`.
+The app uses the HTTPS ingress URL, defaulting to `https://10.174.96.95:39002`.
 The ingress forwards `/offer/android` to the loopback Go relay.
 
 ## 5. Verify TURN is being used
@@ -157,5 +160,5 @@ Browser diagnostics are available at `chrome://webrtc-internals`; coturn
 should also show an allocation and relay traffic in its journal.
 
 If the page loads but video remains black, first check that Android and the browser can reach
-`https://<PUBLIC_HOST>` with a trusted certificate; then confirm the ingress, NAT forwarding, and cloud
+`https://<PUBLIC_HOST>:39002` with a trusted certificate; then confirm the ingress, NAT forwarding, and cloud
 firewall rules for the coturn listener and relay range.

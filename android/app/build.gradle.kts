@@ -10,7 +10,7 @@ val turnUrl = providers.gradleProperty("turn.url").orNull
 val turnUsername = providers.gradleProperty("turn.username").orNull ?: "user"
 val turnPassword = providers.gradleProperty("turn.password").orNull ?: "pass"
 val relayUrl = providers.gradleProperty("relay.url").orNull
-    ?: "https://10.174.96.95"
+    ?: "https://10.174.96.95:39002"
 
 android {
     namespace = "com.example.webrtccamera"

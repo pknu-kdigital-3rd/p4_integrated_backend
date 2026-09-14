@@ -30,7 +30,7 @@ const envSchema = z.object({
     JWT_KEY_ID: z.string().min(1),
 
     PUBLIC_OPERATOR_URL: z.url().optional(),
-    VISION_PUBLIC_BASE_URL: z.url().default("https://127.0.0.1:39001"),
+    VISION_PUBLIC_BASE_URL: z.url().default("https://127.0.0.1:39002"),
     LIVE_VIEW_URL: z.url().optional(),
     ROUTING_TRACKING_BASE_URL: z.url().default("http://127.0.0.1:8000"),
     OPERATOR_DEMO_PUBLIC: envBoolean,

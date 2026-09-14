@@ -15,7 +15,8 @@ until every required check below passes.
 | Route/tracking + A* | `services/routing-tracking/` | Python/uv | `127.0.0.1:8000` | `/health/live`, `/health/ready` |
 | Go media relay | `services/media-relay/` | Go | `127.0.0.1:39012` | `/healthz`, `/internal/status` |
 | Vision live-view/inference | `services/vision/` | Python/uv + CUDA | `127.0.0.1:39011` | `/health/live` |
-| HTTPS ingress (required for browser Live View) | `deploy/nginx/` | Nginx | `:80`, `:443` | HTTPS curl checks |
+| Operator HTTPS ingress | `deploy/nginx/` | Nginx | `:39001` | HTTPS curl checks |
+| Vision/WSS/signaling HTTPS ingress | `deploy/nginx/` | Nginx | `:39002` | HTTPS curl checks |
 
 Terminology: Vision is the Python WebRTC/YOLO server. Route/tracking is the
 second Python service. There is no separate fourth Python server in this
@@ -49,7 +50,7 @@ All service variables belong in one untracked file. Do not maintain separate
 shell-specific copies.
 
 ```bash
-cd /opt/p4_integrated_backend
+cd /home/user/p4_integrated_backend
 cp deploy/env.local.example deploy/env.local
 $EDITOR deploy/env.local
 set -a
@@ -121,7 +122,7 @@ npx tsx src/server.ts
 Keep this shell running. In another shell, source the environment and verify:
 
 ```bash
-set -a; source /opt/p4_integrated_backend/deploy/env.local; set +a
+set -a; source /home/user/p4_integrated_backend/deploy/env.local; set +a
 curl --fail http://127.0.0.1:"$NODE_PORT"/health/live
 curl --fail http://127.0.0.1:"$NODE_PORT"/health/ready
 curl --fail http://127.0.0.1:"$NODE_PORT"/api/v1/demo/bootstrap
@@ -146,7 +147,7 @@ The first start loads `busan-roads_osm.pbf`; wait for the graph-loaded message.
 Verify from another shell:
 
 ```bash
-set -a; source /opt/p4_integrated_backend/deploy/env.local; set +a
+set -a; source /home/user/p4_integrated_backend/deploy/env.local; set +a
 curl --fail http://127.0.0.1:"$ROUTING_PORT"/health/live
 curl --fail http://127.0.0.1:"$ROUTING_PORT"/health/ready
 curl --fail http://127.0.0.1:"$ROUTING_PORT"/internal/telemetry/status
@@ -171,7 +172,7 @@ go run .
 Verify the relay boundary:
 
 ```bash
-set -a; source /opt/p4_integrated_backend/deploy/env.local; set +a
+set -a; source /home/user/p4_integrated_backend/deploy/env.local; set +a
 curl --fail http://127.0.0.1:39012/healthz
 curl --fail http://127.0.0.1:39012/internal/status
 ```
@@ -201,7 +202,7 @@ runtime check must print the RTX 3090 and the process must log
 Verify:
 
 ```bash
-set -a; source /opt/p4_integrated_backend/deploy/env.local; set +a
+set -a; source /home/user/p4_integrated_backend/deploy/env.local; set +a
 curl --fail http://127.0.0.1:"$VISION_PORT"/health/live
 curl --fail http://127.0.0.1:"$VISION_PORT"/
 ```
@@ -244,15 +245,16 @@ configuration:
 sudo nginx -p "$P4_ROOT/deploy/nginx/" -t -c nginx.conf
 sudo nginx -p "$P4_ROOT/deploy/nginx/" -c nginx.conf
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
-  https://10.174.96.95/health/live
+  https://10.174.96.95:39001/health/live
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
-  https://10.174.96.95/vision/
+  https://10.174.96.95:39002/
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
-  https://10.174.96.95/operator/
+  https://10.174.96.95:39001/operator/
 ```
 
-The expected browser URL is `https://10.174.96.95/operator/`. Live View is
-embedded in the dashboard in the same tab. A video stream will remain empty
+The expected browser URL is `https://10.174.96.95:39001/operator/`. Live View is
+embedded in the dashboard in the same tab from the HTTPS Vision origin on port
+`39002`. A video stream will remain empty
 until an Android publisher is connected to the relay; the backend health checks
 can still pass before that publisher is present.
 
@@ -269,9 +271,9 @@ BIMS secrets in Git.
 The stack is up only when all of these succeed from a separate shell:
 
 ```bash
-curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95/health/live
-curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95/vision/
-curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95/operator/
+curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39001/health/live
+curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39002/
+curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39001/operator/
 curl --fail http://127.0.0.1:"$ROUTING_PORT"/health/ready
 curl --fail http://127.0.0.1:39012/healthz
 ```
