@@ -23,4 +23,6 @@ This repository integrates the existing control backend, BIMS routing/tracking, 
 
 Public HTTP redirects to HTTPS. Node, Vision, routing/tracking, and relay HTTP listeners are internal-only. See [deploy/nginx/README.md](deploy/nginx/README.md) for certificate, proxy, WebSocket, and firewall details.
 
+For a Linux host, use the single-environment, health-checked startup procedure in [docs/integration/LINUX_STARTUP_RUNBOOK.md](docs/integration/LINUX_STARTUP_RUNBOOK.md) and copy [deploy/env.local.example](deploy/env.local.example) to the untracked `deploy/env.local`.
+
 GPU-dependent vision tests and Android device streaming require their original environment and are not part of CPU-only verification. No SUMO, Tauri, route reassignment, or multi-stream media routing is included.

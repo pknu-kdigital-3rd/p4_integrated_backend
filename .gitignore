@@ -16,5 +16,6 @@ secrets/
 *.key
 *.pem
 *.p12
+deploy/env.local
 deploy/nginx/logs/*.log
 deploy/nginx/logs/*.pid
