@@ -1,0 +1,31 @@
+[project]
+name = "astar-route-explorer"
+version = "0.1.0"
+description = "Click-to-route A* pathfinding over an OSM PBF road network, served with FastAPI"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+# Recommended: gives the full unfiltered graph + real networkx A*.
+# Without this, graph_backend.py auto-falls-back to the bundled
+# pure-Python parser (pbf_parser.py) - no extra deps needed.
+# pyrosm is required alongside osmnx/networkx: osmnx's own graph_from_xml()
+# only reads OSM XML, not this project's binary .pbf file - pyrosm is what
+# actually parses the .pbf into a graph osmnx/networkx can route over.
+osmnx = [
+    "osmnx>=1.9",
+    "networkx>=3.2",
+    "pyrosm>=0.13",
+    "scikit-learn>=1.3",  # osmnx's nearest_nodes() needs this for unprojected (lat/lon) graphs
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]

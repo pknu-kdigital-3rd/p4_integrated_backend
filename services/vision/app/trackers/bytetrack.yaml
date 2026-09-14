@@ -1,0 +1,16 @@
+# ByteTrack association for the ordered no-drop inference path.
+#
+# new_track_thresh > track_low_thresh is the anti-flicker property: a box must
+# clear the high bar to appear, but an established track survives all the way
+# down to the low bar. Confidence oscillating around the appearance threshold
+# therefore no longer blinks the overlay on and off.
+#
+# Raising track_buffer keeps a lost track's identity reusable for longer, which
+# preserves the ID across a brief occlusion at the cost of more ID-switch risk.
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.10
+new_track_thresh: 0.35
+track_buffer: 30
+match_thresh: 0.8
+fuse_score: True

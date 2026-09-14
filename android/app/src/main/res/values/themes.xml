@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.WebRtcCamera" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>

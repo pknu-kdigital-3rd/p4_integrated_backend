@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>A* route explorer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  html, body { margin:0; padding:0; height:100%; font-family: -apple-system, sans-serif; }
+  #map { position:absolute; top:0; bottom:0; left:0; right:0; cursor: default; }
+  #map.solving { cursor: wait; }
+  /* Leaflet defaults the whole map pane to a grab/grabbing hand since the
+     map itself is draggable - override back to a normal arrow cursor. */
+  .leaflet-grab { cursor: default !important; }
+  .leaflet-dragging .leaflet-grab { cursor: default !important; }
+  #panel {
+    position:absolute; top:12px; left:12px; z-index:1000;
+    background:white; padding:10px 14px; border-radius:8px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.2); font-size:13px; max-width:260px;
+  }
+  #panel b { display:block; margin-bottom:4px; }
+  #stats { margin-top:6px; color:#444; line-height:1.5; }
+  #resetBtn {
+    margin-top:8px; padding:5px 10px; border:none; border-radius:6px;
+    background:#D85A30; color:white; cursor:pointer; font-size:12px;
+  }
+  #resetBtn:hover { background:#993C1D; }
+
+  .coord-row {
+    display: flex; align-items: center; gap: 4px;
+    margin-top: 6px;
+  }
+  .coord-label {
+    font-size: 11px; font-weight: 600;
+    width: 32px; flex-shrink: 0;
+  }
+  .coord-row input {
+    width: 0; flex: 1 1 0;
+    min-width: 0;
+    padding: 3px 5px;
+    font-size: 11px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  .coord-row input:focus {
+    outline: none;
+    border-color: #888;
+  }
+  .coord-set-btn {
+    flex-shrink: 0;
+    padding: 3px 8px;
+    border: none; border-radius: 4px;
+    background: #444; color: white;
+    font-size: 11px; cursor: pointer;
+  }
+  .coord-set-btn:hover { background: #222; }
+
+  .vehicle-toggles {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: 8px 0;
+  }
+  .override-toggle-row {
+    display: flex; align-items: center; gap: 6px;
+    margin: 8px 0 4px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .override-toggle-row input { cursor: pointer; }
+  #overrideCount {
+    color: #888; font-size: 11px;
+  }
+  .vehicle-chip {
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 9px;
+    border: 1.5px solid #ddd;
+    border-radius: 14px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    background: white;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .vehicle-chip.active {
+    border-color: var(--chip-color, #888);
+    background: color-mix(in srgb, var(--chip-color, #888) 12%, white);
+  }
+  .vehicle-chip .swatch {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--chip-color, #888);
+    flex-shrink: 0;
+  }
+
+  #busControls {
+    margin: 8px 0 4px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+  }
+  .bus-toggle-row {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; cursor: pointer; user-select: none;
+  }
+  #busStatus { color: #666; font-size: 11px; margin-top: 4px; line-height: 1.35; }
+  .bus-legend { display: flex; gap: 8px; margin-top: 5px; font-size: 10px; color: #666; }
+  .bus-legend span::before {
+    content: ''; display: inline-block; width: 7px; height: 7px;
+    border-radius: 50%; margin-right: 3px;
+  }
+  .bus-legend .live::before { background: #16A34A; }
+  .bus-legend .interpolated::before { background: #F59E0B; }
+  .bus-legend .reconciling::before { background: #8B5CF6; }
+  .bus-marker {
+    min-width: 27px; height: 24px; padding: 0 4px;
+    border: 2px solid white; border-radius: 12px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font: bold 10px/1 sans-serif; white-space: nowrap;
+  }
+  .bus-marker.live { background: #16A34A; }
+  .bus-marker.interpolated { background: #F59E0B; }
+  .bus-marker.reconciling { background: #8B5CF6; }
+
+  /* pin markers */
+  .route-pin {
+    --pin-border: 2px;
+    width: 26px; height: 26px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    position: relative;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+    border: var(--pin-border) solid white;
+  }
+  .route-pin::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 8px; height: 8px;
+    background: white;
+    border-radius: 50%;
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+  /* Marks the shape's true sharp point in its own pre-rotation coordinate
+     space (the un-rounded corner of the border-radius trick above), offset
+     to the outer border edge - where the visible point actually is, not
+     the padding edge an absolutely-positioned child defaults to. This
+     travels with the shape through any rotation/border/size change, so it
+     can be measured after render instead of hand-computed - see
+     measurePinAnchor() in the script below. */
+  .pin-tip-probe {
+    position: absolute;
+    left: calc(-1 * var(--pin-border));
+    bottom: calc(-1 * var(--pin-border));
+    width: 0; height: 0;
+  }
+  .pin-start { background: #0F6E56; }
+  .pin-goal  { background: #993556; }
+
+  /* pin grows slightly while it's standing in for the cursor, so it's
+     unambiguous which pin you're currently holding */
+  .leaflet-marker-icon.being-dragged .route-pin {
+    transform: rotate(-45deg) scale(1.25);
+  }
+
+  /* manual override locations - candidate tunnels/underpasses awaiting
+     on-site verification, or already confirmed with a real measured value */
+  .override-marker {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .override-marker.unverified {
+    background: #999;
+  }
+  .override-marker.verified {
+    background: #C0392B;
+  }
+  .override-popup b { display: block; margin-bottom: 3px; }
+  .override-popup .status-pill {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    margin-bottom: 5px;
+  }
+  .override-popup .status-pill.unverified { background: #eee; color: #666; }
+  .override-popup .status-pill.verified { background: #FBE1DD; color: #C0392B; }
+  .override-popup a { color: #2E86AB; }
+
+  /* snap-preview ring: shows where the pin WOULD land, without moving the
+     actual pin mid-drag (that's what caused the jank) - same idea as the
+     glowing drop-target ring in Naver/Google street view dragging */
+  .snap-preview-ring {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 3px solid #FFB020;
+    background: rgba(255, 176, 32, 0.25);
+    box-shadow: 0 0 0 rgba(255, 176, 32, 0.5);
+    animation: snap-pulse 1s ease-out infinite;
+    pointer-events: none;
+  }
+  @keyframes snap-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255, 176, 32, 0.5); }
+    70%  { box-shadow: 0 0 0 8px rgba(255, 176, 32, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 176, 32, 0); }
+  }
+
+  /* brief transition applied only during the snap correction itself, not
+     during the raw drag motion, so cursor-follow stays immediate but the
+     "settle onto the road" moment feels magnetic rather than jumpy */
+  .leaflet-marker-icon.snapping {
+    transition: transform 90ms ease-out;
+  }
+  .leaflet-marker-draggable {
+    cursor: grab !important;
+  }
+  .leaflet-marker-draggable:active,
+  .leaflet-drag-target {
+    cursor: grabbing !important;
+  }
+
+  /* while actively dragging a pin, hide the OS cursor entirely so the pin
+     itself - which already tracks the mouse in real time - reads as the
+     cursor, instead of showing both a hand icon and a separate pin */
+  body.dragging-marker,
+  body.dragging-marker #map,
+  body.dragging-marker .leaflet-marker-draggable,
+  body.dragging-marker .leaflet-drag-target {
+    cursor: none !important;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <b>A* route explorer</b>
+  Click a start point, then an end point on the map. Or enter coordinates:
+
+  <div class="coord-row">
+    <span class="coord-label" style="color:#0F6E56">Start</span>
+    <input type="text" id="startCoordInput" placeholder="lat, lon" inputmode="decimal">
+    <button class="coord-set-btn" id="setStartBtn">Set</button>
+  </div>
+  <div class="coord-row">
+    <span class="coord-label" style="color:#993556">Goal</span>
+    <input type="text" id="goalCoordInput" placeholder="lat, lon" inputmode="decimal">
+    <button class="coord-set-btn" id="setGoalBtn">Set</button>
+  </div>
+
+  <div id="vehicleToggles" class="vehicle-toggles"></div>
+
+  <div id="busControls">
+    <label class="bus-toggle-row">
+      <input type="checkbox" id="showBusesToggle" checked>
+      Show Busan BIMS buses <span id="busCount"></span>
+    </label>
+    <div class="bus-legend">
+      <span class="live">Live</span>
+      <span class="interpolated">Interpolated</span>
+      <span class="reconciling">Rejoining</span>
+    </div>
+    <div id="busStatus">Loading live bus feed...</div>
+  </div>
+
+  <label class="override-toggle-row">
+    <input type="checkbox" id="showOverridesToggle">
+    Show restriction markers in view <span id="overrideCount"></span>
+  </label>
+
+  <div id="stats">Click to set start point.</div>
+  <button id="resetBtn">Reset</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const map = L.map('map').setView([35.18, 129.08], 11); // Busan
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors',
+  maxZoom: 18
+}).addTo(map);
+
+const mapEl = document.getElementById('map');
+const statsEl = document.getElementById('stats');
+
+// Measures where a marked "tip" point actually ends up on screen after all
+// CSS (rotation, border, scale, etc.) is applied, by rendering the icon
+// HTML off-screen and reading real layout geometry - rather than hand-
+// deriving trigonometry that breaks the moment the CSS changes.
+// `innerHtml` must contain an element with class "pin-tip-probe" marking
+// the intended point in the shape's own pre-transform coordinates.
+function measurePinAnchor(innerHtml, boxSize) {
+  const probe = document.createElement('div');
+  probe.style.cssText = `position:fixed; left:-9999px; top:-9999px; width:${boxSize}px; height:${boxSize}px; visibility:hidden;`;
+  probe.innerHTML = innerHtml;
+  document.body.appendChild(probe);
+
+  const tip = probe.querySelector('.pin-tip-probe');
+  const boxRect = probe.getBoundingClientRect();
+  const tipRect = tip.getBoundingClientRect();
+
+  document.body.removeChild(probe);
+
+  return [
+    Math.round(tipRect.left - boxRect.left),
+    Math.round(tipRect.top - boxRect.top),
+  ];
+}
+
+const PIN_BOX_SIZE = 26;
+// Both pins share identical geometry (only color differs), so measure once
+// and reuse - but this recalculates automatically if PIN_BOX_SIZE or the
+// .route-pin/.pin-tip-probe CSS above ever changes.
+const PIN_ANCHOR = measurePinAnchor(
+  '<div class="route-pin"><span class="pin-tip-probe"></span></div>',
+  PIN_BOX_SIZE
+);
+
+function pinIcon(cssClass) {
+  return L.divIcon({
+    className: '',
+    html: `<div class="route-pin ${cssClass}"><span class="pin-tip-probe"></span></div>`,
+    iconSize: [PIN_BOX_SIZE, PIN_BOX_SIZE],
+    iconAnchor: PIN_ANCHOR,
+  });
+}
+
+let startMarker = null, goalMarker = null;
+
+// distinct color per class so multiple selected routes stay visually
+// distinguishable when overlaid on the same map
+const VEHICLE_COLORS = { car: '#D85A30', small: '#2E86AB', semi: '#6A1B4D' };
+let activeClasses = new Set(['car']); // "car" (unrestricted) selected by default
+let routeLines = {}; // class -> L.polyline currently drawn for it
+
+async function loadVehicleToggles() {
+  const res = await fetch('/api/truck-classes');
+  const classes = await res.json(); // {car:{label}, small:{label}, semi:{label}}
+  const container = document.getElementById('vehicleToggles');
+
+  for (const [cls, info] of Object.entries(classes)) {
+    const chip = document.createElement('div');
+    chip.className = 'vehicle-chip' + (activeClasses.has(cls) ? ' active' : '');
+    chip.style.setProperty('--chip-color', VEHICLE_COLORS[cls] || '#888');
+    chip.innerHTML = `<span class="swatch"></span>${info.label}`;
+    chip.onclick = () => {
+      if (activeClasses.has(cls)) activeClasses.delete(cls);
+      else activeClasses.add(cls);
+      chip.classList.toggle('active');
+      solveRoute(); // no-op until both pins are placed
+    };
+    container.appendChild(chip);
+  }
+}
+loadVehicleToggles();
+
+// --- Live-first Busan BIMS bus feed ---------------------------------
+// The server polls the official API and emits one selected bus per public
+// line.  Fresh API fixes are green; historical route-constrained samples
+// are amber; a new live fix is blended back in purple.
+const busLayer = L.layerGroup();
+const busMarkers = new Map();
+const busToggle = document.getElementById('showBusesToggle');
+const busStatus = document.getElementById('busStatus');
+const busCount = document.getElementById('busCount');
+let busTimer = null;
+let busFeedAvailable = false;
+
+function busIcon(vehicle) {
+  const source = ['live', 'interpolated', 'reconciling'].includes(vehicle.source)
+    ? vehicle.source : 'interpolated';
+  return L.divIcon({
+    className: '',
+    html: `<div class="bus-marker ${source}">${vehicle.line_number}</div>`,
+    iconSize: [40, 24],
+    iconAnchor: [20, 12],
+  });
+}
+
+function busPopup(vehicle) {
+  const speed = Number(vehicle.speed_kmh);
+  const sourceLabel = vehicle.source === 'live' ? 'Live BIMS GPS'
+    : vehicle.source === 'interpolated' ? 'Pre-collected route interpolation'
+    : 'Rejoining live GPS';
+  const progress = Number(vehicle.route_progress_pct);
+  return `<b>Bus ${vehicle.line_number}</b><br>`
+    + `Vehicle: ${vehicle.vehicle_id || '—'}<br>`
+    + `${sourceLabel}<br>`
+    + `Live age: ${Number(vehicle.live_age_s).toFixed(1)} s<br>`
+    + `${Number.isFinite(progress) ? 'Route: ' + progress.toFixed(1) + '%<br>' : ''}`
+    + `${Number.isFinite(speed) ? speed.toFixed(1) + ' km/h' : ''}`;
+}
+
+async function refreshBuses() {
+  if (!busFeedAvailable || !busToggle.checked) return;
+  try {
+    const res = await fetch('/api/buses');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const snapshot = await res.json();
+    const visible = new Set();
+    for (const vehicle of snapshot.vehicles) {
+      visible.add(vehicle.line_number);
+      let marker = busMarkers.get(vehicle.line_number);
+      if (!marker) {
+        marker = L.marker([vehicle.lat, vehicle.lon], {
+          icon: busIcon(vehicle), zIndexOffset: 600,
+        }).addTo(busLayer);
+        busMarkers.set(vehicle.line_number, marker);
+      } else {
+        marker.setLatLng([vehicle.lat, vehicle.lon]);
+        marker.setIcon(busIcon(vehicle));
+      }
+      marker.bindPopup(busPopup(vehicle));
+    }
+    for (const [line, marker] of busMarkers) {
+      if (!visible.has(line)) {
+        busLayer.removeLayer(marker);
+        busMarkers.delete(line);
+      }
+    }
+    busCount.textContent = `(${snapshot.vehicles.length} visible)`;
+    const counts = snapshot.vehicles.reduce((result, vehicle) => {
+      result[vehicle.source] = (result[vehicle.source] || 0) + 1;
+      return result;
+    }, {});
+    const summary = ['live', 'interpolated', 'reconciling']
+      .filter(source => counts[source])
+      .map(source => `${counts[source]} ${source}`)
+      .join(' · ');
+    const warnings = snapshot.warnings.map(item => `${item.line_number}: ${item.message}`);
+    busStatus.textContent = [summary || 'Waiting for live positions', ...warnings].join(' | ');
+  } catch (err) {
+    busStatus.textContent = 'Live bus feed unavailable.';
+  }
+}
+
+async function loadBusFeed() {
+  try {
+    const res = await fetch('/api/buses/info');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const info = await res.json();
+    busFeedAvailable = Boolean(info.available);
+    if (!busFeedAvailable) {
+      busToggle.checked = false;
+      busToggle.disabled = true;
+      busStatus.textContent = 'Set BUSAN_BIMS_SERVICE_KEY to enable live buses.';
+      return;
+    }
+    const ready = info.lines.filter(line => line.history_ready).length;
+    busStatus.textContent = `BIMS every ${info.poll_interval_s}s · stale after ${info.stale_after_s}s · ${ready}/${info.lines.length} lines have history`;
+    if (busToggle.checked) busLayer.addTo(map);
+    await refreshBuses();
+    busTimer = setInterval(refreshBuses, 1000);
+  } catch (err) {
+    busToggle.checked = false;
+    busToggle.disabled = true;
+    busStatus.textContent = 'Live bus feed unavailable.';
+  }
+}
+
+busToggle.addEventListener('change', () => {
+  if (busToggle.checked) {
+    busLayer.addTo(map);
+    refreshBuses();
+  } else {
+    map.removeLayer(busLayer);
+  }
+});
+
+loadBusFeed();
+
+// Restriction-override locations (height/weight/width limits sourced from
+// government data or hand-verified via Roadview) - shown as small circular
+// markers so it's easy to see at a glance what's been verified with a real
+// measured value versus what still needs someone to go check Roadview.
+// There are 6,700+ of these across Busan, so they're OFF by default and
+// only ever fetched for the current map viewport (never the whole
+// dataset) - toggled and refreshed via showOverridesToggle/refreshOverrideMarkers
+// below, not loaded automatically at page load.
+const overrideLayer = L.layerGroup(); // not added to the map until the toggle turns on
+let showOverrides = false;
+const overrideCountEl = document.getElementById('overrideCount');
+
+function overrideMarker(loc) {
+  const statusClass = loc.verified ? 'verified' : 'unverified';
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class="override-marker ${statusClass}">${loc.verified ? '&#9888;' : '?'}</div>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
+
+  const restrictionLines = Object.entries(loc.restrictions || {})
+    .filter(([k, v]) => v !== null && v !== undefined)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('<br>');
+
+  const popupHtml = `
+    <div class="override-popup">
+      <span class="status-pill ${statusClass}">${loc.verified ? 'Verified' : 'Unverified'}</span>
+      <b>${loc.name || 'Way ' + loc.way_id}</b>
+      ${loc.note ? `<div style="margin-bottom:5px;">${loc.note}</div>` : ''}
+      ${restrictionLines ? `<div style="margin-bottom:5px;">${restrictionLines}</div>` : ''}
+      ${loc.roadview ? `<a href="${loc.roadview}" target="_blank" rel="noopener">Open in Kakao Roadview &#8594;</a>` : ''}
+    </div>`;
+
+  return L.marker([loc.lat, loc.lon], {icon, zIndexOffset: 500}).bindPopup(popupHtml);
+}
+
+let overrideFetchSeq = 0;
+
+async function refreshOverrideMarkers() {
+  if (!showOverrides) return;
+  const b = map.getBounds();
+  const seq = ++overrideFetchSeq;
+  const params = new URLSearchParams({
+    min_lat: b.getSouth(), max_lat: b.getNorth(),
+    min_lon: b.getWest(), max_lon: b.getEast(),
+  });
+  let locations;
+  try {
+    const res = await fetch(`/api/override-locations?${params}`);
+    locations = await res.json();
+  } catch (err) {
+    return; // network hiccup - leave whatever's currently shown as-is
+  }
+  if (seq !== overrideFetchSeq || !showOverrides) return; // stale response, or toggled off while in flight
+
+  overrideLayer.clearLayers();
+  for (const loc of locations) overrideMarker(loc).addTo(overrideLayer);
+  overrideCountEl.textContent = locations.length ? `(${locations.length})` : '';
+}
+
+// debounced so continuous panning/zooming doesn't fire a request per frame
+let overrideRefreshTimer = null;
+function scheduleOverrideRefresh() {
+  if (!showOverrides) return;
+  clearTimeout(overrideRefreshTimer);
+  overrideRefreshTimer = setTimeout(refreshOverrideMarkers, 250);
+}
+
+document.getElementById('showOverridesToggle').addEventListener('change', (e) => {
+  showOverrides = e.target.checked;
+  if (showOverrides) {
+    overrideLayer.addTo(map);
+    refreshOverrideMarkers();
+  } else {
+    map.removeLayer(overrideLayer);
+    overrideLayer.clearLayers();
+    overrideCountEl.textContent = '';
+  }
+});
+
+map.on('moveend zoomend', scheduleOverrideRefresh);
+
+async function snapToRoad(marker) {
+  const p = marker.getLatLng();
+  try {
+    const res = await fetch('/api/nearest', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({lat: p.lat, lon: p.lng})
+    });
+    if (!res.ok) return; // leave marker where dropped if nothing nearby
+    const snapped = await res.json();
+    animateSnap(marker, [snapped.lat, snapped.lon]);
+  } catch (err) {
+    // network hiccup - leave marker at the dropped position rather than blocking
+  }
+}
+
+// brief transition applied only for this position update, so the "settle
+// onto the road" correction looks smooth without slowing down normal drag
+function animateSnap(marker, latlng) {
+  const icon = marker._icon;
+  if (icon) {
+    icon.classList.add('snapping');
+    setTimeout(() => icon.classList.remove('snapping'), 160);
+  }
+  marker.setLatLng(latlng);
+}
+
+// --- snap preview ring -----------------------------------------------
+// Shows where the pin WOULD land if you released now, as a separate
+// pulsing ring - the pin itself keeps following the cursor with zero
+// interference. This is what makes it feel like street-view dragging
+// instead of a laggy network-driven marker.
+let previewRing = null;
+
+function showPreviewRing(latlng) {
+  if (!previewRing) {
+    previewRing = L.marker(latlng, {
+      icon: L.divIcon({ className: '', html: '<div class="snap-preview-ring"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
+      interactive: false,
+      zIndexOffset: -1000, // stay below the pins
+    }).addTo(map);
+  } else {
+    previewRing.setLatLng(latlng);
+  }
+}
+
+function hidePreviewRing() {
+  if (previewRing) { map.removeLayer(previewRing); previewRing = null; }
+}
+
+// throttled snap lookups during drag - only update the PREVIEW ring, never
+// the pin's own position, so cursor-follow stays perfectly smooth
+let dragSnapTimer = null;
+let dragSnapSeq = 0;
+
+function scheduleLiveSnap(marker) {
+  if (dragSnapTimer) return; // a lookup is already queued for the near future
+  dragSnapTimer = setTimeout(async () => {
+    dragSnapTimer = null;
+    const seq = ++dragSnapSeq;
+    const p = marker.getLatLng();
+    try {
+      const res = await fetch('/api/nearest', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({lat: p.lat, lon: p.lng})
+      });
+      if (!res.ok || seq !== dragSnapSeq) return; // stale or empty - skip
+      const snapped = await res.json();
+      if (seq !== dragSnapSeq) return; // a newer drag position arrived while we waited
+      showPreviewRing([snapped.lat, snapped.lon]);
+    } catch (err) { /* ignore - next throttled tick will try again */ }
+  }, 100);
+}
+
+async function solveRoute() {
+  if (!startMarker || !goalMarker) return;
+  if (activeClasses.size === 0) {
+    statsEl.textContent = 'Select at least one vehicle class above.';
+    return;
+  }
+  const s = startMarker.getLatLng();
+  const g = goalMarker.getLatLng();
+
+  mapEl.classList.add('solving');
+  statsEl.textContent = 'Solving route...';
+
+  // clear previously drawn routes - class selection may have changed
+  for (const cls in routeLines) map.removeLayer(routeLines[cls]);
+  routeLines = {};
+
+  const t0 = performance.now();
+  const results = await Promise.all(
+    [...activeClasses].map(async (cls) => {
+      try {
+        const res = await fetch('/api/route', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            start_lat: s.lat, start_lon: s.lng,
+            end_lat: g.lat, end_lon: g.lng,
+            truck_class: cls,
+          })
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          return {cls, error: err.detail || res.statusText};
+        }
+        return {cls, data: await res.json()};
+      } catch (err) {
+        return {cls, error: err.message};
+      }
+    })
+  );
+  const elapsedMs = (performance.now() - t0).toFixed(0);
+
+  let snapCoords = null;
+  const lines = [];
+  for (const r of results) {
+    const color = VEHICLE_COLORS[r.cls] || '#888';
+    if (r.error) {
+      lines.push(`<span style="color:${color}">&#9679;</span> <b>${r.cls}</b>: ${r.error}`);
+      continue;
+    }
+    routeLines[r.cls] = L.polyline(r.data.coords, {color, weight:4, opacity:0.9}).addTo(map);
+    lines.push(`<span style="color:${color}">&#9679;</span> <b>${r.cls}</b>: ${r.data.distance_km} km, ${r.data.time_min} min`);
+    // all classes share the same start/goal - snap pins using whichever succeeded first
+    if (!snapCoords) snapCoords = [r.data.coords[0], r.data.coords[r.data.coords.length - 1]];
+  }
+
+  // route endpoints are already snapped server-side (same nearest-vertex
+  // logic) - pin the markers exactly onto them so pin and path agree
+  if (snapCoords) {
+    startMarker.setLatLng(snapCoords[0]);
+    goalMarker.setLatLng(snapCoords[1]);
+  }
+
+  statsEl.innerHTML =
+    lines.join('<br>') +
+    `<br><span style="color:#888">${elapsedMs} ms &middot; drag either pin to adjust.</span>`;
+  mapEl.classList.remove('solving');
+}
+
+function makeDraggable(marker) {
+  marker.on('dragstart', () => {
+    for (const cls in routeLines) routeLines[cls].setStyle({opacity: 0.3});
+    document.body.classList.add('dragging-marker');
+    if (marker._icon) marker._icon.classList.add('being-dragged');
+  });
+  marker.on('drag', () => { scheduleLiveSnap(marker); });
+  marker.on('dragend', async () => {
+    document.body.classList.remove('dragging-marker');
+    if (marker._icon) marker._icon.classList.remove('being-dragged');
+    if (dragSnapTimer) { clearTimeout(dragSnapTimer); dragSnapTimer = null; }
+    dragSnapSeq++; // invalidate any still-in-flight preview lookup
+
+    if (previewRing) {
+      // we already know the snap target from the live preview - use it
+      // directly instead of firing another round-trip
+      animateSnap(marker, previewRing.getLatLng());
+      hidePreviewRing();
+      solveRoute();
+    } else {
+      // preview hadn't resolved yet (very quick drag) - fall back to a fresh lookup
+      await snapToRoad(marker);
+      solveRoute();
+    }
+  });
+}
+
+// Creates the marker for `role` ('start'/'goal') if it doesn't exist yet,
+// otherwise moves the existing one - shared by map clicks and the
+// coordinate-entry inputs so both paths behave identically.
+async function placeOrMovePoint(role, latlng) {
+  const isStart = role === 'start';
+  let marker = isStart ? startMarker : goalMarker;
+
+  if (!marker) {
+    marker = L.marker(latlng, {icon: pinIcon(isStart ? 'pin-start' : 'pin-goal'), draggable: true}).addTo(map);
+    makeDraggable(marker);
+    if (isStart) startMarker = marker; else goalMarker = marker;
+  } else {
+    marker.setLatLng(latlng);
+  }
+
+  await snapToRoad(marker);
+
+  if (startMarker && goalMarker) {
+    solveRoute();
+  } else {
+    statsEl.textContent = isStart ? 'Start set. Click an end point.' : 'Goal set. Click a start point.';
+  }
+}
+
+map.on('click', async (e) => {
+  if (startMarker === null) {
+    await placeOrMovePoint('start', e.latlng);
+    return;
+  }
+  if (goalMarker === null) {
+    await placeOrMovePoint('goal', e.latlng);
+    return;
+  }
+  // both points already set -> start over
+  resetAll();
+  map.fire('click', e);
+});
+
+// --- coordinate-entry inputs ------------------------------------------
+function parseLatLonInput(inputId) {
+  const raw = document.getElementById(inputId).value;
+  const parts = raw.split(',').map(s => parseFloat(s.trim()));
+  if (parts.length !== 2 || parts.some(Number.isNaN)) return null;
+  const [lat, lon] = parts;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return L.latLng(lat, lon);
+}
+
+async function setPointFromInputs(role) {
+  const inputId = role === 'start' ? 'startCoordInput' : 'goalCoordInput';
+  const latlng = parseLatLonInput(inputId);
+  if (!latlng) {
+    statsEl.textContent = 'Enter coordinates as "lat, lon" (lat -90 to 90, lon -180 to 180).';
+    return;
+  }
+  map.panTo(latlng);
+  await placeOrMovePoint(role, latlng);
+}
+
+document.getElementById('setStartBtn').onclick = () => setPointFromInputs('start');
+document.getElementById('setGoalBtn').onclick = () => setPointFromInputs('goal');
+
+// Enter key submits that row, without needing to click Set
+document.getElementById('startCoordInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') setPointFromInputs('start');
+});
+document.getElementById('goalCoordInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') setPointFromInputs('goal');
+});
+
+function resetAll() {
+  if (startMarker) map.removeLayer(startMarker);
+  if (goalMarker) map.removeLayer(goalMarker);
+  for (const cls in routeLines) map.removeLayer(routeLines[cls]);
+  routeLines = {};
+  startMarker = goalMarker = null;
+  for (const id of ['startCoordInput', 'goalCoordInput']) {
+    document.getElementById(id).value = '';
+  }
+  statsEl.textContent = 'Click to set start point.';
+}
+document.getElementById('resetBtn').onclick = resetAll;
+</script>
+</body>
+</html>

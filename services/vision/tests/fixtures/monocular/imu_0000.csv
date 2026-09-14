@@ -1,0 +1,3 @@
+timestamp_ns,pitch_deg,roll_deg,yaw_deg,accuracy
+1000000000,0,0,0,3
+1033333333,0,0,0,3

@@ -1,0 +1,51 @@
+{
+  "_readme": "Restriction overrides for specific OSM way IDs, merged into the graph at load time. Each entry below is a REAL, NAMED underpass/tunnel found in the Busan road data that currently has NO maxheight/maxweight tag in OSM - meaning the graph currently treats it as unrestricted, which is very likely wrong for a physical underpass. The 'maxheight' values are PLACEHOLDERS (null) - go check the actual clearance via Kakao/Naver Roadview (links provided) or the physical posted sign, then fill in the real number and remove the 'TODO' note. Only entries with an actual value set will affect routing; null values are ignored.",
+  "134482231": {
+    "name": "중앙대로260번길 (Choryang underpass / 초량지하차도)",
+    "note": "TODO: verify actual clearance. This is the underpass beneath the Gyeongbu rail line at Choryang - site of the well-known 2020 flooding disaster (3 deaths). Given it passes under an active rail line, a real height restriction is highly likely.",
+    "roadview": "https://map.kakao.com/link/roadview/35.1189521,129.0453116",
+    "maxheight": "3.5"
+  },
+  "159433006": {
+    "name": "구지터t널 (Guji Tunnel)",
+    "note": "TODO: verify actual clearance via Roadview or posted sign at tunnel entrance.",
+    "roadview": "https://map.kakao.com/link/roadview/35.2436256,128.8767351",
+    "maxheight": "4.8"
+  },
+  "173718896": {
+    "name": "어곡터널 (Eogok Tunnel)",
+    "note": "TODO: verify actual clearance.",
+    "roadview": "https://map.kakao.com/link/roadview/35.3760659,129.0325992",
+    "maxheight": "4.0"
+  },
+  "164835581": {
+    "name": "온골지하차도 (Ongol underpass)",
+    "note": "TODO: verify actual clearance.",
+    "roadview": "https://map.kakao.com/link/roadview/35.15278,128.9964509",
+    "maxheight": "4.2"
+  },
+  "285106663": {
+    "name": "용원1지하차도 (Yongwon underpass 1)",
+    "note": "TODO: verify actual clearance. Near Yongwon industrial/port area - if genuinely low, this would be a meaningful real-world case since large trucks are common in this area.",
+    "roadview": "https://map.kakao.com/link/roadview/35.1029934,128.8137695",
+    "maxheight": "4.5"
+  },
+  "413688429": {
+    "name": "용원2지하차도 (Yongwon underpass 2)",
+    "note": "TODO: verify actual clearance.",
+    "roadview": "https://map.kakao.com/link/roadview/35.1026564,128.817186",
+    "maxheight": "4.5"
+  },
+  "548665569": {
+    "name": "증산역지하차도 (Jeungsan Station underpass)",
+    "note": "TODO: verify actual clearance.",
+    "roadview": "https://map.kakao.com/link/roadview/35.3079055,129.009425",
+    "maxheight": "4.5"
+  },
+  "420983370": {
+    "name": "터널 (unnamed 'Tunnel' road, residential)",
+    "note": "TODO: verify actual clearance - literally tagged only as '터널' (tunnel) with no other name.",
+    "roadview": "https://map.kakao.com/link/roadview/35.2113159,129.0513905",
+    "maxheight": "4.0"
+  }
+}

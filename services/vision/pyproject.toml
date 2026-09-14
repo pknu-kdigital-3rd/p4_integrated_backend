@@ -1,0 +1,36 @@
+[project]
+name = "poc-server-webrtc"
+version = "0.1.0"
+description = "WebRTC relay server with YOLO object detection"
+requires-python = ">=3.10"
+dependencies = [
+    "aiortc",
+    "fastapi[standard]",
+    "openai",
+    "opencv-python-headless",
+    "pydantic-settings",
+    "torch",
+    "torchvision",
+    "ultralytics",
+]
+
+# Ultralytics currently declares the GUI-enabled opencv-python package on
+# Linux. The server and offline tools only need cv2's non-GUI APIs, so keep the
+# project-level opencv-python-headless dependency and remove that transitive
+# GUI package from Ultralytics' dependency graph.
+[tool.uv]
+exclude-dependencies = [
+    "opencv-python",
+]
+
+# Pull torch/torchvision from PyTorch's CUDA wheel index instead of the default
+# CPU-only PyPI build, so YOLO inference uses the GPU when one is available.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchvision = [{ index = "pytorch-cu130" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+

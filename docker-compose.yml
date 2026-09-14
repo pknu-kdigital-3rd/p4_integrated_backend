@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    container_name: vehicle-platform-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: vehicle_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - p4_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U app -d vehicle_platform" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backup:
+    image: postgres:17-alpine
+    container_name: vehicle-platform-backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: app
+    volumes:
+      - ../postgres_backups:/backups
+    entrypoint: >
+      sh -c "echo '0 3 * * * pg_dump -h db -U app vehicle_platform > /backups/backup_$$(date +\%Y\%m\%d).sql find /backups -name \"backup_*.sql\" -mtime +14 -delete' | crontab - && crond -f"
+
+volumes:
+  p4_pgdata:
+

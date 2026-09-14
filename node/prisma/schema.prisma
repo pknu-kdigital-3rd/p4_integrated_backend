@@ -1,0 +1,404 @@
+// ============================================================================
+// schema.prisma — Prisma ORM 7
+// 지능형 교통 시스템 통합 스키마 (v17, 13 tables)
+// ============================================================================
+// Prisma 7 notes baked into this file:
+//   - generator provider is "prisma-client" (the old "prisma-client-js" is
+//     gone); `output` is now REQUIRED — no more silent node_modules generation.
+//   - `datasource.url` is no longer set here — it lives in prisma.config.ts
+//     (see the companion file). The `datasource` block only declares the
+//     provider (+ extensions).
+//   - PostGIS `geography` columns are NOT natively typed by Prisma. They are
+//     declared with `Unsupported("geography(Point, 4326)")`, which means
+//     Prisma Client CANNOT read/write them directly — this matches the
+//     ERD's own v10 decision to access those 6 tables via TypedSQL/$queryRaw
+//     instead of Prisma Client for any query touching `location`/`route_line`.
+//   - CHECK constraints (alert's 3-way exclusivity, all enum-style VARCHAR
+//     CHECKs) have NO native Prisma schema syntax. They're added as raw SQL
+//     in the generated migration — see the block at the bottom of this file.
+//   - GiST indexes on geography columns also aren't expressible on
+//     `Unsupported` fields — same treatment, added via raw SQL migration.
+// ============================================================================
+
+generator client {
+    provider            = "prisma-client"
+    output              = "../src/generated/prisma"
+    previewFeatures     = ["typedSql", "postgresqlExtensions"]
+    importFileExtension = "ts"
+    // typedSql            -> enables prisma/sql/*.sql -> typed functions
+    // postgresqlExtensions -> required for datasource.extensions = [postgis] below
+}
+
+datasource db {
+    provider   = "postgresql"
+    extensions = [postgis]
+}
+
+// ============================================================================
+// 1. 사용자 / 차량 기본 정보
+// ============================================================================
+
+model PlatformAccount {
+    userId       BigInt   @id @default(autoincrement()) @map("user_id")
+    loginId      String   @unique @map("login_id") @db.VarChar(100)
+    passwordHash String   @map("password_hash") @db.VarChar(255)
+    userName     String   @map("user_name") @db.VarChar(100)
+    role         String   @db.VarChar(30) // CHECK: ADMIN | OPERATOR | VIEWER
+    isActive     Boolean  @default(true) @map("is_active")
+    createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+    updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+    acknowledgedAlerts Alert[] @relation("AlertAcknowledgedBy")
+
+    @@map("platform_account")
+}
+
+model Vehicle {
+    vehicleId      BigInt   @id @default(autoincrement()) @map("vehicle_id")
+    vehicleCode    String   @unique @map("vehicle_code") @db.VarChar(50)
+    plateNumber    String?  @unique @map("plate_number") @db.VarChar(30)
+    vehicleName    String?  @map("vehicle_name") @db.VarChar(100)
+    vehicleSource  String   @default("CUSTOM") @map("vehicle_source") @db.VarChar(20) // CHECK: CUSTOM|BIMS
+    externalId     String?  @map("external_id") @db.VarChar(100)
+    maxLoadKg      Decimal? @map("max_load_kg") @db.Decimal(10, 2)
+    heightM        Decimal? @map("height_m") @db.Decimal(5, 2)
+    widthM         Decimal? @map("width_m") @db.Decimal(5, 2)
+    lengthM        Decimal? @map("length_m") @db.Decimal(5, 2)
+    vehicleStatus  String   @map("vehicle_status") @db.VarChar(30) // CHECK: READY|DRIVING|STOPPED|MAINTENANCE|OFFLINE
+    streamUrl      String?  @map("stream_url")
+    cameraHeightM  Decimal? @map("camera_height_m") @db.Decimal(5, 3)
+    cameraPitchDeg Decimal? @map("camera_pitch_deg") @db.Decimal(6, 2)
+    cameraRollDeg  Decimal? @map("camera_roll_deg") @db.Decimal(6, 2)
+    cameraYawDeg   Decimal? @map("camera_yaw_deg") @db.Decimal(6, 2)
+    focalLengthMm  Decimal? @map("focal_length_mm") @db.Decimal(6, 2)
+    sensorWidthMm  Decimal? @map("sensor_width_mm") @db.Decimal(6, 2)
+    isActive       Boolean  @default(true) @map("is_active")
+    createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+    updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+    positions       VehiclePosition[]
+    trips           Trip[]
+    detectionEvents DetectionEvent[]
+    routeDeviations RouteDeviation[]
+    alerts          Alert[]
+    transportGoals  TransportGoal[]
+
+    @@unique([vehicleSource, externalId])
+    @@map("vehicle")
+}
+
+model Driver {
+    driverId      BigInt   @id @default(autoincrement()) @map("driver_id")
+    driverName    String   @map("driver_name") @db.VarChar(100)
+    phone         String?  @db.VarChar(30)
+    licenseNumber String?  @unique @map("license_number") @db.VarChar(100)
+    driverStatus  String   @map("driver_status") @db.VarChar(30) // CHECK: AVAILABLE|DRIVING|OFF_DUTY
+    createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+    updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+    trips Trip[]
+
+    @@map("driver")
+}
+
+// ============================================================================
+// 2. 실제 운행 및 경로
+// ============================================================================
+
+model Trip {
+    tripId    BigInt  @id @default(autoincrement()) @map("trip_id")
+    vehicleId BigInt  @map("vehicle_id")
+    driverId  BigInt? @map("driver_id")
+
+    originName     String?                                @map("origin_name") @db.VarChar(150)
+    originAddress  String?                                @map("origin_address")
+    // geography(Point,4326) — read/write via TypedSQL/$queryRaw, not Prisma Client
+    originLocation Unsupported("geography(Point, 4326)")? @map("origin_location")
+
+    destinationName     String                                @map("destination_name") @db.VarChar(150)
+    destinationAddress  String?                               @map("destination_address")
+    destinationLocation Unsupported("geography(Point, 4326)") @map("destination_location")
+
+    tripStatus      String    @map("trip_status") @db.VarChar(30) // CHECK: READY|IN_PROGRESS|PAUSED|COMPLETED|CANCELLED
+    plannedStartAt  DateTime? @map("planned_start_at") @db.Timestamptz(6)
+    startedAt       DateTime? @map("started_at") @db.Timestamptz(6)
+    endedAt         DateTime? @map("ended_at") @db.Timestamptz(6)
+    actualDistanceM Int?      @map("actual_distance_m")
+
+    aiSummary            String?   @map("ai_summary")
+    aiSummaryGeneratedAt DateTime? @map("ai_summary_generated_at") @db.Timestamptz(6)
+
+    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+    updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+    vehicle         Vehicle           @relation(fields: [vehicleId], references: [vehicleId])
+    driver          Driver?           @relation(fields: [driverId], references: [driverId])
+    routes          Route[]
+    positions       VehiclePosition[]
+    detectionEvents DetectionEvent[]
+    routeDeviations RouteDeviation[]
+    tripVideos      TripVideo[]
+    alerts          Alert[]
+    transportGoals  TransportGoal[]
+
+    @@map("trip")
+}
+
+model TripVideo {
+    tripVideoId  BigInt    @id @default(autoincrement()) @map("trip_video_id")
+    tripId       BigInt    @map("trip_id")
+    videoUrl     String    @map("video_url")
+    startFrameId BigInt    @map("start_frame_id")
+    endFrameId   BigInt?   @map("end_frame_id")
+    startedAt    DateTime  @map("started_at") @db.Timestamptz(6)
+    endedAt      DateTime? @map("ended_at") @db.Timestamptz(6)
+    fps          Decimal?  @db.Decimal(5, 2)
+    durationSec  Int?      @map("duration_sec")
+    createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    trip Trip @relation(fields: [tripId], references: [tripId])
+
+    @@index([tripId, startedAt], map: "idx_trip_video_trip_start")
+    @@map("trip_video")
+}
+
+model Route {
+    routeId         BigInt                                      @id @default(autoincrement()) @map("route_id")
+    tripId          BigInt                                      @map("trip_id")
+    routeVersion    Int                                         @map("route_version")
+    routeType       String                                      @map("route_type") @db.VarChar(30) // CHECK: INITIAL|RECALCULATED
+    routeSource     String                                      @default("OPTIMAL_PATH") @map("route_source") @db.VarChar(30) // CHECK: BIMS_LINE|OPTIMAL_PATH
+    sourceMetadata  Json?                                       @map("source_metadata")
+    distanceM       Int?                                        @map("distance_m")
+    durationSec     Int?                                        @map("duration_sec")
+    encodedPolyline String?                                     @map("encoded_polyline")
+    routeGeojson    Json?                                       @map("route_geojson")
+    // geography(LineString,4326) — space-only relation, no true FK target
+    routeLine       Unsupported("geography(LineString, 4326)")? @map("route_line")
+    isCurrent       Boolean                                     @default(true) @map("is_current")
+    createdAt       DateTime                                    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    trip                      Trip             @relation(fields: [tripId], references: [tripId])
+    routeDeviations           RouteDeviation[] @relation("RouteDeviationRoute")
+    recalculatedForDeviations RouteDeviation[] @relation("RouteDeviationRecalculatedRoute")
+
+    @@unique([tripId, routeVersion])
+    @@index([routeLine], type: Gist, map: "idx_route_line")
+    @@map("route")
+}
+
+model VehiclePosition {
+    positionId BigInt                                @id @default(autoincrement()) @map("position_id")
+    vehicleId  BigInt                                @map("vehicle_id")
+    tripId     BigInt?                               @map("trip_id")
+    location   Unsupported("geography(Point, 4326)") // NOT NULL
+    speedKmh   Decimal?                              @map("speed_kmh") @db.Decimal(6, 2)
+    headingDeg Decimal?                              @map("heading_deg") @db.Decimal(6, 2)
+    recordedAt DateTime                              @map("recorded_at") @db.Timestamptz(6)
+    telemetrySource String                            @default("DEVICE_GPS") @map("telemetry_source") @db.VarChar(30) // CHECK: BIMS_LIVE|BIMS_REPLAY|DEVICE_GPS|RECORDED_GPS
+
+    vehicle Vehicle @relation(fields: [vehicleId], references: [vehicleId])
+    trip    Trip?   @relation(fields: [tripId], references: [tripId])
+
+    @@index([vehicleId, recordedAt], map: "idx_vehicle_position_vehicle_time")
+    @@index([location], type: Gist, map: "idx_vehicle_position_location")
+    @@map("vehicle_position")
+}
+
+model RouteDeviation {
+    deviationId         BigInt                                @id @default(autoincrement()) @map("deviation_id")
+    vehicleId           BigInt                                @map("vehicle_id")
+    tripId              BigInt                                @map("trip_id")
+    routeId             BigInt                                @map("route_id")
+    deviationDistanceM  Decimal                               @map("deviation_distance_m") @db.Decimal(10, 2)
+    location            Unsupported("geography(Point, 4326)") // NOT NULL
+    detectedAt          DateTime                              @map("detected_at") @db.Timestamptz(6)
+    resolvedAt          DateTime?                             @map("resolved_at") @db.Timestamptz(6)
+    recalculatedRouteId BigInt?                               @map("recalculated_route_id")
+    createdAt           DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    vehicle           Vehicle @relation(fields: [vehicleId], references: [vehicleId])
+    trip              Trip    @relation(fields: [tripId], references: [tripId])
+    route             Route   @relation("RouteDeviationRoute", fields: [routeId], references: [routeId])
+    recalculatedRoute Route?  @relation("RouteDeviationRecalculatedRoute", fields: [recalculatedRouteId], references: [routeId])
+    alerts            Alert[]
+
+    @@index([location], type: Gist, map: "idx_route_deviation_location")
+    @@map("route_deviation")
+}
+
+// ============================================================================
+// 3. 비전 객체 탐지
+// ============================================================================
+
+model ObjectClass {
+    classId          BigInt   @id @default(autoincrement()) @map("class_id")
+    modelClassId     Int      @map("model_class_id")
+    className        String   @map("class_name") @db.VarChar(100)
+    displayName      String   @map("display_name") @db.VarChar(100)
+    warningDistanceM Decimal? @map("warning_distance_m") @db.Decimal(6, 2)
+    isAlertTarget    Boolean  @default(true) @map("is_alert_target")
+    isActive         Boolean  @default(true) @map("is_active")
+
+    detectionEvents DetectionEvent[]
+
+    @@unique([modelClassId, className])
+    @@map("object_class")
+}
+
+model DetectionEvent {
+    detectionEventId BigInt                                 @id @default(autoincrement()) @map("detection_event_id")
+    frameId          BigInt                                 @map("frame_id")
+    vehicleId        BigInt                                 @map("vehicle_id")
+    vehicleCode      String                                 @map("vehicle_code") @db.VarChar(50) // denormalized (v2)
+    tripId           BigInt?                                @map("trip_id")
+    classId          BigInt                                 @map("class_id")
+    className        String                                 @map("class_name") @db.VarChar(100) // denormalized (v2)
+    displayName      String                                 @map("display_name") @db.VarChar(100) // denormalized (v2)
+    confidence       Decimal                                @db.Decimal(5, 4)
+    distanceM        Decimal?                               @map("distance_m") @db.Decimal(8, 2)
+    warningDistanceM Decimal?                               @map("warning_distance_m") @db.Decimal(8, 2) // denormalized snapshot
+    riskLevel        String                                 @map("risk_level") @db.VarChar(20) // CHECK: NORMAL|CAUTION|DANGER
+    location         Unsupported("geography(Point, 4326)")? // nullable per ERD
+
+    bboxX1 Decimal? @map("bbox_x1") @db.Decimal(10, 4)
+    bboxY1 Decimal? @map("bbox_y1") @db.Decimal(10, 4)
+    bboxX2 Decimal? @map("bbox_x2") @db.Decimal(10, 4)
+    bboxY2 Decimal? @map("bbox_y2") @db.Decimal(10, 4)
+
+    pitchAtCaptureDeg Decimal? @map("pitch_at_capture_deg") @db.Decimal(6, 3) // v11
+    rollAtCaptureDeg  Decimal? @map("roll_at_capture_deg") @db.Decimal(6, 3) // v11
+    telemetrySource   String?  @map("telemetry_source") @db.VarChar(20) // CHECK: DEVICE_SENSOR|SIMULATED (v11)
+
+    detectedAt DateTime @map("detected_at") @db.Timestamptz(6)
+    createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    vehicle     Vehicle      @relation(fields: [vehicleId], references: [vehicleId])
+    trip        Trip?        @relation(fields: [tripId], references: [tripId])
+    objectClass ObjectClass  @relation(fields: [classId], references: [classId])
+    eventImages EventImage[]
+    alerts      Alert[]
+
+    @@index([vehicleId, frameId], map: "idx_detection_event_frame")
+    @@index([location], type: Gist, map: "idx_detection_event_location")
+    @@map("detection_event")
+}
+
+model EventImage {
+    eventImageId     BigInt   @id @default(autoincrement()) @map("event_image_id")
+    detectionEventId BigInt   @map("detection_event_id")
+    imageUrl         String   @map("image_url")
+    thumbnailUrl     String?  @map("thumbnail_url")
+    capturedAt       DateTime @map("captured_at") @db.Timestamptz(6)
+    createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    detectionEvent DetectionEvent @relation(fields: [detectionEventId], references: [detectionEventId])
+
+    @@map("event_image")
+}
+
+// ============================================================================
+// 4. 관제 경고
+// ============================================================================
+
+model Alert {
+    alertId          BigInt  @id @default(autoincrement()) @map("alert_id")
+    vehicleId        BigInt  @map("vehicle_id") // denormalized, see ERD §7.1 rationale
+    detectionEventId BigInt? @map("detection_event_id")
+    routeDeviationId BigInt? @map("route_deviation_id")
+    tripId           BigInt? @map("trip_id") // TRIP_COMPLETED only
+
+    alertType    String  @map("alert_type") @db.VarChar(30) // CHECK: OBJECT_PROXIMITY|ROUTE_DEVIATION|TRIP_COMPLETED
+    severity     String  @db.VarChar(20) // CHECK: INFO|WARNING|CRITICAL
+    alertMessage String? @map("alert_message")
+    operatorNote String? @map("operator_note")
+    alertStatus  String  @map("alert_status") @db.VarChar(30) // CHECK: UNCONFIRMED|ACKNOWLEDGED|RESOLVED
+
+    acknowledgedBy BigInt?   @map("acknowledged_by")
+    acknowledgedAt DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+    resolvedAt     DateTime? @map("resolved_at") @db.Timestamptz(6)
+    createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    vehicle        Vehicle         @relation(fields: [vehicleId], references: [vehicleId])
+    detectionEvent DetectionEvent? @relation(fields: [detectionEventId], references: [detectionEventId])
+    routeDeviation RouteDeviation? @relation(fields: [routeDeviationId], references: [deviationId])
+    trip           Trip?           @relation(fields: [tripId], references: [tripId])
+    acknowledger   PlatformAccount? @relation("AlertAcknowledgedBy", fields: [acknowledgedBy], references: [userId])
+
+    // NOTE: the "exactly one of detectionEventId/routeDeviationId/tripId is set"
+    // rule has no Prisma schema representation — it's added as a raw CHECK
+    // constraint in the migration (see bottom of file).
+
+    @@map("alert")
+}
+
+// ============================================================================
+// 5. 운송 목표 (통계 전용, 최소 스펙)
+// ============================================================================
+
+model TransportGoal {
+    goalId              BigInt                                 @id @default(autoincrement()) @map("goal_id")
+    goalCode            String                                 @unique @map("goal_code") @db.VarChar(50)
+    destinationName     String                                 @map("destination_name") @db.VarChar(150)
+    destinationAddress  String?                                @map("destination_address")
+    destinationLocation Unsupported("geography(Point, 4326)")? @map("destination_location")
+    cargoWeightKg       Decimal?                               @map("cargo_weight_kg") @db.Decimal(10, 2)
+    priority            String                                 @db.VarChar(20) // CHECK: HIGH|NORMAL|LOW
+    targetEta           DateTime?                              @map("target_eta") @db.Timestamptz(6)
+    goalStatus          String                                 @map("goal_status") @db.VarChar(30) // CHECK: PENDING|ASSIGNED|IN_PROGRESS|COMPLETED|DELAYED|CANCELLED
+    assignedVehicleId   BigInt?                                @map("assigned_vehicle_id")
+    assignedTripId      BigInt?                                @map("assigned_trip_id")
+    completedAt         DateTime?                              @map("completed_at") @db.Timestamptz(6)
+    createdAt           DateTime                               @default(now()) @map("created_at") @db.Timestamptz(6)
+    updatedAt           DateTime                               @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+    assignedVehicle Vehicle? @relation(fields: [assignedVehicleId], references: [vehicleId])
+    assignedTrip    Trip?    @relation(fields: [assignedTripId], references: [tripId])
+
+    @@index([goalStatus, targetEta], map: "idx_transport_goal_status")
+    @@index([assignedVehicleId], map: "idx_transport_goal_vehicle")
+    @@index([destinationLocation], type: Gist, map: "idx_transport_goal_location")
+    @@map("transport_goal")
+}
+
+// ============================================================================
+// Raw SQL to run as an additional migration step (Prisma has no schema-level
+// syntax for CHECK constraints or GiST indexes on Unsupported columns).
+// Save as e.g. prisma/migrations/<timestamp>_constraints/migration.sql
+// after `prisma migrate dev --create-only`, then apply.
+// ============================================================================
+//
+// CREATE EXTENSION IF NOT EXISTS postgis;
+// ALTER TABLE "platform_account" ADD CONSTRAINT chk_platform_account_role
+//   CHECK (role IN ('ADMIN','OPERATOR','VIEWER'));
+// ALTER TABLE "vehicle" ADD CONSTRAINT chk_vehicle_status
+//   CHECK (vehicle_status IN ('READY','DRIVING','STOPPED','MAINTENANCE','OFFLINE'));
+// ALTER TABLE "driver" ADD CONSTRAINT chk_driver_status
+//   CHECK (driver_status IN ('AVAILABLE','DRIVING','OFF_DUTY'));
+// ALTER TABLE "trip" ADD CONSTRAINT chk_trip_status
+//   CHECK (trip_status IN ('READY','IN_PROGRESS','PAUSED','COMPLETED','CANCELLED'));
+// ALTER TABLE "route" ADD CONSTRAINT chk_route_type
+//   CHECK (route_type IN ('INITIAL','RECALCULATED'));
+// ALTER TABLE "detection_event" ADD CONSTRAINT chk_detection_event_risk_level
+//   CHECK (risk_level IN ('NORMAL','CAUTION','DANGER'));
+// ALTER TABLE "detection_event" ADD CONSTRAINT chk_detection_event_telemetry_source
+//   CHECK (telemetry_source IN ('DEVICE_SENSOR','SIMULATED'));
+// ALTER TABLE "alert" ADD CONSTRAINT chk_alert_type
+//   CHECK (alert_type IN ('OBJECT_PROXIMITY','ROUTE_DEVIATION','TRIP_COMPLETED'));
+// ALTER TABLE "alert" ADD CONSTRAINT chk_alert_severity
+//   CHECK (severity IN ('INFO','WARNING','CRITICAL'));
+// ALTER TABLE "alert" ADD CONSTRAINT chk_alert_status
+//   CHECK (alert_status IN ('UNCONFIRMED','ACKNOWLEDGED','RESOLVED'));
+// ALTER TABLE "alert" ADD CONSTRAINT chk_alert_exactly_one_cause CHECK (
+//   (detection_event_id IS NOT NULL AND route_deviation_id IS NULL AND trip_id IS NULL) OR
+//   (detection_event_id IS NULL AND route_deviation_id IS NOT NULL AND trip_id IS NULL) OR
+//   (detection_event_id IS NULL AND route_deviation_id IS NULL AND trip_id IS NOT NULL)
+// );
+// ALTER TABLE "transport_goal" ADD CONSTRAINT chk_transport_goal_priority
+//   CHECK (priority IN ('HIGH','NORMAL','LOW'));
+// ALTER TABLE "transport_goal" ADD CONSTRAINT chk_transport_goal_status
+//   CHECK (goal_status IN ('PENDING','ASSIGNED','IN_PROGRESS','COMPLETED','DELAYED','CANCELLED'));
+//
+// GiST indexes on the geography columns are now declared directly in this
+// file via @@index([...], type: Gist) on each model — Prisma manages them
+// like any other index, so they no longer need manual SQL here.

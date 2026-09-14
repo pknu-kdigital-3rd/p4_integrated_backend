@@ -1,0 +1,48 @@
+{
+  "name": "test_prisma",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "dotenv -e .env.dev -- tsx watch src/server.ts",
+    "dev:once": "dotenv -e .env.dev -- tsx src/server.ts",
+    "test": "dotenv -e .env.test -- vitest run --pool=threads --maxWorkers=1",
+    "test:watch": "dotenv -e .env.test -- vitest --pool=threads --maxWorkers=1",
+    "db:migrate:dev": "dotenv -e .env.dev -- prisma migrate dev",
+    "db:migrate:test": "dotenv -e .env.test -- prisma migrate deploy",
+    "db:seed:dev": "dotenv -e .env.dev -- tsx prisma/seed.ts",
+    "start": "node dist/server.js",
+    "postinstall": "prisma skills sync || exit 0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.4.0",
+    "@types/pg": "^8.23.1",
+    "@types/swagger-ui-express": "^4.1.8",
+    "dotenv-cli": "^11.0.0",
+    "pino-pretty": "^13.1.3",
+    "prisma": "^7.10.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@asteasolutions/zod-to-openapi": "git+ssh://git@github.com:pknu-kdigital-3rd/p4_zod-to-openapi.git#master",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "argon2": "^0.45.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jose": "^6.2.10",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^4.4.3"
+  }
+}

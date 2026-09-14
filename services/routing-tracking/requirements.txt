@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+
+# Optional but recommended - gives the full graph and real networkx A*
+# (main.py auto-detects and uses this if present; otherwise falls back
+# to the bundled pure-Python parser in pbf_parser.py, no install needed).
+# pyrosm is what actually reads the .pbf file - osmnx's own graph_from_xml()
+# only understands OSM XML, not the binary .pbf format used here, so all
+# three of these are needed together for the osmnx backend to work.
+osmnx
+networkx
+pyrosm
+scikit-learn  # osmnx's nearest_nodes() needs this for unprojected (lat/lon) graphs

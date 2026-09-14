@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>No-drop inference playback</title>
+  <style>
+    body { margin: 0; padding: 20px; color: #eee; background: #181818; font-family: system-ui, sans-serif; }
+    main { max-width: 980px; margin: auto; }
+    #stage { position: relative; width: fit-content; height: fit-content; background: #000; overflow: hidden; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #overlay { pointer-events: none; }
+    button { padding: 8px 14px; margin: 12px 6px 8px 0; cursor: pointer; }
+    #status, #stats { color: #aaa; font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+<main>
+  <h2>Android stream · ordered YOLO inference</h2>
+  <div id="stage"><canvas id="video"></canvas><canvas id="overlay"></canvas></div>
+  <button id="start">Start</button><button id="stop">Stop</button><button id="live">Jump to Live</button>
+  <label><input id="boxes" type="checkbox" checked /> boxes</label>
+  <label><input id="masks" type="checkbox" checked /> segmentation</label>
+  <label>overlay style
+    <select id="overlayMode">
+      <option value="person_box_other_segmentation">Person: boxes · others: segmentation</option>
+      <option value="all">All boxes + segmentation</option>
+      <option value="boxes">Boxes only</option>
+      <option value="segmentation">Segmentation only</option>
+    </select>
+  </label>
+  <label>compensation
+    <select id="compensationMode">
+      <option value="global">Global motion + local smoothing</option>
+      <option value="local">Global motion disabled</option>
+      <option value="raw">Total compensation disabled</option>
+    </select>
+  </label>
+  <label>ghost frames
+    <input id="ghostFrames" type="number" min="0" max="30" step="1" value="0" />
+  </label>
+  <div id="status">Stopped</div><div id="stats"></div>
+</main>
+<script>
+(() => {
+  const videoCanvas = document.getElementById('video');
+  const overlayCanvas = document.getElementById('overlay');
+  const videoCtx = videoCanvas.getContext('2d');
+  const overlayCtx = overlayCanvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const statsEl = document.getElementById('stats');
+  const boxesEl = document.getElementById('boxes');
+  const masksEl = document.getElementById('masks');
+  const overlayModeEl = document.getElementById('overlayMode');
+  const compensationModeEl = document.getElementById('compensationMode');
+  const ghostFramesEl = document.getElementById('ghostFrames');
+  let socket = null, reconnectTimer = null, reconnectAttempt = 0, stopped = true;
+  let jumpPending = false;
+  let sessionId = sessionStorage.getItem('playback-session-id');
+  let epoch = Number(sessionStorage.getItem('playback-epoch') || 0);
+  let lastPresentedSeq = Number(sessionStorage.getItem('playback-last-seq') || -1);
+  let queue = [], known = new Set(), pending = new Map();
+  let decoder = null, decoding = false, playing = false, sourceEnded = false;
+  let lastPresentedTs = null, lastInferenceMs = 0, presentedCount = 0;
+  let lastMonocular = {};
+  let nextPaintAt = null;
+  let tracks = new Map(), nextTrackId = 1;
+  let overlayMode = localStorage.getItem('playback-overlay-mode') || 'person_box_other_segmentation';
+  let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
+  let ghostFrames = Number.parseInt(localStorage.getItem('playback-ghost-frames') || '0', 10);
+  let globalMotion = { dx: 0, dy: 0, confidence: 0 };
+  const MOTION_WIDTH = 160;
+  const MOTION_HEIGHT = 90;
+  const MOTION_SEARCH = 8;
+  const motionCanvas = document.createElement('canvas');
+  motionCanvas.width = MOTION_WIDTH;
+  motionCanvas.height = MOTION_HEIGHT;
+  const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+  let previousMotionLuma = null;
+  const TRACK_IOU_THRESHOLD = 0.12;
+  const TRACK_CENTER_DISTANCE = 0.20;
+  const TRACK_SMOOTHING = 0.45;
+  const TRACK_CONFIRM_HITS = 2;
+  const GHOST_OPACITY = 0.18;
+  let targetSeconds = 2, lowWatermarkSeconds = 0.5, maxBufferBytes = 64 * 1024 * 1024;
+
+  function setStatus(text, color = '#aaa') { statusEl.textContent = text; statusEl.style.color = color; }
+  function resize(w, h) {
+    if (!w || !h) return;
+    videoCanvas.width = overlayCanvas.width = w;
+    videoCanvas.height = overlayCanvas.height = h;
+    const stage = document.getElementById('stage');
+    // Keep the visible stage at the source dimensions as well as keeping the
+    // canvas backing store in that same coordinate space.
+    stage.style.width = `${w}px`;
+    stage.style.height = `${h}px`;
+  }
+  function bufferedSeconds() {
+    if (queue.length < 2) return 0;
+    return Math.max(0, (queue[queue.length - 1].timestamp_us - queue[0].timestamp_us) / 1e6);
+  }
+  function updateStats() {
+    const monocularStatus = lastMonocular.status ? `  monocular=${lastMonocular.status}  qr=${lastMonocular.qr_status || '?'}` : '';
+    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  ghost_frames=${ghostFrames}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${monocularStatus}`;
+  }
+  function send(value) { if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); }
+
+  if (!['person_box_other_segmentation', 'all', 'boxes', 'segmentation'].includes(overlayMode)) overlayMode = 'person_box_other_segmentation';
+  overlayModeEl.value = overlayMode;
+  if (!['global', 'local', 'raw'].includes(compensationMode)) compensationMode = 'global';
+  compensationModeEl.value = compensationMode;
+  if (!Number.isFinite(ghostFrames)) ghostFrames = 0;
+  ghostFrames = Math.max(0, Math.min(30, Math.trunc(ghostFrames)));
+  ghostFramesEl.value = String(ghostFrames);
+
+  function resetCompensation() {
+    tracks.clear();
+    nextTrackId = 1;
+    previousMotionLuma = null;
+    globalMotion = { dx: 0, dy: 0, confidence: 0 };
+    lastMonocular = {};
+    updateStats();
+  }
+
+  // Estimate the dominant translation between two displayed frames. Frames
+  // are reduced to 160x90 first, keeping the work small enough for a 30 fps
+  // browser playback loop. The best translation is selected by sparse,
+  // grid-sampled luminance SAD; this is intentionally conservative and is
+  // used only to move an existing track before local YOLO matching.
+  function estimateGlobalMotion() {
+    if (compensationMode !== 'global') {
+      previousMotionLuma = null;
+      globalMotion = { dx: 0, dy: 0, confidence: 0 };
+      return;
+    }
+    motionCtx.drawImage(videoCanvas, 0, 0, MOTION_WIDTH, MOTION_HEIGHT);
+    const pixels = motionCtx.getImageData(0, 0, MOTION_WIDTH, MOTION_HEIGHT).data;
+    const current = new Uint8Array(MOTION_WIDTH * MOTION_HEIGHT);
+    for (let i = 0, p = 0; i < current.length; i++, p += 4) {
+      current[i] = Math.round(pixels[p] * 0.299 + pixels[p + 1] * 0.587 + pixels[p + 2] * 0.114);
+    }
+    if (!previousMotionLuma) {
+      previousMotionLuma = current;
+      globalMotion = { dx: 0, dy: 0, confidence: 0 };
+      return;
+    }
+    const previous = previousMotionLuma;
+    const sampleStep = 4;
+    const border = MOTION_SEARCH + 2;
+    let bestCost = Infinity, secondCost = Infinity, bestDx = 0, bestDy = 0;
+    for (let dy = -MOTION_SEARCH; dy <= MOTION_SEARCH; dy++) {
+      for (let dx = -MOTION_SEARCH; dx <= MOTION_SEARCH; dx++) {
+        let cost = 0, samples = 0;
+        for (let y = border; y < MOTION_HEIGHT - border; y += sampleStep) {
+          const sourceY = y - dy;
+          if (sourceY < 0 || sourceY >= MOTION_HEIGHT) continue;
+          for (let x = border; x < MOTION_WIDTH - border; x += sampleStep) {
+            const sourceX = x - dx;
+            if (sourceX < 0 || sourceX >= MOTION_WIDTH) continue;
+            cost += Math.abs(current[y * MOTION_WIDTH + x] - previous[sourceY * MOTION_WIDTH + sourceX]);
+            samples++;
+          }
+        }
+        cost /= Math.max(samples, 1);
+        if (cost < bestCost) {
+          secondCost = bestCost;
+          bestCost = cost;
+          bestDx = dx;
+          bestDy = dy;
+        } else if (cost < secondCost) {
+          secondCost = cost;
+        }
+      }
+    }
+    previousMotionLuma = current;
+    const separation = (secondCost - bestCost) / Math.max(secondCost, 1);
+    const confidence = bestCost < 45 ? Math.max(0, Math.min(1, separation)) : 0;
+    globalMotion = confidence >= 0.02
+      ? { dx: bestDx / MOTION_WIDTH, dy: bestDy / MOTION_HEIGHT, confidence }
+      : { dx: 0, dy: 0, confidence: 0 };
+  }
+
+  function configureDecoder(meta) {
+    if (decoder && decoder.state !== 'closed') decoder.close();
+    decoder = new VideoDecoder({
+      output(frame) {
+        const pair = pending.get(frame.timestamp);
+        if (!pair) {
+          // A jump/epoch reset may invalidate an in-flight decode. Do not
+          // leave the pump locked in decoding=true when its pair was cleared.
+          frame.close();
+          decoding = false;
+          pump();
+          updateStats();
+          return;
+        }
+        pending.delete(frame.timestamp);
+        if (!playing) { frame.close(); decoding = false; pump(); return; }
+        // Inference has already completed before this pair is sent.  Waiting
+        // for inference_ms here would charge that cost a second time and make
+        // a 30 fps source play at roughly half speed when inference takes one
+        // frame interval.  Source spacing controls a queued burst; if
+        // inference is slower, arrival/decode naturally becomes the pacing.
+        const sourceDelta = lastPresentedTs == null ? 0 : Math.max(0, (pair.timestamp_us - lastPresentedTs) / 1000);
+        const now = performance.now();
+        if (lastPresentedTs == null || nextPaintAt == null) nextPaintAt = now;
+        else nextPaintAt = Math.max(nextPaintAt + sourceDelta, now);
+        const delay = Math.max(0, nextPaintAt - now);
+        setTimeout(() => requestAnimationFrame(() => paint(frame, pair)), delay);
+      },
+      error(error) {
+        setStatus(`Decoder error: ${error.message || error}`, '#f66');
+        decoding = false;
+        if (!stopped) { try { decoder.close(); } catch (_) {} decoder = null; pump(); updateStats(); }
+      }
+    });
+    decoder.configure({ codec: meta.codec || 'avc1.42E01F', codedWidth: meta.width || 1280, codedHeight: meta.height || 720, optimizeForLatency: false });
+  }
+  function paint(frame, pair) {
+    // Use the dimensions produced by the server's inference frame as the
+    // canonical coordinate space. Decoder display dimensions can differ after
+    // codec scaling or pixel-aspect handling, which would misalign overlays.
+    const sourceWidth = Number(pair.frame.width) || frame.displayWidth;
+    const sourceHeight = Number(pair.frame.height) || frame.displayHeight;
+    resize(sourceWidth, sourceHeight);
+    videoCtx.drawImage(frame, 0, 0, videoCanvas.width, videoCanvas.height);
+    estimateGlobalMotion();
+    frame.close();
+    lastMonocular = pair.inference.monocular || {};
+    drawOverlay(pair.inference, pair.frame.width, pair.frame.height);
+    lastPresentedTs = pair.timestamp_us;
+    lastPresentedSeq = pair.seq;
+    lastInferenceMs = Number(pair.inference.duration_ms || 0);
+    presentedCount++;
+    updateStats();
+    known.delete(`${pair.epoch}:${pair.seq}`);
+    sessionStorage.setItem('playback-epoch', String(pair.epoch));
+    sessionStorage.setItem('playback-last-seq', String(pair.seq));
+    send({ type: 'presented', epoch: pair.epoch, seq: pair.seq });
+    decoding = false;
+    // Keep the session in the playing state even when the queue momentarily
+    // empties. The pump is naturally idle until enqueue() supplies the next
+    // completed pair; toggling playing here creates a first-frame/rebuffer
+    // race when results arrive one at a time.
+    pump();
+    updateStats();
+  }
+  function normalizedBox(item, width, height) {
+    const b = item.bbox || [];
+    if (b.length < 4) return null;
+    const format = String(item.bbox_format || 'xyxy_normalized').toLowerCase();
+    const normalized = format.endsWith('normalized');
+    const centerSize = format.startsWith('xywh');
+    let x = Number(b[0]), y = Number(b[1]), w = Number(b[2]), h = Number(b[3]);
+    if (![x, y, w, h].every(Number.isFinite)) return null;
+    if (!normalized) { x /= width || 1; y /= height || 1; w /= width || 1; h /= height || 1; }
+    if (centerSize) { x -= w / 2; y -= h / 2; }
+    else { w -= x; h -= y; }
+    const x2 = Math.max(x, Math.min(1, x + w));
+    const y2 = Math.max(y, Math.min(1, y + h));
+    x = Math.max(0, Math.min(1, x));
+    y = Math.max(0, Math.min(1, y));
+    return x2 > x && y2 > y ? [x, y, x2, y2] : null;
+  }
+  function boxIoU(a, b) {
+    const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+    const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+    const intersection = ix * iy;
+    const areaA = Math.max(0, a[2] - a[0]) * Math.max(0, a[3] - a[1]);
+    const areaB = Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    return intersection / Math.max(areaA + areaB - intersection, 1e-9);
+  }
+  function boxCenterDistance(a, b) {
+    const ax = (a[0] + a[2]) / 2, ay = (a[1] + a[3]) / 2;
+    const bx = (b[0] + b[2]) / 2, by = (b[1] + b[3]) / 2;
+    return Math.hypot(ax - bx, ay - by);
+  }
+  function updateTrack(track, observation) {
+    track.hits++; track.misses = 0;
+    track.box = track.box.map((value, index) => value * (1 - TRACK_SMOOTHING) + observation.box[index] * TRACK_SMOOTHING);
+    track.item = observation.item;
+    const observedConfidence = Number(observation.item.confidence || 0);
+    track.confidence = track.confidence * (1 - TRACK_SMOOTHING) + observedConfidence * TRACK_SMOOTHING;
+    track.confirmed = track.confirmed || track.server || track.hits >= TRACK_CONFIRM_HITS;
+  }
+  function createTrack(id, observation, server) {
+    // A server-identified track has already cleared the tracker's
+    // new_track_thresh, so requiring a second local confirmation would only
+    // add a frame of latency before it can be drawn.
+    tracks.set(id, {
+      id, server, className: observation.className, box: observation.box.slice(),
+      item: observation.item, confidence: Number(observation.item.confidence || 0),
+      hits: 1, misses: 0, confirmed: server || TRACK_CONFIRM_HITS <= 1,
+    });
+    return id;
+  }
+  function compensatedDetections(inference, width, height) {
+    const observations = (inference.items || []).map(item => ({
+      item, box: normalizedBox(item, width, height),
+      className: String(item.class || 'object').toLowerCase(),
+    })).filter(observation => observation.box);
+
+    if (compensationMode === 'raw') {
+      tracks.clear();
+      return observations.map(observation => ({
+        item: observation.item,
+        box: observation.box,
+        confidence: Number(observation.item.confidence || 0),
+      }));
+    }
+
+    if (compensationMode === 'global' && globalMotion.confidence > 0) {
+      // Predict each previous track into the current image coordinates before
+      // comparing it with this frame's YOLO result. The motion estimate is a
+      // translation from previous displayed frame to current displayed frame.
+      for (const track of tracks.values()) {
+        track.box = track.box.map((value, index) => {
+          const shift = index % 2 === 0 ? globalMotion.dx : globalMotion.dy;
+          return Math.max(0, Math.min(1, value + shift));
+        });
+      }
+    }
+
+    const used = new Set(), matched = new Set(), unidentified = [];
+    for (const observation of observations) {
+      const trackId = observation.item.track_id;
+      if (trackId === null || trackId === undefined) { unidentified.push(observation); continue; }
+      // The server tracker already resolved identity across frames, including
+      // through the low-confidence dips and crossings that geometric matching
+      // gets wrong. Trust its ID instead of re-deriving the association here.
+      const id = `s${trackId}`;
+      const track = tracks.get(id);
+      used.add(id); matched.add(id);
+      if (track) updateTrack(track, observation);
+      else createTrack(id, observation, true);
+    }
+    for (const observation of unidentified) {
+      let best = null, bestIou = TRACK_IOU_THRESHOLD;
+      for (const track of tracks.values()) {
+        if (track.server || used.has(track.id) || track.className !== observation.className) continue;
+        const score = boxIoU(track.box, observation.box);
+        const distance = boxCenterDistance(track.box, observation.box);
+        if (score < bestIou && distance > TRACK_CENTER_DISTANCE) continue;
+        if (!best || score > bestIou || (score === bestIou && distance < boxCenterDistance(best.box, observation.box))) { best = track; bestIou = score; }
+      }
+      if (best) { used.add(best.id); matched.add(best.id); updateTrack(best, observation); }
+      else matched.add(createTrack(`l${nextTrackId++}`, observation, false));
+    }
+    for (const [id, track] of tracks) {
+      if (matched.has(id)) continue;
+      track.misses++;
+      track.confidence *= 0.75;
+      if (track.misses > ghostFrames) tracks.delete(id);
+    }
+    return Array.from(tracks.values()).filter(track => track.confirmed);
+  }
+  function drawOverlay(inference, width, height) {
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    const classColors = {
+      person: '#35e18c', chair: '#4dabf7', clock: '#c77dff', car: '#ff922b',
+      truck: '#ff6b6b', bicycle: '#20c997', motorcycle: '#f06595', dog: '#ffd43b',
+      cat: '#74c0fc', bottle: '#a9e34b', cup: '#ffa94d', object: '#ffd166'
+    };
+    const fallbackColors = ['#e599f7', '#66d9e8', '#ff8787', '#94d82d', '#748ffc', '#ffa94d'];
+    function colorForClass(value) {
+      const name = String(value || 'object').toLowerCase();
+      if (classColors[name]) return classColors[name];
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+      return fallbackColors[hash % fallbackColors.length];
+    }
+    for (const track of compensatedDetections(inference, width, height)) {
+      const item = track.item;
+      const [x1, y1, x2, y2] = track.box;
+      const x = x1 * overlayCanvas.width, y = y1 * overlayCanvas.height;
+      const w = (x2 - x1) * overlayCanvas.width, h = (y2 - y1) * overlayCanvas.height;
+      const color = colorForClass(item.class);
+      const confidence = track.confidence;
+      const ghost = track.misses > 0;
+      overlayCtx.globalAlpha = ghost ? Math.pow(GHOST_OPACITY, track.misses) : 1;
+      const className = String(item.class || 'object').toLowerCase();
+      const drawBox = overlayMode === 'all' || overlayMode === 'boxes' || (overlayMode === 'person_box_other_segmentation' && className === 'person');
+      const drawMask = overlayMode === 'all' || overlayMode === 'segmentation' || (overlayMode === 'person_box_other_segmentation' && className !== 'person');
+      if (boxesEl.checked && drawBox) { overlayCtx.strokeStyle = color; overlayCtx.lineWidth = ghost ? 1 : 2; overlayCtx.setLineDash(ghost ? [5, 4] : []); overlayCtx.strokeRect(x, y, w, h); overlayCtx.setLineDash([]); if (!ghost) { overlayCtx.fillStyle = color; overlayCtx.font = '14px sans-serif'; const rawDistance = item.distance_m; const distance = Number(rawDistance); const distanceLabel = rawDistance != null && Number.isFinite(distance) ? ` · ${distance.toFixed(1)}m` : (item.distance_status ? ` · no-dist:${item.distance_status}` : ''); overlayCtx.fillText(`${item.class || 'object'} ${(confidence * 100).toFixed(0)}%${distanceLabel}`, x + 3, Math.max(14, y - 4)); } }
+      if (masksEl.checked && drawMask && item.mask && item.mask.length > 2) { overlayCtx.beginPath(); item.mask.forEach((point, i) => { const px = point[0] * overlayCanvas.width, py = point[1] * overlayCanvas.height; i ? overlayCtx.lineTo(px, py) : overlayCtx.moveTo(px, py); }); overlayCtx.closePath(); overlayCtx.fillStyle = color + '44'; overlayCtx.fill(); overlayCtx.strokeStyle = color; overlayCtx.stroke(); }
+      overlayCtx.globalAlpha = 1;
+    }
+  }
+  function pump() {
+    if (stopped || !decoder || decoding || !playing || !queue.length) return;
+    const pair = queue.shift();
+    pending.set(pair.timestamp_us, pair);
+    decoding = true;
+    decoder.decode(new EncodedVideoChunk({ type: pair.keyframe ? 'key' : 'delta', timestamp: pair.timestamp_us, data: pair.data }));
+  }
+  function maybeStart() {
+    // Do not hide the first decoded video while waiting for the full
+    // reconnect cushion. A keyframe plus any completed pair is enough to
+    // start; subsequent rebuffering still waits for the low watermark.
+    const firstKeyframeReady = presentedCount === 0 && queue.length > 0 && queue[0].keyframe;
+    // A slow-but-healthy inference stream may never accumulate the full
+    // low-watermark cushion. Resume as soon as the next completed pair exists;
+    // the decoder/network then naturally pace playback without freezing on
+    // the first frame.
+    const refillReady = presentedCount > 0 && queue.length > 0;
+    if (!playing && (firstKeyframeReady || refillReady || (sourceEnded && queue.length))) {
+      playing = true;
+      setStatus('Playing every inferred frame', '#4fdb8a');
+      pump();
+      updateStats();
+    }
+  }
+  function enqueue(meta, data) {
+    const key = `${meta.epoch}:${meta.seq}`;
+    if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
+    if (known.has(key) || meta.epoch !== epoch) return;
+    known.add(key);
+    const pair = { epoch: meta.epoch, seq: meta.seq, timestamp_us: Number(meta.source.timestamp_us), keyframe: !!meta.encoded.keyframe, data, inference: meta.inference, frame: meta.frame };
+    queue.push(pair);
+    queue.sort((a, b) => a.seq - b.seq);
+    if (!decoder) configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height });
+    updateStats();
+    if (queue.reduce((n, p) => n + p.data.byteLength, 0) > maxBufferBytes) setStatus('Client buffer full; waiting for playback', '#fc6');
+    if (playing) pump();
+    else maybeStart();
+  }
+  function openSocket() {
+    if (stopped) return;
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${scheme}://${location.host}/ws/playback`);
+    // A handler closure captures `ws`, not the shared `socket` variable, so a
+    // stale event from a socket Stop/Start already superseded cannot act on
+    // the new connection: closing is not synchronous, so the old socket's
+    // close event can otherwise arrive after `start()` has already opened a
+    // replacement, and an `if (stopped) return` guard alone does not catch
+    // that (stopped is back to false by then).
+    socket = ws;
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      if (socket !== ws) return;
+      reconnectAttempt = 0;
+      setStatus('Connected; buffering inference results');
+      send({ type: 'open', session_id: sessionId, epoch, last_presented_seq: lastPresentedSeq, decoder_state_preserved: !!decoder });
+      if (jumpPending) { jumpPending = false; send({ type: 'jump_to_live' }); }
+    };
+    ws.onmessage = (event) => {
+      if (socket !== ws) return;
+      if (typeof event.data === 'string') {
+        const message = JSON.parse(event.data);
+        if (message.type === 'session') { sessionId = message.session_id; epoch = message.epoch; targetSeconds = message.buffer.target_seconds; lowWatermarkSeconds = message.buffer.low_watermark_seconds; maxBufferBytes = message.buffer.client_max_bytes; sessionStorage.setItem('playback-session-id', sessionId); }
+        else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; if (decoder) { try { decoder.close(); } catch (_) {} decoder = null; } }
+        else if (message.type === 'fault') setStatus(message.detail, '#f66');
+        else if (message.type === 'resume_unavailable') { setStatus(`Resume unavailable: ${message.reason}; resyncing`, '#fc6'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; }
+        return;
+      }
+      const bytes = new Uint8Array(event.data), view = new DataView(event.data);
+      if (bytes.byteLength < 4) return;
+      const metaLen = view.getUint32(0), meta = JSON.parse(new TextDecoder().decode(bytes.slice(4, 4 + metaLen)));
+      enqueue(meta, bytes.slice(4 + metaLen));
+    };
+    ws.onclose = (event) => {
+      if (stopped || socket !== ws) return;
+      const detail = event.reason ? ` ${event.code}: ${event.reason}` : ` (${event.code})`;
+      setStatus(`Playback connection lost${detail}; continuing local buffer`, '#fc6');
+      scheduleReconnect();
+    };
+    ws.onerror = () => { if (socket === ws) setStatus('Playback WebSocket error; waiting to reconnect', '#fc6'); };
+  }
+  function scheduleReconnect() { if (reconnectTimer || stopped) return; const delay = Math.min(3000, 250 * 2 ** reconnectAttempt++); reconnectTimer = setTimeout(() => { reconnectTimer = null; openSocket(); }, delay); }
+  function start() {
+    if (!('VideoDecoder' in window) || !('EncodedVideoChunk' in window)) {
+      if (window.isSecureContext === false) {
+        setStatus('WebCodecs requires HTTPS (secure context). Please access via https://', '#f66');
+      } else {
+        setStatus('This browser needs H.264 WebCodecs support', '#f66');
+      }
+      return;
+    }
+    stopped = false;
+    setStatus('Connecting…');
+    openSocket();
+  }
+  function stop() { stopped = true; playing = false; nextPaintAt = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; if (decoder) { try { decoder.close(); } catch (_) {} decoder = null; } queue = []; known.clear(); pending.clear(); resetCompensation(); setStatus('Stopped'); }
+  function jumpLive() { queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; lastPresentedSeq = -1; sessionStorage.setItem('playback-last-seq', '-1'); jumpPending = true; send({ type: 'jump_to_live' }); setStatus('Resynchronizing at live IDR…', '#fc6'); }
+  compensationModeEl.addEventListener('change', () => {
+    compensationMode = compensationModeEl.value;
+    localStorage.setItem('playback-compensation-mode', compensationMode);
+    resetCompensation();
+    setStatus(`Compensation mode: ${compensationMode}`, '#fc6');
+  });
+  overlayModeEl.addEventListener('change', () => {
+    overlayMode = overlayModeEl.value;
+    localStorage.setItem('playback-overlay-mode', overlayMode);
+    setStatus(`Overlay style: ${overlayMode}`, '#fc6');
+    updateStats();
+  });
+  ghostFramesEl.addEventListener('change', () => {
+    const parsed = Number.parseInt(ghostFramesEl.value, 10);
+    ghostFrames = Number.isFinite(parsed) ? Math.max(0, Math.min(30, parsed)) : 0;
+    ghostFramesEl.value = String(ghostFrames);
+    localStorage.setItem('playback-ghost-frames', String(ghostFrames));
+    resetCompensation();
+    setStatus(`Ghost frames: ${ghostFrames}`, '#fc6');
+  });
+  document.getElementById('start').onclick = start;
+  document.getElementById('stop').onclick = stop;
+  document.getElementById('live').onclick = jumpLive;
+  if (!window.isSecureContext && location.protocol === 'http:') {
+    const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (!isLocal) {
+      setStatus('Insecure HTTP context: WebCodecs is disabled. Redirecting to HTTPS…', '#f66');
+      location.protocol = 'https:';
+    }
+  }
+})();
+</script>
+</body>
+</html>
