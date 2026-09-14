@@ -69,6 +69,18 @@ hybrid_bus_service: HybridBusService | None = None
 vehicle_tracker: VehicleTracker | None = None
 
 
+@app.get("/health/live")
+def health_live():
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready():
+    if graph is None or vehicle_tracker is None:
+        raise HTTPException(status_code=503, detail="Routing/tracking service is not ready")
+    return {"status": "ready", "graph": "ok", "telemetry": "ok"}
+
+
 @app.on_event("startup")
 def startup():
     global graph, override_locations, hybrid_bus_service, vehicle_tracker

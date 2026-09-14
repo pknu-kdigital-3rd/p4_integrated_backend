@@ -3,6 +3,7 @@ import {
 } from "@asteasolutions/zod-to-openapi";
 
 import { registry } from "./registry.ts";
+import { env } from "../config/env.ts";
 
 // Registration side effects
 import "../modules/vehicle/vehicle.openapi.ts";
@@ -24,8 +25,8 @@ export const openApiDocument = generator.generateDocument({
 
     servers: [
         {
-            url: "http://localhost:3000",
-            description: "Development Server",
+            url: env.PUBLIC_OPERATOR_URL ?? `http://${env.HOST}:${env.PORT}`,
+            description: env.PUBLIC_OPERATOR_URL ? "HTTPS operator ingress" : "Local development server",
         },
     ],
 });

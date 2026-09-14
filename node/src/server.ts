@@ -12,8 +12,9 @@ async function main() {
     await prisma.$queryRaw`SELECT 1`;
 
     logger.info("Database Connected");
-    const server = app.listen(env.PORT, () => {
+    const server = app.listen(env.PORT, env.HOST, () => {
         logger.info({
+            host: env.HOST,
             port: env.PORT,
             environment: env.NODE_ENV,
         }, "HTTP Server started");

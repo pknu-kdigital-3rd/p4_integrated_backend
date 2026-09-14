@@ -66,8 +66,9 @@ class Settings(BaseSettings):
     MONOCULAR_IMU_MAX_DELTA_MS: float = Field(default=50.0, ge=0.0, le=10_000.0)
 
     # --- Server ---
-    HOST: str = "0.0.0.0"
-    PORT: int = 39001
+    HOST: str = "127.0.0.1"
+    PORT: int = 39011
+    FORWARDED_ALLOW_IPS: str = "127.0.0.1"
     TLS_CERT_FILE: str | None = None
     TLS_KEY_FILE: str | None = None
 
@@ -76,8 +77,8 @@ class Settings(BaseSettings):
     TURN_USERNAME: str = "user"
     TURN_PASSWORD: str = "pass"
     YOLO_FEED_SOCKET: str = "/tmp/poc-relay-yolo.sock"
-    RELAY_KEYFRAME_URL: str = "http://127.0.0.1:39002/internal/request-keyframe"
-    RELAY_STATUS_URL: str = "http://127.0.0.1:39002/internal/status"
+    RELAY_KEYFRAME_URL: str = "http://127.0.0.1:39012/internal/request-keyframe"
+    RELAY_STATUS_URL: str = "http://127.0.0.1:39012/internal/status"
     CLIENT_PREFETCH_SECONDS: float = Field(default=2.0, ge=0.1, le=30.0)
     CLIENT_LOW_WATERMARK_SECONDS: float = Field(default=0.5, ge=0.05, le=10.0)
     CLIENT_BUFFER_MAX_BYTES: int = Field(default=64 * 1024 * 1024, ge=1)
@@ -91,6 +92,7 @@ class Settings(BaseSettings):
         "YOLO_DEVICE",
         "YOLO_TRACKER_CONFIG",
         "HOST",
+        "FORWARDED_ALLOW_IPS",
         "TURN_URL",
         "TURN_USERNAME",
         "YOLO_FEED_SOCKET",

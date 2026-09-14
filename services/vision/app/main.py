@@ -74,6 +74,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")
 
+
+@app.get("/health/live")
+async def health_live():
+    """Ingress liveness check; it does not create a playback session."""
+    return {"status": "ok"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

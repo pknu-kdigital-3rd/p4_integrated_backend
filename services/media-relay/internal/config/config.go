@@ -18,7 +18,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		RelayListenAddr:      env("RELAY_LISTEN_ADDR", ":39002"),
+        RelayListenAddr:      env("RELAY_LISTEN_ADDR", "127.0.0.1:39012"),
 		TurnURL:              env("TURN_URL", "turn:10.174.96.95:3478?transport=udp"),
 		TurnUsername:         env("TURN_USERNAME", "user"),
 		TurnPassword:         env("TURN_PASSWORD", "pass"),
@@ -26,7 +26,7 @@ func Load() Config {
 		// YOLO_FEED_ADDR (TCP) so a stale env var fails loudly instead of
 		// being silently misinterpreted as a path.
 		YoloFeedSocketPath:   env("YOLO_FEED_SOCKET", "/tmp/poc-relay-yolo.sock"),
-		PythonAndroidLiveURL: env("PY_ANDROID_LIVE_URL", "http://127.0.0.1:39001/internal/android-live"),
+        PythonAndroidLiveURL: env("PY_ANDROID_LIVE_URL", "http://127.0.0.1:39011/internal/android-live"),
 		BacklogMaxSeconds:   envFloat("BACKLOG_MAX_SECONDS", 30),
 		BacklogMaxBytes:     envInt64("BACKLOG_MAX_BYTES", 256*1024*1024),
 	}

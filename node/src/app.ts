@@ -17,9 +17,11 @@ import { trackingRouter } from "./modules/tracking/tracking.router.ts";
 import { demoRouter } from "./modules/demo/demo.router.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { env } from "./config/env.ts";
 
 export function createApp() {
 	const app = express();
+	app.set("trust proxy", env.TRUST_PROXY);
 	app.use(
 		pinoHttp({
 			logger,

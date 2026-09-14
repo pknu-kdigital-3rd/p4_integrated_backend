@@ -81,5 +81,7 @@ describe("GET /api/v1/bootstrap", () => {
             liveViewUrl:
                 env.LIVE_VIEW_URL ?? env.VISION_PUBLIC_BASE_URL,
         });
+        expect(new URL(response.body.data.liveViewUrl).protocol)
+            .toBe("https:");
     });
 });

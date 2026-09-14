@@ -27,9 +27,9 @@ class RunTlsTests(unittest.TestCase):
             else:
                 os.environ[name] = value
 
-    def test_tls_is_enabled_by_default(self):
-        with patch.dict(os.environ, {"TLS_ENABLED": "true"}, clear=False):
-            self.assertTrue(run.parse_args([]).tls)
+    def test_tls_is_disabled_by_default_for_reverse_proxy(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(run.parse_args([]).tls)
 
     def test_certificate_generation_is_reusable(self):
         cert = Path("cert.pem")
@@ -45,7 +45,7 @@ class RunTlsTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertEqual(write_bytes.call_count, 2)
 
-    def test_main_uses_generated_tls_by_default(self):
+    def test_main_uses_generated_tls_only_when_explicitly_enabled(self):
         with (
             patch.object(
                 run,
@@ -59,7 +59,7 @@ class RunTlsTests(unittest.TestCase):
             self.assertIsNone(settings.TLS_CERT_FILE)
             self.assertNotIn("ssl_certfile", mock_config.call_args.kwargs)
 
-            run.main([])
+            run.main(["--tls"])
             ensure_certificates.assert_called_once_with(
                 run.BASE_DIR / "certs" / "poc-cert.pem",
                 run.BASE_DIR / "certs" / "poc-key.pem",

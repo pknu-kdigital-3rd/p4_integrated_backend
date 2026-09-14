@@ -96,8 +96,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--tls",
         dest="tls",
         action=argparse.BooleanOptionalAction,
-        default=os.getenv("TLS_ENABLED", "true").lower() not in {"false", "0", "no"},
-        help="Serve over HTTPS/TLS (default: enabled)",
+        default=os.getenv("TLS_ENABLED", "false").lower() not in {"false", "0", "no"},
+        help="Serve over HTTPS/TLS (default: disabled; terminate TLS at the ingress)",
     )
     parser.add_argument(
         "--tls-cert",
@@ -151,6 +151,8 @@ def main(argv: list[str] | None = None) -> None:
         app,
         host=settings.HOST,
         port=settings.PORT,
+        proxy_headers=True,
+        forwarded_allow_ips=settings.FORWARDED_ALLOW_IPS,
         timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_TIMEOUT_S,
         **tls,
     )

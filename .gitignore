@@ -13,3 +13,8 @@ node_modules/
 
 /generated/prisma
 secrets/
+*.key
+*.pem
+*.p12
+deploy/nginx/logs/*.log
+deploy/nginx/logs/*.pid
