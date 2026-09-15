@@ -155,9 +155,15 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
         gpu_end_event.synchronize()
         gpu_ms = float(gpu_start_event.elapsed_time(gpu_end_event))
 
+    postprocess_start = perf_counter()
+    mask_polygon_ms = 0.0
+    detection_parse_ms = 0.0
     detections = []
     for result in results:
+        mask_start = perf_counter()
         normalized_polygons = result.masks.xyn if result.masks is not None else []
+        mask_polygon_ms += (perf_counter() - mask_start) * 1000
+        detection_start = perf_counter()
         for box_index, box in enumerate(result.boxes):
             conf = float(box.conf[0])
             if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
@@ -188,6 +194,8 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
                     ]
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
+        detection_parse_ms += (perf_counter() - detection_start) * 1000
+    postprocess_ms = (perf_counter() - postprocess_start) * 1000
     return {
         "source": {
             "epoch": inference_frame.epoch,
@@ -203,8 +211,12 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
         # Keep inference_ms as the legacy end-to-end value. The additional
         # fields separate the Ultralytics call and GPU work from CPU parsing.
         "inference_ms": round((perf_counter() - pipeline_start) * 1000, 1),
+        "input_ms": round((model_start - pipeline_start) * 1000, 1),
         "model_wall_ms": round(model_wall_ms, 1),
         "gpu_ms": round(gpu_ms, 1) if gpu_ms is not None else None,
+        "postprocess_ms": round(postprocess_ms, 1),
+        "mask_polygon_ms": round(mask_polygon_ms, 1),
+        "detection_parse_ms": round(detection_parse_ms, 1),
     }
 
 
@@ -485,8 +497,12 @@ async def yolo_worker(state: AppState) -> None:
                 "FastSAM throughput: "
                 f"{window_completed / elapsed:.1f} fps; "
                 f"last={result['inference_ms']:.1f} ms; "
+                f"input={result['input_ms']:.1f} ms; "
                 f"model={result['model_wall_ms']:.1f} ms; "
                 f"gpu={result['gpu_ms'] if result['gpu_ms'] is not None else 'n/a'} ms; "
+                f"post={result['postprocess_ms']:.1f} ms "
+                f"(masks={result['mask_polygon_ms']:.1f}, "
+                f"boxes={result['detection_parse_ms']:.1f}); "
                 f"pending={state.inference_queue.qsize()}",
                 flush=True,
             )
