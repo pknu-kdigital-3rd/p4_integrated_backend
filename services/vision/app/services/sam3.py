@@ -33,10 +33,15 @@ def load_sam3_model() -> Sam3Model:
         from sam3.model.sam3_image_processor import Sam3Processor
         from sam3.model_builder import build_sam3_image_model
     except ModuleNotFoundError as exc:
+        if exc.name == "sam3" or (exc.name and exc.name.startswith("sam3.")):
+            raise RuntimeError(
+                "SAM3 is unavailable. Install the SAM3 checkout (for example, "
+                "`uv pip install -e /workspace/sam3`) in the Vision environment "
+                "before starting the service."
+            ) from exc
         raise RuntimeError(
-            "SAM3 is selected but its source package is unavailable. Install "
-            "the SAM3 checkout (for example, `uv pip install -e /workspace/sam3`) "
-            "before starting the vision service."
+            f"SAM3 import failed because dependency {exc.name!r} is unavailable. "
+            "Install Vision dependencies and the SAM3 checkout again."
         ) from exc
 
     checkpoint = Path(settings.SAM3_CHECKPOINT_PATH)
