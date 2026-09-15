@@ -308,6 +308,12 @@ def run_sam3(inference_frame: InferenceFrame, sam3_model: Sam3Model) -> dict:
         else:
             _append_frame(sam3_model, image)
             frame_idx = sam3_model.frame_count
+            # The upstream interactive predictor alternates to
+            # ``propagation_fetch`` after repeated calls, assuming a finite
+            # video whose frames were already processed. A live frame is new
+            # by definition, so clear only the planner history and force a
+            # real propagation while retaining all tracker state and caches.
+            sam3_model.inference_state["action_history"].clear()
             propagated = sam3_model.predictor.model.propagate_in_video(
                 sam3_model.inference_state,
                 start_frame_idx=frame_idx,
