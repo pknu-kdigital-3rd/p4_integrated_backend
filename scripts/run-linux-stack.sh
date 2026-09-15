@@ -250,6 +250,12 @@ setup_stack() {
   (
     cd "${PROJECT_ROOT}/services/vision"
     uv sync
+    if [[ "${SEGMENTATION_BACKEND:-sam3}" == "sam3" ]]; then
+      : "${SAM3_SOURCE_DIR:?SAM3_SOURCE_DIR is required when SEGMENTATION_BACKEND=sam3}"
+      [[ -d "$SAM3_SOURCE_DIR" ]] \
+        || die "SAM3 source checkout not found: $SAM3_SOURCE_DIR"
+      uv pip install -e "$SAM3_SOURCE_DIR"
+    fi
     uv run python -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; name=torch.cuda.get_device_name(0); assert "3090" in name, name; print(name); print(torch.cuda.get_arch_list())'
   )
 

@@ -20,6 +20,7 @@ them in the environment:
 
 ```bash
 export SEGMENTATION_BACKEND=sam3
+export SAM3_SOURCE_DIR=/workspace/sam3
 export SAM3_CHECKPOINT_PATH=/workspace/models/sam3.pt
 export SAM3_BPE_PATH=/workspace/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz
 export SAM3_PROMPT=person
@@ -46,4 +47,3 @@ export SEGMENTATION_BACKEND=yolo
 ```
 
 The YOLO settings and checkpoint are otherwise unchanged.
-
