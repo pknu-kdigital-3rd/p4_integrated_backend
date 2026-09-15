@@ -111,12 +111,12 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
     frame_height, frame_width = img.shape[:2]
     longest_side = max(frame_width, frame_height)
     imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
-    half = settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda")
+    quantize = 16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
     tracking = settings.YOLO_TRACKING
     common_kwargs = {
         "device": settings.YOLO_DEVICE,
         "imgsz": imgsz,
-        "half": half,
+        "quantize": quantize,
         "retina_masks": True,
         "conf": settings.CONF_THRESHOLD_LOW,
         "iou": settings.FASTSAM_IOU,
