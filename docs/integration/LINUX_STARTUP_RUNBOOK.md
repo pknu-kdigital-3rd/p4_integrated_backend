@@ -149,7 +149,7 @@ Use a new shell, source the same environment file, and run:
 cd "$P4_ROOT"
 set -a; source deploy/env.local; set +a
 cd node
-npm ci --include=dev
+NODE_ENV=development npm ci --include=dev
 npx prisma migrate deploy
 npx tsx prisma/seed.ts
 npm run build
