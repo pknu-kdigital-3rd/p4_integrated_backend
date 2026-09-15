@@ -1,6 +1,6 @@
 # HTTPS ingress
 
-This configuration makes Nginx the only LAN-facing HTTP/TLS process. It uses `10.174.96.95`, with operator HTTPS on port `39001` and Vision/WSS/Android signaling HTTPS on port `39002`. Port 80 redirects to the operator URL. Change `server_name` and certificate SANs together if the public address changes. Nginx must be installed separately on the host; this repository intentionally does not vendor a web-server binary.
+This configuration makes Nginx the only LAN-facing HTTP/TLS process. It uses `10.174.96.95`, with operator HTTPS on port `39001` and Vision/WSS/Android signaling HTTPS on port `39002`. It intentionally does not bind port 80, so the project-local Nginx can run as the current user without `sudo`. Change `server_name` and certificate SANs together if the public address changes. Nginx must be installed separately on the host; this repository intentionally does not vendor a web-server binary.
 
 Internal listeners:
 

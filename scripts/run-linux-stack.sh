@@ -110,7 +110,7 @@ load_environment() {
 preflight() {
   load_node_runtime
   local command_name
-  for command_name in docker uv go openssl curl nginx sudo nvidia-smi; do
+  for command_name in docker uv go openssl curl nginx nvidia-smi; do
     require_command "$command_name"
   done
   docker compose version >/dev/null
@@ -249,7 +249,7 @@ setup_stack() {
   )
 
   log "Validating Nginx configuration"
-  sudo nginx -p "$NGINX_PREFIX" -t -c nginx.conf
+  nginx -p "$NGINX_PREFIX" -t -c nginx.conf
   log "Setup completed"
 }
 
@@ -289,14 +289,14 @@ start_service() {
 
 start_nginx() {
   local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
-  sudo nginx -p "$NGINX_PREFIX" -t -c nginx.conf
-  if [[ -f "$nginx_pid_file" ]] && sudo kill -0 "$(<"$nginx_pid_file")" 2>/dev/null; then
+  nginx -p "$NGINX_PREFIX" -t -c nginx.conf
+  if [[ -f "$nginx_pid_file" ]] && kill -0 "$(<"$nginx_pid_file")" 2>/dev/null; then
     log "Reloading Nginx"
-    sudo nginx -p "$NGINX_PREFIX" -c nginx.conf -s reload
+    nginx -p "$NGINX_PREFIX" -c nginx.conf -s reload
   else
-    sudo rm -f -- "$nginx_pid_file"
+    rm -f -- "$nginx_pid_file"
     log "Starting Nginx"
-    sudo nginx -p "$NGINX_PREFIX" -c nginx.conf
+    nginx -p "$NGINX_PREFIX" -c nginx.conf
   fi
 }
 
@@ -367,11 +367,11 @@ stop_service() {
 
 stop_nginx() {
   local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
-  if [[ -f "$nginx_pid_file" ]] && sudo kill -0 "$(<"$nginx_pid_file")" 2>/dev/null; then
+  if [[ -f "$nginx_pid_file" ]] && kill -0 "$(<"$nginx_pid_file")" 2>/dev/null; then
     log "Stopping Nginx"
-    sudo nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit
+    nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit
   else
-    sudo rm -f -- "$nginx_pid_file"
+    rm -f -- "$nginx_pid_file"
     log "Nginx is not running under the project prefix"
   fi
 }

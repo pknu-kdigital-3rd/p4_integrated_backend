@@ -45,8 +45,8 @@ Useful lifecycle commands are:
 ```
 
 Logs and PID files are kept under the ignored `.runtime/` directory. `stop`
-leaves PostgreSQL running; `down` stops it too. The script may prompt for
-`sudo` when validating, starting, reloading, or stopping Nginx.
+leaves PostgreSQL running; `down` stops it too. Nginx uses only the unprivileged
+HTTPS ports 39001 and 39002 and runs under the current user.
 
 ## 0. One-time host prerequisites
 
@@ -280,8 +280,8 @@ that will connect. Install Nginx, then validate and start the checked-in
 configuration:
 
 ```bash
-sudo nginx -p "$P4_ROOT/deploy/nginx/" -t -c nginx.conf
-sudo nginx -p "$P4_ROOT/deploy/nginx/" -c nginx.conf
+nginx -p "$P4_ROOT/deploy/nginx/" -t -c nginx.conf
+nginx -p "$P4_ROOT/deploy/nginx/" -c nginx.conf
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
   https://10.174.96.95:39001/health/live
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
