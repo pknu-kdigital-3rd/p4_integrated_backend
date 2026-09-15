@@ -222,7 +222,9 @@ setup_stack() {
   log "Installing and validating Node dependencies"
   (
     cd "${PROJECT_ROOT}/node"
-    npm ci
+    # TypeScript compilation and Prisma tooling require packages from
+    # devDependencies even when NODE_ENV=production.
+    npm ci --include=dev
     npx prisma migrate deploy
     npx tsx prisma/seed.ts
     npm run build
