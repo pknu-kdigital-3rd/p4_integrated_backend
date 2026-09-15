@@ -13,6 +13,7 @@ import android.hardware.camera2.TotalCaptureResult
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Log
 import android.util.Range
 import android.util.Size
 import android.view.GestureDetector
@@ -55,6 +56,7 @@ import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 private data class ResolutionOption(val label: String, val size: Size)
@@ -78,6 +80,8 @@ private const val TARGET_CAPTURE_FPS = 30
 private const val QR_SCAN_EVERY_N_FRAMES = 2L
 private const val QR_MAX_WIDTH = 640
 private const val QR_MAX_HEIGHT = 360
+private const val QR_FAILURE_LOG_INTERVAL_NS = 1_000_000_000L
+private const val QR_LOG_TAG = "MainActivity"
 
 // The rig points at a screen a fixed distance away. Autofocus hunts badly on a
 // flat, periodic pixel pattern, so the lens is pinned rather than scanned and
@@ -119,6 +123,8 @@ class MainActivity : AppCompatActivity() {
     private val qrCaptureIndex = AtomicLong(0)
     private val qrScanInFlight = AtomicBoolean(false)
     private var qrFrameCounter = 0L
+    private val qrConsecutiveFailures = AtomicInteger(0)
+    private var lastQrFailureLogNs = 0L
     // Reused because only one QR task is allowed to reference this buffer at a
     // time. The camera frame itself can therefore be closed immediately after
     // this reduced-resolution copy is complete.
@@ -229,6 +235,8 @@ class MainActivity : AppCompatActivity() {
         qrCaptureIndex.set(0)
         qrScanInFlight.set(false)
         qrFrameCounter = 0L
+        qrConsecutiveFailures.set(0)
+        lastQrFailureLogNs = 0L
         captureFps = 0f
         captureWindowStartedNs = 0L
         captureWindowFrames = 0
@@ -478,7 +486,7 @@ class MainActivity : AppCompatActivity() {
         } catch (error: Exception) {
             qrScanInFlight.set(false)
             image.close()
-            setQrStatus("QR: scan failed (${error.message ?: "image conversion failed"})")
+            reportQrFailure("image conversion", error)
             publisher?.sendQrEvent(
                 timestamp,
                 null,
@@ -504,6 +512,7 @@ class MainActivity : AppCompatActivity() {
                 .addOnSuccessListener { barcodes ->
                     val raw = barcodes.firstOrNull()?.rawValue
                     val decoded = raw?.toLongOrNull()
+                    qrConsecutiveFailures.set(0)
                     setQrStatus(
                         when {
                             raw == null -> "QR: none visible"
@@ -520,7 +529,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 .addOnFailureListener { error ->
-                    setQrStatus("QR: scan failed (${error.message ?: "unknown error"})")
+                    reportQrFailure("ML Kit", error)
                     publisher?.sendQrEvent(
                         timestamp,
                         null,
@@ -534,8 +543,20 @@ class MainActivity : AppCompatActivity() {
                 }
         } catch (error: Exception) {
             qrScanInFlight.set(false)
-            setQrStatus("QR: scan failed (${error.message ?: "unknown error"})")
+            reportQrFailure("ML Kit setup", error)
         }
+    }
+
+    private fun reportQrFailure(stage: String, error: Throwable) {
+        val consecutiveFailures = qrConsecutiveFailures.incrementAndGet()
+        val now = SystemClock.elapsedRealtimeNanos()
+        if (now - lastQrFailureLogNs < QR_FAILURE_LOG_INTERVAL_NS) return
+        lastQrFailureLogNs = now
+        Log.w(
+            QR_LOG_TAG,
+            "QR $stage failed; retrying (consecutive=$consecutiveFailures): " +
+                (error.message ?: error.javaClass.simpleName),
+        )
     }
 
     /**
