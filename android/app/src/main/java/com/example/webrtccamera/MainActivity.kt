@@ -70,6 +70,11 @@ private const val DEFAULT_RESOLUTION_INDEX = 0 // 720p, matches the previous har
 // raise gain rather than hold the shutter open and smear motion into the pixels.
 private const val TARGET_CAPTURE_FPS = 30
 
+// QR detection does not need to run at the video frame rate. Keeping one ML
+// Kit task in flight and sampling at 10 Hz prevents ImageProxy instances from
+// accumulating while preserving responsive QR updates.
+private const val QR_SCAN_INTERVAL_NS = 100_000_000L
+
 // The rig points at a screen a fixed distance away. Autofocus hunts badly on a
 // flat, periodic pixel pattern, so the lens is pinned rather than scanned and
 // the operator pinches to find the sharp point by eye. Focus is held as a 0..1
@@ -108,6 +113,8 @@ class MainActivity : AppCompatActivity() {
             .build()
     )
     private val qrCaptureIndex = AtomicLong(0)
+    private val qrScanInFlight = AtomicBoolean(false)
+    private var lastQrScanStartedNs = 0L
 
     // Written from a camera thread by the session capture callback so a tap-
     // triggered scan can be read back and adopted as the new manual position.
@@ -212,6 +219,8 @@ class MainActivity : AppCompatActivity() {
 
         streaming.set(true)
         qrCaptureIndex.set(0)
+        qrScanInFlight.set(false)
+        lastQrScanStartedNs = 0L
         captureFps = 0f
         captureWindowStartedNs = 0L
         captureWindowFrames = 0
@@ -417,28 +426,27 @@ class MainActivity : AppCompatActivity() {
         recordCaptureFrame()
         val timestamp = image.imageInfo.timestamp.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos()
         // scanQrFrame takes over closing `image` once handed off, since ML
-        // Kit reads it asynchronously. When QR scanning is disabled, close
-        // immediately after the synchronous WebRTC copy so CameraX can deliver
-        // frames without waiting for ML Kit.
+        // Kit reads it asynchronously. Only one sampled frame may be held by
+        // ML Kit at a time; all other frames close immediately so CameraX can
+        // keep delivering the full-rate video stream.
         var handedOffToQrScan = false
         try {
             publisher?.push(image, timestamp)
-            handedOffToQrScan = true
-            if (qrScanningEnabled) {
+            if (qrScanningEnabled && tryStartQrScan()) {
+                handedOffToQrScan = true
                 scanQrFrame(image, timestamp)
-            } else {
-                publisher?.sendQrEvent(
-                    timestamp,
-                    null,
-                    false,
-                    qrCaptureIndex.getAndIncrement(),
-                    0,
-                )
-                image.close()
             }
         } finally {
             if (!handedOffToQrScan) image.close()
         }
+    }
+
+    private fun tryStartQrScan(): Boolean {
+        val now = SystemClock.elapsedRealtimeNanos()
+        if (now - lastQrScanStartedNs < QR_SCAN_INTERVAL_NS) return false
+        if (!qrScanInFlight.compareAndSet(false, true)) return false
+        lastQrScanStartedNs = now
+        return true
     }
 
     /** Measures frames delivered to CameraX before WebRTC encoding or server processing. */
@@ -460,6 +468,7 @@ class MainActivity : AppCompatActivity() {
         val start = System.nanoTime()
         val mediaImage = image.image
         if (mediaImage == null) {
+            qrScanInFlight.set(false)
             setQrStatus("QR: no frame (image unavailable)")
             publisher?.sendQrEvent(
                 timestamp,
@@ -472,36 +481,45 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val input = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
-        qrScanner.process(input)
-            .addOnSuccessListener { barcodes ->
-                val raw = barcodes.firstOrNull()?.rawValue
-                val decoded = raw?.toLongOrNull()
-                setQrStatus(
-                    when {
-                        raw == null -> "QR: none visible"
-                        decoded == null -> "QR: unreadable content \"$raw\""
-                        else -> "QR: ts=$decoded"
-                    }
-                )
-                publisher?.sendQrEvent(
-                    timestamp,
-                    decoded,
-                    decoded != null,
-                    captureIndex,
-                    (System.nanoTime() - start) / 1_000_000,
-                )
-            }
-            .addOnFailureListener { error ->
-                setQrStatus("QR: scan failed (${error.message ?: "unknown error"})")
-                publisher?.sendQrEvent(
-                    timestamp,
-                    null,
-                    false,
-                    captureIndex,
-                    (System.nanoTime() - start) / 1_000_000,
-                )
-            }
-            .addOnCompleteListener { image.close() }
+        try {
+            qrScanner.process(input)
+                .addOnSuccessListener { barcodes ->
+                    val raw = barcodes.firstOrNull()?.rawValue
+                    val decoded = raw?.toLongOrNull()
+                    setQrStatus(
+                        when {
+                            raw == null -> "QR: none visible"
+                            decoded == null -> "QR: unreadable content \"$raw\""
+                            else -> "QR: ts=$decoded"
+                        }
+                    )
+                    publisher?.sendQrEvent(
+                        timestamp,
+                        decoded,
+                        decoded != null,
+                        captureIndex,
+                        (System.nanoTime() - start) / 1_000_000,
+                    )
+                }
+                .addOnFailureListener { error ->
+                    setQrStatus("QR: scan failed (${error.message ?: "unknown error"})")
+                    publisher?.sendQrEvent(
+                        timestamp,
+                        null,
+                        false,
+                        captureIndex,
+                        (System.nanoTime() - start) / 1_000_000,
+                    )
+                }
+                .addOnCompleteListener {
+                    qrScanInFlight.set(false)
+                    image.close()
+                }
+        } catch (error: Exception) {
+            qrScanInFlight.set(false)
+            image.close()
+            setQrStatus("QR: scan failed (${error.message ?: "unknown error"})")
+        }
     }
 
     private fun setQrStatus(text: String) {
