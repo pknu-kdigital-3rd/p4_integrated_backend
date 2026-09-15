@@ -56,6 +56,35 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
+def _yolo_detect_conf() -> float:
+    """Use the new detector threshold, falling back to the legacy setting."""
+
+    return (
+        settings.YOLO_DETECT_CONF
+        if settings.YOLO_DETECT_CONF is not None
+        else settings.CONF_THRESHOLD_LOW
+    )
+
+
+def _allowed_yolo_classes() -> set[str] | None:
+    values = {
+        value.strip().casefold()
+        for value in settings.YOLO_CLASS_ALLOWLIST.split(",")
+        if value.strip()
+    }
+    return values or None
+
+
+def _yolo_class_name(yolo_model: YOLO, class_id: int) -> str:
+    names = yolo_model.names
+    value = (
+        names[class_id]
+        if not isinstance(names, dict)
+        else names.get(class_id, class_id)
+    )
+    return str(value)
+
+
 async def _read_record(reader: asyncio.StreamReader) -> tuple[int, bytes]:
     header = await reader.readexactly(RECORD_HEADER.size)
     (length,) = RECORD_HEADER.unpack(header)
@@ -142,8 +171,8 @@ def _fastsam_polygons(
         device=settings.YOLO_DEVICE,
         imgsz=imgsz,
         quantize=quantize,
-        retina_masks=True,
-        conf=settings.CONF_THRESHOLD_LOW,
+        retina_masks=False,
+        conf=settings.FASTSAM_CONF,
         verbose=False,
     )
     if not sam_results:
@@ -194,7 +223,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 # Hand the weak detections to the tracker rather than dropping
                 # them here; its second association stage is what keeps an
                 # established track alive through a confidence dip.
-                conf=settings.CONF_THRESHOLD_LOW,
+                conf=_yolo_detect_conf(),
                 tracker=settings.YOLO_TRACKER_CONFIG,
                 persist=True,
                 verbose=False,
@@ -205,20 +234,35 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 device=settings.YOLO_DEVICE,
                 imgsz=imgsz,
                 quantize=quantize,
+                conf=_yolo_detect_conf(),
                 verbose=False,
             )
     detections = []
+    allowed_classes = _allowed_yolo_classes()
     for result in results:
-        detector_boxes = [
-            list(map(float, box.xyxy[0].detach().cpu().tolist()))
-            for box in result.boxes
-        ]
+        detector_boxes = []
+        fastsam_index_by_box: dict[int, int] = {}
+        for box_index, box in enumerate(result.boxes):
+            conf = float(box.conf[0])
+            if not tracking and conf <= _yolo_detect_conf():
+                continue
+            cls_id = int(box.cls[0])
+            class_name = _yolo_class_name(yolo_model, cls_id)
+            if allowed_classes and class_name.casefold() not in allowed_classes:
+                continue
+            fastsam_index_by_box[box_index] = len(detector_boxes)
+            detector_boxes.append(
+                list(map(float, box.xyxy[0].detach().cpu().tolist()))
+            )
         fastsam_polygons = _fastsam_polygons(img, detector_boxes, imgsz, quantize)
         for box_index, box in enumerate(result.boxes):
             conf = float(box.conf[0])
-            if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
+            if not tracking and conf <= _yolo_detect_conf():
                 continue
             cls_id = int(box.cls[0])
+            class_name = _yolo_class_name(yolo_model, cls_id)
+            if allowed_classes and class_name.casefold() not in allowed_classes:
+                continue
             if settings.BBOX_FORMAT == "xyxy_normalized":
                 bbox = list(map(float, box.xyxyn[0].detach().cpu().tolist()))
             elif settings.BBOX_FORMAT == "xyxy_pixels":
@@ -228,7 +272,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             else:
                 bbox = list(map(float, box.xywh[0].detach().cpu().tolist()))
             detection = {
-                "class": yolo_model.names[cls_id],
+                "class": class_name,
                 "confidence": round(conf, 2),
                 "bbox": bbox,
                 "bbox_format": settings.BBOX_FORMAT,
@@ -236,7 +280,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             track_id = getattr(box, "id", None)
             if track_id is not None:
                 detection["track_id"] = int(track_id[0])
-            polygon = fastsam_polygons.get(box_index)
+            polygon = fastsam_polygons.get(fastsam_index_by_box[box_index])
             if polygon is not None:
                 if len(polygon) >= 3:
                     detection["mask"] = [
