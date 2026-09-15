@@ -15,8 +15,7 @@
     "db:migrate:dev": "dotenv -e .env.dev -- prisma migrate dev",
     "db:migrate:test": "dotenv -e .env.test -- prisma migrate deploy",
     "db:seed:dev": "dotenv -e .env.dev -- tsx prisma/seed.ts",
-    "start": "node dist/server.js",
-    "postinstall": "prisma skills sync || exit 0"
+    "start": "node dist/server.js"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
