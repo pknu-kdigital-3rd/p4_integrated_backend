@@ -17,6 +17,7 @@ from ultralytics import YOLO
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.monocular import annotate_result
+from app.services.sam3 import Sam3Model, load_sam3_model, reset_sam3, run_sam3
 
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
@@ -89,6 +90,14 @@ def load_yolo_model() -> YOLO:
     return model
 
 
+def load_segmentation_model() -> YOLO | Sam3Model:
+    """Load the configured segmentation backend."""
+
+    if settings.SEGMENTATION_BACKEND == "sam3":
+        return load_sam3_model()
+    return load_yolo_model()
+
+
 def reset_tracker(yolo_model: YOLO) -> None:
     """Drop tracker state so a new epoch cannot inherit old track identities."""
 
@@ -103,6 +112,13 @@ def reset_tracker(yolo_model: YOLO) -> None:
         # Without a reset method, drop the trackers so the next track() call
         # rebuilds them instead of carrying the old epoch's tracks forward.
         del predictor.trackers
+
+
+def reset_segmentation_state(model: YOLO | Sam3Model) -> None:
+    if isinstance(model, Sam3Model):
+        reset_sam3(model)
+    else:
+        reset_tracker(model)
 
 
 def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
@@ -185,6 +201,12 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         "items": detections,
         "inference_ms": round((perf_counter() - start) * 1000, 1),
     }
+
+
+def run_segmentation(inference_frame: InferenceFrame, model: YOLO | Sam3Model) -> dict:
+    if isinstance(model, Sam3Model):
+        return run_sam3(inference_frame, model)
+    return run_yolo(inference_frame, model)
 
 
 async def _feed_command_sender(writer: asyncio.StreamWriter, state: AppState) -> None:
@@ -388,7 +410,7 @@ async def frame_receiver(state: AppState) -> None:
 
 async def yolo_worker(state: AppState) -> None:
     """Infer every queued decoded frame; a failed frame never advances."""
-    run_inference = partial(run_yolo, yolo_model=state.yolo_model)
+    run_inference = partial(run_segmentation, model=state.yolo_model)
     retry_frame: InferenceFrame | None = None
     window_started = perf_counter()
     window_completed = 0
@@ -407,7 +429,7 @@ async def yolo_worker(state: AppState) -> None:
         if state.tracker_epoch != inference_frame.epoch:
             # An epoch boundary is a hard discontinuity in the source, so the
             # tracker's identities and motion models must not survive it.
-            await asyncio.to_thread(reset_tracker, state.yolo_model)
+            await asyncio.to_thread(reset_segmentation_state, state.yolo_model)
             state.tracker_epoch = inference_frame.epoch
         result = None
         last_error: Exception | None = None
@@ -461,7 +483,7 @@ async def yolo_worker(state: AppState) -> None:
         if window_completed >= 30:
             elapsed = max(perf_counter() - window_started, 1e-6)
             print(
-                "YOLO throughput: "
+                f"{settings.SEGMENTATION_BACKEND.upper()} throughput: "
                 f"{window_completed / elapsed:.1f} fps; "
                 f"last={result['inference_ms']:.1f} ms; "
                 f"pending={state.inference_queue.qsize()}",

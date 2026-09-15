@@ -15,12 +15,22 @@ router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 
 
+def _segmentation_model_filename() -> str:
+    configured = (
+        settings.SAM3_CHECKPOINT_PATH
+        if settings.SEGMENTATION_BACKEND == "sam3"
+        else settings.YOLO_MODEL
+    )
+    return Path(configured).name
+
+
 def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     result = item.result
     metadata = {
         "type": "frame",
         "session_id": state.session_id,
-        "model_filename": Path(settings.YOLO_MODEL).name,
+        "segmentation_backend": settings.SEGMENTATION_BACKEND,
+        "model_filename": _segmentation_model_filename(),
         "epoch": item.epoch,
         "seq": item.seq,
         "source": result.get("source", {}),

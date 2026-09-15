@@ -26,7 +26,12 @@ def _default_yolo_device() -> str:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    # --- YOLO / inference ---
+    # --- Segmentation / inference ---
+    # The sam3 branch defaults to SAM3. Set SEGMENTATION_BACKEND=yolo to use
+    # the existing Ultralytics path without changing the rest of the service.
+    SEGMENTATION_BACKEND: Literal["sam3", "yolo"] = "sam3"
+
+    # --- YOLO backend ---
     # Segmentation checkpoints use the -seg suffix. Custom trained
     # segmentation checkpoints can be supplied through YOLO_MODEL as usual.
     YOLO_MODEL: str = "yolo26s-seg.pt"
@@ -53,6 +58,17 @@ class Settings(BaseSettings):
     # Disable to fall back to stateless per-frame detection.
     YOLO_TRACKING: bool = True
     YOLO_TRACKER_CONFIG: str = str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml")
+
+    # --- SAM3 backend ---
+    # These defaults mirror the paths used by sam3_ex01.ipynb on the Linux
+    # GPU host. The SAM3 package itself is installed from its source checkout,
+    # not from the regular project dependency index.
+    SAM3_CHECKPOINT_PATH: str = "/workspace/models/sam3.pt"
+    SAM3_BPE_PATH: str = "/workspace/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz"
+    SAM3_PROMPT: str = "person"
+    SAM3_DEVICE: str | None = None
+    SAM3_SCORE_THRESHOLD: float = Field(default=0.5, ge=0.0, le=1.0)
+    SAM3_MAX_DETECTIONS: int = Field(default=100, ge=1, le=1000)
 
     # --- QR-synchronised monocular distance ---
     # Disabled unless a dataset and a per-session camera calibration are
@@ -91,6 +107,10 @@ class Settings(BaseSettings):
         "YOLO_MODEL",
         "YOLO_DEVICE",
         "YOLO_TRACKER_CONFIG",
+        "SAM3_CHECKPOINT_PATH",
+        "SAM3_BPE_PATH",
+        "SAM3_PROMPT",
+        "SAM3_DEVICE",
         "HOST",
         "FORWARDED_ALLOW_IPS",
         "TURN_URL",
@@ -107,6 +127,11 @@ class Settings(BaseSettings):
     @classmethod
     def _strip(cls, v: str) -> str:
         return v.strip() if isinstance(v, str) else v
+
+    @field_validator("SEGMENTATION_BACKEND", mode="before")
+    @classmethod
+    def _normalize_segmentation_backend(cls, v: str) -> str:
+        return v.strip().lower() if isinstance(v, str) else v
 
     @field_validator("BBOX_FORMAT", mode="before")
     @classmethod
