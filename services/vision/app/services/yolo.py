@@ -165,16 +165,12 @@ def _box_iou(left: list[float], right: list[float]) -> float:
     return intersection / union if union else 0.0
 
 
-def _clip_polygon_to_box(
-    polygon: object, box: list[float]
-) -> list[list[float]]:
+def _clip_polygon_to_box(polygon: object, box: list[float]) -> list[list[float]]:
     """Clip a normalized polygon to its normalized YOLO xyxy box."""
 
     raw_points = polygon.tolist() if hasattr(polygon, "tolist") else polygon
     points = [
-        [float(point[0]), float(point[1])]
-        for point in raw_points
-        if len(point) >= 2
+        [float(point[0]), float(point[1])] for point in raw_points if len(point) >= 2
     ]
     if len(points) < 3:
         return []
@@ -236,7 +232,7 @@ def _fastsam_polygons(
         device=settings.YOLO_DEVICE,
         imgsz=imgsz,
         quantize=quantize,
-        retina_masks=False,
+        retina_masks=True,
         conf=settings.FASTSAM_CONF,
         verbose=False,
     )
@@ -309,9 +305,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         if yolo_task == "segment":
             # Segmentation checkpoints already provide the desired masks;
             # do not run the separate FastSAM model for the same frame.
-            normalized_polygons = (
-                result.masks.xyn if result.masks is not None else []
-            )
+            normalized_polygons = result.masks.xyn if result.masks is not None else []
             fastsam_polygons = {}
             fastsam_index_by_box: dict[int, int] = {}
         else:
@@ -329,9 +323,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 detector_boxes.append(
                     list(map(float, box.xyxy[0].detach().cpu().tolist()))
                 )
-            fastsam_polygons = _fastsam_polygons(
-                img, detector_boxes, imgsz, quantize
-            )
+            fastsam_polygons = _fastsam_polygons(img, detector_boxes, imgsz, quantize)
             normalized_polygons = []
         for box_index, box in enumerate(result.boxes):
             conf = float(box.conf[0])
@@ -341,9 +333,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             class_name = _yolo_class_name(yolo_model, cls_id)
             if allowed_classes and class_name.casefold() not in allowed_classes:
                 continue
-            normalized_box = list(
-                map(float, box.xyxyn[0].detach().cpu().tolist())
-            )
+            normalized_box = list(map(float, box.xyxyn[0].detach().cpu().tolist()))
             if settings.BBOX_FORMAT == "xyxy_normalized":
                 bbox = normalized_box
             elif settings.BBOX_FORMAT == "xyxy_pixels":
