@@ -469,8 +469,20 @@ class WebRtcPublisher(
         }
         finished.await(2, TimeUnit.SECONDS)
         rtcExecutor.shutdown()
-        httpClient.dispatcher.executorService.shutdown()
-        httpClient.connectionPool.evictAll()
+
+        // OkHttp closes pooled TLS sockets synchronously from evictAll().
+        // dispose() is normally called by MainActivity on the UI thread, and
+        // doing that work here raises NetworkOnMainThreadException. Queue the
+        // eviction on OkHttp's own executor before shutting it down; executor
+        // shutdown still lets already-queued work finish.
+        val httpExecutor = httpClient.dispatcher.executorService
+        try {
+            httpExecutor.execute { httpClient.connectionPool.evictAll() }
+        } catch (_: RejectedExecutionException) {
+            // A request callback may have raced disposal and shut the executor
+            // down already. The process can safely reclaim the remaining pool.
+        }
+        httpExecutor.shutdown()
     }
 
     private fun postRtc(action: () -> Unit) {
