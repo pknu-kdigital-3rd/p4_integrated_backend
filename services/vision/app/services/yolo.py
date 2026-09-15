@@ -104,9 +104,9 @@ async def _write_record(
 def load_yolo_model() -> YOLO:
     print(f"YOLO inference device: {settings.YOLO_DEVICE}")
     model = YOLO(settings.YOLO_MODEL)
-    if model.task != "segment":
+    if model.task not in {"detect", "segment"}:
         raise ValueError(
-            f"YOLO_MODEL must be a segmentation checkpoint; {settings.YOLO_MODEL!r} "
+            f"YOLO_MODEL must be a detection or segmentation checkpoint; {settings.YOLO_MODEL!r} "
             f"is a {model.task!r} model"
         )
     model.to(settings.YOLO_DEVICE)
@@ -116,6 +116,8 @@ def load_yolo_model() -> YOLO:
         model.fuse()
     if settings.YOLO_DEVICE.startswith("cuda"):
         torch.backends.cudnn.benchmark = True
+    if model.task == "detect":
+        _load_fastsam_model()
     return model
 
 
@@ -135,8 +137,18 @@ def reset_tracker(yolo_model: YOLO) -> None:
         del predictor.trackers
 
 
-fastsam = FastSAM("FastSAM-s.pt")
-fastsam.to(settings.YOLO_DEVICE)
+fastsam: FastSAM | None = None
+
+
+def _load_fastsam_model() -> FastSAM:
+    global fastsam
+    if fastsam is None:
+        print(f"FastSAM mask device: {settings.YOLO_DEVICE}")
+        fastsam = FastSAM("FastSAM-s.pt")
+        fastsam.to(settings.YOLO_DEVICE)
+        if hasattr(fastsam, "fuse"):
+            fastsam.fuse()
+    return fastsam
 
 
 def _box_iou(left: list[float], right: list[float]) -> float:
@@ -162,7 +174,7 @@ def _fastsam_polygons(
         return {}
     # stream=False materializes the generator. The previous experimental code
     # assigned the stream generator to ``sam_result`` without consuming it.
-    sam_results = fastsam.predict(
+    sam_results = _load_fastsam_model().predict(
         source=image,
         stream=False,
         bboxes=boxes,
@@ -213,6 +225,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
     )
     tracking = settings.YOLO_TRACKING
+    yolo_task = getattr(yolo_model, "task", "segment")
     with torch.inference_mode():
         if tracking:
             results = yolo_model.track(
@@ -240,21 +253,33 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
     detections = []
     allowed_classes = _allowed_yolo_classes()
     for result in results:
-        detector_boxes = []
-        fastsam_index_by_box: dict[int, int] = {}
-        for box_index, box in enumerate(result.boxes):
-            conf = float(box.conf[0])
-            if not tracking and conf <= _yolo_detect_conf():
-                continue
-            cls_id = int(box.cls[0])
-            class_name = _yolo_class_name(yolo_model, cls_id)
-            if allowed_classes and class_name.casefold() not in allowed_classes:
-                continue
-            fastsam_index_by_box[box_index] = len(detector_boxes)
-            detector_boxes.append(
-                list(map(float, box.xyxy[0].detach().cpu().tolist()))
+        if yolo_task == "segment":
+            # Segmentation checkpoints already provide the desired masks;
+            # do not run the separate FastSAM model for the same frame.
+            normalized_polygons = (
+                result.masks.xyn if result.masks is not None else []
             )
-        fastsam_polygons = _fastsam_polygons(img, detector_boxes, imgsz, quantize)
+            fastsam_polygons = {}
+            fastsam_index_by_box: dict[int, int] = {}
+        else:
+            detector_boxes = []
+            fastsam_index_by_box = {}
+            for box_index, box in enumerate(result.boxes):
+                conf = float(box.conf[0])
+                if not tracking and conf <= _yolo_detect_conf():
+                    continue
+                cls_id = int(box.cls[0])
+                class_name = _yolo_class_name(yolo_model, cls_id)
+                if allowed_classes and class_name.casefold() not in allowed_classes:
+                    continue
+                fastsam_index_by_box[box_index] = len(detector_boxes)
+                detector_boxes.append(
+                    list(map(float, box.xyxy[0].detach().cpu().tolist()))
+                )
+            fastsam_polygons = _fastsam_polygons(
+                img, detector_boxes, imgsz, quantize
+            )
+            normalized_polygons = []
         for box_index, box in enumerate(result.boxes):
             conf = float(box.conf[0])
             if not tracking and conf <= _yolo_detect_conf():
@@ -280,7 +305,14 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             track_id = getattr(box, "id", None)
             if track_id is not None:
                 detection["track_id"] = int(track_id[0])
-            polygon = fastsam_polygons.get(fastsam_index_by_box[box_index])
+            if yolo_task == "segment":
+                polygon = (
+                    normalized_polygons[box_index]
+                    if box_index < len(normalized_polygons)
+                    else None
+                )
+            else:
+                polygon = fastsam_polygons.get(fastsam_index_by_box[box_index])
             if polygon is not None:
                 if len(polygon) >= 3:
                     detection["mask"] = [
