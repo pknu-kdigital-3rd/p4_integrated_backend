@@ -25,10 +25,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     # --- SAM3 inference ---
-    # These defaults mirror the paths used by sam3_ex01.ipynb on the Linux
-    # GPU host. The SAM3 package itself is installed from its source checkout,
+    # These defaults mirror the SAM3.1 multiplex files on the Linux GPU host.
+    # The SAM3 package itself is installed from its source checkout,
     # not from the regular project dependency index.
-    SAM3_CHECKPOINT_PATH: str = "/workspace/models/sam3.pt"
+    SAM3_CHECKPOINT_PATH: str = "/workspace/models/sam3.1_multiplex.pt"
     # The upstream SAM3 repository currently references this package asset but
     # does not include it in the checkout, so setup downloads the compatible
     # OpenAI CLIP vocabulary into the shared models directory.
@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     SAM3_DEVICE: str = _default_inference_device()
     SAM3_SCORE_THRESHOLD: float = Field(default=0.5, ge=0.0, le=1.0)
     SAM3_MAX_DETECTIONS: int = Field(default=100, ge=1, le=1000)
+    # SAM3.1 multiplex controls. FlashAttention 3 and torch.compile are
+    # disabled by default because they are not available on every Ampere host.
+    SAM3_MAX_NUM_OBJECTS: int = Field(default=16, ge=1, le=256)
+    SAM3_MULTIPLEX_COUNT: int = Field(default=16, ge=1, le=256)
+    SAM3_USE_FA3: bool = False
+    SAM3_USE_ROPE_REAL: bool = False
+    SAM3_COMPILE: bool = False
+    SAM3_WARM_UP: bool = False
+    SAM3_ASYNC_LOADING_FRAMES: bool = False
 
     # --- QR-synchronised monocular distance ---
     # Disabled unless a dataset and a per-session camera calibration are

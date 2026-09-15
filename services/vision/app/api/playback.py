@@ -24,7 +24,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     metadata = {
         "type": "frame",
         "session_id": state.session_id,
-        "segmentation_backend": "sam3",
+        "segmentation_backend": "sam3.1_multiplex",
         "model_filename": _segmentation_model_filename(),
         "epoch": item.epoch,
         "seq": item.seq,

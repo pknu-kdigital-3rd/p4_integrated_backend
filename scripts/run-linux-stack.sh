@@ -107,7 +107,7 @@ load_environment() {
   [[ "$HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "HEALTH_TIMEOUT_SECONDS must be a positive integer"
 
   export SAM3_SOURCE_DIR="${SAM3_SOURCE_DIR:-/workspace/sam3}"
-  export SAM3_CHECKPOINT_PATH="${SAM3_CHECKPOINT_PATH:-/workspace/models/sam3.pt}"
+  export SAM3_CHECKPOINT_PATH="${SAM3_CHECKPOINT_PATH:-/workspace/models/sam3.1_multiplex.pt}"
   export SAM3_BPE_PATH="${SAM3_BPE_PATH:-/workspace/models/bpe_simple_vocab_16e6.txt.gz}"
   export SAM3_BPE_URL="${SAM3_BPE_URL:-https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz}"
 }
