@@ -69,6 +69,10 @@ class WebRtcPublisher(
     private var qrChannel: DataChannel? = null
     private val pendingQrEvents = ArrayDeque<ByteArray>()
     private val bitrateCapApplied = AtomicBoolean(false)
+    // Reused by the CameraX analyzer thread to avoid allocating conversion
+    // buffers for every frame.
+    private var planeRowScratch = ByteArray(0)
+    private var planeRotationScratch = ByteArray(0)
 
     init {
         if (factoryInitialized.compareAndSet(false, true)) {
@@ -526,35 +530,85 @@ class WebRtcPublisher(
         rotationDegrees: Int,
     ) {
         val input = source.duplicate()
+        val outputWidth = if (rotationDegrees == 90 || rotationDegrees == 270) srcHeight else srcWidth
+        val outputHeight = if (rotationDegrees == 90 || rotationDegrees == 270) srcWidth else srcHeight
+        val sourceRowBytes = (srcWidth - 1) * pixelStride + 1
+        if (planeRowScratch.size < sourceRowBytes) planeRowScratch = ByteArray(sourceRowBytes)
+
+        fun readRow(row: Int) {
+            input.position(row * rowStride)
+            input.get(planeRowScratch, 0, sourceRowBytes)
+        }
+
+        // The common landscape/Y plane case is contiguous. Copy whole rows
+        // instead of performing one absolute ByteBuffer read per pixel.
+        if (rotationDegrees == 0 && pixelStride == 1) {
+            val output = target.duplicate()
+            for (row in 0 until srcHeight) {
+                readRow(row)
+                output.position(row * targetStride)
+                output.put(planeRowScratch, 0, srcWidth)
+            }
+            return
+        }
+
         when (rotationDegrees) {
             90 -> {
-                for (row in 0 until srcWidth) {
-                    for (col in 0 until srcHeight) {
-                        val value = input.get((srcHeight - 1 - col) * rowStride + row * pixelStride)
-                        target.put(row * targetStride + col, value)
+                val required = targetStride * outputHeight
+                if (planeRotationScratch.size < required) planeRotationScratch = ByteArray(required)
+                for (sourceRow in 0 until srcHeight) {
+                    readRow(sourceRow)
+                    for (sourceColumn in 0 until srcWidth) {
+                        val destinationRow = sourceColumn
+                        val destinationColumn = srcHeight - 1 - sourceRow
+                        planeRotationScratch[destinationRow * targetStride + destinationColumn] =
+                            planeRowScratch[sourceColumn * pixelStride]
                     }
+                }
+                val output = target.duplicate()
+                for (row in 0 until outputHeight) {
+                    output.position(row * targetStride)
+                    output.put(planeRotationScratch, row * targetStride, outputWidth)
                 }
             }
             180 -> {
-                for (row in 0 until srcHeight) {
-                    for (col in 0 until srcWidth) {
-                        val value = input.get((srcHeight - 1 - row) * rowStride + (srcWidth - 1 - col) * pixelStride)
-                        target.put(row * targetStride + col, value)
+                val output = target.duplicate()
+                for (sourceRow in 0 until srcHeight) {
+                    readRow(sourceRow)
+                    output.position((srcHeight - 1 - sourceRow) * targetStride)
+                    for (sourceColumn in srcWidth - 1 downTo 0) {
+                        output.put(planeRowScratch[sourceColumn * pixelStride])
                     }
                 }
             }
             270 -> {
-                for (row in 0 until srcWidth) {
-                    for (col in 0 until srcHeight) {
-                        val value = input.get(col * rowStride + (srcWidth - 1 - row) * pixelStride)
-                        target.put(row * targetStride + col, value)
+                val required = targetStride * outputHeight
+                if (planeRotationScratch.size < required) planeRotationScratch = ByteArray(required)
+                for (sourceRow in 0 until srcHeight) {
+                    readRow(sourceRow)
+                    for (sourceColumn in 0 until srcWidth) {
+                        val destinationRow = srcWidth - 1 - sourceColumn
+                        val destinationColumn = sourceRow
+                        planeRotationScratch[destinationRow * targetStride + destinationColumn] =
+                            planeRowScratch[sourceColumn * pixelStride]
                     }
+                }
+                val output = target.duplicate()
+                for (row in 0 until outputHeight) {
+                    output.position(row * targetStride)
+                    output.put(planeRotationScratch, row * targetStride, outputWidth)
                 }
             }
             else -> {
+                val output = target.duplicate()
                 for (row in 0 until srcHeight) {
-                    for (col in 0 until srcWidth) {
-                        target.put(row * targetStride + col, input.get(row * rowStride + col * pixelStride))
+                    readRow(row)
+                    output.position(row * targetStride)
+                    for (column in 0 until srcWidth) {
+                        // This branch is retained for defensive handling of
+                        // unexpected rotation values; CameraX supplies 0/90/
+                        // 180/270 in normal operation.
+                        output.put(planeRowScratch[column * pixelStride])
                     }
                 }
             }
