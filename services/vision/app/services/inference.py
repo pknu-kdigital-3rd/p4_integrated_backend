@@ -11,8 +11,6 @@ from functools import partial
 from time import perf_counter
 
 import av
-import torch
-from ultralytics import YOLO
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
@@ -72,141 +70,18 @@ async def _write_record(writer: asyncio.StreamWriter, kind: int, body: bytes = b
     await writer.drain()
 
 
-def load_yolo_model() -> YOLO:
-    print(f"YOLO inference device: {settings.YOLO_DEVICE}")
-    model = YOLO(settings.YOLO_MODEL)
-    if model.task != "segment":
-        raise ValueError(
-            f"YOLO_MODEL must be a segmentation checkpoint; {settings.YOLO_MODEL!r} "
-            f"is a {model.task!r} model"
-        )
-    model.to(settings.YOLO_DEVICE)
-    # Fuse Conv+BatchNorm where supported. This is a one-time optimization and
-    # avoids paying the unfused layer overhead on every frame.
-    if hasattr(model, "fuse"):
-        model.fuse()
-    if settings.YOLO_DEVICE.startswith("cuda"):
-        torch.backends.cudnn.benchmark = True
-    return model
+def load_inference_model() -> Sam3Model:
+    """Load the branch's sole inference backend."""
+
+    return load_sam3_model()
 
 
-def load_segmentation_model() -> YOLO | Sam3Model:
-    """Load the configured segmentation backend."""
-
-    if settings.SEGMENTATION_BACKEND == "sam3":
-        return load_sam3_model()
-    return load_yolo_model()
+def reset_inference_state(model: Sam3Model) -> None:
+    reset_sam3(model)
 
 
-def reset_tracker(yolo_model: YOLO) -> None:
-    """Drop tracker state so a new epoch cannot inherit old track identities."""
-
-    predictor = getattr(yolo_model, "predictor", None)
-    trackers = getattr(predictor, "trackers", None)
-    if not trackers:
-        return
-    try:
-        for tracker in trackers:
-            tracker.reset()
-    except AttributeError:
-        # Without a reset method, drop the trackers so the next track() call
-        # rebuilds them instead of carrying the old epoch's tracks forward.
-        del predictor.trackers
-
-
-def reset_segmentation_state(model: YOLO | Sam3Model) -> None:
-    if isinstance(model, Sam3Model):
-        reset_sam3(model)
-    else:
-        reset_tracker(model)
-
-
-def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
-    start = perf_counter()
-    img = inference_frame.frame.to_ndarray(format="bgr24")
-    frame_height, frame_width = img.shape[:2]
-    longest_side = max(frame_width, frame_height)
-    imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
-    quantize = (
-        16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
-    )
-    tracking = settings.YOLO_TRACKING
-    with torch.inference_mode():
-        if tracking:
-            results = yolo_model.track(
-                img,
-                device=settings.YOLO_DEVICE,
-                imgsz=imgsz,
-                quantize=quantize,
-                # Hand the weak detections to the tracker rather than dropping
-                # them here; its second association stage is what keeps an
-                # established track alive through a confidence dip.
-                conf=settings.CONF_THRESHOLD_LOW,
-                tracker=settings.YOLO_TRACKER_CONFIG,
-                persist=True,
-                verbose=False,
-            )
-        else:
-            results = yolo_model(
-                img,
-                device=settings.YOLO_DEVICE,
-                imgsz=imgsz,
-                quantize=quantize,
-                verbose=False,
-            )
-    detections = []
-    for result in results:
-        normalized_polygons = result.masks.xyn if result.masks is not None else []
-        for box_index, box in enumerate(result.boxes):
-            conf = float(box.conf[0])
-            if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
-                continue
-            cls_id = int(box.cls[0])
-            if settings.BBOX_FORMAT == "xyxy_normalized":
-                bbox = list(map(float, box.xyxyn[0].detach().cpu().tolist()))
-            elif settings.BBOX_FORMAT == "xyxy_pixels":
-                bbox = list(map(float, box.xyxy[0].detach().cpu().tolist()))
-            elif settings.BBOX_FORMAT == "xywh_normalized":
-                bbox = list(map(float, box.xywhn[0].detach().cpu().tolist()))
-            else:
-                bbox = list(map(float, box.xywh[0].detach().cpu().tolist()))
-            detection = {
-                "class": yolo_model.names[cls_id],
-                "confidence": round(conf, 2),
-                "bbox": bbox,
-                "bbox_format": settings.BBOX_FORMAT,
-            }
-            track_id = getattr(box, "id", None)
-            if track_id is not None:
-                detection["track_id"] = int(track_id[0])
-            if box_index < len(normalized_polygons):
-                polygon = normalized_polygons[box_index]
-                if len(polygon) >= 3:
-                    detection["mask"] = [
-                        [float(x), float(y)] for x, y in polygon.tolist()
-                    ]
-                    detection["mask_format"] = "polygon_normalized"
-            detections.append(detection)
-    return {
-        "source": {
-            "epoch": inference_frame.epoch,
-            "seq": inference_frame.seq,
-            "pts": inference_frame.pts,
-            "time_base": inference_frame.time_base,
-            "time": inference_frame.media_time,
-            "timestamp_us": inference_frame.timestamp_us,
-        },
-        "width": frame_width,
-        "height": frame_height,
-        "items": detections,
-        "inference_ms": round((perf_counter() - start) * 1000, 1),
-    }
-
-
-def run_segmentation(inference_frame: InferenceFrame, model: YOLO | Sam3Model) -> dict:
-    if isinstance(model, Sam3Model):
-        return run_sam3(inference_frame, model)
-    return run_yolo(inference_frame, model)
+def run_inference(inference_frame: InferenceFrame, model: Sam3Model) -> dict:
+    return run_sam3(inference_frame, model)
 
 
 async def _feed_command_sender(writer: asyncio.StreamWriter, state: AppState) -> None:
@@ -408,9 +283,9 @@ async def frame_receiver(state: AppState) -> None:
         await asyncio.sleep(0.5)
 
 
-async def yolo_worker(state: AppState) -> None:
+async def inference_worker(state: AppState) -> None:
     """Infer every queued decoded frame; a failed frame never advances."""
-    run_inference = partial(run_segmentation, model=state.yolo_model)
+    run_frame = partial(run_inference, model=state.inference_model)
     retry_frame: InferenceFrame | None = None
     window_started = perf_counter()
     window_completed = 0
@@ -426,16 +301,16 @@ async def yolo_worker(state: AppState) -> None:
                 while state.fault is not None and inference_frame.epoch == state.current_epoch:
                     await state.result_condition.wait()
             continue
-        if state.tracker_epoch != inference_frame.epoch:
+        if state.inference_epoch != inference_frame.epoch:
             # An epoch boundary is a hard discontinuity in the source, so the
-            # tracker's identities and motion models must not survive it.
-            await asyncio.to_thread(reset_segmentation_state, state.yolo_model)
-            state.tracker_epoch = inference_frame.epoch
+            # backend state must not survive it.
+            await asyncio.to_thread(reset_inference_state, state.inference_model)
+            state.inference_epoch = inference_frame.epoch
         result = None
         last_error: Exception | None = None
         for attempt in range(max(1, settings.INFERENCE_RETRY_COUNT)):
             try:
-                result = await asyncio.to_thread(run_inference, inference_frame)
+                result = await asyncio.to_thread(run_frame, inference_frame)
                 break
             except Exception as exc:  # retry the same frame, never skip it
                 last_error = exc
@@ -483,7 +358,7 @@ async def yolo_worker(state: AppState) -> None:
         if window_completed >= 30:
             elapsed = max(perf_counter() - window_started, 1e-6)
             print(
-                f"{settings.SEGMENTATION_BACKEND.upper()} throughput: "
+                f"SAM3 throughput: "
                 f"{window_completed / elapsed:.1f} fps; "
                 f"last={result['inference_ms']:.1f} ms; "
                 f"pending={state.inference_queue.qsize()}",

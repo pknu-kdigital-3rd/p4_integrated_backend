@@ -46,8 +46,8 @@ class PlaybackItem:
 class AppState:
     """Process-wide state for the single ordered inference/playback session."""
 
-    # Holds the selected segmentation backend (Ultralytics YOLO or SAM3).
-    yolo_model: Any | None = None
+    # Holds the SAM3 model used by the inference worker.
+    inference_model: Any | None = None
     android_live: bool = False
     current_epoch: int = 0
     session_id: str | None = None
@@ -67,10 +67,10 @@ class AppState:
     result_condition: asyncio.Condition = field(default_factory=asyncio.Condition)
     feed_commands: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     fault: str | None = None
-    # Epoch whose frames the object tracker currently holds state for. Only the
-    # inference worker touches it, which keeps the reset serialized with the
-    # inference calls that mutate the same tracker.
-    tracker_epoch: int | None = None
+    # Epoch whose frames the inference backend currently holds state for. Only
+    # the inference worker touches it, which keeps reset serialized with model
+    # calls that may mutate backend state.
+    inference_epoch: int | None = None
     monocular_timeline: Any | None = None
     monocular_resolver: Any | None = None
 

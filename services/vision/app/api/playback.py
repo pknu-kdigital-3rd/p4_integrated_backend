@@ -16,12 +16,7 @@ logger = logging.getLogger("uvicorn.error")
 
 
 def _segmentation_model_filename() -> str:
-    configured = (
-        settings.SAM3_CHECKPOINT_PATH
-        if settings.SEGMENTATION_BACKEND == "sam3"
-        else settings.YOLO_MODEL
-    )
-    return Path(configured).name
+    return Path(settings.SAM3_CHECKPOINT_PATH).name
 
 
 def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
@@ -29,7 +24,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     metadata = {
         "type": "frame",
         "session_id": state.session_id,
-        "segmentation_backend": settings.SEGMENTATION_BACKEND,
+        "segmentation_backend": "sam3",
         "model_filename": _segmentation_model_filename(),
         "epoch": item.epoch,
         "seq": item.seq,

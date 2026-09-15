@@ -46,7 +46,7 @@ def load_sam3_model() -> Sam3Model:
     if not bpe_path.is_file():
         raise FileNotFoundError(f"SAM3 BPE vocabulary not found: {bpe_path}")
 
-    device = settings.SAM3_DEVICE or settings.YOLO_DEVICE
+    device = settings.SAM3_DEVICE
     if device.startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError(f"SAM3 device {device!r} requested but CUDA is unavailable")
 

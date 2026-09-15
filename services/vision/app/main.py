@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import internal, pages, playback
 from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
-from app.services.yolo import frame_receiver, load_segmentation_model, yolo_worker
+from app.services.inference import frame_receiver, inference_worker, load_inference_model
 from app.services.monocular import MonocularTimeline, QRResolver
 from app.core.settings import settings
 
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
     # Explicit device selection rather than relying on per-call auto-detection,
     # so the chosen segmentation device is logged once at startup and stays
     # fixed for the life of the process.
-    state.yolo_model = load_segmentation_model()
+    state.inference_model = load_inference_model()
 
     # Reference the tasks for the lifetime of the app (held by this suspended
     # generator frame across the yield below) - asyncio only keeps a weak
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     # silently destroyed under GC pressure, which looked like an unrelated
     # TCP "broken pipe" on the Go relay's side minutes later.
     frame_receiver_task = asyncio.create_task(frame_receiver(state))
-    yolo_worker_task = asyncio.create_task(yolo_worker(state))
+    inference_worker_task = asyncio.create_task(inference_worker(state))
     # Backgrounded, not awaited here: it retries a few times over ~1.5s if
     # the relay isn't reachable yet, and startup shouldn't block on that.
     android_live_sync_task = asyncio.create_task(sync_android_live_from_relay(state))
@@ -65,10 +65,13 @@ async def lifespan(app: FastAPI):
     # exit cleanly. CancelledError isn't an Exception subclass (Python 3.8+),
     # so none of these tasks' own exception handling swallows this.
     frame_receiver_task.cancel()
-    yolo_worker_task.cancel()
+    inference_worker_task.cancel()
     android_live_sync_task.cancel()
     await asyncio.gather(
-        frame_receiver_task, yolo_worker_task, android_live_sync_task, return_exceptions=True
+        frame_receiver_task,
+        inference_worker_task,
+        android_live_sync_task,
+        return_exceptions=True,
     )
 
 
