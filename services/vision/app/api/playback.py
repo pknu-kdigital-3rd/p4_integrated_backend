@@ -20,6 +20,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     metadata = {
         "type": "frame",
         "session_id": state.session_id,
+        "segmentation_backend": "fastsam",
         "model_filename": Path(settings.YOLO_MODEL).name,
         "epoch": item.epoch,
         "seq": item.seq,

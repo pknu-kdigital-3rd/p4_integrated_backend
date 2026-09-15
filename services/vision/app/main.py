@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     )
 
 
-app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")
+app = FastAPI(lifespan=lifespan, title="Android to Web Relay FastSAM Stream")
 
 
 @app.get("/health/live")

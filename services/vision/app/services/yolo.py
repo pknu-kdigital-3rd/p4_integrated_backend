@@ -12,7 +12,7 @@ from time import perf_counter
 
 import av
 import torch
-from ultralytics import YOLO
+from ultralytics import FastSAM
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
@@ -71,12 +71,12 @@ async def _write_record(writer: asyncio.StreamWriter, kind: int, body: bytes = b
     await writer.drain()
 
 
-def load_yolo_model() -> YOLO:
-    print(f"YOLO inference device: {settings.YOLO_DEVICE}")
-    model = YOLO(settings.YOLO_MODEL)
+def load_yolo_model() -> FastSAM:
+    print(f"FastSAM inference device: {settings.YOLO_DEVICE}")
+    model = FastSAM(settings.YOLO_MODEL)
     if model.task != "segment":
         raise ValueError(
-            f"YOLO_MODEL must be a segmentation checkpoint; {settings.YOLO_MODEL!r} "
+            f"YOLO_MODEL must be a FastSAM segmentation checkpoint; {settings.YOLO_MODEL!r} "
             f"is a {model.task!r} model"
         )
     model.to(settings.YOLO_DEVICE)
@@ -89,7 +89,7 @@ def load_yolo_model() -> YOLO:
     return model
 
 
-def reset_tracker(yolo_model: YOLO) -> None:
+def reset_tracker(yolo_model: FastSAM) -> None:
     """Drop tracker state so a new epoch cannot inherit old track identities."""
 
     predictor = getattr(yolo_model, "predictor", None)
@@ -105,39 +105,35 @@ def reset_tracker(yolo_model: YOLO) -> None:
         del predictor.trackers
 
 
-def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
+def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
     start = perf_counter()
     img = inference_frame.frame.to_ndarray(format="bgr24")
     frame_height, frame_width = img.shape[:2]
     longest_side = max(frame_width, frame_height)
     imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
-    quantize = (
-        16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
-    )
+    half = settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda")
     tracking = settings.YOLO_TRACKING
+    common_kwargs = {
+        "device": settings.YOLO_DEVICE,
+        "imgsz": imgsz,
+        "half": half,
+        "retina_masks": True,
+        "conf": settings.CONF_THRESHOLD_LOW,
+        "iou": settings.FASTSAM_IOU,
+        "verbose": False,
+    }
+    if settings.FASTSAM_PROMPT:
+        common_kwargs["texts"] = settings.FASTSAM_PROMPT
     with torch.inference_mode():
         if tracking:
             results = yolo_model.track(
                 img,
-                device=settings.YOLO_DEVICE,
-                imgsz=imgsz,
-                quantize=quantize,
-                # Hand the weak detections to the tracker rather than dropping
-                # them here; its second association stage is what keeps an
-                # established track alive through a confidence dip.
-                conf=settings.CONF_THRESHOLD_LOW,
                 tracker=settings.YOLO_TRACKER_CONFIG,
                 persist=True,
-                verbose=False,
+                **common_kwargs,
             )
         else:
-            results = yolo_model(
-                img,
-                device=settings.YOLO_DEVICE,
-                imgsz=imgsz,
-                quantize=quantize,
-                verbose=False,
-            )
+            results = yolo_model(img, **common_kwargs)
     detections = []
     for result in results:
         normalized_polygons = result.masks.xyn if result.masks is not None else []
@@ -155,7 +151,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             else:
                 bbox = list(map(float, box.xywh[0].detach().cpu().tolist()))
             detection = {
-                "class": yolo_model.names[cls_id],
+                "class": settings.FASTSAM_PROMPT or yolo_model.names[cls_id],
                 "confidence": round(conf, 2),
                 "bbox": bbox,
                 "bbox_format": settings.BBOX_FORMAT,
@@ -461,7 +457,7 @@ async def yolo_worker(state: AppState) -> None:
         if window_completed >= 30:
             elapsed = max(perf_counter() - window_started, 1e-6)
             print(
-                "YOLO throughput: "
+                "FastSAM throughput: "
                 f"{window_completed / elapsed:.1f} fps; "
                 f"last={result['inference_ms']:.1f} ms; "
                 f"pending={state.inference_queue.qsize()}",

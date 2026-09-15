@@ -7,7 +7,7 @@ from typing import Any
 
 from av import VideoFrame
 from starlette.requests import HTTPConnection
-from ultralytics import YOLO
+from ultralytics import FastSAM
 
 
 @dataclass
@@ -47,7 +47,7 @@ class PlaybackItem:
 class AppState:
     """Process-wide state for the single ordered inference/playback session."""
 
-    yolo_model: YOLO | None = None
+    yolo_model: FastSAM | None = None
     android_live: bool = False
     current_epoch: int = 0
     session_id: str | None = None
