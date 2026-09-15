@@ -505,6 +505,9 @@
   document.getElementById('start').onclick = start;
   document.getElementById('stop').onclick = stop;
   document.getElementById('live').onclick = jumpLive;
+  // The operator dashboard opts into immediate playback when it opens this
+  // page in its live-view panel. Direct visits remain manual-start by default.
+  if (new URLSearchParams(location.search).get('autostart') === '1') start();
   if (!window.isSecureContext && location.protocol === 'http:') {
     const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (!isLocal) {

@@ -36,7 +36,9 @@ function stopLiveView(){
 }
 document.querySelector('#live-view').addEventListener('click',()=>{
   if(!bootstrap)return;
-  const liveViewUrl=browserReachableUrl(bootstrap.liveViewUrl);
+  const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
+  liveViewUrlObject.searchParams.set('autostart','1');
+  const liveViewUrl=liveViewUrlObject.href;
   const diagnostic=document.querySelector('#live-view-diagnostic');
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
