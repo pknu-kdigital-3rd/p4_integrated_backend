@@ -44,6 +44,24 @@ Useful lifecycle commands are:
 ./scripts/run-linux-stack.sh down
 ```
 
+Individual components can be started, stopped, restarted, or checked without
+touching the other services:
+
+```bash
+./scripts/run-linux-stack.sh start node
+./scripts/run-linux-stack.sh restart routing
+./scripts/run-linux-stack.sh restart relay
+./scripts/run-linux-stack.sh restart vision
+./scripts/run-linux-stack.sh restart nginx
+./scripts/run-linux-stack.sh stop node
+./scripts/run-linux-stack.sh status vision
+```
+
+The component names are `node`, `routing`, `relay`, `vision`, and `nginx`.
+Run `setup` once before starting the relay or Vision so dependencies and the
+relay binary are available. Restarting Nginx only validates and reloads its
+project-local configuration.
+
 Logs and PID files are kept under the ignored `.runtime/` directory. `stop`
 leaves PostgreSQL running; `down` stops it too. Nginx uses only the unprivileged
 HTTPS ports 39001 and 39002 and runs under the current user.

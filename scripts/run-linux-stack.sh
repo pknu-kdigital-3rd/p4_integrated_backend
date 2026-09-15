@@ -352,6 +352,54 @@ start_stack() {
   log "Live View: ${LIVE_VIEW_URL}"
 }
 
+prepare_runtime_dirs() {
+  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" \
+    "${NGINX_PREFIX}/logs/client_temp" \
+    "${NGINX_PREFIX}/logs/proxy_temp" \
+    "${NGINX_PREFIX}/logs/fastcgi_temp" \
+    "${NGINX_PREFIX}/logs/uwsgi_temp" \
+    "${NGINX_PREFIX}/logs/scgi_temp"
+}
+
+start_component() {
+  local component="$1"
+  prepare_runtime_dirs
+  case "$component" in
+    node)
+      load_node_runtime
+      start_service node "${PROJECT_ROOT}/node" \
+        env PORT="$NODE_PORT" "${PROJECT_ROOT}/node/node_modules/.bin/tsx" src/server.ts
+      wait_for_http "Node" "http://${HOST}:${NODE_PORT}/health/ready" \
+        || { show_service_log node; die "Node health check failed"; }
+      ;;
+    routing)
+      start_service routing "${PROJECT_ROOT}/services/routing-tracking" \
+        uv run uvicorn main:app --host "$HOST" --port "$ROUTING_PORT"
+      wait_for_http "Route/tracking" "http://${HOST}:${ROUTING_PORT}/health/ready" \
+        || { show_service_log routing; die "Route/tracking health check failed"; }
+      ;;
+    relay)
+      [[ -x "${BIN_DIR}/media-relay" ]] || die "Relay binary is missing. Run setup first."
+      start_service relay "${PROJECT_ROOT}/services/media-relay" "${BIN_DIR}/media-relay"
+      wait_for_http "Go relay" "http://${RELAY_LISTEN_ADDR}/healthz" \
+        || { show_service_log relay; die "Relay health check failed"; }
+      ;;
+    vision)
+      start_service vision "${PROJECT_ROOT}/services/vision" \
+        env PORT="$VISION_PORT" uv run python run.py --no-tls
+      wait_for_http "Vision" "http://${HOST}:${VISION_PORT}/health/live" \
+        || { show_service_log vision; die "Vision health check failed"; }
+      ;;
+    nginx)
+      start_nginx
+      local ca_cert="${TLS_DIR}/development-ca.crt"
+      wait_for_http "Public operator" "${PUBLIC_OPERATOR_URL%/}/health/live" "$ca_cert" \
+        || die "Public operator HTTPS health check failed"
+      ;;
+    *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
+  esac
+}
+
 stop_service() {
   local name="$1"
   local pid_file="${PID_DIR}/${name}.pid"
@@ -419,9 +467,41 @@ status_stack() {
   return "$failed"
 }
 
+status_component() {
+  local component="$1"
+  case "$component" in
+    node) status_line node "http://${HOST}:${NODE_PORT}/health/ready" ;;
+    routing) status_line routing "http://${HOST}:${ROUTING_PORT}/health/ready" ;;
+    relay) status_line relay "http://${RELAY_LISTEN_ADDR}/healthz" ;;
+    vision) status_line vision "http://${HOST}:${VISION_PORT}/health/live" ;;
+    nginx)
+      curl -fsS --max-time 3 --cacert "${TLS_DIR}/development-ca.crt" \
+        "${PUBLIC_OPERATOR_URL%/}/health/live" >/dev/null 2>&1 \
+        && printf '%-10s READY %s\n' nginx "$PUBLIC_OPERATOR_URL" \
+        || { printf '%-10s NOT_READY %s\n' nginx "$PUBLIC_OPERATOR_URL"; return 1; }
+      ;;
+    *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
+  esac
+}
+
+stop_component() {
+  local component="$1"
+  case "$component" in
+    node|routing|relay|vision) stop_service "$component" ;;
+    nginx) stop_nginx ;;
+    *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
+  esac
+}
+
 usage() {
   cat <<'USAGE'
-Usage: scripts/run-linux-stack.sh [all|setup|start|status|stop|down]
+Usage: scripts/run-linux-stack.sh [all|setup|start|restart|status|stop|down]
+
+Individual components:
+  scripts/run-linux-stack.sh start <node|routing|relay|vision|nginx>
+  scripts/run-linux-stack.sh stop <node|routing|relay|vision|nginx>
+  scripts/run-linux-stack.sh restart <node|routing|relay|vision|nginx>
+  scripts/run-linux-stack.sh status <node|routing|relay|vision|nginx>
 
   all     Run setup, start every service, and require all health checks (default)
   setup   Install/sync dependencies, prepare DB/keys/certs, and validate CUDA/Nginx
@@ -445,9 +525,21 @@ main() {
       start_stack
       ;;
     setup) setup_stack ;;
-    start) start_stack ;;
-    status) status_stack ;;
-    stop) stop_stack ;;
+    start)
+      if [[ -n "${2:-}" ]]; then start_component "${2//route-tracking/routing}"; else start_stack; fi
+      ;;
+    restart)
+      [[ -n "${2:-}" ]] || die "restart requires a component"
+      local restart_component="${2//route-tracking/routing}"
+      stop_component "$restart_component"
+      start_component "$restart_component"
+      ;;
+    status)
+      if [[ -n "${2:-}" ]]; then status_component "${2//route-tracking/routing}"; else status_stack; fi
+      ;;
+    stop)
+      if [[ -n "${2:-}" ]]; then stop_component "${2//route-tracking/routing}"; else stop_stack; fi
+      ;;
     down)
       stop_stack
       docker compose -f "${PROJECT_ROOT}/docker-compose.yml" stop db
