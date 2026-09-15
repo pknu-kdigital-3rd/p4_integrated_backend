@@ -189,6 +189,9 @@ def _append_frame(sam3_model: Sam3Model, image: Image.Image) -> None:
     state["per_frame_geometric_prompt"].append(None)
     state["per_frame_cur_step"].append(0)
     state["num_frames"] += 1
+    # The initial one-frame list is intentionally treated as an image by the
+    # upstream loader. Once a second frame exists, enable temporal tracking.
+    state["is_image_only"] = False
 
 
 def _start_session(sam3_model: Sam3Model, image: Image.Image) -> dict[str, Any]:
@@ -281,6 +284,12 @@ def run_sam3(inference_frame: InferenceFrame, sam3_model: Sam3Model) -> dict:
     image = Image.fromarray(image_array, mode="RGB")
 
     with torch.inference_mode():
+        if sam3_model.session_id is not None:
+            session = sam3_model.predictor._all_inference_states.get(
+                sam3_model.session_id
+            )
+            if session is not None:
+                sam3_model.predictor._extend_expiration_time(session)
         if sam3_model.inference_state is None:
             state = _start_session(sam3_model, image)
             _, outputs = sam3_model.predictor.model.add_prompt(
