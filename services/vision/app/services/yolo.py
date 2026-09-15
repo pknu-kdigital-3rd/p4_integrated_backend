@@ -234,6 +234,7 @@ def _fastsam_polygons(
         quantize=quantize,
         retina_masks=True,
         conf=settings.FASTSAM_CONF,
+        iou=0.6,
         verbose=False,
     )
     if not sam_results:
@@ -363,11 +364,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 polygon_points = (
                     _clip_polygon_to_box(polygon, normalized_box)
                     if settings.SEGMENTATION_CLIP_TO_YOLO_BOX
-                    else (
-                        polygon.tolist()
-                        if hasattr(polygon, "tolist")
-                        else polygon
-                    )
+                    else (polygon.tolist() if hasattr(polygon, "tolist") else polygon)
                 )
                 if len(polygon_points) >= 3:
                     detection["mask"] = [
