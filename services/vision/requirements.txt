@@ -1,4 +1,5 @@
 fastapi[standard]
+einops
 opencv-python-headless
 openai
 aiortc

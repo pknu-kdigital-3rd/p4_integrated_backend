@@ -5,6 +5,7 @@ description = "WebRTC relay server with configurable segmentation inference"
 requires-python = ">=3.12"
 dependencies = [
     "aiortc",
+    "einops",
     "fastapi[standard]",
     "openai",
     "opencv-python-headless",
