@@ -18,7 +18,7 @@ until every required check below passes.
 | Operator HTTPS ingress | `deploy/nginx/` | Nginx | `:39001` | HTTPS curl checks |
 | Vision/WSS/signaling HTTPS ingress | `deploy/nginx/` | Nginx | `:39002` | HTTPS curl checks |
 
-Terminology: Vision is the Python WebRTC/YOLO server. Route/tracking is the
+Terminology: Vision is the Python WebRTC/segmentation server. Route/tracking is the
 second Python service. There is no separate fourth Python server in this
 repository; the other backend process is the Node control API.
 
@@ -236,7 +236,7 @@ curl --fail http://127.0.0.1:39012/internal/status
 `/internal/status` may report `live:false` until the Android publisher connects;
 that is expected. A failed health check is not expected.
 
-## 6. Start Vision (Python WebRTC/YOLO service)
+## 6. Start Vision (Python WebRTC/segmentation service)
 
 Start the relay before Vision so the initial relay-status query succeeds. Use
 another shell:
@@ -246,14 +246,17 @@ cd "$P4_ROOT"
 set -a; source deploy/env.local; set +a
 cd services/vision
 uv sync
+uv pip install -e /workspace/sam3
 uv run python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0)); print(torch.cuda.get_arch_list())'
 uv run python run.py --no-tls
 ```
 
 `uv sync` installs the CUDA PyTorch wheels declared by this service. The
-runtime check must print the RTX 3090 and the process must log
-`YOLO inference device: cuda:0`. The first model load may download
-`yolo26s-seg.pt`; allow that download to finish.
+SAM3 checkout must contain `sam3/model_builder.py`, and the checkpoint/BPE
+paths in `deploy/env.local` must exist before startup. The runtime check must
+print the RTX 3090 and the process must log `SAM3 inference device: cuda:0`.
+To use the original backend instead, set `SEGMENTATION_BACKEND=yolo`; then the
+process logs `YOLO inference device: cuda:0` and uses `YOLO_MODEL`.
 
 Verify:
 
