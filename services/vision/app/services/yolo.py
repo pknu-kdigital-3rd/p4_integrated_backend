@@ -165,6 +165,59 @@ def _box_iou(left: list[float], right: list[float]) -> float:
     return intersection / union if union else 0.0
 
 
+def _clip_polygon_to_box(
+    polygon: object, box: list[float]
+) -> list[list[float]]:
+    """Clip a normalized polygon to its normalized YOLO xyxy box."""
+
+    raw_points = polygon.tolist() if hasattr(polygon, "tolist") else polygon
+    points = [
+        [float(point[0]), float(point[1])]
+        for point in raw_points
+        if len(point) >= 2
+    ]
+    if len(points) < 3:
+        return []
+
+    x_min, y_min, x_max, y_max = box
+    boundaries = (
+        (0, x_min, False),
+        (0, x_max, True),
+        (1, y_min, False),
+        (1, y_max, True),
+    )
+    for axis, bound, keep_less in boundaries:
+        if not points:
+            break
+
+        def inside(point: list[float]) -> bool:
+            return point[axis] <= bound if keep_less else point[axis] >= bound
+
+        def intersection(start: list[float], end: list[float]) -> list[float]:
+            delta = end[axis] - start[axis]
+            if abs(delta) < 1e-12:
+                return end.copy()
+            ratio = (bound - start[axis]) / delta
+            return [
+                start[0] + ratio * (end[0] - start[0]),
+                start[1] + ratio * (end[1] - start[1]),
+            ]
+
+        clipped: list[list[float]] = []
+        previous = points[-1]
+        previous_inside = inside(previous)
+        for current in points:
+            current_inside = inside(current)
+            if current_inside != previous_inside:
+                clipped.append(intersection(previous, current))
+            if current_inside:
+                clipped.append(current)
+            previous = current
+            previous_inside = current_inside
+        points = clipped
+    return points
+
+
 def _fastsam_polygons(
     image, boxes: list[list[float]], imgsz: int, quantize: int
 ) -> dict[int, object]:
@@ -288,8 +341,11 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             class_name = _yolo_class_name(yolo_model, cls_id)
             if allowed_classes and class_name.casefold() not in allowed_classes:
                 continue
+            normalized_box = list(
+                map(float, box.xyxyn[0].detach().cpu().tolist())
+            )
             if settings.BBOX_FORMAT == "xyxy_normalized":
-                bbox = list(map(float, box.xyxyn[0].detach().cpu().tolist()))
+                bbox = normalized_box
             elif settings.BBOX_FORMAT == "xyxy_pixels":
                 bbox = list(map(float, box.xyxy[0].detach().cpu().tolist()))
             elif settings.BBOX_FORMAT == "xywh_normalized":
@@ -314,9 +370,10 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             else:
                 polygon = fastsam_polygons.get(fastsam_index_by_box[box_index])
             if polygon is not None:
-                if len(polygon) >= 3:
+                clipped_polygon = _clip_polygon_to_box(polygon, normalized_box)
+                if len(clipped_polygon) >= 3:
                     detection["mask"] = [
-                        [float(x), float(y)] for x, y in polygon.tolist()
+                        [float(x), float(y)] for x, y in clipped_polygon
                     ]
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
