@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # FP16 is substantially faster on RTX-class CUDA GPUs. It is enabled by
     # default but is automatically ignored when YOLO_DEVICE is CPU.
     YOLO_HALF: bool = True
+    # Detector threshold is intentionally separate from FastSAM's mask
+    # confidence. Leave unset to preserve the legacy low tracker threshold.
+    YOLO_DETECT_CONF: float | None = Field(default=None, ge=0.0, le=1.0)
+    FASTSAM_CONF: float = Field(default=0.4, ge=0.0, le=1.0)
+    # Comma-separated class names sent to FastSAM. An empty value preserves
+    # the legacy behavior and allows every YOLO class.
+    YOLO_CLASS_ALLOWLIST: str = ""
     BBOX_FORMAT: Literal[
         "xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"
     ] = "xyxy_normalized"
@@ -90,6 +97,7 @@ class Settings(BaseSettings):
     @field_validator(
         "YOLO_MODEL",
         "YOLO_DEVICE",
+        "YOLO_CLASS_ALLOWLIST",
         "YOLO_TRACKER_CONFIG",
         "HOST",
         "FORWARDED_ALLOW_IPS",
