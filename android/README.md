@@ -28,6 +28,8 @@ user-installed CAs; release builds trust system CAs only. Cleartext HTTP is disa
 Use the **QR scanning** switch in the app to disable ML Kit QR analysis while
 measuring video throughput. When disabled, camera frames are released
 immediately after WebRTC publishing instead of waiting for QR processing.
+The camera panel also reports `capture=... fps`, which measures frames delivered
+by CameraX before WebRTC encoding or Vision inference.
 
 The phone and server must be reachable on the same network. This prototype
 uses host ICE candidates and does not configure a STUN/TURN server.

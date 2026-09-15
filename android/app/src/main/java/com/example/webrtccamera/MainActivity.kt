@@ -95,6 +95,10 @@ class MainActivity : AppCompatActivity() {
     private val streaming = AtomicBoolean(false)
     private var captureSummary = ""
     @Volatile
+    private var captureFps = 0f
+    private var captureWindowStartedNs = 0L
+    private var captureWindowFrames = 0
+    @Volatile
     private var qrScanningEnabled = true
     private var focusRangeDiopters: Float? = null
     private var focusFraction = 0f
@@ -208,6 +212,9 @@ class MainActivity : AppCompatActivity() {
 
         streaming.set(true)
         qrCaptureIndex.set(0)
+        captureFps = 0f
+        captureWindowStartedNs = 0L
+        captureWindowFrames = 0
         resolutionSpinner.isEnabled = false
         streamButton.setText(R.string.stop_streaming)
         setStatus("Starting WebRTC…")
@@ -388,7 +395,8 @@ class MainActivity : AppCompatActivity() {
             diopters <= 0f -> " · focus ∞"
             else -> " · focus %.2f m".format(1f / diopters)
         }
-        actualResolutionText.text = captureSummary + focusNote
+        val fpsNote = if (captureFps > 0f) " · capture %.1f fps".format(captureFps) else ""
+        actualResolutionText.text = captureSummary + focusNote + fpsNote
     }
 
     // QR decoding runs on the exact same frame this pushes as video, instead
@@ -406,6 +414,7 @@ class MainActivity : AppCompatActivity() {
             image.close()
             return
         }
+        recordCaptureFrame()
         val timestamp = image.imageInfo.timestamp.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos()
         // scanQrFrame takes over closing `image` once handed off, since ML
         // Kit reads it asynchronously. When QR scanning is disabled, close
@@ -430,6 +439,19 @@ class MainActivity : AppCompatActivity() {
         } finally {
             if (!handedOffToQrScan) image.close()
         }
+    }
+
+    /** Measures frames delivered to CameraX before WebRTC encoding or server processing. */
+    private fun recordCaptureFrame() {
+        val now = SystemClock.elapsedRealtimeNanos()
+        if (captureWindowStartedNs == 0L) captureWindowStartedNs = now
+        captureWindowFrames += 1
+        val elapsed = now - captureWindowStartedNs
+        if (elapsed < 1_000_000_000L) return
+        captureFps = captureWindowFrames * 1_000_000_000f / elapsed
+        captureWindowStartedNs = now
+        captureWindowFrames = 0
+        runOnUiThread { if (streaming.get()) updateCaptureLabel() }
     }
 
     @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
