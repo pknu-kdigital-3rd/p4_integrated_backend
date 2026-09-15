@@ -107,6 +107,71 @@ def reset_tracker(yolo_model: YOLO) -> None:
 
 
 fastsam = FastSAM("FastSAM-s.pt")
+fastsam.to(settings.YOLO_DEVICE)
+
+
+def _box_iou(left: list[float], right: list[float]) -> float:
+    """Return IoU for two pixel-space xyxy boxes."""
+
+    ix1 = max(left[0], right[0])
+    iy1 = max(left[1], right[1])
+    ix2 = min(left[2], right[2])
+    iy2 = min(left[3], right[3])
+    intersection = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    left_area = max(0.0, left[2] - left[0]) * max(0.0, left[3] - left[1])
+    right_area = max(0.0, right[2] - right[0]) * max(0.0, right[3] - right[1])
+    union = left_area + right_area - intersection
+    return intersection / union if union else 0.0
+
+
+def _fastsam_polygons(
+    image, boxes: list[list[float]], imgsz: int, quantize: int
+) -> dict[int, object]:
+    """Segment all detector boxes once and map masks back to detector boxes."""
+
+    if not boxes:
+        return {}
+    # stream=False materializes the generator. The previous experimental code
+    # assigned the stream generator to ``sam_result`` without consuming it.
+    sam_results = fastsam.predict(
+        source=image,
+        stream=False,
+        bboxes=boxes,
+        points=None,
+        labels=None,
+        device=settings.YOLO_DEVICE,
+        imgsz=imgsz,
+        quantize=quantize,
+        retina_masks=True,
+        conf=settings.CONF_THRESHOLD_LOW,
+        verbose=False,
+    )
+    if not sam_results:
+        return {}
+    sam_result = sam_results[0]
+    if sam_result.masks is None:
+        return {}
+    polygons = sam_result.masks.xyn
+    sam_boxes = [
+        list(map(float, sam_box.detach().cpu().tolist()))
+        for sam_box in sam_result.boxes.xyxy
+    ]
+    matches: dict[int, object] = {}
+    used_masks: set[int] = set()
+    for box_index, detector_box in enumerate(boxes):
+        candidates = [
+            (mask_index, _box_iou(detector_box, sam_box))
+            for mask_index, sam_box in enumerate(sam_boxes)
+            if mask_index not in used_masks
+        ]
+        if not candidates:
+            break
+        mask_index, overlap = max(candidates, key=lambda item: item[1])
+        if overlap <= 0.0 or mask_index >= len(polygons):
+            continue
+        matches[box_index] = polygons[mask_index]
+        used_masks.add(mask_index)
+    return matches
 
 
 def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
@@ -144,15 +209,11 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             )
     detections = []
     for result in results:
-        normalized_polygons = result.masks.xyn if result.masks is not None else []
-        sam_result = fastsam.predict(
-            source=img,
-            stream=True,
-            bboxes=result.boxes,
-            points=None,
-            labels=["car"],
-            texts=None,
-        )
+        detector_boxes = [
+            list(map(float, box.xyxy[0].detach().cpu().tolist()))
+            for box in result.boxes
+        ]
+        fastsam_polygons = _fastsam_polygons(img, detector_boxes, imgsz, quantize)
         for box_index, box in enumerate(result.boxes):
             conf = float(box.conf[0])
             if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
@@ -175,8 +236,8 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             track_id = getattr(box, "id", None)
             if track_id is not None:
                 detection["track_id"] = int(track_id[0])
-            if box_index < len(normalized_polygons):
-                polygon = normalized_polygons[box_index]
+            polygon = fastsam_polygons.get(box_index)
+            if polygon is not None:
                 if len(polygon) >= 3:
                     detection["mask"] = [
                         [float(x), float(y)] for x, y in polygon.tolist()
