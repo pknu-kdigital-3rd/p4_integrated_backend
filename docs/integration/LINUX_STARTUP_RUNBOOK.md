@@ -50,21 +50,32 @@ leaves PostgreSQL running; `down` stops it too. The script may prompt for
 
 ## 0. One-time host prerequisites
 
-Install and verify Docker Engine/Compose, `uv`, Node/npm, Go, OpenSSL, and
-`curl`. Python must be 3.10 or newer. Do not run the GPU test suite on a host
-that is not the original test environment; the CUDA check below is only a
-runtime prerequisite check.
+Install and verify Docker Engine/Compose, `uv`, Go, OpenSSL, and `curl`. Node
+may be installed directly or managed by `nvm`. The one-command script discovers
+the current user's `~/.nvm/nvm.sh` even when NVM was not loaded in the launching
+terminal, then selects or installs `NODE_VERSION`. Set `NVM_DIR` in
+`deploy/env.local` only when NVM uses a custom location. Python must be 3.10 or
+newer. Do not run the GPU test suite on a host that is not the original test
+environment; the CUDA check below is only a runtime prerequisite check.
 
 ```bash
 docker --version
 docker compose version
 uv --version
-node --version
-npm --version
 go version
 openssl version
 curl --version
 nvidia-smi
+```
+
+For a manual `nvm` check after creating `deploy/env.local`:
+
+```bash
+set -a; source deploy/env.local; set +a
+source "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+nvm use "$NODE_VERSION"
+node --version
+npm --version
 ```
 
 If any command is missing or `nvidia-smi` cannot see the RTX 3090, stop and fix
@@ -84,7 +95,8 @@ source deploy/env.local
 set +a
 ```
 
-Set `P4_ROOT` to the real checkout path. If the server address is not
+Set `P4_ROOT` to the real checkout path. Set `NVM_DIR` only if NVM is not under
+the current user's `~/.nvm`. If the server address is not
 `10.174.96.95`, change `PUBLIC_OPERATOR_URL`, `VISION_PUBLIC_BASE_URL`,
 `LIVE_VIEW_URL`, the `server_name` in `deploy/nginx/nginx.conf`, `TURN_URL`,
 and the certificate SAN together. For a local smoke test without BIMS, leave

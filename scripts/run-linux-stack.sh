@@ -24,6 +24,59 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
+load_node_runtime() {
+  if command -v node >/dev/null 2>&1 \
+    && command -v npm >/dev/null 2>&1 \
+    && command -v npx >/dev/null 2>&1; then
+    log "Using Node $(node --version) from PATH"
+    return 0
+  fi
+
+  NODE_VERSION="${NODE_VERSION:-lts/*}"
+  local account_home="${HOME:-}"
+  if [[ -z "$account_home" ]] && command -v getent >/dev/null 2>&1; then
+    account_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+  fi
+
+  local candidates=()
+  [[ -n "${NVM_DIR:-}" ]] && candidates+=("${NVM_DIR}/nvm.sh")
+  if [[ -n "$account_home" ]]; then
+    candidates+=("${account_home}/.nvm/nvm.sh")
+    candidates+=("${XDG_CONFIG_HOME:-${account_home}/.config}/nvm/nvm.sh")
+  fi
+  candidates+=("/usr/local/share/nvm/nvm.sh")
+
+  local nvm_script=""
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -s "$candidate" ]]; then
+      nvm_script="$candidate"
+      break
+    fi
+  done
+  [[ -n "$nvm_script" ]] \
+    || die "Node is not on PATH and nvm.sh was not found. Set NVM_DIR in $ENV_FILE."
+  NVM_DIR="$(cd -- "$(dirname -- "$nvm_script")" && pwd)"
+  export NVM_DIR NODE_VERSION
+
+  log "Loading nvm from $nvm_script"
+  set +u
+  # shellcheck disable=SC1090
+  source "$nvm_script"
+
+  if ! nvm use --silent "$NODE_VERSION" >/dev/null 2>&1; then
+    log "Installing Node $NODE_VERSION with nvm"
+    nvm install "$NODE_VERSION"
+    nvm use --silent "$NODE_VERSION" >/dev/null
+  fi
+  set -u
+
+  require_command node
+  require_command npm
+  require_command npx
+  log "Using Node $(node --version) from nvm"
+}
+
 load_environment() {
   [[ -f "$ENV_FILE" ]] || die "Missing $ENV_FILE. Copy deploy/env.local.example to deploy/env.local and edit it."
   set -a
@@ -55,8 +108,9 @@ load_environment() {
 }
 
 preflight() {
+  load_node_runtime
   local command_name
-  for command_name in docker uv node npm go openssl curl nginx sudo nvidia-smi; do
+  for command_name in docker uv go openssl curl nginx sudo nvidia-smi; do
     require_command "$command_name"
   done
   docker compose version >/dev/null
@@ -250,6 +304,7 @@ show_service_log() {
 }
 
 start_stack() {
+  load_node_runtime
   mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" "${NGINX_PREFIX}/logs"
   [[ -x "${BIN_DIR}/media-relay" ]] || die "Relay binary is missing. Run setup or all first."
 
