@@ -89,6 +89,10 @@ def load_yolo_model() -> FastSAM:
     return model
 
 
+def _cuda_timing_enabled() -> bool:
+    return settings.YOLO_DEVICE.startswith("cuda") and torch.cuda.is_available()
+
+
 def reset_tracker(yolo_model: FastSAM) -> None:
     """Drop tracker state so a new epoch cannot inherit old track identities."""
 
@@ -106,7 +110,7 @@ def reset_tracker(yolo_model: FastSAM) -> None:
 
 
 def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
-    start = perf_counter()
+    pipeline_start = perf_counter()
     img = inference_frame.frame.to_ndarray(format="bgr24")
     frame_height, frame_width = img.shape[:2]
     longest_side = max(frame_width, frame_height)
@@ -124,6 +128,16 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
     }
     if settings.FASTSAM_PROMPT:
         common_kwargs["texts"] = settings.FASTSAM_PROMPT
+
+    gpu_start_event = gpu_end_event = None
+    if _cuda_timing_enabled():
+        # CUDA kernels are asynchronous. Synchronizing before the event keeps
+        # work from a previous frame out of this frame's GPU measurement.
+        torch.cuda.synchronize()
+        gpu_start_event = torch.cuda.Event(enable_timing=True)
+        gpu_end_event = torch.cuda.Event(enable_timing=True)
+        gpu_start_event.record()
+    model_start = perf_counter()
     with torch.inference_mode():
         if tracking:
             results = yolo_model.track(
@@ -134,6 +148,13 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
             )
         else:
             results = yolo_model(img, **common_kwargs)
+    model_wall_ms = (perf_counter() - model_start) * 1000
+    gpu_ms = None
+    if gpu_end_event is not None and gpu_start_event is not None:
+        gpu_end_event.record()
+        gpu_end_event.synchronize()
+        gpu_ms = float(gpu_start_event.elapsed_time(gpu_end_event))
+
     detections = []
     for result in results:
         normalized_polygons = result.masks.xyn if result.masks is not None else []
@@ -179,7 +200,11 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: FastSAM) -> dict:
         "width": frame_width,
         "height": frame_height,
         "items": detections,
-        "inference_ms": round((perf_counter() - start) * 1000, 1),
+        # Keep inference_ms as the legacy end-to-end value. The additional
+        # fields separate the Ultralytics call and GPU work from CPU parsing.
+        "inference_ms": round((perf_counter() - pipeline_start) * 1000, 1),
+        "model_wall_ms": round(model_wall_ms, 1),
+        "gpu_ms": round(gpu_ms, 1) if gpu_ms is not None else None,
     }
 
 
@@ -460,6 +485,8 @@ async def yolo_worker(state: AppState) -> None:
                 "FastSAM throughput: "
                 f"{window_completed / elapsed:.1f} fps; "
                 f"last={result['inference_ms']:.1f} ms; "
+                f"model={result['model_wall_ms']:.1f} ms; "
+                f"gpu={result['gpu_ms'] if result['gpu_ms'] is not None else 'n/a'} ms; "
                 f"pending={state.inference_queue.qsize()}",
                 flush=True,
             )
