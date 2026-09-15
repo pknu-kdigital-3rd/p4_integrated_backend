@@ -25,14 +25,25 @@ function browserReachableUrl(configuredUrl){
   if(url.hostname==='127.0.0.1'||url.hostname==='localhost')url.hostname=window.location.hostname;
   return url.href;
 }
+function stopLiveView(){
+  const panel=document.querySelector('#live-view-panel');
+  const frame=document.querySelector('#live-view-frame');
+  // Navigating the iframe away from the Vision page closes its WebRTC peer
+  // connection and releases the browser media resources.
+  frame.src='about:blank';
+  panel.hidden=true;
+  document.querySelector('#live-view-diagnostic').textContent='';
+}
 document.querySelector('#live-view').addEventListener('click',()=>{
   if(!bootstrap)return;
   const liveViewUrl=browserReachableUrl(bootstrap.liveViewUrl);
   const diagnostic=document.querySelector('#live-view-diagnostic');
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
-  document.querySelector('#live-view-frame').src=liveViewUrl;
   document.querySelector('#live-view-panel').hidden=false;
+  // Set the URL only after opening the panel so navigation/playback starts as
+  // part of the user's click instead of while the iframe is hidden.
+  document.querySelector('#live-view-frame').src=liveViewUrl;
 });
 document.querySelector('#live-view-frame').addEventListener('load',event=>{
   if(document.querySelector('#live-view-panel').hidden)return;
@@ -43,11 +54,7 @@ document.querySelector('#live-view-frame').addEventListener('load',event=>{
     diagnostic.textContent+=' — iframe loaded; inspect its console if playback does not start';
   }
 });
-document.querySelector('#close-live-view').addEventListener('click',()=>{
-  document.querySelector('#live-view-panel').hidden=true;
-  document.querySelector('#live-view-frame').src='about:blank';
-  document.querySelector('#live-view-diagnostic').textContent='';
-});
+document.querySelector('#close-live-view').addEventListener('click',stopLiveView);
 async function boot(){
   try{demoMode=true;await start();return}catch{demoMode=false}
   if(token){
