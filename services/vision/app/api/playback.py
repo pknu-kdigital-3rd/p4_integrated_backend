@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -10,6 +11,7 @@ from app.core.settings import settings
 from app.core.state import AppState, PlaybackItem, get_app_state
 
 router = APIRouter()
+logger = logging.getLogger("uvicorn.error")
 
 
 def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
@@ -76,6 +78,7 @@ async def _receive_controls(
                     state.result_condition.notify_all()
                 await state.feed_commands.put({"type": "resync", "reason": message_type})
             elif message_type == "stop":
+                logger.info("playback stop received client=%s", websocket.client)
                 await state.feed_commands.put({"type": "stop"})
                 state.viewer_connected = False
                 async with state.result_condition:
@@ -86,6 +89,7 @@ async def _receive_controls(
                 # OPEN messages instead of treating them as an implicit resync.
                 continue
     except (WebSocketDisconnect, asyncio.IncompleteReadError, json.JSONDecodeError):
+        logger.info("playback control channel disconnected client=%s", websocket.client)
         state.viewer_connected = False
         async with state.result_condition:
             state.result_condition.notify_all()
@@ -94,6 +98,7 @@ async def _receive_controls(
 @router.websocket("/ws/playback")
 async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state)):
     await websocket.accept()
+    logger.info("playback websocket accepted client=%s", websocket.client)
     control_task: asyncio.Task | None = None
     try:
         first = json.loads(await websocket.receive_text())
@@ -246,9 +251,10 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
             sent_sizes[(item.epoch, item.seq)] = len(item.encoded)
             next_seq += 1
     except (WebSocketDisconnect, asyncio.IncompleteReadError):
-        pass
+        logger.info("playback websocket disconnected client=%s", websocket.client)
     finally:
         if control_task is not None:
             control_task.cancel()
             await asyncio.gather(control_task, return_exceptions=True)
         state.viewer_connected = False
+        logger.info("playback websocket closed client=%s", websocket.client)
