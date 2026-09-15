@@ -9,6 +9,7 @@ dependencies = [
     "fastapi[standard]",
     "openai",
     "opencv-python-headless",
+    "pycocotools",
     "pydantic-settings",
     # SAM3 currently imports the legacy pkg_resources module. setuptools 81+
     # removed it, so keep a compatible release in the Vision environment.

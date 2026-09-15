@@ -1,6 +1,7 @@
 fastapi[standard]
 einops
 opencv-python-headless
+pycocotools
 openai
 aiortc
 pydantic-settings
