@@ -283,7 +283,12 @@ def run_sam3(inference_frame: InferenceFrame, sam3_model: Sam3Model) -> dict:
     height, width = image_array.shape[:2]
     image = Image.fromarray(image_array, mode="RGB")
 
-    with torch.inference_mode():
+    # The upstream predictor normally owns a process-wide BF16 context. The
+    # service calls the underlying model methods directly so it can maintain a
+    # growing live session; keep the dtype contract explicit at this boundary.
+    with torch.inference_mode(), torch.autocast(
+        device_type="cuda", dtype=torch.bfloat16
+    ):
         if sam3_model.frame_count >= settings.SAM3_MAX_SESSION_FRAMES:
             reset_sam3(sam3_model)
         if sam3_model.session_id is not None:
