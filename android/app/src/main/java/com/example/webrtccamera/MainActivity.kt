@@ -24,6 +24,7 @@ import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -85,6 +86,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var resolutionSpinner: Spinner
     private lateinit var actualResolutionText: TextView
     private lateinit var qrStatusText: TextView
+    private lateinit var qrScanningSwitch: Switch
     private lateinit var cameraExecutor: ExecutorService
 
     private var cameraProvider: ProcessCameraProvider? = null
@@ -92,6 +94,8 @@ class MainActivity : AppCompatActivity() {
     private var publisher: WebRtcPublisher? = null
     private val streaming = AtomicBoolean(false)
     private var captureSummary = ""
+    @Volatile
+    private var qrScanningEnabled = true
     private var focusRangeDiopters: Float? = null
     private var focusFraction = 0f
     private val qrScanner = BarcodeScanning.getClient(
@@ -149,6 +153,11 @@ class MainActivity : AppCompatActivity() {
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         actualResolutionText = findViewById(R.id.actualResolutionText)
         qrStatusText = findViewById(R.id.qrStatusText)
+        qrScanningSwitch = findViewById(R.id.qrScanningSwitch)
+        qrScanningSwitch.setOnCheckedChangeListener { _, enabled ->
+            qrScanningEnabled = enabled
+            setQrStatus(if (enabled) "QR: waiting for scan…" else "QR: disabled")
+        }
         focusFraction = getPreferences(MODE_PRIVATE).getFloat(FOCUS_FRACTION_KEY, 0f)
         viewFinder.setOnTouchListener { view, event ->
             focusGestureDetector.onTouchEvent(event)
@@ -399,14 +408,25 @@ class MainActivity : AppCompatActivity() {
         }
         val timestamp = image.imageInfo.timestamp.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos()
         // scanQrFrame takes over closing `image` once handed off, since ML
-        // Kit reads it asynchronously; only close here if we never reach that
-        // handoff (push() itself is a synchronous copy-out and never retains
-        // `image` past this call).
+        // Kit reads it asynchronously. When QR scanning is disabled, close
+        // immediately after the synchronous WebRTC copy so CameraX can deliver
+        // frames without waiting for ML Kit.
         var handedOffToQrScan = false
         try {
             publisher?.push(image, timestamp)
             handedOffToQrScan = true
-            scanQrFrame(image, timestamp)
+            if (qrScanningEnabled) {
+                scanQrFrame(image, timestamp)
+            } else {
+                publisher?.sendQrEvent(
+                    timestamp,
+                    null,
+                    false,
+                    qrCaptureIndex.getAndIncrement(),
+                    0,
+                )
+                image.close()
+            }
         } finally {
             if (!handedOffToQrScan) image.close()
         }

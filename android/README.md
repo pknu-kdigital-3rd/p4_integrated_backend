@@ -25,5 +25,9 @@ The default URL is `https://10.174.96.95:39002`. Override it with the Gradle pro
 CA certificate on the development device before connecting. Debug builds trust
 user-installed CAs; release builds trust system CAs only. Cleartext HTTP is disabled.
 
+Use the **QR scanning** switch in the app to disable ML Kit QR analysis while
+measuring video throughput. When disabled, camera frames are released
+immediately after WebRTC publishing instead of waiting for QR processing.
+
 The phone and server must be reachable on the same network. This prototype
 uses host ICE candidates and does not configure a STUN/TURN server.

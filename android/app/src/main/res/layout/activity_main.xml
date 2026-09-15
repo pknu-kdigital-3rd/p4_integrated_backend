@@ -55,6 +55,14 @@
                 android:textColor="#B0FFFFFF"
                 android:textSize="12sp" />
 
+            <Switch
+                android:id="@+id/qrScanningSwitch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="QR scanning"
+                android:textColor="#FFFFFFFF" />
+
             <TextView
                 android:id="@+id/qrStatusText"
                 android:layout_width="match_parent"
