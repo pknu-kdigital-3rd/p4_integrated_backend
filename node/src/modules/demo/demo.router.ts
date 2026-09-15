@@ -1,5 +1,8 @@
 import { Router } from "express";
 import { env } from "../../config/env.ts";
+import { loginBodySchema } from "../auth/auth.schema.ts";
+import { authController } from "../auth/auth.controller.ts";
+import { validateBody } from "../../common/middleware/validate-body.ts";
 import { bootstrapService } from "../bootstrap/bootstrap.service.ts";
 import { trackingService } from "../tracking/tracking.service.ts";
 
@@ -17,6 +20,10 @@ demoRouter.use((_req, res, next) => {
 demoRouter.get("/bootstrap", (_req, res) => {
     res.json({ data: bootstrapService.getBootstrap() });
 });
+
+// Compatibility endpoint for older dashboard bundles. New bundles use the
+// regular auth endpoint when demo bootstrap is unavailable.
+demoRouter.post("/auth/login", validateBody(loginBodySchema), authController.login);
 
 demoRouter.get("/tracking/vehicles", async (_req, res) => {
     res.json({ data: await trackingService.getVehicles() });

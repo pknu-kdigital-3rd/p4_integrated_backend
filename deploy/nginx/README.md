@@ -21,6 +21,7 @@ The certificate must contain `IP:10.174.96.95` in its Subject Alternative Name a
 The external routes are:
 
 - `https://10.174.96.95:39001/operator/` — dashboard
+- `https://10.174.96.95:39001/osm/{z}/{x}/{y}.png` — same-origin OSM tile proxy
 - `https://10.174.96.95:39002/` — existing Live View page
 - `wss://10.174.96.95:39002/ws/playback` — playback WebSocket
 - `https://10.174.96.95:39002/offer/android` — Android SDP signaling
