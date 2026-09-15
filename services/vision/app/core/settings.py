@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     # --- YOLO / inference ---
-    # Segmentation checkpoints use the -seg suffix. Custom trained
-    # segmentation checkpoints can be supplied through YOLO_MODEL as usual.
+    # Detection checkpoints use FastSAM for masks; -seg checkpoints use their
+    # native masks and skip FastSAM.
     YOLO_MODEL: str = "yolo26s-seg.pt"
     YOLO_DEVICE: str = _default_yolo_device()
     # Ultralytics letterboxes every frame to a fixed imgsz regardless of source
