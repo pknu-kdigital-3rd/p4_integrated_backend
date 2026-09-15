@@ -247,6 +247,10 @@ set -a; source deploy/env.local; set +a
 cd services/vision
 uv sync
 uv pip install -e /workspace/sam3
+mkdir -p "$(dirname "$SAM3_BPE_PATH")"
+if [[ ! -f "$SAM3_BPE_PATH" ]]; then
+  curl --fail --location "$SAM3_BPE_URL" -o "$SAM3_BPE_PATH"
+fi
 uv run python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0)); print(torch.cuda.get_arch_list())'
 uv run python run.py --no-tls
 ```

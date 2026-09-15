@@ -255,6 +255,13 @@ setup_stack() {
       [[ -d "$SAM3_SOURCE_DIR" ]] \
         || die "SAM3 source checkout not found: $SAM3_SOURCE_DIR"
       uv pip install -e "$SAM3_SOURCE_DIR"
+      : "${SAM3_BPE_PATH:?SAM3_BPE_PATH is required when SEGMENTATION_BACKEND=sam3}"
+      SAM3_BPE_URL="${SAM3_BPE_URL:-https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz}"
+      if [[ ! -f "$SAM3_BPE_PATH" ]]; then
+        log "Downloading SAM3 BPE vocabulary"
+        mkdir -p "$(dirname -- "$SAM3_BPE_PATH")"
+        curl --fail --location --retry 3 "$SAM3_BPE_URL" -o "$SAM3_BPE_PATH"
+      fi
     fi
     uv run python -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; name=torch.cuda.get_device_name(0); assert "3090" in name, name; print(name); print(torch.cuda.get_arch_list())'
   )

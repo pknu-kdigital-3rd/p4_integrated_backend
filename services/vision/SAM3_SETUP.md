@@ -22,7 +22,8 @@ them in the environment:
 export SEGMENTATION_BACKEND=sam3
 export SAM3_SOURCE_DIR=/workspace/sam3
 export SAM3_CHECKPOINT_PATH=/workspace/models/sam3.pt
-export SAM3_BPE_PATH=/workspace/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz
+export SAM3_BPE_PATH=/workspace/models/bpe_simple_vocab_16e6.txt.gz
+export SAM3_BPE_URL=https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz
 export SAM3_PROMPT=person
 export SAM3_DEVICE=cuda:0
 export SAM3_SCORE_THRESHOLD=0.5
@@ -31,6 +32,10 @@ export SAM3_SCORE_THRESHOLD=0.5
 The service loads SAM3 during startup and fails fast with the missing package,
 checkpoint, or vocabulary path if setup is incomplete. The browser displays
 the checkpoint filename in the live-view page.
+
+The BPE vocabulary is not currently included in the SAM3 Git checkout. The
+one-command Linux setup downloads the compatible OpenAI CLIP vocabulary from
+`SAM3_BPE_URL` into `SAM3_BPE_PATH` before starting Vision.
 
 SAM3 is prompt-based rather than class-trained like YOLO. Each returned item
 uses `SAM3_PROMPT` as its class label and has a normalized bounding box plus a

@@ -64,7 +64,10 @@ class Settings(BaseSettings):
     # GPU host. The SAM3 package itself is installed from its source checkout,
     # not from the regular project dependency index.
     SAM3_CHECKPOINT_PATH: str = "/workspace/models/sam3.pt"
-    SAM3_BPE_PATH: str = "/workspace/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz"
+    # The upstream SAM3 repository currently references this package asset but
+    # does not include it in the checkout, so setup downloads the compatible
+    # OpenAI CLIP vocabulary into the shared models directory.
+    SAM3_BPE_PATH: str = "/workspace/models/bpe_simple_vocab_16e6.txt.gz"
     SAM3_PROMPT: str = "person"
     SAM3_DEVICE: str | None = None
     SAM3_SCORE_THRESHOLD: float = Field(default=0.5, ge=0.0, le=1.0)
