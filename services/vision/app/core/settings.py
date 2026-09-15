@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     # Comma-separated class names sent to FastSAM. An empty value preserves
     # the legacy behavior and allows every YOLO class.
     YOLO_CLASS_ALLOWLIST: str = ""
+    # Keep masks inside their corresponding YOLO boxes. Disable only when the
+    # native/FastSAM mask is known to be correctly bounded already.
+    SEGMENTATION_CLIP_TO_YOLO_BOX: bool = True
     BBOX_FORMAT: Literal[
         "xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"
     ] = "xyxy_normalized"

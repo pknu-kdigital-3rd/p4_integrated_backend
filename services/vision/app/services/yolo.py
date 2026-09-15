@@ -360,10 +360,18 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             else:
                 polygon = fastsam_polygons.get(fastsam_index_by_box[box_index])
             if polygon is not None:
-                clipped_polygon = _clip_polygon_to_box(polygon, normalized_box)
-                if len(clipped_polygon) >= 3:
+                polygon_points = (
+                    _clip_polygon_to_box(polygon, normalized_box)
+                    if settings.SEGMENTATION_CLIP_TO_YOLO_BOX
+                    else (
+                        polygon.tolist()
+                        if hasattr(polygon, "tolist")
+                        else polygon
+                    )
+                )
+                if len(polygon_points) >= 3:
                     detection["mask"] = [
-                        [float(x), float(y)] for x, y in clipped_polygon
+                        [float(x), float(y)] for x, y in polygon_points
                     ]
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
