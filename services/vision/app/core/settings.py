@@ -32,9 +32,8 @@ class Settings(BaseSettings):
     YOLO_MODEL: str = "yolo26s-seg.pt"
     YOLO_DEVICE: str = _default_yolo_device()
     # Optional comma-separated devices for parallel segmentation, for example
-    # ``cuda:0,cuda:1``.  When more than one device is configured, the worker
-    # runs segmentation concurrently on one model copy per device and feeds
-    # the results through one ordered ByteTrack instance.
+    # ``cuda:0,cuda:1``.  ``auto`` selects every CUDA device visible to PyTorch.
+    # This branch keeps inference stateless and publishes results in sequence.
     YOLO_PARALLEL_DEVICES: str = ""
     # Ultralytics letterboxes every frame to a fixed imgsz regardless of source
     # resolution, then rescales boxes back to the original frame - so raising
@@ -47,16 +46,11 @@ class Settings(BaseSettings):
     BBOX_FORMAT: Literal[
         "xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"
     ] = "xyxy_normalized"
-    # Lower bound on what reaches the tracker. ByteTrack's second association
-    # stage can recover an already-established track from a detection this
-    # weak, which is what stops a box blinking out when confidence dips; a new
-    # track still has to clear the higher new_track_thresh in the tracker
-    # config, so weak noise cannot start one.
+    # Detection cutoff. Tracking is disabled on this branch, so detections at
+    # or below this confidence are omitted from the response.
     CONF_THRESHOLD_LOW: float = Field(default=0.1, ge=0.0, le=1.0)
-    # Ordered no-drop delivery is what makes a motion-model tracker usable
-    # here: frame N+1 always follows N, so association never sees a gap.
-    # Disable to fall back to stateless per-frame detection.
-    YOLO_TRACKING: bool = True
+    # This branch intentionally runs stateless per-frame segmentation.
+    YOLO_TRACKING: bool = False
     YOLO_TRACKER_CONFIG: str = str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml")
 
     # --- QR-synchronised monocular distance ---

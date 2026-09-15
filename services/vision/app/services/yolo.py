@@ -7,7 +7,6 @@ import uuid
 from collections import deque
 from contextlib import asynccontextmanager, suppress
 from fractions import Fraction
-from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from time import perf_counter
@@ -78,6 +77,9 @@ async def _write_record(
 def _parallel_devices() -> list[str]:
     """Return the configured device list, with the normal device as fallback."""
 
+    if settings.YOLO_PARALLEL_DEVICES.strip().lower() == "auto":
+        count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        return [f"cuda:{index}" for index in range(count)] or [settings.YOLO_DEVICE]
     configured = [
         value.strip()
         for value in settings.YOLO_PARALLEL_DEVICES.split(",")
@@ -114,10 +116,10 @@ def load_yolo_models() -> list[YOLO]:
     """
 
     devices = _parallel_devices()
-    if len(devices) > 1 and settings.YOLO_TRACKING:
+    if len(devices) > 1:
         print(
-            "YOLO parallel segmentation enabled; ByteTrack will run centrally "
-            f"after inference on {len(devices)} devices",
+            "YOLO parallel segmentation enabled without object tracking "
+            f"on {len(devices)} devices",
             flush=True,
         )
     return [load_yolo_model(device) for device in devices]
@@ -318,19 +320,19 @@ async def _infer_with_retry(
 
 
 async def _parallel_yolo_worker(state: AppState) -> None:
-    """Run segmentation concurrently, then track/publish strictly in order.
+    """Run segmentation concurrently and publish strictly in source order.
 
-    Each model is confined to one asyncio task/thread.  Results may finish out
-    of order, but the ``sequence_order`` deque prevents ByteTrack and playback
-    from observing that reordering.
+    Each model is confined to one asyncio task/thread. Results may finish out
+    of order, but the ``sequence_order`` deque prevents playback from observing
+    that reordering.
     """
 
     models = state.yolo_models or ([state.yolo_model] if state.yolo_model else [])
     devices = _parallel_devices()
     if len(models) < 2:
         raise RuntimeError("parallel worker requires at least two YOLO models")
-    tracker = state.central_tracker
-    model_names = models[0].names
+    tracker = None
+    model_names = None
     sequence_order: deque[tuple[int, int]] = deque()
     pending: dict[asyncio.Task, InferenceFrame] = {}
     ready: dict[tuple[int, int], tuple[InferenceFrame, dict]] = {}
@@ -752,7 +754,6 @@ async def yolo_worker(state: AppState) -> None:
     if len(state.yolo_models) > 1:
         await _parallel_yolo_worker(state)
         return
-    run_inference = partial(run_yolo, yolo_model=state.yolo_model)
     retry_frame: InferenceFrame | None = None
     window_started = perf_counter()
     window_completed = 0
@@ -771,7 +772,7 @@ async def yolo_worker(state: AppState) -> None:
                 ):
                     await state.result_condition.wait()
             continue
-        if state.tracker_epoch != inference_frame.epoch:
+        if settings.YOLO_TRACKING and state.tracker_epoch != inference_frame.epoch:
             # An epoch boundary is a hard discontinuity in the source, so the
             # tracker's identities and motion models must not survive it.
             await asyncio.to_thread(reset_tracker, state.yolo_model)
@@ -780,7 +781,13 @@ async def yolo_worker(state: AppState) -> None:
         last_error: Exception | None = None
         for attempt in range(max(1, settings.INFERENCE_RETRY_COUNT)):
             try:
-                result = await asyncio.to_thread(run_inference, inference_frame)
+                result = await asyncio.to_thread(
+                    run_yolo,
+                    inference_frame,
+                    state.yolo_model,
+                    settings.YOLO_DEVICE,
+                    False,
+                )
                 break
             except Exception as exc:  # retry the same frame, never skip it
                 last_error = exc

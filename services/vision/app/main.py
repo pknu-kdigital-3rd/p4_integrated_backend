@@ -8,12 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import internal, pages, playback
 from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
-from app.services.yolo import (
-    frame_receiver,
-    load_central_tracker,
-    load_yolo_models,
-    yolo_worker,
-)
+from app.services.yolo import frame_receiver, load_yolo_models, yolo_worker
 from app.services.monocular import MonocularTimeline, QRResolver
 from app.core.settings import settings
 
@@ -49,8 +44,6 @@ async def lifespan(app: FastAPI):
     # and stays fixed for the life of the process.
     state.yolo_models = load_yolo_models()
     state.yolo_model = state.yolo_models[0]
-    if len(state.yolo_models) > 1 and settings.YOLO_TRACKING:
-        state.central_tracker = load_central_tracker()
 
     # Reference the tasks for the lifetime of the app (held by this suspended
     # generator frame across the yield below) - asyncio only keeps a weak
