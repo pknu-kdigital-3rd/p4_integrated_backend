@@ -12,12 +12,11 @@ from time import perf_counter
 
 import av
 import torch
-from ultralytics import YOLO
+from ultralytics import YOLO, FastSAM
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.monocular import annotate_result
-
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
 # one-byte record kind and the kind-specific body.
@@ -66,7 +65,9 @@ async def _read_record(reader: asyncio.StreamReader) -> tuple[int, bytes]:
     return payload[0], payload[1:]
 
 
-async def _write_record(writer: asyncio.StreamWriter, kind: int, body: bytes = b"") -> None:
+async def _write_record(
+    writer: asyncio.StreamWriter, kind: int, body: bytes = b""
+) -> None:
     writer.write(_record(kind, body))
     await writer.drain()
 
@@ -105,6 +106,9 @@ def reset_tracker(yolo_model: YOLO) -> None:
         del predictor.trackers
 
 
+fastsam = FastSAM("FastSAM-s.pt")
+
+
 def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
     start = perf_counter()
     img = inference_frame.frame.to_ndarray(format="bgr24")
@@ -141,6 +145,14 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
     detections = []
     for result in results:
         normalized_polygons = result.masks.xyn if result.masks is not None else []
+        sam_result = fastsam.predict(
+            source=img,
+            stream=True,
+            bboxes=result.boxes,
+            points=None,
+            labels=["car"],
+            texts=None,
+        )
         for box_index, box in enumerate(result.boxes):
             conf = float(box.conf[0])
             if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
@@ -293,14 +305,20 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             packet.time_base = RTP_VIDEO_TIME_BASE
             pending.append(metadata)
             if metadata.get("pts_90k") is not None:
-                pending_by_pts.setdefault(int(metadata["pts_90k"]), deque()).append(metadata)
+                pending_by_pts.setdefault(int(metadata["pts_90k"]), deque()).append(
+                    metadata
+                )
             try:
                 decoded = decoder.decode(packet)
             except av.error.InvalidDataError as exc:
                 pending.clear()
                 pending_by_pts.clear()
-                await state.feed_commands.put({"type": "resync", "reason": "decode_error"})
-                raise RuntimeError("H.264 decode failed; requested a new epoch") from exc
+                await state.feed_commands.put(
+                    {"type": "resync", "reason": "decode_error"}
+                )
+                raise RuntimeError(
+                    "H.264 decode failed; requested a new epoch"
+                ) from exc
             for frame in decoded:
                 source = None
                 if frame.pts is not None and pending_by_pts.get(int(frame.pts)):
@@ -317,7 +335,9 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             for frame in decoder.decode():
                 if pending:
                     source = pending.popleft()
-                    if source.get("pts_90k") is not None and pending_by_pts.get(int(source["pts_90k"])):
+                    if source.get("pts_90k") is not None and pending_by_pts.get(
+                        int(source["pts_90k"])
+                    ):
                         pending_by_pts[int(source["pts_90k"])].popleft()
                     await _queue_decoded_frame(state, source, frame)
             async with state.result_condition:
@@ -330,7 +350,9 @@ async def _relay_connection(state: AppState):
     logged = False
     while True:
         try:
-            reader, writer = await asyncio.open_unix_connection(settings.YOLO_FEED_SOCKET)
+            reader, writer = await asyncio.open_unix_connection(
+                settings.YOLO_FEED_SOCKET
+            )
             break
         except OSError as exc:
             if not logged:
@@ -378,7 +400,9 @@ async def frame_receiver(state: AppState) -> None:
         except asyncio.CancelledError:
             raise
         except (asyncio.IncompleteReadError, ConnectionError, OSError):
-            print("frame_receiver: relay feed disconnected; preserving session for resume")
+            print(
+                "frame_receiver: relay feed disconnected; preserving session for resume"
+            )
         except Exception:
             import traceback
 
@@ -401,7 +425,10 @@ async def yolo_worker(state: AppState) -> None:
             # Do not silently process later sequences after a failed frame.
             retry_frame = inference_frame
             async with state.result_condition:
-                while state.fault is not None and inference_frame.epoch == state.current_epoch:
+                while (
+                    state.fault is not None
+                    and inference_frame.epoch == state.current_epoch
+                ):
                     await state.result_condition.wait()
             continue
         if state.tracker_epoch != inference_frame.epoch:
