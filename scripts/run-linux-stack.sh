@@ -211,7 +211,12 @@ wait_for_database() {
 
 setup_stack() {
   preflight
-  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" "${NGINX_PREFIX}/logs"
+  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" \
+    "${NGINX_PREFIX}/logs/client_temp" \
+    "${NGINX_PREFIX}/logs/proxy_temp" \
+    "${NGINX_PREFIX}/logs/fastcgi_temp" \
+    "${NGINX_PREFIX}/logs/uwsgi_temp" \
+    "${NGINX_PREFIX}/logs/scgi_temp"
   generate_jwt_keys
   generate_tls_certificate
 
@@ -308,7 +313,12 @@ show_service_log() {
 
 start_stack() {
   load_node_runtime
-  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" "${NGINX_PREFIX}/logs"
+  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" \
+    "${NGINX_PREFIX}/logs/client_temp" \
+    "${NGINX_PREFIX}/logs/proxy_temp" \
+    "${NGINX_PREFIX}/logs/fastcgi_temp" \
+    "${NGINX_PREFIX}/logs/uwsgi_temp" \
+    "${NGINX_PREFIX}/logs/scgi_temp"
   [[ -x "${BIN_DIR}/media-relay" ]] || die "Relay binary is missing. Run setup or all first."
 
   start_service node "${PROJECT_ROOT}/node" \
