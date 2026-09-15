@@ -48,6 +48,10 @@ class AppState:
     """Process-wide state for the single ordered inference/playback session."""
 
     yolo_model: YOLO | None = None
+    # The first model remains exposed for compatibility with existing code;
+    # parallel mode keeps additional model copies here.
+    yolo_models: list[YOLO] = field(default_factory=list)
+    central_tracker: Any | None = None
     android_live: bool = False
     current_epoch: int = 0
     session_id: str | None = None

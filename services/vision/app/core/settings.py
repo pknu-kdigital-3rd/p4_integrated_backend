@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # segmentation checkpoints can be supplied through YOLO_MODEL as usual.
     YOLO_MODEL: str = "yolo26s-seg.pt"
     YOLO_DEVICE: str = _default_yolo_device()
+    # Optional comma-separated devices for parallel segmentation, for example
+    # ``cuda:0,cuda:1``.  When more than one device is configured, the worker
+    # runs segmentation concurrently on one model copy per device and feeds
+    # the results through one ordered ByteTrack instance.
+    YOLO_PARALLEL_DEVICES: str = ""
     # Ultralytics letterboxes every frame to a fixed imgsz regardless of source
     # resolution, then rescales boxes back to the original frame - so raising
     # imgsz only changes inference cost/accuracy, never output coordinate space.
@@ -90,6 +95,7 @@ class Settings(BaseSettings):
     @field_validator(
         "YOLO_MODEL",
         "YOLO_DEVICE",
+        "YOLO_PARALLEL_DEVICES",
         "YOLO_TRACKER_CONFIG",
         "HOST",
         "FORWARDED_ALLOW_IPS",

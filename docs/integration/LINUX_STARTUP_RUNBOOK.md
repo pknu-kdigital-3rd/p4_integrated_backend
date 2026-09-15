@@ -255,6 +255,21 @@ runtime check must print the RTX 3090 and the process must log
 `YOLO inference device: cuda:0`. The first model load may download
 `yolo26s-seg.pt`; allow that download to finish.
 
+For a host with multiple CUDA devices, segmentation can run concurrently while
+tracking remains ordered. Set this in `deploy/env.local` before starting
+Vision:
+
+```bash
+export YOLO_PARALLEL_DEVICES="cuda:0,cuda:1"
+```
+
+Vision loads one model copy per listed device. Completed segmentation results
+are reordered by source sequence and passed through one ByteTrack instance, so
+`track_id` continuity is preserved. Leave the value empty for the normal
+single-GPU path. This mode uses additional VRAM for each model copy and only
+helps when both devices are available and the segmentation workload is the
+bottleneck.
+
 Verify:
 
 ```bash

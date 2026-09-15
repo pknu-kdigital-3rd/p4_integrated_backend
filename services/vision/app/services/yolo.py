@@ -8,9 +8,12 @@ from collections import deque
 from contextlib import asynccontextmanager, suppress
 from fractions import Fraction
 from functools import partial
+from pathlib import Path
+from types import SimpleNamespace
 from time import perf_counter
 
 import av
+import numpy as np
 import torch
 from ultralytics import YOLO
 
@@ -72,22 +75,361 @@ async def _write_record(
     await writer.drain()
 
 
-def load_yolo_model() -> YOLO:
-    print(f"YOLO inference device: {settings.YOLO_DEVICE}")
+def _parallel_devices() -> list[str]:
+    """Return the configured device list, with the normal device as fallback."""
+
+    configured = [
+        value.strip()
+        for value in settings.YOLO_PARALLEL_DEVICES.split(",")
+        if value.strip()
+    ]
+    return configured or [settings.YOLO_DEVICE]
+
+
+def load_yolo_model(device: str | None = None) -> YOLO:
+    device = device or settings.YOLO_DEVICE
+    print(f"YOLO inference device: {device}")
     model = YOLO(settings.YOLO_MODEL)
     if model.task != "segment":
         raise ValueError(
             f"YOLO_MODEL must be a segmentation checkpoint; {settings.YOLO_MODEL!r} "
             f"is a {model.task!r} model"
         )
-    model.to(settings.YOLO_DEVICE)
+    model.to(device)
     # Fuse Conv+BatchNorm where supported. This is a one-time optimization and
     # avoids paying the unfused layer overhead on every frame.
     if hasattr(model, "fuse"):
         model.fuse()
-    if settings.YOLO_DEVICE.startswith("cuda"):
+    if device.startswith("cuda"):
         torch.backends.cudnn.benchmark = True
     return model
+
+
+def load_yolo_models() -> list[YOLO]:
+    """Load one independent segmentation model per configured device.
+
+    Each model is used by exactly one inference thread.  This avoids concurrent
+    predictor/tracker mutation while still allowing the GPU work itself to run
+    in parallel.  Tracking is applied later by the single ordered tracker.
+    """
+
+    devices = _parallel_devices()
+    if len(devices) > 1 and settings.YOLO_TRACKING:
+        print(
+            "YOLO parallel segmentation enabled; ByteTrack will run centrally "
+            f"after inference on {len(devices)} devices",
+            flush=True,
+        )
+    return [load_yolo_model(device) for device in devices]
+
+
+class _TrackerArray:
+    """Small tensor-compatible wrapper for tracker versions using ``.cpu()``."""
+
+    def __init__(self, values: np.ndarray):
+        self.values = np.asarray(values, dtype=np.float32)
+
+    def __array__(self, dtype=None):
+        return self.values.astype(dtype) if dtype is not None else self.values
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self.values
+
+    def __len__(self):
+        return len(self.values)
+
+    def __iter__(self):
+        return iter(self.values)
+
+    def __getitem__(self, selection):
+        return self.values[selection]
+
+    def __ge__(self, other):
+        return self.values >= other
+
+    def __gt__(self, other):
+        return self.values > other
+
+    def __lt__(self, other):
+        return self.values < other
+
+
+class _TrackerDetections:
+    """Minimal Results-like view consumed by Ultralytics BYTETracker.
+
+    Keeping this adapter on CPU means the central tracker never touches CUDA
+    tensors.  ``idx`` preserves the serialized detection index so assigned
+    track IDs can be copied back to the corresponding mask result.
+    """
+
+    def __init__(self, xyxy: np.ndarray, conf: np.ndarray, cls: np.ndarray):
+        xyxy = np.asarray(xyxy, dtype=np.float32).reshape((-1, 4))
+        conf = np.asarray(conf, dtype=np.float32).reshape((-1,))
+        cls = np.asarray(cls, dtype=np.float32).reshape((-1,))
+        if len(xyxy):
+            x1, y1, x2, y2 = xyxy.T
+            xywh = np.column_stack(
+                ((x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1)
+            ).astype(np.float32)
+        else:
+            xywh = np.empty((0, 4), dtype=np.float32)
+        self.xyxy = _TrackerArray(xyxy)
+        self.conf = _TrackerArray(conf)
+        self.cls = _TrackerArray(cls)
+        self.xywh = _TrackerArray(xywh)
+
+    def __len__(self) -> int:
+        return len(self.conf)
+
+    def __getitem__(self, selection):
+        return _TrackerDetections(
+            self.xyxy[selection], self.conf[selection], self.cls[selection]
+        )
+
+
+def load_central_tracker():
+    """Create one ByteTrack instance for all parallel inference workers."""
+
+    from ultralytics.trackers.byte_tracker import BYTETracker
+    import yaml
+
+    config_path = Path(settings.YOLO_TRACKER_CONFIG)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    return BYTETracker(SimpleNamespace(**config))
+
+
+def _bbox_to_pixels(item: dict, width: int, height: int) -> list[float]:
+    values = [float(value) for value in item["bbox"]]
+    bbox_format = item.get("bbox_format", settings.BBOX_FORMAT)
+    if bbox_format == "xyxy_normalized":
+        x1, y1, x2, y2 = values
+        return [x1 * width, y1 * height, x2 * width, y2 * height]
+    if bbox_format == "xyxy_pixels":
+        return values
+    if bbox_format == "xywh_normalized":
+        cx, cy, box_width, box_height = values
+        cx, cy = cx * width, cy * height
+        box_width, box_height = box_width * width, box_height * height
+    else:
+        cx, cy, box_width, box_height = values
+    return [
+        cx - box_width / 2,
+        cy - box_height / 2,
+        cx + box_width / 2,
+        cy + box_height / 2,
+    ]
+
+
+def apply_central_tracking(result: dict, tracker, model_names: dict | list) -> None:
+    """Apply ByteTrack in source order and write IDs into serialized items."""
+
+    if not isinstance(model_names, dict):
+        model_names = dict(enumerate(model_names))
+    items = result["items"]
+    boxes = [_bbox_to_pixels(item, result["width"], result["height"]) for item in items]
+    class_ids = [
+        next(
+            (key for key, name in model_names.items() if name == item["class"]),
+            -1,
+        )
+        for item in items
+    ]
+    tracker_input = _TrackerDetections(
+        np.asarray(boxes, dtype=np.float32),
+        np.asarray([item["confidence"] for item in items], dtype=np.float32),
+        np.asarray(class_ids, dtype=np.float32),
+    )
+    tracked = tracker.update(tracker_input)
+    for row in tracked:
+        if len(row) < 8:
+            continue
+        detection_index = int(row[7])
+        if 0 <= detection_index < len(items):
+            items[detection_index]["track_id"] = int(row[4])
+
+
+def reset_central_tracker(tracker) -> None:
+    if tracker is not None and hasattr(tracker, "reset"):
+        tracker.reset()
+
+
+async def _commit_result(
+    state: AppState,
+    inference_frame: InferenceFrame,
+    result: dict,
+    tracker=None,
+    model_names: dict | None = None,
+) -> None:
+    """Apply ordered postprocessing and publish one completed frame."""
+
+    if tracker is not None:
+        apply_central_tracking(result, tracker, model_names or {})
+    if state.monocular_resolver is not None:
+        annotate_result(
+            result,
+            inference_frame,
+            state.monocular_timeline,
+            state.monocular_resolver,
+            max_frame_delta_ms=settings.MONOCULAR_SOURCE_MAX_DELTA_MS,
+            max_imu_delta_ms=settings.MONOCULAR_IMU_MAX_DELTA_MS,
+        )
+
+    item = PlaybackItem(
+        epoch=inference_frame.epoch,
+        seq=inference_frame.seq,
+        encoded=inference_frame.encoded,
+        timestamp_us=inference_frame.timestamp_us,
+        keyframe=inference_frame.keyframe,
+        result=result,
+    )
+    async with state.result_condition:
+        state.queued_sequences.discard((item.epoch, item.seq))
+        state.completed_sequences.add((item.epoch, item.seq))
+        state.put_result(item)
+        state.result_condition.notify_all()
+
+
+async def _infer_with_retry(
+    inference_frame: InferenceFrame,
+    yolo_model: YOLO,
+    device: str,
+    tracking: bool,
+) -> tuple[dict | None, Exception | None]:
+    last_error: Exception | None = None
+    for attempt in range(max(1, settings.INFERENCE_RETRY_COUNT)):
+        try:
+            result = await asyncio.to_thread(
+                run_yolo,
+                inference_frame,
+                yolo_model,
+                device,
+                tracking,
+            )
+            return result, None
+        except Exception as exc:  # retry the same frame, never skip it
+            last_error = exc
+            if attempt + 1 < settings.INFERENCE_RETRY_COUNT:
+                delays = settings.INFERENCE_RETRY_DELAYS or (0.1,)
+                await asyncio.sleep(delays[min(attempt, len(delays) - 1)])
+    return None, last_error
+
+
+async def _parallel_yolo_worker(state: AppState) -> None:
+    """Run segmentation concurrently, then track/publish strictly in order.
+
+    Each model is confined to one asyncio task/thread.  Results may finish out
+    of order, but the ``sequence_order`` deque prevents ByteTrack and playback
+    from observing that reordering.
+    """
+
+    models = state.yolo_models or ([state.yolo_model] if state.yolo_model else [])
+    devices = _parallel_devices()
+    if len(models) < 2:
+        raise RuntimeError("parallel worker requires at least two YOLO models")
+    tracker = state.central_tracker
+    model_names = models[0].names
+    sequence_order: deque[tuple[int, int]] = deque()
+    pending: dict[asyncio.Task, InferenceFrame] = {}
+    ready: dict[tuple[int, int], tuple[InferenceFrame, dict]] = {}
+    next_model = 0
+    tracker_epoch: int | None = None
+    window_started = perf_counter()
+    window_completed = 0
+    retry_frame: InferenceFrame | None = None
+
+    while True:
+        current_epoch = state.current_epoch
+        if tracker_epoch != current_epoch:
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            pending.clear()
+            ready.clear()
+            sequence_order.clear()
+            reset_central_tracker(tracker)
+            tracker_epoch = current_epoch
+            state.tracker_epoch = current_epoch
+
+        if state.fault is not None:
+            async with state.result_condition:
+                while state.fault is not None and state.current_epoch == current_epoch:
+                    await state.result_condition.wait()
+            continue
+
+        while len(pending) < len(models):
+            if retry_frame is not None:
+                inference_frame = retry_frame
+                retry_frame = None
+            else:
+                inference_frame = await state.inference_queue.get()
+            if inference_frame.epoch != state.current_epoch:
+                continue
+            sequence_order.append((inference_frame.epoch, inference_frame.seq))
+            model_index = next_model % len(models)
+            next_model += 1
+            task = asyncio.create_task(
+                _infer_with_retry(
+                    inference_frame,
+                    models[model_index],
+                    devices[model_index],
+                    False,
+                )
+            )
+            pending[task] = inference_frame
+
+        done, _ = await asyncio.wait(
+            pending, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in done:
+            inference_frame = pending.pop(task)
+            result, last_error = task.result()
+            if result is None:
+                retry_frame = inference_frame
+                state.fault = (
+                    f"inference failed at epoch={inference_frame.epoch} "
+                    f"seq={inference_frame.seq}: {last_error}"
+                )
+                async with state.result_condition:
+                    state.result_condition.notify_all()
+                break
+            if inference_frame.epoch == state.current_epoch:
+                ready[(inference_frame.epoch, inference_frame.seq)] = (
+                    inference_frame,
+                    result,
+                )
+
+        if state.fault is not None:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            pending.clear()
+            ready.clear()
+            sequence_order.clear()
+            continue
+
+        while sequence_order and sequence_order[0] in ready:
+            key = sequence_order.popleft()
+            inference_frame, result = ready.pop(key)
+            if inference_frame.epoch != state.current_epoch:
+                continue
+            await _commit_result(state, inference_frame, result, tracker, model_names)
+            window_completed += 1
+            if window_completed >= 30:
+                elapsed = max(perf_counter() - window_started, 1e-6)
+                print(
+                    "YOLO parallel throughput: "
+                    f"{window_completed / elapsed:.1f} fps; "
+                    f"last={result['inference_ms']:.1f} ms; "
+                    f"pending={state.inference_queue.qsize()}; "
+                    f"in_flight={len(pending)}",
+                    flush=True,
+                )
+                window_started = perf_counter()
+                window_completed = 0
 
 
 def reset_tracker(yolo_model: YOLO) -> None:
@@ -106,21 +448,25 @@ def reset_tracker(yolo_model: YOLO) -> None:
         del predictor.trackers
 
 
-def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
+def run_yolo(
+    inference_frame: InferenceFrame,
+    yolo_model: YOLO,
+    device: str | None = None,
+    tracking_override: bool | None = None,
+) -> dict:
     start = perf_counter()
     img = inference_frame.frame.to_ndarray(format="bgr24")
     frame_height, frame_width = img.shape[:2]
     longest_side = max(frame_width, frame_height)
     imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
-    quantize = (
-        16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
-    )
-    tracking = settings.YOLO_TRACKING
+    device = device or settings.YOLO_DEVICE
+    quantize = 16 if settings.YOLO_HALF and device.startswith("cuda") else 32
+    tracking = settings.YOLO_TRACKING if tracking_override is None else tracking_override
     with torch.inference_mode():
         if tracking:
             results = yolo_model.track(
                 img,
-                device=settings.YOLO_DEVICE,
+                device=device,
                 imgsz=imgsz,
                 quantize=quantize,
                 # Hand the weak detections to the tracker rather than dropping
@@ -135,7 +481,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         else:
             results = yolo_model(
                 img,
-                device=settings.YOLO_DEVICE,
+                device=device,
                 imgsz=imgsz,
                 quantize=quantize,
                 verbose=False,
@@ -403,6 +749,9 @@ async def frame_receiver(state: AppState) -> None:
 
 async def yolo_worker(state: AppState) -> None:
     """Infer every queued decoded frame; a failed frame never advances."""
+    if len(state.yolo_models) > 1:
+        await _parallel_yolo_worker(state)
+        return
     run_inference = partial(run_yolo, yolo_model=state.yolo_model)
     retry_frame: InferenceFrame | None = None
     window_started = perf_counter()
