@@ -70,10 +70,10 @@ private const val DEFAULT_RESOLUTION_INDEX = 0 // 720p, matches the previous har
 // raise gain rather than hold the shutter open and smear motion into the pixels.
 private const val TARGET_CAPTURE_FPS = 30
 
-// QR detection does not need to run at the video frame rate. Keeping one ML
-// Kit task in flight and sampling at 10 Hz prevents ImageProxy instances from
-// accumulating while preserving responsive QR updates.
-private const val QR_SCAN_INTERVAL_NS = 100_000_000L
+// The QR payload changes every two video frames. Scan every second frame to
+// preserve those updates while the one-in-flight guard prevents ML Kit tasks
+// from accumulating behind the camera analyzer.
+private const val QR_SCAN_EVERY_N_FRAMES = 2L
 
 // The rig points at a screen a fixed distance away. Autofocus hunts badly on a
 // flat, periodic pixel pattern, so the lens is pinned rather than scanned and
@@ -114,7 +114,7 @@ class MainActivity : AppCompatActivity() {
     )
     private val qrCaptureIndex = AtomicLong(0)
     private val qrScanInFlight = AtomicBoolean(false)
-    private var lastQrScanStartedNs = 0L
+    private var qrFrameCounter = 0L
 
     // Written from a camera thread by the session capture callback so a tap-
     // triggered scan can be read back and adopted as the new manual position.
@@ -220,7 +220,7 @@ class MainActivity : AppCompatActivity() {
         streaming.set(true)
         qrCaptureIndex.set(0)
         qrScanInFlight.set(false)
-        lastQrScanStartedNs = 0L
+        qrFrameCounter = 0L
         captureFps = 0f
         captureWindowStartedNs = 0L
         captureWindowFrames = 0
@@ -425,6 +425,7 @@ class MainActivity : AppCompatActivity() {
         }
         recordCaptureFrame()
         val timestamp = image.imageInfo.timestamp.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos()
+        qrFrameCounter += 1
         // scanQrFrame takes over closing `image` once handed off, since ML
         // Kit reads it asynchronously. Only one sampled frame may be held by
         // ML Kit at a time; all other frames close immediately so CameraX can
@@ -442,10 +443,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun tryStartQrScan(): Boolean {
-        val now = SystemClock.elapsedRealtimeNanos()
-        if (now - lastQrScanStartedNs < QR_SCAN_INTERVAL_NS) return false
+        if (qrFrameCounter % QR_SCAN_EVERY_N_FRAMES != 0L) return false
         if (!qrScanInFlight.compareAndSet(false, true)) return false
-        lastQrScanStartedNs = now
         return true
     }
 
