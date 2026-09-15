@@ -284,6 +284,8 @@ def run_sam3(inference_frame: InferenceFrame, sam3_model: Sam3Model) -> dict:
     image = Image.fromarray(image_array, mode="RGB")
 
     with torch.inference_mode():
+        if sam3_model.frame_count >= settings.SAM3_MAX_SESSION_FRAMES:
+            reset_sam3(sam3_model)
         if sam3_model.session_id is not None:
             session = sam3_model.predictor._all_inference_states.get(
                 sam3_model.session_id

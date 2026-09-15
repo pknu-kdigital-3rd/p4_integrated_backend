@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # disabled by default because they are not available on every Ampere host.
     SAM3_MAX_NUM_OBJECTS: int = Field(default=16, ge=1, le=256)
     SAM3_MULTIPLEX_COUNT: int = Field(default=16, ge=1, le=256)
+    SAM3_MAX_SESSION_FRAMES: int = Field(default=300, ge=2, le=10_000)
     SAM3_USE_FA3: bool = False
     SAM3_USE_ROPE_REAL: bool = False
     SAM3_COMPILE: bool = False

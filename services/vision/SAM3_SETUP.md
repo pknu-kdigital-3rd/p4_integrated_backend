@@ -26,6 +26,7 @@ export SAM3_BPE_URL=https://github.com/openai/CLIP/raw/main/clip/bpe_simple_voca
 export SAM3_PROMPT=person
 export SAM3_DEVICE=cuda:0
 export SAM3_SCORE_THRESHOLD=0.5
+export SAM3_MAX_SESSION_FRAMES=300
 ```
 
 The service loads SAM3.1 during startup and fails fast with the missing package,
@@ -42,3 +43,7 @@ polygon extracted from the returned mask. The adapter keeps one multiplex
 video session alive and appends decoded relay frames to it, so returned items
 include stable `track_id` values when the model can associate an object across
 frames.
+
+Because the multiplex predictor stores its video state, the adapter rotates the
+session after `SAM3_MAX_SESSION_FRAMES` frames (300 by default) to keep GPU
+memory bounded. The current text prompt is applied again after each rotation.
