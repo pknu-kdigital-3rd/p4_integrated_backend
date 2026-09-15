@@ -2,7 +2,7 @@
 name = "poc-server-webrtc"
 version = "0.1.0"
 description = "WebRTC relay server with configurable segmentation inference"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "aiortc",
     "fastapi[standard]",
