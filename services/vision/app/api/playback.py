@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -19,6 +20,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     metadata = {
         "type": "frame",
         "session_id": state.session_id,
+        "model_filename": Path(settings.YOLO_MODEL).name,
         "epoch": item.epoch,
         "seq": item.seq,
         "source": result.get("source", {}),

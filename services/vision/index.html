@@ -11,6 +11,7 @@
     canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     #overlay { pointer-events: none; }
     #fps-overlay { position: absolute; top: 8px; left: 8px; z-index: 2; padding: 4px 7px; color: #fff; background: #000b; border-radius: 4px; font: 13px ui-monospace, monospace; pointer-events: none; }
+    #model-label { margin-top: 10px; color: #8fd3ff; font: 13px ui-monospace, monospace; }
     button { padding: 8px 14px; margin: 12px 6px 8px 0; cursor: pointer; }
     #status, #stats { color: #aaa; font-family: ui-monospace, monospace; white-space: pre-wrap; }
   </style>
@@ -40,7 +41,7 @@
   <label>ghost frames
     <input id="ghostFrames" type="number" min="0" max="30" step="1" value="0" />
   </label>
-  <div id="status">Stopped</div><div id="stats"></div>
+  <div id="status">Stopped</div><div id="model-label">Segmentation model: --</div><div id="stats"></div>
 </main>
 <script>
 (() => {
@@ -49,6 +50,7 @@
   const videoCtx = videoCanvas.getContext('2d');
   const overlayCtx = overlayCanvas.getContext('2d');
   const fpsOverlayEl = document.getElementById('fps-overlay');
+  const modelLabelEl = document.getElementById('model-label');
   const statusEl = document.getElementById('status');
   const statsEl = document.getElementById('stats');
   const boxesEl = document.getElementById('boxes');
@@ -66,6 +68,7 @@
   let lastPresentedTs = null, lastInferenceMs = 0, presentedCount = 0;
   let browserFps = 0, fpsWindowStarted = performance.now(), fpsWindowFrames = 0;
   let lastMonocular = {};
+  let modelFilename = '--';
   let nextPaintAt = null;
   let tracks = new Map(), nextTrackId = 1;
   let overlayMode = localStorage.getItem('playback-overlay-mode') || 'person_box_other_segmentation';
@@ -105,6 +108,7 @@
   function updateStats() {
     const monocularStatus = lastMonocular.status ? `  monocular=${lastMonocular.status}  qr=${lastMonocular.qr_status || '?'}` : '';
     statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  ghost_frames=${ghostFrames}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${monocularStatus}`;
+    modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
   }
   function updateBrowserFps() {
     const now = performance.now();
@@ -426,6 +430,10 @@
     }
   }
   function enqueue(meta, data) {
+    if (meta.model_filename) {
+      modelFilename = String(meta.model_filename);
+      modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
+    }
     const key = `${meta.epoch}:${meta.seq}`;
     if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
     if (known.has(key) || meta.epoch !== epoch) return;
