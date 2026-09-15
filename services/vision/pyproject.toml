@@ -1,7 +1,7 @@
 [project]
 name = "poc-server-webrtc"
 version = "0.1.0"
-description = "WebRTC relay server with YOLO object detection"
+description = "WebRTC relay server with FastSAM instance segmentation"
 requires-python = ">=3.10"
 dependencies = [
     "aiortc",
@@ -24,7 +24,7 @@ exclude-dependencies = [
 ]
 
 # Pull torch/torchvision from PyTorch's CUDA wheel index instead of the default
-# CPU-only PyPI build, so YOLO inference uses the GPU when one is available.
+# CPU-only PyPI build, so FastSAM inference uses the GPU when one is available.
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
 torchvision = [{ index = "pytorch-cu130" }]

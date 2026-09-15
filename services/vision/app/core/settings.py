@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent  # .../server
 INDEX_HTML_PATH = BASE_DIR / "index.html"
 
 
-def _default_yolo_device() -> str:
+def _default_fastsam_device() -> str:
     """Use CUDA only when this PyTorch wheel supports the installed GPU."""
     if not torch.cuda.is_available():
         return "cpu"
@@ -26,19 +26,17 @@ def _default_yolo_device() -> str:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    # --- YOLO / inference ---
-    # Segmentation checkpoints use the -seg suffix. Custom trained
-    # segmentation checkpoints can be supplied through YOLO_MODEL as usual.
-    YOLO_MODEL: str = "yolo26s-seg.pt"
-    YOLO_DEVICE: str = _default_yolo_device()
-    # Ultralytics letterboxes every frame to a fixed imgsz regardless of source
-    # resolution, then rescales boxes back to the original frame - so raising
-    # imgsz only changes inference cost/accuracy, never output coordinate space.
-    # This caps the worst-case latency/VRAM at very high input resolutions.
+    # --- FastSAM / inference ---
+    # Keep the YOLO_* names for compatibility with the existing relay and
+    # deployment contract; YOLO_FEED_SOCKET is the socket name, while this
+    # model path now selects Ultralytics FastSAM.
+    YOLO_MODEL: str = "FastSAM-s.pt"
+    YOLO_DEVICE: str = _default_fastsam_device()
+    # FastSAM resizes each frame to imgsz and rescales outputs to source space.
     YOLO_MAX_IMGSZ: int = 640
-    # FP16 is substantially faster on RTX-class CUDA GPUs. It is enabled by
-    # default but is automatically ignored when YOLO_DEVICE is CPU.
     YOLO_HALF: bool = True
+    FASTSAM_PROMPT: str = "person"
+    FASTSAM_IOU: float = Field(default=0.9, ge=0.0, le=1.0)
     BBOX_FORMAT: Literal[
         "xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"
     ] = "xyxy_normalized"
@@ -56,7 +54,7 @@ class Settings(BaseSettings):
 
     # --- QR-synchronised monocular distance ---
     # Disabled unless a dataset and a per-session camera calibration are
-    # explicitly supplied.  Missing QR/data never blocks YOLO; it produces a
+    # explicitly supplied. Missing QR/data never blocks FastSAM; it produces a
     # nullable distance with a diagnostic status instead.
     MONOCULAR_ENABLED: bool = False
     MONOCULAR_DATASET_DIR: str | None = None
@@ -90,6 +88,7 @@ class Settings(BaseSettings):
     @field_validator(
         "YOLO_MODEL",
         "YOLO_DEVICE",
+        "FASTSAM_PROMPT",
         "YOLO_TRACKER_CONFIG",
         "HOST",
         "FORWARDED_ALLOW_IPS",
