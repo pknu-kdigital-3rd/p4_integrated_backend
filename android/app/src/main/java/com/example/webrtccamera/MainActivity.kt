@@ -3,6 +3,7 @@ package com.example.webrtccamera
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
@@ -57,6 +58,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 private data class ResolutionOption(val label: String, val size: Size)
+private data class QrInput(val data: ByteArray, val width: Int, val height: Int)
 
 private val RESOLUTION_OPTIONS = listOf(
     ResolutionOption("720p (1280x720)", Size(1280, 720)),
@@ -74,6 +76,8 @@ private const val TARGET_CAPTURE_FPS = 30
 // preserve those updates while the one-in-flight guard prevents ML Kit tasks
 // from accumulating behind the camera analyzer.
 private const val QR_SCAN_EVERY_N_FRAMES = 2L
+private const val QR_MAX_WIDTH = 640
+private const val QR_MAX_HEIGHT = 360
 
 // The rig points at a screen a fixed distance away. Autofocus hunts badly on a
 // flat, periodic pixel pattern, so the lens is pinned rather than scanned and
@@ -115,6 +119,10 @@ class MainActivity : AppCompatActivity() {
     private val qrCaptureIndex = AtomicLong(0)
     private val qrScanInFlight = AtomicBoolean(false)
     private var qrFrameCounter = 0L
+    // Reused because only one QR task is allowed to reference this buffer at a
+    // time. The camera frame itself can therefore be closed immediately after
+    // this reduced-resolution copy is complete.
+    private var qrImageBuffer = ByteArray(0)
 
     // Written from a camera thread by the session capture callback so a tap-
     // triggered scan can be read back and adopted as the new manual position.
@@ -461,14 +469,16 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread { if (streaming.get()) updateCaptureLabel() }
     }
 
-    @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
     private fun scanQrFrame(image: ImageProxy, timestamp: Long) {
         val captureIndex = qrCaptureIndex.getAndIncrement()
         val start = System.nanoTime()
-        val mediaImage = image.image
-        if (mediaImage == null) {
+        val rotation = image.imageInfo.rotationDegrees
+        val qrInput = try {
+            createQrInput(image)
+        } catch (error: Exception) {
             qrScanInFlight.set(false)
-            setQrStatus("QR: no frame (image unavailable)")
+            image.close()
+            setQrStatus("QR: scan failed (${error.message ?: "image conversion failed"})")
             publisher?.sendQrEvent(
                 timestamp,
                 null,
@@ -476,11 +486,20 @@ class MainActivity : AppCompatActivity() {
                 captureIndex,
                 (System.nanoTime() - start) / 1_000_000,
             )
-            image.close()
             return
         }
-        val input = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
+        // The QR scanner receives an owned byte-array copy, so release the
+        // CameraX image before ML Kit starts. This prevents QR processing from
+        // holding CameraX's analysis stream open and throttling video capture.
+        image.close()
         try {
+            val input = InputImage.fromByteArray(
+                qrInput.data,
+                qrInput.width,
+                qrInput.height,
+                rotation,
+                ImageFormat.NV21,
+            )
             qrScanner.process(input)
                 .addOnSuccessListener { barcodes ->
                     val raw = barcodes.firstOrNull()?.rawValue
@@ -512,13 +531,61 @@ class MainActivity : AppCompatActivity() {
                 }
                 .addOnCompleteListener {
                     qrScanInFlight.set(false)
-                    image.close()
                 }
         } catch (error: Exception) {
             qrScanInFlight.set(false)
-            image.close()
             setQrStatus("QR: scan failed (${error.message ?: "unknown error"})")
         }
+    }
+
+    /**
+     * Converts a camera YUV_420_888 frame to a reusable, downsampled NV21
+     * buffer for QR detection. Video still uses the original full-resolution
+     * ImageProxy in WebRtcPublisher; this reduced copy is QR-only.
+     */
+    private fun createQrInput(image: ImageProxy): QrInput {
+        val sourceWidth = image.width
+        val sourceHeight = image.height
+        val scale = maxOf(
+            1,
+            (sourceWidth + QR_MAX_WIDTH - 1) / QR_MAX_WIDTH,
+            (sourceHeight + QR_MAX_HEIGHT - 1) / QR_MAX_HEIGHT,
+        )
+        val width = (sourceWidth / scale).and(-2).coerceAtLeast(2)
+        val height = (sourceHeight / scale).and(-2).coerceAtLeast(2)
+        val chromaWidth = width / 2
+        val chromaHeight = height / 2
+        val required = width * height + width * height / 2
+        if (qrImageBuffer.size != required) qrImageBuffer = ByteArray(required)
+
+        val yPlane = image.planes[0]
+        val uPlane = image.planes[1]
+        val vPlane = image.planes[2]
+        val y = yPlane.buffer.duplicate()
+        val u = uPlane.buffer.duplicate()
+        val v = vPlane.buffer.duplicate()
+
+        var destination = 0
+        for (row in 0 until height) {
+            val sourceRow = (row * scale).coerceAtMost(sourceHeight - 1)
+            val rowOffset = sourceRow * yPlane.rowStride
+            for (column in 0 until width) {
+                val sourceColumn = (column * scale).coerceAtMost(sourceWidth - 1)
+                qrImageBuffer[destination++] = y.get(rowOffset + sourceColumn * yPlane.pixelStride)
+            }
+        }
+        for (row in 0 until chromaHeight) {
+            val sourceRow = (row * scale).coerceAtMost(sourceHeight / 2 - 1)
+            val uRowOffset = sourceRow * uPlane.rowStride
+            val vRowOffset = sourceRow * vPlane.rowStride
+            for (column in 0 until chromaWidth) {
+                val sourceColumn = (column * scale).coerceAtMost(sourceWidth / 2 - 1)
+                // NV21 stores chroma as VU pairs.
+                qrImageBuffer[destination++] = v.get(vRowOffset + sourceColumn * vPlane.pixelStride)
+                qrImageBuffer[destination++] = u.get(uRowOffset + sourceColumn * uPlane.pixelStride)
+            }
+        }
+        return QrInput(qrImageBuffer, width, height)
     }
 
     private fun setQrStatus(text: String) {
