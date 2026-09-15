@@ -9,22 +9,17 @@ dependencies = [
     "openai",
     "opencv-python-headless",
     "pydantic-settings",
+    # SAM3 currently imports the legacy pkg_resources module. setuptools 81+
+    # removed it, so keep a compatible release in the Vision environment.
+    "setuptools<81",
     "torch",
     "torchvision",
-    "ultralytics",
 ]
 
-# Ultralytics currently declares the GUI-enabled opencv-python package on
-# Linux. The server and offline tools only need cv2's non-GUI APIs, so keep the
-# project-level opencv-python-headless dependency and remove that transitive
-# GUI package from Ultralytics' dependency graph.
-[tool.uv]
-exclude-dependencies = [
-    "opencv-python",
-]
+# The server only needs cv2's non-GUI APIs, so keep the headless OpenCV wheel.
 
 # Pull torch/torchvision from PyTorch's CUDA wheel index instead of the default
-# CPU-only PyPI build, so YOLO inference uses the GPU when one is available.
+# CPU-only PyPI build, so SAM3 inference uses the GPU when one is available.
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
 torchvision = [{ index = "pytorch-cu130" }]

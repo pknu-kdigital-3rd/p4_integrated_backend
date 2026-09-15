@@ -106,16 +106,13 @@ load_environment() {
   HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-300}"
   [[ "$HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "HEALTH_TIMEOUT_SECONDS must be a positive integer"
 
-  if [[ "${SEGMENTATION_BACKEND:-sam3}" == "sam3" ]]; then
-    export SAM3_SOURCE_DIR="${SAM3_SOURCE_DIR:-/workspace/sam3}"
-    export SAM3_CHECKPOINT_PATH="${SAM3_CHECKPOINT_PATH:-/workspace/models/sam3.pt}"
-    export SAM3_BPE_PATH="${SAM3_BPE_PATH:-/workspace/models/bpe_simple_vocab_16e6.txt.gz}"
-    export SAM3_BPE_URL="${SAM3_BPE_URL:-https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz}"
-  fi
+  export SAM3_SOURCE_DIR="${SAM3_SOURCE_DIR:-/workspace/sam3}"
+  export SAM3_CHECKPOINT_PATH="${SAM3_CHECKPOINT_PATH:-/workspace/models/sam3.pt}"
+  export SAM3_BPE_PATH="${SAM3_BPE_PATH:-/workspace/models/bpe_simple_vocab_16e6.txt.gz}"
+  export SAM3_BPE_URL="${SAM3_BPE_URL:-https://github.com/openai/CLIP/raw/main/clip/bpe_simple_vocab_16e6.txt.gz}"
 }
 
 prepare_vision_sam3() {
-  [[ "${SEGMENTATION_BACKEND:-sam3}" == "sam3" ]] || return 0
   [[ -d "$SAM3_SOURCE_DIR" ]] \
     || die "SAM3 source checkout not found: $SAM3_SOURCE_DIR"
   uv pip install -e "$SAM3_SOURCE_DIR"

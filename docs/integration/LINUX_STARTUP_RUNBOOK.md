@@ -259,8 +259,8 @@ uv run python run.py --no-tls
 SAM3 checkout must contain `sam3/model_builder.py`, and the checkpoint/BPE
 paths in `deploy/env.local` must exist before startup. The runtime check must
 print the RTX 3090 and the process must log `SAM3 inference device: cuda:0`.
-To use the original backend instead, set `SEGMENTATION_BACKEND=yolo`; then the
-process logs `YOLO inference device: cuda:0` and uses `YOLO_MODEL`.
+This branch uses SAM3 as the sole inference backend. The process logs the SAM3
+device and checkpoint during startup.
 
 Verify:
 

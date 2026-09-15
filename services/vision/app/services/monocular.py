@@ -1,7 +1,7 @@
 """Timestamp-synchronised ground-plane monocular distance estimation.
 
 The QR code carries the timestamp of the source recording frame.  This module
-keeps that synchronisation separate from YOLO so that a missing QR/data sample
+keeps that synchronisation separate from inference so that a missing QR/data sample
 can never turn into a guessed metric distance.
 """
 

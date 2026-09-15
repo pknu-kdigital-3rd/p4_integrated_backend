@@ -1,8 +1,8 @@
 # SAM3 segmentation backend
 
-The `sam3` branch adds SAM3 as an alternative segmentation backend. It uses
+The `sam3` branch uses SAM3 as its segmentation backend. It uses
 the image/text-prompt API shown in `E:/project4/temp/sam3_ex01.ipynb` and emits
-the same normalized box/polygon schema as the existing YOLO backend.
+the normalized box/polygon schema consumed by the browser overlay.
 
 ## Linux GPU setup
 
@@ -19,7 +19,6 @@ Place the model files at the paths used by the example notebook, or override
 them in the environment:
 
 ```bash
-export SEGMENTATION_BACKEND=sam3
 export SAM3_SOURCE_DIR=/workspace/sam3
 export SAM3_CHECKPOINT_PATH=/workspace/models/sam3.pt
 export SAM3_BPE_PATH=/workspace/models/bpe_simple_vocab_16e6.txt.gz
@@ -42,13 +41,3 @@ uses `SAM3_PROMPT` as its class label and has a normalized bounding box plus a
 polygon extracted from the returned mask. SAM3 does not use the YOLO
 ByteTrack state, so the browser's existing overlay smoothing remains the
 available temporal stabilization.
-
-## YOLO fallback
-
-To run the original backend, set:
-
-```bash
-export SEGMENTATION_BACKEND=yolo
-```
-
-The YOLO settings and checkpoint are otherwise unchanged.

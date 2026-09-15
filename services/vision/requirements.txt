@@ -1,12 +1,12 @@
 fastapi[standard]
 opencv-python-headless
-ultralytics
 openai
 aiortc
 pydantic-settings
+setuptools<81
 
-# ultralytics pulls in torch/torchvision transitively, but plain `pip install
-# -r requirements.txt` resolves the CPU-only build. For GPU inference, install
-# the CUDA build first from PyTorch's index (match the CUDA version to the
-# machine's driver, e.g. `nvidia-smi`), then install the rest of this file:
+# Plain `pip install -r requirements.txt` resolves the CPU-only Torch build.
+# For GPU inference, install the CUDA build first from PyTorch's index (match
+# the CUDA version to the machine's driver, e.g. `nvidia-smi`), then install
+# the rest of this file:
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
