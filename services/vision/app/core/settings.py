@@ -48,11 +48,17 @@ class Settings(BaseSettings):
     # track still has to clear the higher new_track_thresh in the tracker
     # config, so weak noise cannot start one.
     CONF_THRESHOLD_LOW: float = Field(default=0.1, ge=0.0, le=1.0)
-    # Ordered no-drop delivery is what makes a motion-model tracker usable
-    # here: frame N+1 always follows N, so association never sees a gap.
-    # Disable to fall back to stateless per-frame detection.
+    # In `queue` mode ordered no-drop delivery gives the motion-model tracker
+    # every frame. `latest` trades some temporal updates for fresh inference
+    # when the model cannot keep up. Disable to use stateless per-frame
+    # detection.
     YOLO_TRACKING: bool = True
     YOLO_TRACKER_CONFIG: str = str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml")
+    # `queue` preserves the current ordered, no-drop inference behavior.  With
+    # `latest`, the worker keeps only the newest queued frame for the next
+    # inference call; skipped media frames still pass through with the last
+    # completed detections so the H.264 playback sequence remains decodable.
+    YOLO_FRAME_DROP_POLICY: Literal["latest", "queue"] = "queue"
 
     # --- QR-synchronised monocular distance ---
     # Disabled unless a dataset and a per-session camera calibration are
@@ -111,6 +117,11 @@ class Settings(BaseSettings):
     @field_validator("BBOX_FORMAT", mode="before")
     @classmethod
     def _normalize_bbox_format(cls, v: str) -> str:
+        return v.strip().lower() if isinstance(v, str) else v
+
+    @field_validator("YOLO_FRAME_DROP_POLICY", mode="before")
+    @classmethod
+    def _normalize_frame_drop_policy(cls, v: str) -> str:
         return v.strip().lower() if isinstance(v, str) else v
 
     @field_validator("YOLO_MAX_IMGSZ")

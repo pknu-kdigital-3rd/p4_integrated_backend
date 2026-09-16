@@ -8,7 +8,12 @@ import av
 import numpy as np
 
 from app.core.state import AppState, InferenceFrame, PlaybackItem
-from app.services.yolo import reset_tracker, run_yolo, yolo_worker
+from app.services.yolo import (
+    _take_latest_inference_frame,
+    reset_tracker,
+    run_yolo,
+    yolo_worker,
+)
 
 
 class _Vector:
@@ -79,7 +84,9 @@ class RunYoloTests(unittest.TestCase):
             "app.services.yolo.settings.CONF_THRESHOLD_LOW", 0.3
         ), patch("app.services.yolo.settings.BBOX_FORMAT", "xyxy_normalized"), patch(
             "app.services.yolo.settings.YOLO_DEVICE", "cpu"
-        ), patch("app.services.yolo.settings.YOLO_MAX_IMGSZ", 704):
+        ), patch(
+            "app.services.yolo.settings.YOLO_MAX_IMGSZ", 704
+        ):
             result = run_yolo(inference_frame, model)
 
         self.assertEqual(result["width"], 96)
@@ -106,7 +113,9 @@ class RunYoloTests(unittest.TestCase):
             "app.services.yolo.settings.CONF_THRESHOLD_LOW", 0.3
         ), patch("app.services.yolo.settings.BBOX_FORMAT", "xyxy_normalized"), patch(
             "app.services.yolo.settings.YOLO_DEVICE", "cpu"
-        ), patch("app.services.yolo.settings.YOLO_MAX_IMGSZ", 704), patch(
+        ), patch(
+            "app.services.yolo.settings.YOLO_MAX_IMGSZ", 704
+        ), patch(
             "app.services.yolo.settings.YOLO_TRACKER_CONFIG", "bytetrack.yaml"
         ):
             result = run_yolo(inference_frame, model)
@@ -159,7 +168,11 @@ class PutResultTests(unittest.TestCase):
         state.current_epoch = 2
         state.put_result(
             PlaybackItem(
-                epoch=1, seq=0, encoded=b"", timestamp_us=0, keyframe=False,
+                epoch=1,
+                seq=0,
+                encoded=b"",
+                timestamp_us=0,
+                keyframe=False,
                 result={},
             )
         )
@@ -180,8 +193,13 @@ class YoloWorkerEpochRaceTests(unittest.IsolatedAsyncioTestCase):
         state = AppState()
         state.current_epoch = 1
         frame = InferenceFrame(
-            seq=0, frame=None, pts=0, time_base=1 / 90000, media_time=0.0,
-            epoch=1, timestamp_us=0,
+            seq=0,
+            frame=None,
+            pts=0,
+            time_base=1 / 90000,
+            media_time=0.0,
+            epoch=1,
+            timestamp_us=0,
         )
         await state.inference_queue.put(frame)
 
@@ -204,6 +222,124 @@ class YoloWorkerEpochRaceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state.current_epoch, 2)
         self.assertEqual(state.result_store, {})
+
+
+class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_latest_policy_infers_only_the_newest_queued_frame(self):
+        state = AppState()
+        state.current_epoch = 1
+        frames = [
+            InferenceFrame(
+                seq=seq,
+                frame=None,
+                pts=seq,
+                time_base=1 / 90000,
+                media_time=seq / 30,
+                epoch=1,
+                encoded=bytes([seq]),
+            )
+            for seq in range(4)
+        ]
+        for frame in frames:
+            state.queued_sequences.add((frame.epoch, frame.seq))
+            await state.inference_queue.put(frame)
+        calls = []
+
+        def fake_run_yolo(inference_frame, yolo_model):
+            calls.append(inference_frame.seq)
+            return {
+                "source": {"seq": inference_frame.seq},
+                "width": 1,
+                "height": 1,
+                "items": [{"class": "person", "confidence": 0.9}],
+                "inference_ms": 10.0,
+            }
+
+        with patch(
+            "app.services.yolo.settings.YOLO_FRAME_DROP_POLICY", "latest"
+        ), patch("app.services.yolo.run_yolo", side_effect=fake_run_yolo):
+            task = asyncio.create_task(yolo_worker(state))
+            for _ in range(100):
+                await asyncio.sleep(0)
+                if len(state.result_store) == len(frames):
+                    break
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        self.assertEqual(calls, [3])
+        self.assertEqual(list(state.result_store), [(1, 0), (1, 1), (1, 2), (1, 3)])
+        self.assertTrue(state.result_store[(1, 0)].result["inference_skipped"])
+        self.assertTrue(state.result_store[(1, 1)].result["inference_skipped"])
+        self.assertFalse(state.queued_sequences)
+
+    async def test_queue_policy_preserves_current_ordered_behavior(self):
+        state = AppState()
+        state.current_epoch = 1
+        frames = [
+            InferenceFrame(
+                seq=seq,
+                frame=None,
+                pts=seq,
+                time_base=1 / 90000,
+                media_time=seq / 30,
+                epoch=1,
+                encoded=bytes([seq]),
+            )
+            for seq in range(3)
+        ]
+        for frame in frames:
+            state.queued_sequences.add((frame.epoch, frame.seq))
+            await state.inference_queue.put(frame)
+        calls = []
+
+        def fake_run_yolo(inference_frame, yolo_model):
+            calls.append(inference_frame.seq)
+            return {
+                "source": {"seq": inference_frame.seq},
+                "width": 1,
+                "height": 1,
+                "items": [],
+                "inference_ms": 10.0,
+            }
+
+        with patch("app.services.yolo.settings.YOLO_FRAME_DROP_POLICY", "queue"), patch(
+            "app.services.yolo.run_yolo", side_effect=fake_run_yolo
+        ):
+            task = asyncio.create_task(yolo_worker(state))
+            for _ in range(100):
+                await asyncio.sleep(0)
+                if len(state.result_store) == len(frames):
+                    break
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+        self.assertEqual(calls, [0, 1, 2])
+        self.assertEqual(list(state.result_store), [(1, 0), (1, 1), (1, 2)])
+        self.assertFalse(state.queued_sequences)
+        self.assertNotIn("inference_skipped", state.result_store[(1, 0)].result)
+
+    async def test_latest_helper_returns_old_frames_and_keeps_newest(self):
+        state = AppState()
+        frames = [
+            InferenceFrame(
+                seq=seq,
+                frame=None,
+                pts=None,
+                time_base=None,
+                media_time=None,
+            )
+            for seq in range(3)
+        ]
+        for frame in frames[1:]:
+            await state.inference_queue.put(frame)
+
+        latest, dropped = _take_latest_inference_frame(state, frames[0])
+
+        self.assertEqual(latest.seq, 2)
+        self.assertEqual([frame.seq for frame in dropped], [0, 1])
+        self.assertTrue(state.inference_queue.empty())
 
 
 if __name__ == "__main__":

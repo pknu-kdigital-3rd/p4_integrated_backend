@@ -1,4 +1,6 @@
-# ByteTrack association for the ordered no-drop inference path.
+# ByteTrack association for the ordered inference path. `queue` mode gives the
+# tracker every frame; `latest` mode deliberately trades temporal updates for
+# fresher detections when inference cannot keep up.
 #
 # new_track_thresh > track_low_thresh is the anti-flicker property: a box must
 # clear the high bar to appear, but an established track survives all the way

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>No-drop inference playback</title>
+  <title>Inference playback</title>
   <style>
     body { margin: 0; padding: 20px; color: #eee; background: #181818; font-family: system-ui, sans-serif; }
     main { max-width: 980px; margin: auto; }
@@ -18,7 +18,7 @@
 </head>
 <body>
 <main>
-  <h2>Android stream · ordered YOLO inference</h2>
+  <h2>Android stream · YOLO inference</h2>
   <div id="stage"><canvas id="video"></canvas><canvas id="overlay"></canvas><div id="fps-overlay">Browser FPS: --</div></div>
   <button id="start">Start</button><button id="stop">Stop</button><button id="live">Jump to Live</button>
   <label><input id="boxes" type="checkbox" checked /> boxes</label>
@@ -424,7 +424,7 @@
     const refillReady = presentedCount > 0 && queue.length > 0;
     if (!playing && (firstKeyframeReady || refillReady || (sourceEnded && queue.length))) {
       playing = true;
-      setStatus('Playing every inferred frame', '#4fdb8a');
+      setStatus('Playing inference results', '#4fdb8a');
       pump();
       updateStats();
     }
