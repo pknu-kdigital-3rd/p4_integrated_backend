@@ -2,7 +2,7 @@
 name = "poc-server-webrtc"
 version = "0.1.0"
 description = "WebRTC relay server with YOLO object detection"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiortc",
     "fastapi[standard]",
@@ -27,6 +27,11 @@ exclude-dependencies = [
 # Pull torch/torchvision from PyTorch's CUDA wheel index instead of the default
 # CPU-only PyPI build, so YOLO inference uses the GPU when one is available.
 [tool.uv.sources]
+# The trained checkpoint serializes custom classes from this fork. Keep the
+# source editable so uv sync/run cannot replace it with the public package.
+# From services/vision this resolves to /home/user/yolo_custom/yolo_carafe_aspp
+# in the Linux deployment layout.
+ultralytics = { path = "../../../yolo_custom/yolo_carafe_aspp", editable = true }
 torch = [{ index = "pytorch-cu130" }]
 torchvision = [{ index = "pytorch-cu130" }]
 
