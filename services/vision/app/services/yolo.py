@@ -12,6 +12,7 @@ from time import perf_counter
 
 import av
 import torch
+import torch.nn.functional as F
 from ultralytics import YOLO
 
 from app.core.settings import settings
@@ -67,6 +68,59 @@ def _source_metadata(inference_frame: InferenceFrame) -> dict[str, object]:
         "time": inference_frame.media_time,
         "timestamp_us": inference_frame.timestamp_us,
     }
+
+
+def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
+    """Convert only retained result masks to normalized polygons.
+
+    ``Masks.xyn`` performs a GPU-to-CPU copy and contour extraction for every
+    mask on first access. Selecting the retained masks first avoids paying that
+    cost for detections filtered by the service.
+    """
+
+    if not box_indices:
+        return []
+    masks = getattr(result, "masks", None)
+    if masks is None:
+        return []
+    try:
+        selected_masks = masks[box_indices]
+    except (AttributeError, IndexError, TypeError):
+        # Keep lightweight Results-like test doubles and older wrappers
+        # working when their mask container does not support indexing.
+        polygons = getattr(masks, "xyn", [])
+        return [polygons[index] for index in box_indices if index < len(polygons)]
+
+    mask_data = getattr(selected_masks, "data", None)
+    contour_size = settings.YOLO_MASK_CONTOUR_SIZE
+    if (
+        not isinstance(mask_data, torch.Tensor)
+        or mask_data.ndim != 3
+        or max(int(mask_data.shape[-2]), int(mask_data.shape[-1])) <= contour_size
+    ):
+        return selected_masks.xyn
+
+    mask_height, mask_width = map(int, mask_data.shape[-2:])
+    scale = contour_size / max(mask_height, mask_width)
+    contour_shape = (
+        max(1, round(mask_height * scale)),
+        max(1, round(mask_width * scale)),
+    )
+    # Masks.xyn calls cv2.findContours on CPU. Reduce the binary mask while it
+    # is still on the inference device, so only a small grid crosses the
+    # device boundary and contour work scales with contour_size, not camera
+    # resolution.
+    reduced_data = (
+        F.interpolate(
+            mask_data.unsqueeze(1).float(),
+            size=contour_shape,
+            mode="nearest",
+        )
+        .squeeze(1)
+        .gt_(0)
+    )
+    reduced_masks = selected_masks.__class__(reduced_data, selected_masks.orig_shape)
+    return reduced_masks.xyn
 
 
 def _skipped_frame_result(
@@ -238,10 +292,11 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 # them here; its second association stage is what keeps an
                 # established track alive through a confidence dip.
                 conf=settings.CONF_THRESHOLD_LOW,
+                max_det=settings.YOLO_MAX_DETECTIONS,
                 tracker=settings.YOLO_TRACKER_CONFIG,
                 persist=True,
                 verbose=False,
-                retina_masks=True,
+                retina_masks=settings.YOLO_RETINA_MASKS,
             )
         else:
             results = yolo_model(
@@ -249,16 +304,22 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 device=settings.YOLO_DEVICE,
                 imgsz=imgsz,
                 quantize=quantize,
+                max_det=settings.YOLO_MAX_DETECTIONS,
                 verbose=False,
-                retina_masks=True,
+                retina_masks=settings.YOLO_RETINA_MASKS,
             )
     detections = []
     for result in results:
-        normalized_polygons = result.masks.xyn if result.masks is not None else []
+        retained_indices = []
         for box_index, box in enumerate(result.boxes):
             conf = float(box.conf[0])
             if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
                 continue
+            retained_indices.append(box_index)
+        normalized_polygons = _normalized_mask_polygons(result, retained_indices)
+        for polygon_index, box_index in enumerate(retained_indices):
+            box = result.boxes[box_index]
+            conf = float(box.conf[0])
             cls_id = int(box.cls[0])
             if settings.BBOX_FORMAT == "xyxy_normalized":
                 bbox = list(map(float, box.xyxyn[0].detach().cpu().tolist()))
@@ -277,8 +338,8 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             track_id = getattr(box, "id", None)
             if track_id is not None:
                 detection["track_id"] = int(track_id[0])
-            if box_index < len(normalized_polygons):
-                polygon = normalized_polygons[box_index]
+            if polygon_index < len(normalized_polygons):
+                polygon = normalized_polygons[polygon_index]
                 if len(polygon) >= 3:
                     detection["mask"] = [
                         [float(x), float(y)] for x, y in polygon.tolist()
@@ -510,6 +571,13 @@ async def yolo_worker(state: AppState) -> None:
     """Infer queued decoded frames using the configured drop policy."""
     print(
         f"YOLO frame drop policy: {settings.YOLO_FRAME_DROP_POLICY}",
+        flush=True,
+    )
+    print(
+        "YOLO mask settings: "
+        f"retina_masks={settings.YOLO_RETINA_MASKS}; "
+        f"max_det={settings.YOLO_MAX_DETECTIONS}; "
+        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}",
         flush=True,
     )
     run_inference = partial(run_yolo, yolo_model=state.yolo_model)

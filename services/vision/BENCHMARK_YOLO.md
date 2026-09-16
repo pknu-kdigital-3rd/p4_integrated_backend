@@ -41,6 +41,26 @@ Always discard the first warmup iterations. CUDA timings are synchronized by
 the script; without synchronization, asynchronous kernel launches make the
 GPU appear faster than the live worker really is.
 
+## Mask performance
+
+The live service defaults to the faster mask path:
+
+- `YOLO_RETINA_MASKS=false` keeps masks at model resolution before polygon
+  extraction. The browser still receives normalized polygons, but native
+  camera-resolution upsampling is avoided. Set it to `true` only when the
+  extra mask detail is worth the latency.
+- `YOLO_MAX_DETECTIONS=100` bounds the number of detections retained by NMS and
+  sent to mask processing for crowded frames. Increase it if more objects must be
+  published in a single frame.
+- `YOLO_MASK_CONTOUR_SIZE=160` downsamples masks on the inference device before
+  CPU contour extraction. This matches the native prototype scale for a 640px
+  input and keeps polygon generation from scaling with the camera resolution.
+  Use `320` or `640` when more polygon detail is required.
+
+The service also extracts polygons only for detections retained after its
+confidence filter, avoiding unnecessary CPU contour conversion for discarded
+boxes.
+
 ## Live frame policy
 
 Set `YOLO_FRAME_DROP_POLICY=latest` to keep inference near the live edge when
