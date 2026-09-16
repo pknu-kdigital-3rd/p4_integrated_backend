@@ -102,6 +102,9 @@ def _skipped_frame_result(
         "width": width,
         "height": height,
         "items": items,
+        "mask_count": sum(
+            1 for item in items if isinstance(item, dict) and "mask" in item
+        ),
         "inference_ms": 0.0,
         "inference_skipped": True,
         "monocular": {"status": "inference_skipped"},
@@ -287,6 +290,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         "width": frame_width,
         "height": frame_height,
         "items": detections,
+        "mask_count": sum(1 for detection in detections if "mask" in detection),
         "inference_ms": round((perf_counter() - start) * 1000, 1),
     }
 
@@ -608,6 +612,7 @@ async def yolo_worker(state: AppState) -> None:
                 "YOLO throughput: "
                 f"{window_completed / elapsed:.1f} fps; "
                 f"last={result['inference_ms']:.1f} ms; "
+                f"masks={result.get('mask_count', 0)}; "
                 f"pending={state.inference_queue.qsize()}; "
                 f"dropped={window_dropped}",
                 flush=True,

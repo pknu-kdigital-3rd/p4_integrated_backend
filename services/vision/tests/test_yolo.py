@@ -92,6 +92,7 @@ class RunYoloTests(unittest.TestCase):
         self.assertEqual(result["width"], 96)
         self.assertEqual(result["height"], 64)
         self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["mask_count"], 1)
         self.assertEqual(result["items"][0]["class"], "dog")
         self.assertEqual(result["items"][0]["mask_format"], "polygon_normalized")
         self.assertTrue(np.allclose(result["items"][0]["mask"], polygons[1]))
