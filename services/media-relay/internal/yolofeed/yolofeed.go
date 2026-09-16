@@ -16,31 +16,33 @@ import (
 )
 
 const (
-	kStart         = 1
-	kFrame         = 2
-	kEnd           = 3
-	kReset         = 4
-	kBegin         = 10
-	kPresentedAck  = 12
-	kResync        = 13
-	kStop          = 14
+	kStart             = 1
+	kFrame             = 2
+	kEnd               = 3
+	kReset             = 4
+	kBegin             = 10
+	kPresentedAck      = 12
+	kResync            = 13
+	kStop              = 14
 	maxRecordBytes     = 256 * 1024 * 1024
 	maxPendingQREvents = 1024
+	defaultAssemblyCap = 64 * 1024
+	maxReusableAUCap   = 512 * 1024
 )
 
 // AccessUnit is the authoritative compressed frame retained by the relay.
 // Data is an Annex-B H.264 access unit and is never overwritten by a newer
 // frame. It remains in the backlog until Python acknowledges presentation.
 type AccessUnit struct {
-	Epoch         uint64
-	Seq           uint64
-	RTPTimestamp  uint32
-	PTS90K        int64
-	TimestampUS   int64
-	Keyframe      bool
-	Data          []byte
-	QR            *QREvent
-	receivedAt    time.Time
+	Epoch        uint64
+	Seq          uint64
+	RTPTimestamp uint32
+	PTS90K       int64
+	TimestampUS  int64
+	Keyframe     bool
+	Data         []byte
+	QR           *QREvent
+	receivedAt   time.Time
 }
 
 // QREvent is emitted by the Android publisher over the reliable qr-events
@@ -87,8 +89,8 @@ type Feed struct {
 
 	// OnClientConnect requests a fresh IDR when Python reconnects. OnResync is
 	// called after an explicit or automatic reset so the publisher can recover.
-	OnClientConnect   func()
-	OnResync          func()
+	OnClientConnect func()
+	OnResync        func()
 }
 
 func New(socketPath string) *Feed {
@@ -96,7 +98,14 @@ func New(socketPath string) *Feed {
 }
 
 func NewWithLimits(socketPath string, maxSeconds float64, maxBytes int64) *Feed {
-	f := &Feed{socketPath: socketPath, maxSeconds: maxSeconds, maxBytes: maxBytes, epoch: 1, qrEvents: make(map[uint32]*QREvent)}
+	f := &Feed{
+		socketPath: socketPath,
+		maxSeconds: maxSeconds,
+		maxBytes:   maxBytes,
+		epoch:      1,
+		assembly:   make([]byte, 0, defaultAssemblyCap),
+		qrEvents:   make(map[uint32]*QREvent),
+	}
 	f.cond = sync.NewCond(&f.mu)
 	return f
 }
@@ -203,16 +212,12 @@ func (f *Feed) Publish(packet *rtp.Packet) {
 			if delta := int16(packet.SequenceNumber - expected); delta < 0 {
 				return
 			}
-			f.assembly = nil
-			f.fuActive = false
 			f.resetLocked("source_discontinuity")
 		}
 	}
 	f.lastPacketSeq = packet.SequenceNumber
 	f.havePacketSeq = true
 	if len(f.assembly) > 0 && f.haveAssemblyTs && packet.Header.Timestamp != f.assemblyRTPTs {
-		f.assembly = nil
-		f.fuActive = false
 		f.resetLocked("incomplete_access_unit")
 	}
 	if len(f.assembly) == 0 {
@@ -262,7 +267,10 @@ func (f *Feed) consumePayloadLocked(payload []byte) {
 		start := header&0x80 != 0
 		end := header&0x40 != 0
 		if start {
-			f.assembly = nil
+			// Publish assigned the access-unit timestamp before payload parsing;
+			// reuse only the bytes here so FU-A continuation packets still remain
+			// associated with that timestamp.
+			f.reuseAssemblyBufferLocked()
 			f.assemblyKey = false
 			f.assemblyParams = false
 			f.fuActive = true
@@ -301,16 +309,11 @@ func (f *Feed) appendNALLocked(nal []byte) {
 
 func (f *Feed) finishAccessUnitLocked(rtpTS uint32) {
 	if len(f.assembly) == 0 {
-		f.assemblyKey = false
-		f.assemblyParams = false
-		f.haveAssemblyTs = false
+		f.resetAssemblyLocked()
 		return
 	}
 	if !f.seenIDR && !f.assemblyKey {
-		f.assembly = nil
-		f.assemblyKey = false
-		f.assemblyParams = false
-		f.haveAssemblyTs = false
+		f.resetAssemblyLocked()
 		return
 	}
 	data := append([]byte(nil), f.assembly...)
@@ -362,10 +365,7 @@ func (f *Feed) finishAccessUnitLocked(rtpTS uint32) {
 	f.nextSeq++
 	f.backlog = append(f.backlog, item)
 	f.backlogBytes += int64(len(data))
-	f.assembly = nil
-	f.assemblyKey = false
-	f.assemblyParams = false
-	f.haveAssemblyTs = false
+	f.resetAssemblyLocked()
 	if f.overflowLocked() {
 		f.resetLocked("backlog_overflow")
 	}
@@ -447,8 +447,7 @@ func (f *Feed) resetLocked(reason string) {
 	f.epoch++
 	f.nextSeq = 0
 	f.seenIDR = false
-	f.assembly = nil
-	f.fuActive = false
+	f.resetAssemblyLocked()
 	f.parameterSets = nil
 	f.qrEvents = make(map[uint32]*QREvent)
 	f.havePacketSeq = false
@@ -460,6 +459,27 @@ func (f *Feed) resetLocked(reason string) {
 		go f.OnResync()
 	}
 	log.Printf("YOLO feed reset: epoch=%d reason=%s", f.epoch, reason)
+}
+
+// resetAssemblyLocked releases the current access-unit contents while
+// retaining a bounded amount of capacity for the next frame. Published
+// AccessUnits own a separate copy, so reusing this slice cannot mutate the
+// backlog. Very large I-frames are intentionally discarded instead of making
+// every later frame retain their peak capacity.
+func (f *Feed) resetAssemblyLocked() {
+	f.reuseAssemblyBufferLocked()
+	f.assemblyKey = false
+	f.assemblyParams = false
+	f.fuActive = false
+	f.haveAssemblyTs = false
+}
+
+func (f *Feed) reuseAssemblyBufferLocked() {
+	if cap(f.assembly) > maxReusableAUCap {
+		f.assembly = make([]byte, 0, defaultAssemblyCap)
+	} else if f.assembly != nil {
+		f.assembly = f.assembly[:0]
+	}
 }
 
 func (f *Feed) acknowledge(epoch, seq uint64) {
@@ -519,7 +539,6 @@ func (f *Feed) find(epoch, seq uint64) *AccessUnit {
 	for _, item := range f.backlog {
 		if item.Seq == seq {
 			copyItem := *item
-			copyItem.Data = append([]byte(nil), item.Data...)
 			return &copyItem
 		}
 	}
@@ -745,17 +764,53 @@ func (f *Feed) sendFrame(conn net.Conn, item *AccessUnit) error {
 		"epoch": item.Epoch, "seq": item.Seq, "rtp_timestamp": item.RTPTimestamp,
 		"pts_90k": item.PTS90K, "timestamp_us": item.TimestampUS,
 		"keyframe": item.Keyframe,
-		"qr": map[string]any{"decode_success": false},
+		"qr":       map[string]any{"decode_success": false},
 	}
 	if item.QR != nil {
 		metadataValue["qr"] = item.QR
 	}
 	metadata, _ := json.Marshal(metadataValue)
-	body := make([]byte, 4+len(metadata)+len(item.Data))
-	binary.BigEndian.PutUint32(body[:4], uint32(len(metadata)))
-	copy(body[4:], metadata)
-	copy(body[4+len(metadata):], item.Data)
-	return writeRecord(conn, kFrame, body)
+	metadataLength := make([]byte, 4)
+	binary.BigEndian.PutUint32(metadataLength, uint32(len(metadata)))
+	return writeRecordBuffers(
+		conn,
+		kFrame,
+		metadataLength,
+		metadata,
+		item.Data,
+	)
+}
+
+// writeRecordBuffers preserves the record wire format while allowing a
+// net.Conn to use writev for the record header, metadata length, JSON, and
+// immutable H.264 access unit. The generic writeRecord path remains for the
+// small control records.
+func writeRecordBuffers(w io.Writer, kind byte, bodies ...[]byte) error {
+	bodyLength := 0
+	for _, body := range bodies {
+		bodyLength += len(body)
+	}
+	length := 1 + bodyLength
+	if length > maxRecordBytes {
+		return fmt.Errorf("record too large: %d", length)
+	}
+	recordHeader := make([]byte, 4)
+	binary.BigEndian.PutUint32(recordHeader, uint32(length))
+	kindBuffer := []byte{kind}
+	buffers := net.Buffers{recordHeader, kindBuffer}
+	for _, body := range bodies {
+		if len(body) > 0 {
+			buffers = append(buffers, body)
+		}
+	}
+	written, err := buffers.WriteTo(w)
+	if err != nil {
+		return err
+	}
+	if written != int64(len(recordHeader)+1+bodyLength) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func writeRecord(w io.Writer, kind byte, body []byte) error {
