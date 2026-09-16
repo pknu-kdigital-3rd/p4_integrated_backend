@@ -22,10 +22,10 @@ from time import perf_counter
 import av
 import numpy as np
 import torch
-from ultralytics import YOLO
 
 from app.core.settings import settings
 from app.core.state import InferenceFrame
+from app.services.tensorrt_runtime import NativeTensorRTRuntime
 from app.services.yolo import load_yolo_model, run_yolo
 
 
@@ -48,7 +48,9 @@ def _measure_wall(fn, iterations: int, device: str) -> tuple[float, float]:
     return elapsed, _fps(elapsed, iterations)
 
 
-def _measure_forward(net: torch.nn.Module, tensor: torch.Tensor, iterations: int, device: str) -> tuple[float, float, float]:
+def _measure_forward(
+    net: torch.nn.Module, tensor: torch.Tensor, iterations: int, device: str
+) -> tuple[float, float, float]:
     # GPU event timing excludes Python loop overhead and reports the actual
     # kernel time. Wall timing is retained to expose synchronization/dispatch
     # overhead that a live single-frame worker also pays.
@@ -77,11 +79,35 @@ def _measure_forward(net: torch.nn.Module, tensor: torch.Tensor, iterations: int
     return elapsed, _fps(elapsed, iterations), gpu_ms
 
 
+def _measure_native(
+    runtime: NativeTensorRTRuntime,
+    inference_frame: InferenceFrame,
+    iterations: int,
+) -> tuple[float, float, dict[str, float]]:
+    """Measure the exact native path and average its internal stage timers."""
+
+    sums: dict[str, float] = {}
+    started = perf_counter()
+    for _ in range(iterations):
+        run_yolo(inference_frame, runtime)
+        for key, value in runtime.last_timings.items():
+            sums[key] = sums.get(key, 0.0) + float(value)
+    elapsed = perf_counter() - started
+    return (
+        elapsed,
+        _fps(elapsed, iterations),
+        {key: value / iterations for key, value in sums.items()},
+    )
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=os.getenv("YOLO_MODEL", "yolo26s-seg.pt"))
+    parser.add_argument("--manifest", default=os.getenv("YOLO_ENGINE_MANIFEST"))
     parser.add_argument("--device", default=os.getenv("YOLO_DEVICE", "cuda:0"))
-    parser.add_argument("--imgsz", type=int, default=int(os.getenv("YOLO_MAX_IMGSZ", "704")))
+    parser.add_argument(
+        "--imgsz", type=int, default=int(os.getenv("YOLO_MAX_IMGSZ", "640"))
+    )
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--warmup", type=int, default=20)
@@ -93,25 +119,31 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     if args.iterations < 1 or args.warmup < 0:
-        raise SystemExit("--iterations must be positive and --warmup cannot be negative")
+        raise SystemExit(
+            "--iterations must be positive and --warmup cannot be negative"
+        )
     if args.imgsz <= 0 or args.imgsz % 32:
         raise SystemExit("--imgsz must be a positive multiple of 32")
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise SystemExit("CUDA was requested but torch.cuda.is_available() is false")
 
     settings.YOLO_MODEL = args.model
+    settings.YOLO_ENGINE_MANIFEST = args.manifest
     settings.YOLO_DEVICE = args.device
     settings.YOLO_MAX_IMGSZ = args.imgsz
     settings.YOLO_HALF = args.precision == "fp16"
+    settings.YOLO_WARMUP_ITERATIONS = args.warmup
 
     print(f"model={args.model}")
     print(f"device={args.device}")
     if args.device.startswith("cuda"):
         index = torch.device(args.device).index or 0
         print(f"gpu={torch.cuda.get_device_name(index)}")
-    print(f"input={args.width}x{args.height}, imgsz={args.imgsz}, precision={args.precision}")
+    print(
+        f"input={args.width}x{args.height}, imgsz={args.imgsz}, precision={args.precision}"
+    )
 
-    model: YOLO = load_yolo_model()
+    model = load_yolo_model()
     if model.task != "segment":
         raise SystemExit(f"expected a segmentation model, got task={model.task!r}")
 
@@ -127,7 +159,54 @@ def main() -> None:
         timestamp_us=0,
         keyframe=True,
     )
-    quantize = 16 if args.precision == "fp16" and args.device.startswith("cuda") else 32
+    half_precision = args.precision == "fp16" and args.device.startswith("cuda")
+
+    if isinstance(model, NativeTensorRTRuntime):
+        if (model.input_height, model.input_width) != (args.imgsz, args.imgsz):
+            print(
+                "note: the TensorRT engine is fixed at "
+                f"{model.input_width}x{model.input_height}; --imgsz={args.imgsz} "
+                "does not change it"
+            )
+        print("native TensorRT warmup completed during engine load")
+        conversion_seconds, conversion_fps = _measure_wall(
+            lambda: frame.to_ndarray(format="bgr24"), args.iterations, "cpu"
+        )
+        gc.disable()
+        native_seconds, native_fps, stage_ms = _measure_native(
+            model, inference_frame, args.iterations
+        )
+        gc.enable()
+        print("\nResults")
+        print(
+            f"  PyAV conversion      : {conversion_fps:6.2f} FPS ({conversion_seconds * 1000 / args.iterations:6.2f} ms wall)"
+        )
+        print(
+            f"  native TensorRT path : {native_fps:6.2f} FPS ({native_seconds * 1000 / args.iterations:6.2f} ms wall)"
+        )
+        for key in (
+            "decode_ms",
+            "preprocess_ms",
+            "h2d_ms",
+            "trt_enqueue_ms",
+            "d2h_and_sync_ms",
+            "postprocess_tracking_ms",
+            "total_ms",
+        ):
+            if key in stage_ms:
+                print(f"  {key:22s}: {stage_ms[key]:6.2f} ms avg")
+        print("\nInterpretation")
+        if native_fps < 30:
+            print(
+                "  Native path is below 30 FPS; use the stage timings above to identify the bottleneck."
+            )
+        else:
+            print("  Native TensorRT path clears the 30 FPS single-stream target.")
+        print(
+            "  30 FPS budget: 33.33 ms per completed frame, including decode and result handling."
+        )
+        model.close()
+        return
 
     print(f"warming up ({args.warmup} iterations)...")
     for _ in range(args.warmup):
@@ -135,7 +214,7 @@ def main() -> None:
             image,
             device=args.device,
             imgsz=args.imgsz,
-            quantize=quantize,
+            half=half_precision,
             verbose=False,
         )
     _sync(args.device)
@@ -152,7 +231,7 @@ def main() -> None:
             image,
             device=args.device,
             imgsz=args.imgsz,
-            quantize=quantize,
+            half=half_precision,
             verbose=False,
         ),
         args.iterations,
@@ -162,12 +241,14 @@ def main() -> None:
     # Direct forward on a correctly shaped, normalized tensor isolates the
     # neural network kernels from Ultralytics preprocessing and postprocessing.
     net = model.model.eval()
-    dtype = torch.float16 if quantize == 16 else torch.float32
-    if quantize == 16:
+    dtype = torch.float16 if half_precision else torch.float32
+    if half_precision:
         net.half()
     else:
         net.float()
-    tensor = torch.zeros((1, 3, args.imgsz, args.imgsz), device=args.device, dtype=dtype)
+    tensor = torch.zeros(
+        (1, 3, args.imgsz, args.imgsz), device=args.device, dtype=dtype
+    )
     forward_seconds, forward_fps, forward_gpu_ms = _measure_forward(
         net, tensor, args.iterations, args.device
     )
@@ -180,21 +261,37 @@ def main() -> None:
     gc.enable()
 
     print("\nResults")
-    print(f"  direct model forward : {forward_fps:6.2f} FPS ({forward_gpu_ms:6.2f} ms GPU event)")
-    print(f"  Ultralytics predict  : {predict_fps:6.2f} FPS ({predict_seconds * 1000 / args.iterations:6.2f} ms wall)")
-    print(f"  PyAV conversion      : {conversion_fps:6.2f} FPS ({conversion_seconds * 1000 / args.iterations:6.2f} ms wall)")
-    print(f"  exact run_yolo path  : {exact_fps:6.2f} FPS ({exact_seconds * 1000 / args.iterations:6.2f} ms wall)")
+    print(
+        f"  direct model forward : {forward_fps:6.2f} FPS ({forward_gpu_ms:6.2f} ms GPU event)"
+    )
+    print(
+        f"  Ultralytics predict  : {predict_fps:6.2f} FPS ({predict_seconds * 1000 / args.iterations:6.2f} ms wall)"
+    )
+    print(
+        f"  PyAV conversion      : {conversion_fps:6.2f} FPS ({conversion_seconds * 1000 / args.iterations:6.2f} ms wall)"
+    )
+    print(
+        f"  exact run_yolo path  : {exact_fps:6.2f} FPS ({exact_seconds * 1000 / args.iterations:6.2f} ms wall)"
+    )
 
     print("\nInterpretation")
     if forward_fps < 30:
-        print("  GPU/model is below the 30 FPS target; reduce imgsz or use a faster/exported engine.")
+        print(
+            "  GPU/model is below the 30 FPS target; reduce imgsz or use a faster/exported engine."
+        )
     elif predict_fps < 30:
-        print("  GPU forward clears 30 FPS, but Ultralytics preprocessing/postprocessing is the bottleneck.")
+        print(
+            "  GPU forward clears 30 FPS, but Ultralytics preprocessing/postprocessing is the bottleneck."
+        )
     elif exact_fps < 30:
         print("  PyAV conversion or detection-to-JSON extraction is the bottleneck.")
     else:
-        print("  This isolated path clears 30 FPS; inspect relay input rate, WebSocket delivery, and browser pacing.")
-    print("  30 FPS budget: 33.33 ms per completed frame, including decode and result handling.")
+        print(
+            "  This isolated path clears 30 FPS; inspect relay input rate, WebSocket delivery, and browser pacing."
+        )
+    print(
+        "  30 FPS budget: 33.33 ms per completed frame, including decode and result handling."
+    )
 
 
 if __name__ == "__main__":

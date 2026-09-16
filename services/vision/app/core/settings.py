@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # FP16 is substantially faster on RTX-class CUDA GPUs. It is enabled by
     # default but is automatically ignored when YOLO_DEVICE is CPU.
     YOLO_HALF: bool = True
+    # Native TensorRT uses a versioned sidecar manifest next to the .engine
+    # file unless this path is explicitly supplied.
+    YOLO_ENGINE_MANIFEST: str | None = None
+    YOLO_WARMUP_ITERATIONS: int = Field(default=3, ge=0, le=100)
     BBOX_FORMAT: Literal[
         "xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"
     ] = "xyxy_normalized"
@@ -48,6 +52,8 @@ class Settings(BaseSettings):
     # track still has to clear the higher new_track_thresh in the tracker
     # config, so weak noise cannot start one.
     CONF_THRESHOLD_LOW: float = Field(default=0.1, ge=0.0, le=1.0)
+    YOLO_IOU_THRESHOLD: float = Field(default=0.7, ge=0.0, le=1.0)
+    YOLO_MAX_DETECTIONS: int = Field(default=300, ge=1, le=10_000)
     # Ordered no-drop delivery is what makes a motion-model tracker usable
     # here: frame N+1 always follows N, so association never sees a gap.
     # Disable to fall back to stateless per-frame detection.
@@ -90,6 +96,7 @@ class Settings(BaseSettings):
     @field_validator(
         "YOLO_MODEL",
         "YOLO_DEVICE",
+        "YOLO_ENGINE_MANIFEST",
         "YOLO_TRACKER_CONFIG",
         "HOST",
         "FORWARDED_ALLOW_IPS",

@@ -7,7 +7,6 @@ from typing import Any
 
 from av import VideoFrame
 from starlette.requests import HTTPConnection
-from ultralytics import YOLO
 
 
 @dataclass
@@ -47,7 +46,10 @@ class PlaybackItem:
 class AppState:
     """Process-wide state for the single ordered inference/playback session."""
 
-    yolo_model: YOLO | None = None
+    # The live worker accepts either the legacy Ultralytics model or the
+    # persistent native TensorRT runtime. Keep this field intentionally loose
+    # so importing state does not force either inference backend.
+    yolo_model: Any | None = None
     android_live: bool = False
     current_epoch: int = 0
     session_id: str | None = None

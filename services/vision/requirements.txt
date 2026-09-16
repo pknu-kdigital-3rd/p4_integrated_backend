@@ -5,6 +5,11 @@ openai
 aiortc
 pydantic-settings
 
+# Native Linux runtime for .engine models. TensorRT plans must be built on the
+# deployment GPU; these packages are intentionally excluded on Windows.
+tensorrt-cu13; platform_system == "Linux"
+cuda-python; platform_system == "Linux"
+
 # ultralytics pulls in torch/torchvision transitively, but plain `pip install
 # -r requirements.txt` resolves the CPU-only build. For GPU inference, install
 # the CUDA build first from PyTorch's index (match the CUDA version to the

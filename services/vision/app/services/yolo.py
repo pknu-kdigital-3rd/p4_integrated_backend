@@ -18,6 +18,7 @@ from ultralytics import YOLO
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.monocular import annotate_result
+from app.services.tensorrt_runtime import NativeTensorRTRuntime
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
 # one-byte record kind and the kind-specific body.
@@ -73,8 +74,22 @@ async def _write_record(
     await writer.drain()
 
 
-def load_yolo_model() -> YOLO:
+def load_yolo_model() -> YOLO | NativeTensorRTRuntime:
     print(f"YOLO inference device: {settings.YOLO_DEVICE}")
+    if Path(settings.YOLO_MODEL).suffix.lower() == ".engine":
+        runtime = NativeTensorRTRuntime(
+            settings.YOLO_MODEL,
+            manifest_path=settings.YOLO_ENGINE_MANIFEST,
+            device=settings.YOLO_DEVICE,
+        )
+        runtime.warmup(settings.YOLO_WARMUP_ITERATIONS)
+        print(
+            "TensorRT engine loaded: "
+            f"{runtime.engine_path} ({runtime.model_version}, "
+            f"input={runtime.input_shape})",
+            flush=True,
+        )
+        return runtime
     model = YOLO(settings.YOLO_MODEL)
     if model.task != "segment":
         raise ValueError(
@@ -92,9 +107,12 @@ def load_yolo_model() -> YOLO:
     return model
 
 
-def reset_tracker(yolo_model: YOLO) -> None:
+def reset_tracker(yolo_model: YOLO | NativeTensorRTRuntime | object) -> None:
     """Drop tracker state so a new epoch cannot inherit old track identities."""
 
+    if isinstance(yolo_model, NativeTensorRTRuntime):
+        yolo_model.reset_tracker()
+        return
     predictor = getattr(yolo_model, "predictor", None)
     trackers = getattr(predictor, "trackers", None)
     if not trackers:
@@ -108,15 +126,17 @@ def reset_tracker(yolo_model: YOLO) -> None:
         del predictor.trackers
 
 
-def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
+def run_yolo(
+    inference_frame: InferenceFrame, yolo_model: YOLO | NativeTensorRTRuntime | object
+) -> dict:
+    if isinstance(yolo_model, NativeTensorRTRuntime):
+        return yolo_model.infer(inference_frame)
     start = perf_counter()
     img = inference_frame.frame.to_ndarray(format="bgr24")
     frame_height, frame_width = img.shape[:2]
     longest_side = max(frame_width, frame_height)
     imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
-    quantize = (
-        16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
-    )
+    half_precision = settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda")
     tracking = settings.YOLO_TRACKING
     with torch.inference_mode():
         if tracking:
@@ -124,11 +144,13 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 img,
                 device=settings.YOLO_DEVICE,
                 imgsz=imgsz,
-                quantize=quantize,
+                half=half_precision,
                 # Hand the weak detections to the tracker rather than dropping
                 # them here; its second association stage is what keeps an
                 # established track alive through a confidence dip.
                 conf=settings.CONF_THRESHOLD_LOW,
+                iou=settings.YOLO_IOU_THRESHOLD,
+                max_det=settings.YOLO_MAX_DETECTIONS,
                 tracker=settings.YOLO_TRACKER_CONFIG,
                 persist=True,
                 verbose=False,
@@ -139,7 +161,10 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 img,
                 device=settings.YOLO_DEVICE,
                 imgsz=imgsz,
-                quantize=quantize,
+                half=half_precision,
+                conf=settings.CONF_THRESHOLD_LOW,
+                iou=settings.YOLO_IOU_THRESHOLD,
+                max_det=settings.YOLO_MAX_DETECTIONS,
                 verbose=False,
                 retina_masks=True,
             )

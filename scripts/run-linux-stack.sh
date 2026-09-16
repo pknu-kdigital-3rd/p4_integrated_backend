@@ -250,7 +250,7 @@ setup_stack() {
   (
     cd "${PROJECT_ROOT}/services/vision"
     uv sync
-    uv run python -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; name=torch.cuda.get_device_name(0); assert "3090" in name, name; print(name); print(torch.cuda.get_arch_list())'
+    uv run python -c 'import torch, tensorrt; from cuda.bindings import runtime as cudart; assert torch.cuda.is_available(), "CUDA unavailable"; name=torch.cuda.get_device_name(0); assert "3090" in name, name; print(name); print(torch.cuda.get_arch_list()); print("TensorRT", tensorrt.__version__); print("cuda-python", cudart.__name__)'
   )
 
   log "Validating Nginx configuration"

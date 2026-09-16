@@ -57,19 +57,26 @@ async def lifespan(app: FastAPI):
     # the relay isn't reachable yet, and startup shouldn't block on that.
     android_live_sync_task = asyncio.create_task(sync_android_live_from_relay(state))
 
-    yield
-
-    # Without this, Ctrl+C leaves these infinite-loop/background tasks
-    # running with nothing waiting on them - uvicorn's shutdown has nothing
-    # to block on to know they've actually stopped, so the process doesn't
-    # exit cleanly. CancelledError isn't an Exception subclass (Python 3.8+),
-    # so none of these tasks' own exception handling swallows this.
-    frame_receiver_task.cancel()
-    yolo_worker_task.cancel()
-    android_live_sync_task.cancel()
-    await asyncio.gather(
-        frame_receiver_task, yolo_worker_task, android_live_sync_task, return_exceptions=True
-    )
+    try:
+        yield
+    finally:
+        # Without this, Ctrl+C leaves these infinite-loop/background tasks
+        # running with nothing waiting on them - uvicorn's shutdown has nothing
+        # to block on to know they've actually stopped, so the process doesn't
+        # exit cleanly. CancelledError isn't an Exception subclass (Python 3.8+),
+        # so none of these tasks' own exception handling swallows this.
+        frame_receiver_task.cancel()
+        yolo_worker_task.cancel()
+        android_live_sync_task.cancel()
+        await asyncio.gather(
+            frame_receiver_task,
+            yolo_worker_task,
+            android_live_sync_task,
+            return_exceptions=True,
+        )
+        close_runtime = getattr(state.yolo_model, "close", None)
+        if close_runtime is not None:
+            close_runtime()
 
 
 app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")
@@ -79,6 +86,7 @@ app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")
 async def health_live():
     """Ingress liveness check; it does not create a playback session."""
     return {"status": "ok"}
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -5,10 +5,14 @@ description = "WebRTC relay server with YOLO object detection"
 requires-python = ">=3.10"
 dependencies = [
     "aiortc",
+    # Native TensorRT is installed only on the Linux deployment target. The
+    # .pt/Ultralytics path remains available on Windows and CPU test hosts.
+    "cuda-python; sys_platform == 'linux'",
     "fastapi[standard]",
     "openai",
     "opencv-python-headless",
     "pydantic-settings",
+    "tensorrt-cu13; sys_platform == 'linux'",
     "torch",
     "torchvision",
     "ultralytics",
