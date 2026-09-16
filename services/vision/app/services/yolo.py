@@ -42,6 +42,114 @@ def _discard_inference_queue(state: AppState) -> None:
             return
 
 
+def _take_latest_inference_frame(
+    state: AppState, first: InferenceFrame
+) -> tuple[InferenceFrame, list[InferenceFrame]]:
+    """Keep the newest queued frame and return older frames for passthrough."""
+
+    latest = first
+    dropped: list[InferenceFrame] = []
+    while True:
+        try:
+            candidate = state.inference_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return latest, dropped
+        dropped.append(latest)
+        latest = candidate
+
+
+def _source_metadata(inference_frame: InferenceFrame) -> dict[str, object]:
+    return {
+        "epoch": inference_frame.epoch,
+        "seq": inference_frame.seq,
+        "pts": inference_frame.pts,
+        "time_base": inference_frame.time_base,
+        "time": inference_frame.media_time,
+        "timestamp_us": inference_frame.timestamp_us,
+    }
+
+
+def _skipped_frame_result(
+    inference_frame: InferenceFrame, previous_result: dict | None
+) -> dict:
+    """Build a cheap playback item for a frame not sent through the model."""
+
+    frame = inference_frame.frame
+    width = int((previous_result or {}).get("width") or getattr(frame, "width", 0) or 0)
+    height = int(
+        (previous_result or {}).get("height") or getattr(frame, "height", 0) or 0
+    )
+    previous_items = (previous_result or {}).get("items", [])
+    if not isinstance(previous_items, (list, tuple)):
+        previous_items = []
+    # Inference results are immutable after they are stored. Reuse the item
+    # dictionaries and only copy the outer list so a skipped media frame does
+    # not spend time cloning every detection while the model is overloaded.
+    items = list(previous_items)
+    if previous_result and previous_result.get("monocular"):
+        # A monocular distance is tied to the inferred frame's QR/IMU sample;
+        # never present that stale measurement as if it belonged to this media
+        # frame. The geometry/classification can still be held for continuity.
+        items = []
+        for item in previous_items:
+            copied = dict(item) if isinstance(item, dict) else item
+            if isinstance(copied, dict):
+                for key in ("distance_m", "distance_status", "distance_anchor"):
+                    copied.pop(key, None)
+            items.append(copied)
+    return {
+        "source": _source_metadata(inference_frame),
+        "width": width,
+        "height": height,
+        "items": items,
+        "inference_ms": 0.0,
+        "inference_skipped": True,
+        "monocular": {"status": "inference_skipped"},
+    }
+
+
+async def _publish_skipped_frames(
+    state: AppState,
+    frames: list[InferenceFrame],
+    previous_result: dict | None,
+    previous_result_epoch: int | None,
+) -> int:
+    """Publish media-preserving placeholders for frames omitted by inference."""
+
+    if not frames:
+        return 0
+    published = 0
+    async with state.result_condition:
+        for inference_frame in frames:
+            key = (inference_frame.epoch, inference_frame.seq)
+            state.queued_sequences.discard(key)
+            if inference_frame.epoch != state.current_epoch:
+                continue
+            result = _skipped_frame_result(
+                inference_frame,
+                (
+                    previous_result
+                    if previous_result_epoch == inference_frame.epoch
+                    else None
+                ),
+            )
+            state.completed_sequences.add(key)
+            state.put_result(
+                PlaybackItem(
+                    epoch=inference_frame.epoch,
+                    seq=inference_frame.seq,
+                    encoded=inference_frame.encoded,
+                    timestamp_us=inference_frame.timestamp_us,
+                    keyframe=inference_frame.keyframe,
+                    result=result,
+                )
+            )
+            published += 1
+        if published:
+            state.result_condition.notify_all()
+    return published
+
+
 def _record(kind: int, body: bytes = b"") -> bytes:
     payload = bytes([kind]) + body
     return RECORD_HEADER.pack(len(payload)) + payload
@@ -175,14 +283,7 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
     return {
-        "source": {
-            "epoch": inference_frame.epoch,
-            "seq": inference_frame.seq,
-            "pts": inference_frame.pts,
-            "time_base": inference_frame.time_base,
-            "time": inference_frame.media_time,
-            "timestamp_us": inference_frame.timestamp_us,
-        },
+        "source": _source_metadata(inference_frame),
         "width": frame_width,
         "height": frame_height,
         "items": detections,
@@ -402,15 +503,36 @@ async def frame_receiver(state: AppState) -> None:
 
 
 async def yolo_worker(state: AppState) -> None:
-    """Infer every queued decoded frame; a failed frame never advances."""
+    """Infer queued decoded frames using the configured drop policy."""
+    print(
+        f"YOLO frame drop policy: {settings.YOLO_FRAME_DROP_POLICY}",
+        flush=True,
+    )
     run_inference = partial(run_yolo, yolo_model=state.yolo_model)
     retry_frame: InferenceFrame | None = None
+    previous_result: dict | None = None
+    previous_result_epoch: int | None = None
     window_started = perf_counter()
     window_completed = 0
+    window_dropped = 0
     while True:
+        retrying = retry_frame is not None
         inference_frame = retry_frame or await state.inference_queue.get()
         retry_frame = None
+        if settings.YOLO_FRAME_DROP_POLICY == "latest" and not retrying:
+            inference_frame, dropped_frames = _take_latest_inference_frame(
+                state, inference_frame
+            )
+            window_dropped += await _publish_skipped_frames(
+                state,
+                dropped_frames,
+                previous_result,
+                previous_result_epoch,
+            )
         if inference_frame.epoch != state.current_epoch:
+            if previous_result_epoch != state.current_epoch:
+                previous_result = None
+                previous_result_epoch = None
             continue
         if state.fault is not None:
             # Do not silently process later sequences after a failed frame.
@@ -450,6 +572,8 @@ async def yolo_worker(state: AppState) -> None:
             # here), so the epoch gate at the top of the loop isn't enough on
             # its own - re-check before storing anything under a now-stale
             # epoch.
+            previous_result = None
+            previous_result_epoch = None
             continue
 
         if state.monocular_resolver is not None:
@@ -461,6 +585,8 @@ async def yolo_worker(state: AppState) -> None:
                 max_frame_delta_ms=settings.MONOCULAR_SOURCE_MAX_DELTA_MS,
                 max_imu_delta_ms=settings.MONOCULAR_IMU_MAX_DELTA_MS,
             )
+        previous_result = result
+        previous_result_epoch = inference_frame.epoch
 
         item = PlaybackItem(
             epoch=inference_frame.epoch,
@@ -482,8 +608,10 @@ async def yolo_worker(state: AppState) -> None:
                 "YOLO throughput: "
                 f"{window_completed / elapsed:.1f} fps; "
                 f"last={result['inference_ms']:.1f} ms; "
-                f"pending={state.inference_queue.qsize()}",
+                f"pending={state.inference_queue.qsize()}; "
+                f"dropped={window_dropped}",
                 flush=True,
             )
             window_started = perf_counter()
             window_completed = 0
+            window_dropped = 0

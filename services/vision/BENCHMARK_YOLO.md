@@ -40,3 +40,11 @@ The target is 30 FPS, or 33.33 ms per frame. Interpret the results in order:
 Always discard the first warmup iterations. CUDA timings are synchronized by
 the script; without synchronization, asynchronous kernel launches make the
 GPU appear faster than the live worker really is.
+
+## Live frame policy
+
+Set `YOLO_FRAME_DROP_POLICY=latest` to keep inference near the live edge when
+the model cannot keep up. The worker skips queued model calls but still passes
+the compressed frames through with the last completed detections, preserving
+H.264 playback. The default `YOLO_FRAME_DROP_POLICY=queue` retains the current
+ordered behavior and processes every queued frame.
