@@ -47,8 +47,10 @@ class _SegmentationModel:
     def __init__(self, result):
         self.result = result
         self.track_kwargs = None
+        self.predict_kwargs = None
 
-    def __call__(self, *_args, **_kwargs):
+    def __call__(self, *_args, **kwargs):
+        self.predict_kwargs = kwargs
         return [self.result]
 
     def track(self, *_args, **kwargs):
@@ -96,6 +98,8 @@ class RunYoloTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["class"], "dog")
         self.assertEqual(result["items"][0]["mask_format"], "polygon_normalized")
         self.assertTrue(np.allclose(result["items"][0]["mask"], polygons[1]))
+        self.assertFalse(model.predict_kwargs["retina_masks"])
+        self.assertEqual(model.predict_kwargs["max_det"], 100)
 
     def test_tracking_emits_ids_and_leaves_weak_boxes_to_the_tracker(self):
         boxes = [
@@ -127,6 +131,8 @@ class RunYoloTests(unittest.TestCase):
         self.assertEqual([item["track_id"] for item in result["items"]], [4, 7])
         self.assertTrue(model.track_kwargs["persist"])
         self.assertEqual(model.track_kwargs["conf"], 0.3)
+        self.assertFalse(model.track_kwargs["retina_masks"])
+        self.assertEqual(model.track_kwargs["max_det"], 100)
         self.assertEqual(model.track_kwargs["tracker"], "bytetrack.yaml")
 
     def test_reset_tracker_clears_state_for_a_new_epoch(self):
