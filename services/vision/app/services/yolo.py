@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from fractions import Fraction
 from functools import partial
 from time import perf_counter
+from pathlib import Path
 
 import av
 import torch
@@ -80,11 +81,12 @@ def load_yolo_model() -> YOLO:
             f"YOLO_MODEL must be a segmentation checkpoint; {settings.YOLO_MODEL!r} "
             f"is a {model.task!r} model"
         )
-    model.to(settings.YOLO_DEVICE)
-    # Fuse Conv+BatchNorm where supported. This is a one-time optimization and
-    # avoids paying the unfused layer overhead on every frame.
-    if hasattr(model, "fuse"):
-        model.fuse()
+    if Path(settings.YOLO_MODEL).suffix.lower() != ".engine":
+        model.to(settings.YOLO_DEVICE)
+        # Fuse Conv+BatchNorm where supported. This is a one-time optimization and
+        # avoids paying the unfused layer overhead on every frame.
+        if hasattr(model, "fuse"):
+            model.fuse()
     if settings.YOLO_DEVICE.startswith("cuda"):
         torch.backends.cudnn.benchmark = True
     return model
