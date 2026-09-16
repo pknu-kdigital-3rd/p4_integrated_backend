@@ -46,9 +46,10 @@ This creates:
 ```
 
 The engine is static batch 1, FP16, RGB NCHW, and 640x640. The runtime
-preallocates pinned host/device buffers and one CUDA stream, launches with
-TensorRT `execute_async_v3`, then performs NumPy/OpenCV segmentation decode
-and the existing ByteTrack association.
+preallocates a pinned input buffer, CUDA-backed PyTorch output tensors, and one
+CUDA stream, launches with TensorRT `execute_async_v3`, performs score/NMS and
+mask projection on the GPU, then copies compact masks to NumPy for the existing
+polygon/ByteTrack/JSON boundary.
 
 ## Select it
 
@@ -81,6 +82,6 @@ uv run python benchmark_yolo.py \
 
 The target for the current single-stream pipeline is 33.33 ms per completed
 frame, including frame conversion and result handling. The benchmark prints
-separate decode/preprocess, H2D, TensorRT dispatch, D2H synchronization, and
-postprocess/tracking timings so a future GPU-decode phase can be justified by
-measurement rather than added speculatively.
+separate decode/preprocess, H2D, TensorRT dispatch, GPU postprocess, compact
+D2H, polygon serialization, and tracking timings so the live bottleneck can be
+identified from measurements.

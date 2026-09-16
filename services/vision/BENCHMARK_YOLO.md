@@ -25,8 +25,8 @@ For a `.engine`, the report separates:
 | Measurement | Includes | Use it to identify |
 |---|---|---|
 | PyAV conversion | `VideoFrame.to_ndarray()` | Decode/frame conversion overhead |
-| Native TensorRT path | PyAV conversion, fixed-shape preprocessing, H2D, TensorRT enqueue, D2H synchronization, NMS/masks, ByteTrack, JSON-ready output | Real single-frame inference throughput |
-| Stage timings | `decode`, `preprocess`, `h2d`, `trt_enqueue`, `d2h_and_sync`, `postprocess_tracking` | The native path bottleneck |
+| Native TensorRT path | PyAV conversion, fixed-shape preprocessing, H2D, TensorRT enqueue, GPU NMS/masks, compact D2H, ByteTrack, JSON-ready output | Real single-frame inference throughput |
+| Stage timings | `decode`, `preprocess`, `h2d`, `trt_enqueue`, `gpu_postprocess`, `compact_d2h`, `polygon_serialization`, `postprocess_tracking` | The native path bottleneck |
 
 For a `.pt`, the report additionally separates direct PyTorch forward,
 Ultralytics predict, and the exact `run_yolo` path.

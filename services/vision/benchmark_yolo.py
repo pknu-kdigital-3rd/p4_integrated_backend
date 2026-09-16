@@ -189,7 +189,9 @@ def main() -> None:
             "preprocess_ms",
             "h2d_ms",
             "trt_enqueue_ms",
-            "d2h_and_sync_ms",
+            "gpu_postprocess_ms",
+            "compact_d2h_ms",
+            "polygon_serialization_ms",
             "postprocess_tracking_ms",
             "total_ms",
         ):

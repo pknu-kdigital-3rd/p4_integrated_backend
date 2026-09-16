@@ -8,9 +8,11 @@ exercise the decoder and preprocessing helpers without installing NVIDIA's
 Linux runtime packages.
 
 The engine produced by ``build_tensorrt_engine.py`` is deliberately static:
-batch 1, RGB NCHW, and a fixed 640x640 input.  Keeping the execution context
+batch 1, RGB NCHW, and a fixed 640x640 input. Keeping the execution context
 and all device/host buffers alive across calls avoids per-frame allocation and
-engine setup overhead.
+engine setup overhead. TensorRT outputs stay in CUDA-backed PyTorch tensors;
+GPU score filtering, NMS, and mask projection happen before only compact
+boxes/classes/masks are copied to the CPU for polygon extraction and tracking.
 """
 
 from __future__ import annotations
@@ -81,6 +83,18 @@ class _HostBuffer:
     nbytes: int
     array: np.ndarray
     backing: Any
+
+
+@dataclass(frozen=True)
+class _TorchDecodedDetections:
+    """GPU postprocess outputs awaiting one compact host transfer."""
+
+    boxes_xyxy: Any
+    confidences: Any
+    class_ids: Any
+    binary_masks: Any
+    mask_width: int
+    mask_height: int
 
 
 @dataclass(frozen=True)
@@ -529,6 +543,266 @@ def decode_segmentation_outputs(
     return detections
 
 
+def decode_segmentation_outputs_torch(
+    outputs: Mapping[str, Any],
+    meta: LetterboxMeta,
+    manifest: Mapping[str, Any],
+    torch_module: Any,
+    confidence_threshold: float | None = None,
+    iou_threshold: float | None = None,
+    max_detections: int | None = None,
+    batched_nms: Any | None = None,
+) -> _TorchDecodedDetections | None:
+    """Decode predictions and project masks while tensors remain on CUDA.
+
+    The returned tensors are still on the same device as the TensorRT output.
+    The caller synchronizes the shared stream and copies only these compact
+    tensors to the CPU. Polygon extraction is intentionally left outside this
+    function because the service's public contract currently requires
+    normalized polygons rather than a GPU-native mask representation.
+    """
+
+    import torch.nn.functional as functional
+
+    postprocess = manifest["postprocess"]
+    output_specs = manifest["outputs"]
+    prediction_name = postprocess.get("prediction_output")
+    prototype_name = postprocess.get("prototype_output")
+    if prediction_name is None:
+        prediction_name = next(
+            (
+                name
+                for name, spec in output_specs.items()
+                if isinstance(spec, dict) and spec.get("role") == "predictions"
+            ),
+            None,
+        )
+    if prototype_name is None:
+        prototype_name = next(
+            (
+                name
+                for name, spec in output_specs.items()
+                if isinstance(spec, dict) and spec.get("role") == "prototypes"
+            ),
+            None,
+        )
+    if prediction_name not in outputs:
+        raise TensorRTRuntimeError(
+            f"prediction output {prediction_name!r} is not present in engine outputs"
+        )
+    if prototype_name not in outputs:
+        raise TensorRTRuntimeError(
+            f"prototype output {prototype_name!r} is not present in engine outputs"
+        )
+
+    names = manifest["names"]
+    class_count = len(names)
+    mask_dim = int(postprocess.get("mask_dim", 32))
+    layout = str(postprocess.get("layout", "raw")).lower()
+    box_offset = int(postprocess.get("box_offset", 0))
+    class_offset = int(postprocess.get("class_offset", 5 if layout == "end2end" else 4))
+    mask_offset = int(
+        postprocess.get(
+            "mask_offset", 6 if layout == "end2end" else class_offset + class_count
+        )
+    )
+    box_format = str(
+        postprocess.get("box_format", "xyxy" if layout == "end2end" else "xywh")
+    ).lower()
+    prediction = outputs[prediction_name]
+    if prediction.ndim >= 1 and prediction.shape[0] == 1:
+        prediction = prediction[0]
+    if prediction.ndim != 2:
+        raise TensorRTRuntimeError(
+            "expected a 2-D prediction tensor after batch squeeze, "
+            f"got {tuple(prediction.shape)}"
+        )
+    expected_channels = mask_offset + mask_dim
+    if layout == "end2end":
+        if (
+            prediction.shape[0] == expected_channels
+            and prediction.shape[1] != expected_channels
+        ):
+            prediction = prediction.transpose(0, 1)
+    elif (
+        prediction.shape[0] == expected_channels
+        and prediction.shape[1] != expected_channels
+    ):
+        prediction = prediction.transpose(0, 1)
+    elif (
+        prediction.shape[1] != expected_channels
+        and prediction.shape[0] < prediction.shape[1]
+    ):
+        prediction = prediction.transpose(0, 1)
+    if prediction.shape[1] < expected_channels:
+        raise TensorRTRuntimeError(
+            f"prediction tensor has {prediction.shape[1]} channels; "
+            f"manifest requires at least {expected_channels}"
+        )
+
+    boxes = prediction[:, box_offset : box_offset + 4].float()
+    if box_format == "xyxy":
+        boxes_input = boxes.clone()
+    elif box_format == "xywh":
+        center_x, center_y, width, height = boxes.unbind(dim=1)
+        boxes_input = torch_module.stack(
+            (
+                center_x - width / 2.0,
+                center_y - height / 2.0,
+                center_x + width / 2.0,
+                center_y + height / 2.0,
+            ),
+            dim=1,
+        )
+    else:
+        raise TensorRTRuntimeError(f"unsupported prediction box format {box_format!r}")
+
+    if layout == "end2end":
+        score_offset = int(postprocess.get("score_offset", 4))
+        confidences = prediction[:, score_offset].float()
+        class_ids = torch_module.round(prediction[:, class_offset]).long()
+        class_ids = torch_module.clamp(class_ids, 0, max(0, class_count - 1))
+    else:
+        scores = prediction[:, class_offset : class_offset + class_count]
+        if postprocess.get("scores_activation") == "sigmoid":
+            scores = torch_module.sigmoid(scores)
+        class_ids = scores.argmax(dim=1)
+        confidences = scores.gather(1, class_ids[:, None]).squeeze(1).float()
+
+    confidence_threshold = (
+        float(postprocess.get("confidence_threshold", settings.CONF_THRESHOLD_LOW))
+        if confidence_threshold is None
+        else float(confidence_threshold)
+    )
+    keep = confidences >= confidence_threshold
+    if int(keep.sum().item()) == 0:
+        return None
+    boxes_input = boxes_input[keep]
+    confidences = confidences[keep]
+    class_ids = class_ids[keep]
+    mask_coefficients = prediction[keep, mask_offset : mask_offset + mask_dim]
+
+    boxes_original = boxes_input.clone()
+    boxes_original[:, [0, 2]] = (boxes_original[:, [0, 2]] - meta.pad_x) / meta.scale
+    boxes_original[:, [1, 3]] = (boxes_original[:, [1, 3]] - meta.pad_y) / meta.scale
+    boxes_original[:, [0, 2]] = torch_module.clamp(
+        boxes_original[:, [0, 2]], 0, meta.original_width
+    )
+    boxes_original[:, [1, 3]] = torch_module.clamp(
+        boxes_original[:, [1, 3]], 0, meta.original_height
+    )
+
+    iou_threshold = (
+        float(postprocess.get("iou_threshold", settings.YOLO_IOU_THRESHOLD))
+        if iou_threshold is None
+        else float(iou_threshold)
+    )
+    max_detections = (
+        int(postprocess.get("max_detections", settings.YOLO_MAX_DETECTIONS))
+        if max_detections is None
+        else int(max_detections)
+    )
+    max_detections = max(1, max_detections)
+    if layout == "end2end" and not bool(postprocess.get("apply_nms", False)):
+        kept = torch_module.argsort(confidences, descending=True, stable=True)[
+            :max_detections
+        ]
+    else:
+        if batched_nms is None:
+            try:
+                from torchvision.ops import batched_nms as batched_nms_impl
+            except (ImportError, RuntimeError) as exc:
+                raise TensorRTRuntimeError(
+                    "GPU TensorRT postprocess requires torchvision.ops.batched_nms"
+                ) from exc
+            batched_nms = batched_nms_impl
+        kept = batched_nms(
+            boxes_original, confidences, class_ids, float(iou_threshold)
+        )[:max_detections]
+
+    boxes_original = boxes_original[kept]
+    boxes_input = boxes_input[kept]
+    confidences = confidences[kept]
+    class_ids = class_ids[kept]
+    mask_coefficients = mask_coefficients[kept]
+
+    prototype = outputs[prototype_name]
+    if prototype.ndim >= 1 and prototype.shape[0] == 1:
+        prototype = prototype[0]
+    if prototype.ndim != 3:
+        raise TensorRTRuntimeError(
+            "expected a 3-D prototype tensor after batch squeeze, "
+            f"got {tuple(prototype.shape)}"
+        )
+    if prototype.shape[0] != mask_dim and prototype.shape[-1] == mask_dim:
+        prototype = prototype.permute(2, 0, 1)
+    if prototype.shape[0] != mask_dim:
+        raise TensorRTRuntimeError(
+            f"prototype mask dimension {prototype.shape[0]} does not match {mask_dim}"
+        )
+    if mask_coefficients.dtype not in (torch_module.float16, torch_module.float32):
+        mask_coefficients = mask_coefficients.float()
+    if prototype.dtype != mask_coefficients.dtype:
+        prototype = prototype.to(dtype=mask_coefficients.dtype)
+    proto_height, proto_width = map(int, prototype.shape[1:])
+    masks = torch_module.sigmoid(
+        mask_coefficients @ prototype.reshape(mask_dim, -1)
+    ).reshape(-1, proto_height, proto_width)
+
+    # Crop at prototype resolution to keep the GPU working set small, then
+    # resize the selected masks together instead of once per detection.
+    grid_y = torch_module.arange(
+        proto_height, device=masks.device, dtype=masks.dtype
+    ).view(1, proto_height, 1)
+    grid_x = torch_module.arange(
+        proto_width, device=masks.device, dtype=masks.dtype
+    ).view(1, 1, proto_width)
+    x1, y1, x2, y2 = boxes_input.T
+    crop = (
+        (grid_x >= x1[:, None, None] * proto_width / meta.target_width)
+        & (grid_x < x2[:, None, None] * proto_width / meta.target_width)
+        & (grid_y >= y1[:, None, None] * proto_height / meta.target_height)
+        & (grid_y < y2[:, None, None] * proto_height / meta.target_height)
+    )
+    masks = masks * crop.to(masks.dtype)
+    masks = functional.interpolate(
+        masks[:, None],
+        size=(meta.target_height, meta.target_width),
+        mode="bilinear",
+        align_corners=False,
+    )[:, 0]
+    masks = masks[
+        :,
+        meta.pad_y : meta.pad_y + meta.resized_height,
+        meta.pad_x : meta.pad_x + meta.resized_width,
+    ]
+
+    contour_limit = max(1, int(postprocess.get("mask_contour_size", 320)))
+    contour_scale = min(
+        1.0,
+        contour_limit / max(meta.original_width, meta.original_height),
+    )
+    contour_width = max(1, int(round(meta.original_width * contour_scale)))
+    contour_height = max(1, int(round(meta.original_height * contour_scale)))
+    masks = functional.interpolate(
+        masks[:, None],
+        size=(contour_height, contour_width),
+        mode="bilinear",
+        align_corners=False,
+    )[:, 0]
+    binary_masks = (masks >= float(postprocess.get("mask_threshold", 0.5))).to(
+        torch_module.uint8
+    )
+    return _TorchDecodedDetections(
+        boxes_xyxy=boxes_original,
+        confidences=confidences,
+        class_ids=class_ids,
+        binary_masks=binary_masks,
+        mask_width=contour_width,
+        mask_height=contour_height,
+    )
+
+
 def _format_bbox(
     box_xyxy: np.ndarray, meta: LetterboxMeta, bbox_format: str
 ) -> list[float]:
@@ -618,6 +892,37 @@ def _decode_masks(
     return polygons
 
 
+def _polygons_from_binary_masks(
+    binary_masks: np.ndarray, mask_width: int, mask_height: int
+) -> list[list[list[float]]]:
+    """Convert compact binary masks to the service's normalized polygons."""
+
+    import cv2
+
+    polygons: list[list[list[float]]] = []
+    for binary in np.asarray(binary_masks, dtype=np.uint8):
+        contours, _ = cv2.findContours(
+            np.ascontiguousarray(binary), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if not contours:
+            polygons.append([])
+            continue
+        contour = max(contours, key=cv2.contourArea).reshape(-1, 2)
+        if len(contour) < 3:
+            polygons.append([])
+            continue
+        polygons.append(
+            [
+                [
+                    float(np.clip(point[0] / mask_width, 0.0, 1.0)),
+                    float(np.clip(point[1] / mask_height, 0.0, 1.0)),
+                ]
+                for point in contour
+            ]
+        )
+    return polygons
+
+
 def _cuda_error_name(error: Any) -> str:
     return str(getattr(error, "name", error))
 
@@ -649,6 +954,31 @@ def _pointer(value: Any) -> int:
     except (TypeError, ValueError) as exc:
         raise TensorRTRuntimeError(
             f"CUDA returned an invalid pointer {value!r}"
+        ) from exc
+
+
+def _torch_dtype(torch_module: Any, dtype: np.dtype[Any]) -> Any:
+    """Map TensorRT's NumPy dtype representation to a PyTorch dtype."""
+
+    mapping = {
+        np.dtype(np.float16): torch_module.float16,
+        np.dtype(np.float32): torch_module.float32,
+        np.dtype(np.float64): torch_module.float64,
+        np.dtype(np.int8): torch_module.int8,
+        np.dtype(np.int32): torch_module.int32,
+        np.dtype(np.int64): torch_module.int64,
+        np.dtype(np.uint8): torch_module.uint8,
+        np.dtype(np.bool_): torch_module.bool,
+    }
+    try:
+        return mapping[np.dtype(dtype)]
+    except KeyError as exc:
+        raise TensorRTRuntimeError(
+            f"TensorRT output dtype {dtype!r} cannot be allocated as a PyTorch tensor"
+        ) from exc
+    except (TypeError, ValueError) as exc:
+        raise TensorRTRuntimeError(
+            f"TensorRT output dtype {dtype!r} is invalid"
         ) from exc
 
 
@@ -684,19 +1014,29 @@ class NativeTensorRTRuntime:
         self._closed = False
         self._allocations: list[tuple[int, int]] = []
         self._host_allocations: list[_HostBuffer] = []
+        self._device_outputs: dict[str, Any] = {}
+        self._torch_stream: Any | None = None
+        self._batched_nms: Any | None = None
         self.last_timings: dict[str, float] = {}
         self._cuda_thread_state = threading.local()
 
         try:
             import tensorrt as trt
             from cuda.bindings import runtime as cudart
+            import torch
         except ImportError as exc:
             raise TensorRTRuntimeError(
                 "native TensorRT requires the Linux tensorrt-cu13 and "
-                "cuda-python packages; install the vision project's TensorRT extra"
+                "cuda-python packages plus CUDA-enabled PyTorch; install the "
+                "vision project's TensorRT extra"
             ) from exc
+        if not torch.cuda.is_available():
+            raise TensorRTRuntimeError(
+                "native TensorRT requires CUDA-enabled PyTorch with a visible GPU"
+            )
         self.trt = trt
         self.cudart = cudart
+        self.torch = torch
         self._load_engine()
         self._create_tracker()
 
@@ -712,6 +1052,7 @@ class NativeTensorRTRuntime:
         )
         self.device_index = device_index
         _check_cuda(self.cudart.cudaSetDevice(device_index), "cudaSetDevice")
+        self.torch.cuda.set_device(device_index)
 
         logger = self.trt.Logger(self.trt.Logger.WARNING)
         self._trt_logger = logger
@@ -728,6 +1069,24 @@ class NativeTensorRTRuntime:
             raise TensorRTRuntimeError("TensorRT failed to create an execution context")
         stream_result = self.cudart.cudaStreamCreate()
         self.stream = _pointer(_check_cuda(stream_result, "cudaStreamCreate"))
+        get_external_stream = getattr(self.torch.cuda, "get_stream_from_external", None)
+        if get_external_stream is not None:
+            self._torch_stream = get_external_stream(self.stream, device=device_index)
+        else:
+            self._torch_stream = self.torch.cuda.ExternalStream(
+                self.stream, device=device_index
+            )
+        postprocess = self.manifest["postprocess"]
+        layout = str(postprocess.get("layout", "raw")).lower()
+        needs_nms = layout != "end2end" or bool(postprocess.get("apply_nms", False))
+        if needs_nms:
+            try:
+                from torchvision.ops import batched_nms
+            except (ImportError, RuntimeError) as exc:
+                raise TensorRTRuntimeError(
+                    "native TensorRT postprocess requires torchvision.ops.batched_nms"
+                ) from exc
+            self._batched_nms = batched_nms
 
         input_names = []
         output_names = []
@@ -789,17 +1148,29 @@ class NativeTensorRTRuntime:
                 )
             dtype = np.dtype(self.trt.nptype(self.engine.get_tensor_dtype(name)))
             size = int(np.prod(shape, dtype=np.int64)) * dtype.itemsize
-            device_pointer = _pointer(
-                _check_cuda(self.cudart.cudaMalloc(size), f"cudaMalloc({name})")
-            )
-            self._allocations.append((device_pointer, size))
-            host = self._allocate_host(shape, dtype)
+            if name == self.input_name:
+                device_pointer = _pointer(
+                    _check_cuda(self.cudart.cudaMalloc(size), f"cudaMalloc({name})")
+                )
+                self._allocations.append((device_pointer, size))
+                host = self._allocate_host(shape, dtype)
+                device_tensor = None
+            else:
+                device_tensor = self.torch.empty(
+                    shape,
+                    dtype=_torch_dtype(self.torch, dtype),
+                    device=f"cuda:{self.device_index}",
+                )
+                self._device_outputs[name] = device_tensor
+                device_pointer = int(device_tensor.data_ptr())
+                host = None
             self._buffers[name] = {
                 "shape": shape,
                 "dtype": dtype,
                 "nbytes": size,
                 "device": device_pointer,
                 "host": host,
+                "tensor": device_tensor,
             }
             if not self.context.set_tensor_address(name, device_pointer):
                 raise TensorRTRuntimeError(f"failed to bind TensorRT tensor {name!r}")
@@ -851,23 +1222,48 @@ class NativeTensorRTRuntime:
             return
         input_buffer = self._buffers[self.input_name]["host"]
         input_buffer.array.fill(0)
+        warmup_meta = LetterboxMeta(
+            original_width=self.input_width,
+            original_height=self.input_height,
+            target_width=self.input_width,
+            target_height=self.input_height,
+            resized_width=self.input_width,
+            resized_height=self.input_height,
+            scale=1.0,
+            pad_x=0,
+            pad_y=0,
+        )
         for _ in range(iterations):
-            self._execute(input_buffer.array)
+            outputs = self._execute(input_buffer.array)
+            with self.torch.inference_mode():
+                with self.torch.cuda.stream(self._torch_stream):
+                    decode_segmentation_outputs_torch(
+                        outputs,
+                        warmup_meta,
+                        self.manifest,
+                        self.torch,
+                        confidence_threshold=settings.CONF_THRESHOLD_LOW,
+                        iou_threshold=settings.YOLO_IOU_THRESHOLD,
+                        max_detections=settings.YOLO_MAX_DETECTIONS,
+                        batched_nms=self._batched_nms,
+                    )
+            self._torch_stream.synchronize()
 
-    def _execute(self, tensor: np.ndarray) -> dict[str, np.ndarray]:
+    def _execute(self, tensor: np.ndarray) -> dict[str, Any]:
         # yolo_worker calls infer through asyncio.to_thread. CUDA's current
         # device is thread-local, so establish it once on that worker thread
-        # before using the stream created during startup.
+        # before using the stream and CUDA-backed PyTorch tensors created during
+        # startup.
         if not getattr(self._cuda_thread_state, "device_set", False):
             _check_cuda(
                 self.cudart.cudaSetDevice(self.device_index), "cudaSetDevice(worker)"
             )
+            self.torch.cuda.set_device(self.device_index)
             self._cuda_thread_state.device_set = True
         started = perf_counter()
         input_buffer = self._buffers[self.input_name]
         np.copyto(input_buffer["host"].array, tensor, casting="unsafe")
         host_to_device = self.cudart.cudaMemcpyKind.cudaMemcpyHostToDevice
-        device_to_host = self.cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost
         _check_cuda(
             self.cudart.cudaMemcpyAsync(
                 input_buffer["device"],
@@ -889,38 +1285,15 @@ class NativeTensorRTRuntime:
         if launched is False:
             raise TensorRTRuntimeError("TensorRT execute_async_v3 returned false")
         enqueue_ms = (perf_counter() - enqueue_started) * 1000.0
-        d2h_started = perf_counter()
-        outputs: dict[str, np.ndarray] = {}
-        for name in self.output_names:
-            buffer = self._buffers[name]
-            _check_cuda(
-                self.cudart.cudaMemcpyAsync(
-                    buffer["host"].array.ctypes.data,
-                    buffer["device"],
-                    buffer["nbytes"],
-                    device_to_host,
-                    self.stream,
-                ),
-                f"cudaMemcpyAsync({name}, device-to-host)",
-            )
-        _check_cuda(
-            self.cudart.cudaStreamSynchronize(self.stream), "cudaStreamSynchronize"
-        )
-        d2h_ms = (perf_counter() - d2h_started) * 1000.0
         self.last_timings.update(
             {
                 "h2d_ms": h2d_ms,
-                # This is host dispatch time. The synchronized d2h span below
-                # includes waiting for the TensorRT kernels to finish; users
-                # should read it as the end-to-end device phase in this
-                # Python/cuda-python benchmark.
+                # This is host dispatch time. GPU execution and postprocessing
+                # are synchronized after the PyTorch kernels are queued.
                 "trt_enqueue_ms": enqueue_ms,
-                "d2h_and_sync_ms": d2h_ms,
             }
         )
-        for name in self.output_names:
-            outputs[name] = self._buffers[name]["host"].array
-        return outputs
+        return self._device_outputs
 
     def infer(self, inference_frame: Any) -> dict[str, Any]:
         """Run one decoded frame and return the service's existing result shape."""
@@ -943,14 +1316,65 @@ class NativeTensorRTRuntime:
         preprocess_ms = (perf_counter() - preprocess_started) * 1000.0
         outputs = self._execute(tensor)
         postprocess_started = perf_counter()
-        detections = decode_segmentation_outputs(
-            outputs,
-            meta,
-            self.manifest,
-            confidence_threshold=settings.CONF_THRESHOLD_LOW,
-            iou_threshold=settings.YOLO_IOU_THRESHOLD,
-            max_detections=settings.YOLO_MAX_DETECTIONS,
-        )
+        gpu_postprocess_started = perf_counter()
+        with self.torch.inference_mode():
+            with self.torch.cuda.stream(self._torch_stream):
+                decoded = decode_segmentation_outputs_torch(
+                    outputs,
+                    meta,
+                    self.manifest,
+                    self.torch,
+                    confidence_threshold=settings.CONF_THRESHOLD_LOW,
+                    iou_threshold=settings.YOLO_IOU_THRESHOLD,
+                    max_detections=settings.YOLO_MAX_DETECTIONS,
+                    batched_nms=self._batched_nms,
+                )
+        self._torch_stream.synchronize()
+        gpu_postprocess_ms = (perf_counter() - gpu_postprocess_started) * 1000.0
+
+        compact_d2h_started = perf_counter()
+        if decoded is None:
+            compact = None
+        else:
+            compact = (
+                decoded.boxes_xyxy.detach().cpu().numpy(),
+                decoded.confidences.detach().cpu().numpy(),
+                decoded.class_ids.detach().cpu().numpy(),
+                decoded.binary_masks.detach().cpu().numpy(),
+            )
+        compact_d2h_ms = (perf_counter() - compact_d2h_started) * 1000.0
+
+        polygon_started = perf_counter()
+        if compact is None:
+            detections = []
+        else:
+            boxes_xyxy, confidences, class_ids, binary_masks = compact
+            polygons = _polygons_from_binary_masks(
+                binary_masks, decoded.mask_width, decoded.mask_height
+            )
+            detections = []
+            for index, (box, confidence, class_id) in enumerate(
+                zip(boxes_xyxy, confidences, class_ids)
+            ):
+                class_index = int(class_id)
+                class_key = str(class_index)
+                class_name = (
+                    self.names.get(class_key, class_key)
+                    if isinstance(self.names, dict)
+                    else self.names[class_index]
+                )
+                detection = {
+                    "class": class_name,
+                    "confidence": float(confidence),
+                    "bbox": _format_bbox(box, meta, settings.BBOX_FORMAT),
+                    "bbox_format": settings.BBOX_FORMAT,
+                }
+                polygon = polygons[index]
+                if len(polygon) >= 3:
+                    detection["mask"] = polygon
+                    detection["mask_format"] = "polygon_normalized"
+                detections.append(detection)
+        polygon_ms = (perf_counter() - polygon_started) * 1000.0
         if self._tracker is not None:
             self._apply_tracking(detections, frame_width, frame_height)
         for detection in detections:
@@ -959,6 +1383,9 @@ class NativeTensorRTRuntime:
             {
                 "decode_ms": decode_ms,
                 "preprocess_ms": preprocess_ms,
+                "gpu_postprocess_ms": gpu_postprocess_ms,
+                "compact_d2h_ms": compact_d2h_ms,
+                "polygon_serialization_ms": polygon_ms,
                 "postprocess_tracking_ms": (perf_counter() - postprocess_started)
                 * 1000.0,
                 "total_ms": (perf_counter() - started) * 1000.0,
@@ -1034,9 +1461,18 @@ class NativeTensorRTRuntime:
         try:
             # The live worker is single-stream, so this also keeps an
             # in-flight launch from racing the buffer frees during shutdown.
-            self.cudart.cudaStreamSynchronize(self.stream)
+            if self._torch_stream is not None:
+                self._torch_stream.synchronize()
+            else:
+                self.cudart.cudaStreamSynchronize(self.stream)
         except Exception:
             pass
+        # Release PyTorch-owned output allocations before destroying the
+        # external stream. The TensorRT context is no longer used after this
+        # point, so its cached tensor addresses cannot race the allocator.
+        self._device_outputs.clear()
+        if hasattr(self, "_buffers"):
+            self._buffers.clear()
         for host in self._host_allocations:
             try:
                 self.cudart.cudaFreeHost(host.pointer)
@@ -1051,6 +1487,9 @@ class NativeTensorRTRuntime:
             self.cudart.cudaStreamDestroy(self.stream)
         except Exception:
             pass
+        self._host_allocations.clear()
+        self._allocations.clear()
+        self._torch_stream = None
 
     def __enter__(self) -> "NativeTensorRTRuntime":
         return self

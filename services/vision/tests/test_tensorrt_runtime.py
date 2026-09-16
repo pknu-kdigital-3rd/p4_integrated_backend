@@ -3,12 +3,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import torch
 
 from app.services.tensorrt_runtime import (
     LetterboxMeta,
     TrackerDetections,
     classwise_nms,
     decode_segmentation_outputs,
+    decode_segmentation_outputs_torch,
     letterbox_bgr,
     load_engine_manifest,
     prepare_tensor,
@@ -216,6 +218,55 @@ class TensorRTRuntimeHelperTests(unittest.TestCase):
         self.assertEqual(len(detections), 1)
         self.assertEqual(detections[0]["class"], "person")
         self.assertEqual(detections[0]["bbox"], [64.0, 96.0, 320.0, 480.0])
+
+    def test_torch_decoder_projects_masks_before_compact_host_copy(self):
+        manifest = {
+            "schema_version": 1,
+            "task": "segment",
+            "names": {"0": "person"},
+            "input": {"name": "images", "shape": [1, 3, 64, 64]},
+            "outputs": {"pred": {}, "proto": {}},
+            "postprocess": {
+                "layout": "end2end",
+                "prediction_output": "pred",
+                "prototype_output": "proto",
+                "box_format": "xyxy",
+                "score_offset": 4,
+                "class_offset": 5,
+                "mask_offset": 6,
+                "mask_dim": 1,
+                "apply_nms": False,
+                "confidence_threshold": 0.5,
+                "mask_contour_size": 32,
+            },
+        }
+        meta = LetterboxMeta(
+            original_width=64,
+            original_height=64,
+            target_width=64,
+            target_height=64,
+            resized_width=64,
+            resized_height=64,
+            scale=1.0,
+            pad_x=0,
+            pad_y=0,
+        )
+        outputs = {
+            "pred": torch.tensor(
+                [[[8.0, 8.0, 56.0, 56.0, 0.9, 0.0, 10.0]]],
+                dtype=torch.float16,
+            ),
+            "proto": torch.full((1, 1, 4, 4), 10.0, dtype=torch.float16),
+        }
+
+        decoded = decode_segmentation_outputs_torch(outputs, meta, manifest, torch)
+
+        self.assertIsNotNone(decoded)
+        assert decoded is not None
+        self.assertEqual(tuple(decoded.boxes_xyxy.shape), (1, 4))
+        self.assertEqual(tuple(decoded.binary_masks.shape), (1, 32, 32))
+        self.assertEqual(decoded.binary_masks.dtype, torch.uint8)
+        self.assertGreater(int(decoded.binary_masks.sum().item()), 0)
 
     def test_tracker_adapter_supports_boolean_indexing(self):
         detections = TrackerDetections(

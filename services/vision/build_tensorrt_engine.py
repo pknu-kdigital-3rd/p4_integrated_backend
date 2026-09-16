@@ -173,6 +173,7 @@ def _inspect_engine(
             "confidence_threshold": args.confidence,
             "iou_threshold": args.iou,
             "mask_threshold": 0.5,
+            "mask_contour_size": 320,
             "max_detections": args.max_detections,
         },
         "names": args.names,
