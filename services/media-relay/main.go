@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"runtime"
 	"time"
+
+	_ "net/http/pprof"
 
 	"github.com/pion/webrtc/v4"
 
@@ -45,6 +48,7 @@ func main() {
 	// triggers a fresh keyframe for a decodable epoch.
 	feed.OnClientConnect = relay.RequestKeyFrame
 	feed.OnResync = relay.RequestKeyFrame
+	startDiagnostics(cfg, feed)
 	go func() {
 		if err := feed.Run(); err != nil {
 			log.Fatalf("YOLO feed: %v", err)
@@ -59,6 +63,46 @@ func main() {
 	log.Printf("Pion relay listening on %s", cfg.RelayListenAddr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+func startDiagnostics(cfg config.Config, feed *yolofeed.Feed) {
+	if cfg.MetricsInterval > 0 {
+		go logRuntimeMetrics(feed, cfg.MetricsInterval)
+	}
+	if cfg.PprofAddr != "" {
+		go func() {
+			log.Printf("relay pprof listening on %s", cfg.PprofAddr)
+			if err := http.ListenAndServe(cfg.PprofAddr, nil); err != nil {
+				log.Printf("relay pprof stopped: %v", err)
+			}
+		}()
+	}
+}
+
+func logRuntimeMetrics(feed *yolofeed.Feed, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		var mem runtime.MemStats
+		runtime.ReadMemStats(&mem)
+		epoch, backlogFrames, backlogBytes := feed.Stats()
+		log.Printf(
+			"[relay-mem] epoch=%d backlog=%d frames backlog_bytes=%d "+
+				"heap_alloc=%dMiB heap_inuse=%dMiB heap_objects=%d "+
+				"total_alloc=%dMiB mallocs=%d frees=%d num_gc=%d pause_total=%s",
+			epoch,
+			backlogFrames,
+			backlogBytes,
+			mem.HeapAlloc/(1024*1024),
+			mem.HeapInuse/(1024*1024),
+			mem.HeapObjects,
+			mem.TotalAlloc/(1024*1024),
+			mem.Mallocs,
+			mem.Frees,
+			mem.NumGC,
+			time.Duration(mem.PauseTotalNs),
+		)
 	}
 }
 
