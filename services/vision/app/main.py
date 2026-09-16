@@ -11,6 +11,7 @@ from app.core.state import AppState
 from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
 from app.services.monocular import MonocularTimeline, QRResolver
 from app.core.settings import settings
+from app.services.metrics import metrics_worker
 
 
 @asynccontextmanager
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI):
     # TCP "broken pipe" on the Go relay's side minutes later.
     frame_receiver_task = asyncio.create_task(frame_receiver(state))
     yolo_worker_task = asyncio.create_task(yolo_worker(state))
+    metrics_task = asyncio.create_task(metrics_worker(state))
     # Backgrounded, not awaited here: it retries a few times over ~1.5s if
     # the relay isn't reachable yet, and startup shouldn't block on that.
     android_live_sync_task = asyncio.create_task(sync_android_live_from_relay(state))
@@ -66,9 +68,14 @@ async def lifespan(app: FastAPI):
     # so none of these tasks' own exception handling swallows this.
     frame_receiver_task.cancel()
     yolo_worker_task.cancel()
+    metrics_task.cancel()
     android_live_sync_task.cancel()
     await asyncio.gather(
-        frame_receiver_task, yolo_worker_task, android_live_sync_task, return_exceptions=True
+        frame_receiver_task,
+        yolo_worker_task,
+        metrics_task,
+        android_live_sync_task,
+        return_exceptions=True,
     )
 
 
@@ -79,6 +86,7 @@ app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")
 async def health_live():
     """Ingress liveness check; it does not create a playback session."""
     return {"status": "ok"}
+
 
 app.add_middleware(
     CORSMiddleware,

@@ -3,6 +3,7 @@ opencv-python-headless
 ultralytics
 openai
 aiortc
+psutil
 pydantic-settings
 
 # ultralytics pulls in torch/torchvision transitively, but plain `pip install

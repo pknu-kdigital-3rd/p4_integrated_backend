@@ -8,6 +8,7 @@ dependencies = [
     "fastapi[standard]",
     "openai",
     "opencv-python-headless",
+    "psutil",
     "pydantic-settings",
     "torch",
     "torchvision",
