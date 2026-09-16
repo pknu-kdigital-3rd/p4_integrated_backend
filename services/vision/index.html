@@ -478,8 +478,11 @@
       }
       const bytes = new Uint8Array(event.data), view = new DataView(event.data);
       if (bytes.byteLength < 4) return;
-      const metaLen = view.getUint32(0), meta = JSON.parse(new TextDecoder().decode(bytes.slice(4, 4 + metaLen)));
-      enqueue(meta, bytes.slice(4 + metaLen));
+      const metaLen = view.getUint32(0), meta = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)));
+      // Keep the WebSocket message's ArrayBuffer alive through decode instead
+      // of copying the metadata and H.264 payload into two new buffers. The
+      // queue/pending maps never mutate these views.
+      enqueue(meta, bytes.subarray(4 + metaLen));
     };
     ws.onclose = (event) => {
       if (stopped || socket !== ws) return;

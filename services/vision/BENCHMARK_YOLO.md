@@ -41,6 +41,11 @@ Always discard the first warmup iterations. CUDA timings are synchronized by
 the script; without synchronization, asynchronous kernel launches make the
 GPU appear faster than the live worker really is.
 
+For the exact production path, frames larger than `YOLO_MAX_IMGSZ` are scaled
+with PyAV before BGR materialization. Normalized boxes/masks are unchanged and
+pixel-format boxes are mapped back to the original source dimensions. Compare
+the exact path with the same source dimensions when evaluating this change.
+
 ## Mask performance
 
 The live service defaults to the faster mask path:
@@ -56,6 +61,10 @@ The live service defaults to the faster mask path:
   CPU contour extraction. This matches the native prototype scale for a 640px
   input and keeps polygon generation from scaling with the camera resolution.
   Use `320` or `640` when more polygon detail is required.
+- `YOLO_MASK_POLYGON_SIMPLIFY=true` applies configurable OpenCV contour
+  simplification before JSON serialization. It can reduce payload and browser
+  drawing cost for noisy masks; leave it false when exact polygon fidelity is
+  required.
 
 The service also extracts polygons only for detections retained after its
 confidence filter, avoiding unnecessary CPU contour conversion for discarded
@@ -66,5 +75,16 @@ boxes.
 Set `YOLO_FRAME_DROP_POLICY=latest` to keep inference near the live edge when
 the model cannot keep up. The worker skips queued model calls but still passes
 the compressed frames through with the last completed detections, preserving
-H.264 playback. The default `YOLO_FRAME_DROP_POLICY=queue` retains the current
-ordered behavior and processes every queued frame.
+H.264 playback. `YOLO_INFERENCE_QUEUE_SIZE` bounds the decoded-frame handoff;
+the recommended default is `1`. `YOLO_FRAME_DROP_POLICY=queue` is available for
+ordered debugging, but it is also finite and drops newly arriving inference
+work when that bound is full.
+
+## Runtime allocation diagnostics
+
+The vision process emits a `[mem]` line every five seconds containing RSS,
+queue depth/limit, input/inference/playback/WebSocket rates, stage timings,
+drop count, and CUDA allocated/reserved/interval-peak memory. Set
+`ENABLE_PYTHON_ALLOC_PROFILE=true` temporarily to add periodic `tracemalloc`
+top-allocation reports; do not leave it enabled for production throughput
+measurements.

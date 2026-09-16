@@ -31,10 +31,10 @@ class Settings(BaseSettings):
     # segmentation checkpoints can be supplied through YOLO_MODEL as usual.
     YOLO_MODEL: str = "yolo26s-seg.pt"
     YOLO_DEVICE: str = _default_yolo_device()
-    # Ultralytics letterboxes every frame to a fixed imgsz regardless of source
-    # resolution, then rescales boxes back to the original frame - so raising
-    # imgsz only changes inference cost/accuracy, never output coordinate space.
-    # This caps the worst-case latency/VRAM at very high input resolutions.
+    # Frames larger than this are aspect-preservingly scaled before BGR
+    # materialization, then Ultralytics letterboxes the smaller image to its
+    # stride-aligned input. Normalized outputs remain source-size invariant;
+    # pixel boxes are mapped back by the inference worker.
     YOLO_MAX_IMGSZ: int = 640
     # FP16 is substantially faster on RTX-class CUDA GPUs. It is enabled by
     # default but is automatically ignored when YOLO_DEVICE is CPU.
@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # 160 matches the native prototype scale of a 640px YOLO input and avoids
     # transferring an upsampled mask grid for every detection.
     YOLO_MASK_CONTOUR_SIZE: int = Field(default=160, ge=32, le=640)
+    # Optional contour simplification reduces JSON and browser work for masks
+    # with noisy boundaries. Keep it off by default so polygon fidelity stays
+    # identical until a deployment opts in.
+    YOLO_MASK_POLYGON_SIMPLIFY: bool = False
+    YOLO_MASK_POLYGON_EPSILON_RATIO: float = Field(default=0.002, ge=0.0, le=0.2)
     BBOX_FORMAT: Literal[
         "xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"
     ] = "xyxy_normalized"
@@ -66,11 +71,15 @@ class Settings(BaseSettings):
     # detection.
     YOLO_TRACKING: bool = True
     YOLO_TRACKER_CONFIG: str = str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml")
-    # `queue` preserves the current ordered, no-drop inference behavior.  With
-    # `latest`, the worker keeps only the newest queued frame for the next
-    # inference call; skipped media frames still pass through with the last
-    # completed detections so the H.264 playback sequence remains decodable.
-    YOLO_FRAME_DROP_POLICY: Literal["latest", "queue"] = "queue"
+    # `latest` keeps only the newest queued frame for the next inference call;
+    # skipped media frames still pass through with the last completed
+    # detections so the H.264 playback sequence remains decodable. `queue`
+    # retains arrival order until its finite queue is full, then drops new
+    # inference work without blocking ingest.
+    YOLO_FRAME_DROP_POLICY: Literal["latest", "queue"] = "latest"
+    # This is the decoded-frame handoff, not the encoded relay backlog. Keep it
+    # small because every entry owns a PyAV VideoFrame and its encoded AU.
+    YOLO_INFERENCE_QUEUE_SIZE: int = Field(default=1, ge=1, le=120)
 
     # --- QR-synchronised monocular distance ---
     # Disabled unless a dataset and a per-session camera calibration are
@@ -104,6 +113,12 @@ class Settings(BaseSettings):
     INFERENCE_RETRY_DELAYS: tuple[float, ...] = (0.1, 0.5)
     BACKLOG_MAX_SECONDS: float = Field(default=30.0, ge=1.0, le=3600.0)
     BACKLOG_MAX_BYTES: int = Field(default=256 * 1024 * 1024, ge=1)
+    METRICS_LOG_INTERVAL_SECONDS: float = Field(default=5.0, ge=1.0, le=60.0)
+    ENABLE_PYTHON_ALLOC_PROFILE: bool = False
+    PYTHON_ALLOC_PROFILE_INTERVAL_SECONDS: float = Field(
+        default=30.0, ge=5.0, le=3600.0
+    )
+    PYTHON_ALLOC_PROFILE_TOP: int = Field(default=20, ge=1, le=100)
 
     @field_validator(
         "YOLO_MODEL",

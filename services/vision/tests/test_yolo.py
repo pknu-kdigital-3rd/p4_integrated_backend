@@ -9,6 +9,7 @@ import numpy as np
 
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
+    _enqueue_inference_frame,
     _take_latest_inference_frame,
     reset_tracker,
     run_yolo,
@@ -58,6 +59,29 @@ class _SegmentationModel:
         return [self.result]
 
 
+class _ResizedFrame:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+
+    def to_ndarray(self):
+        return np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+
+class _SourceFrame:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.reformat_args = None
+
+    def reformat(self, *, width, height, format):
+        self.reformat_args = {"width": width, "height": height, "format": format}
+        return _ResizedFrame(width, height)
+
+    def to_ndarray(self, format):
+        return np.zeros((self.height, self.width, 3), dtype=np.uint8)
+
+
 class RunYoloTests(unittest.TestCase):
     def test_emits_the_mask_matching_each_retained_box(self):
         boxes = [
@@ -100,6 +124,38 @@ class RunYoloTests(unittest.TestCase):
         self.assertTrue(np.allclose(result["items"][0]["mask"], polygons[1]))
         self.assertFalse(model.predict_kwargs["retina_masks"])
         self.assertEqual(model.predict_kwargs["max_det"], 100)
+
+    def test_resizes_before_bgr_and_maps_pixel_boxes_back_to_source(self):
+        model = _SegmentationModel(
+            SimpleNamespace(
+                boxes=[_Box(0.9, 0, [0.1, 0.1, 0.2, 0.2])],
+                masks=None,
+            )
+        )
+        source_frame = _SourceFrame(1920, 1080)
+        inference_frame = InferenceFrame(
+            seq=7,
+            frame=source_frame,
+            pts=9000,
+            time_base=1 / 90000,
+            media_time=0.1,
+        )
+
+        with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
+            "app.services.yolo.settings.CONF_THRESHOLD_LOW", 0.3
+        ), patch("app.services.yolo.settings.BBOX_FORMAT", "xyxy_pixels"), patch(
+            "app.services.yolo.settings.YOLO_DEVICE", "cpu"
+        ), patch(
+            "app.services.yolo.settings.YOLO_MAX_IMGSZ", 640
+        ):
+            result = run_yolo(inference_frame, model)
+
+        self.assertEqual(
+            source_frame.reformat_args,
+            {"width": 640, "height": 360, "format": "bgr24"},
+        )
+        self.assertEqual((result["width"], result["height"]), (1920, 1080))
+        self.assertEqual(result["items"][0]["bbox"], [30.0, 30.0, 60.0, 60.0])
 
     def test_tracking_emits_ids_and_leaves_weak_boxes_to_the_tracker(self):
         boxes = [
@@ -247,6 +303,7 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
             )
             for seq in range(4)
         ]
+        state.inference_queue = asyncio.Queue(maxsize=len(frames))
         for frame in frames:
             state.queued_sequences.add((frame.epoch, frame.seq))
             await state.inference_queue.put(frame)
@@ -295,6 +352,7 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
             )
             for seq in range(3)
         ]
+        state.inference_queue = asyncio.Queue(maxsize=len(frames))
         for frame in frames:
             state.queued_sequences.add((frame.epoch, frame.seq))
             await state.inference_queue.put(frame)
@@ -339,6 +397,7 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
             )
             for seq in range(3)
         ]
+        state.inference_queue = asyncio.Queue(maxsize=len(frames))
         for frame in frames[1:]:
             await state.inference_queue.put(frame)
 
@@ -347,6 +406,45 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(latest.seq, 2)
         self.assertEqual([frame.seq for frame in dropped], [0, 1])
         self.assertTrue(state.inference_queue.empty())
+
+    async def test_latest_enqueue_replaces_pending_frame_and_publishes_the_drop(self):
+        state = AppState()
+        state.current_epoch = 1
+        old = InferenceFrame(
+            seq=1, frame=None, pts=1, time_base=None, media_time=None, epoch=1
+        )
+        new = InferenceFrame(
+            seq=2, frame=None, pts=2, time_base=None, media_time=None, epoch=1
+        )
+        state.queued_sequences.update({(1, 1), (1, 2)})
+        state.inference_queue.put_nowait(old)
+
+        with patch("app.services.yolo.settings.YOLO_FRAME_DROP_POLICY", "latest"):
+            await _enqueue_inference_frame(state, new)
+
+        self.assertEqual((await state.inference_queue.get()).seq, 2)
+        self.assertEqual(state.metrics.inference_frames_dropped, 1)
+        self.assertTrue(state.result_store[(1, 1)].result["inference_skipped"])
+        self.assertEqual(state.result_store[(1, 1)].encoded, b"")
+
+    async def test_queue_enqueue_drops_new_frame_when_finite_queue_is_full(self):
+        state = AppState()
+        state.current_epoch = 1
+        old = InferenceFrame(
+            seq=1, frame=None, pts=1, time_base=None, media_time=None, epoch=1
+        )
+        new = InferenceFrame(
+            seq=2, frame=None, pts=2, time_base=None, media_time=None, epoch=1
+        )
+        state.queued_sequences.update({(1, 1), (1, 2)})
+        state.inference_queue.put_nowait(old)
+
+        with patch("app.services.yolo.settings.YOLO_FRAME_DROP_POLICY", "queue"):
+            await _enqueue_inference_frame(state, new)
+
+        self.assertEqual((await state.inference_queue.get()).seq, 1)
+        self.assertEqual(state.metrics.inference_frames_dropped, 1)
+        self.assertTrue(state.result_store[(1, 2)].result["inference_skipped"])
 
 
 if __name__ == "__main__":

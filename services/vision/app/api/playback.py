@@ -68,7 +68,9 @@ async def _receive_controls(
                 epoch = int(message.get("epoch", -1))
                 seq = int(message.get("seq", -1))
                 state.acknowledge(epoch, seq)
-                await state.feed_commands.put({"type": "presented", "epoch": epoch, "seq": seq})
+                await state.feed_commands.put(
+                    {"type": "presented", "epoch": epoch, "seq": seq}
+                )
                 async with state.result_condition:
                     state.result_condition.notify_all()
             elif message_type in {"jump_to_live", "resync"}:
@@ -78,7 +80,9 @@ async def _receive_controls(
                     state.last_presented = None
                     state.resync_generation += 1
                     state.result_condition.notify_all()
-                await state.feed_commands.put({"type": "resync", "reason": message_type})
+                await state.feed_commands.put(
+                    {"type": "resync", "reason": message_type}
+                )
             elif message_type == "stop":
                 logger.info("playback stop received client=%s", websocket.client)
                 await state.feed_commands.put({"type": "stop"})
@@ -194,7 +198,9 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
             await state.feed_commands.put({"type": "resync", "reason": resync_reason})
 
         epoch_ref = [requested_epoch]
-        control_task = asyncio.create_task(_receive_controls(websocket, state, epoch_ref))
+        control_task = asyncio.create_task(
+            _receive_controls(websocket, state, epoch_ref)
+        )
         next_seq = requested_seq
         reported_fault = False
         sent_sizes: dict[tuple[int, int], int] = {}
@@ -217,7 +223,10 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                                 sent_sizes.pop(key, None)
                     outstanding_bytes = sum(sent_sizes.values())
                     outstanding_frames = len(sent_sizes)
-                    if outstanding_bytes <= settings.CLIENT_BUFFER_MAX_BYTES and outstanding_frames <= 120:
+                    if (
+                        outstanding_bytes <= settings.CLIENT_BUFFER_MAX_BYTES
+                        and outstanding_frames <= 120
+                    ):
                         break
                     await state.result_condition.wait()
             item = await _wait_for_item(state, epoch_ref[0], next_seq)
@@ -250,6 +259,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                 await asyncio.sleep(0.05)
                 continue
             await websocket.send_bytes(_frame_message(state, item))
+            state.metrics.websocket_frames_sent += 1
             sent_sizes[(item.epoch, item.seq)] = len(item.encoded)
             next_seq += 1
     except (WebSocketDisconnect, asyncio.IncompleteReadError):
