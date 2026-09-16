@@ -34,6 +34,32 @@ class TensorRTRuntimeError(RuntimeError):
     """Raised when a TensorRT engine cannot be loaded or executed."""
 
 
+def unwrap_ultralytics_engine(engine_bytes: bytes) -> bytes:
+    """Remove Ultralytics' JSON prefix from a serialized TensorRT plan.
+
+    Ultralytics writes ``<metadata-length><metadata-json><plan>`` when it
+    exports an engine. TensorRT itself expects the plan header at byte zero,
+    so the prefix must be removed before calling
+    ``deserialize_cuda_engine``. Raw plans from other exporters are returned
+    unchanged.
+    """
+
+    if len(engine_bytes) < 4:
+        return engine_bytes
+    metadata_length = int.from_bytes(engine_bytes[:4], "little", signed=True)
+    if metadata_length <= 0 or metadata_length > len(engine_bytes) - 4:
+        return engine_bytes
+    metadata_bytes = engine_bytes[4 : 4 + metadata_length]
+    try:
+        metadata = json.loads(metadata_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return engine_bytes
+    if not isinstance(metadata, dict):
+        return engine_bytes
+    plan = engine_bytes[4 + metadata_length :]
+    return plan if plan else engine_bytes
+
+
 @dataclass(frozen=True)
 class LetterboxMeta:
     """The reversible geometry transform used before the engine call."""
@@ -690,7 +716,7 @@ class NativeTensorRTRuntime:
         logger = self.trt.Logger(self.trt.Logger.WARNING)
         self._trt_logger = logger
         self._trt_runtime = self.trt.Runtime(logger)
-        engine_bytes = self.engine_path.read_bytes()
+        engine_bytes = unwrap_ultralytics_engine(self.engine_path.read_bytes())
         self.engine = self._trt_runtime.deserialize_cuda_engine(engine_bytes)
         if self.engine is None:
             raise TensorRTRuntimeError(

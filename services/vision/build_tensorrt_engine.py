@@ -27,6 +27,8 @@ from typing import Any
 
 from ultralytics import YOLO
 
+from app.services.tensorrt_runtime import unwrap_ultralytics_engine
+
 
 def _device_for_export(device: str) -> int | str:
     if device.startswith("cuda:"):
@@ -55,7 +57,8 @@ def _inspect_engine(
 
     logger = trt.Logger(trt.Logger.WARNING)
     runtime = trt.Runtime(logger)
-    engine = runtime.deserialize_cuda_engine(engine_path.read_bytes())
+    engine_bytes = unwrap_ultralytics_engine(engine_path.read_bytes())
+    engine = runtime.deserialize_cuda_engine(engine_bytes)
     if engine is None:
         raise SystemExit(
             f"TensorRT could not deserialize exported engine {engine_path}"
@@ -244,6 +247,14 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if exported_path.resolve() != output_path.resolve():
         shutil.copy2(exported_path, output_path)
+    # Ultralytics prepends its metadata to the serialized plan. Keep the
+    # deployment artifact as a native TensorRT plan so both this inspector and
+    # the in-process runtime can pass the plan header at byte zero.
+    raw_engine = output_path.read_bytes()
+    unwrapped_engine = unwrap_ultralytics_engine(raw_engine)
+    if unwrapped_engine != raw_engine:
+        output_path.write_bytes(unwrapped_engine)
+        print("removed Ultralytics metadata prefix from the TensorRT plan")
     manifest = _inspect_engine(output_path, len(args.names), model_version, args)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

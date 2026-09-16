@@ -13,10 +13,19 @@ from app.services.tensorrt_runtime import (
     load_engine_manifest,
     prepare_tensor,
     resolve_manifest_path,
+    unwrap_ultralytics_engine,
 )
 
 
 class TensorRTRuntimeHelperTests(unittest.TestCase):
+    def test_unwraps_ultralytics_metadata_prefix(self):
+        metadata = b'{"task":"segment","names":{"0":"person"}}'
+        plan = b"ftrt\x01\x02\x03\x04"
+        wrapped = len(metadata).to_bytes(4, "little") + metadata + plan
+
+        self.assertEqual(unwrap_ultralytics_engine(wrapped), plan)
+        self.assertEqual(unwrap_ultralytics_engine(plan), plan)
+
     def test_letterbox_preserves_aspect_ratio_and_records_padding(self):
         image = np.zeros((100, 200, 3), dtype=np.uint8)
         boxed, meta = letterbox_bgr(image, 640, 640)

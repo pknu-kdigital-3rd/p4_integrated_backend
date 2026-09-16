@@ -27,7 +27,8 @@ Build once on the RTX 3090 host. The builder uses Ultralytics only as the
 export front end; live inference does not instantiate `YOLO(engine)` or call
 Ultralytics prediction. It emits the engine and a manifest containing the
 actual tensor names, shapes, data types, segmentation decoder, thresholds, and
-class names.
+class names. The builder also removes the metadata prefix that Ultralytics
+places before its serialized plan, leaving a native TensorRT engine file.
 
 ```bash
 uv run python build_tensorrt_engine.py \
