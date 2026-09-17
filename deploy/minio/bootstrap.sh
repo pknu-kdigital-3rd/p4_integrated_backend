@@ -19,7 +19,16 @@ create_policy() {
   policy_name="$1"
   policy_template="$2"
   policy_file="/tmp/${policy_name}.json"
-  sed "s/__BUCKET__/${MINIO_RECORDING_BUCKET}/g" "$policy_template" > "$policy_file"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *__BUCKET__*)
+        prefix=${line%%__BUCKET__*}
+        suffix=${line#*__BUCKET__}
+        line="${prefix}${MINIO_RECORDING_BUCKET}${suffix}"
+        ;;
+    esac
+    printf '%s\n' "$line"
+  done < "$policy_template" > "$policy_file"
   if ! mc admin policy info local "$policy_name" >/dev/null 2>&1; then
     mc admin policy create local "$policy_name" "$policy_file"
   fi
