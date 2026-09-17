@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import av
 import numpy as np
 
-from app.core.settings import Settings
+from app.core.settings import BASE_DIR, Settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
     _enqueue_inference_frame,
@@ -249,6 +249,13 @@ class VisionSettingsDefaultsTests(unittest.TestCase):
     def test_mask_defaults_keep_detail_first_behavior(self):
         self.assertIs(Settings.model_fields["YOLO_RETINA_MASKS"].default, True)
         self.assertEqual(Settings.model_fields["YOLO_MASK_CONTOUR_SIZE"].default, 640)
+
+    def test_bare_model_filename_resolves_under_vision_models_directory(self):
+        settings = Settings(_env_file=None, YOLO_MODEL="a4_best.engine")
+        self.assertEqual(
+            settings.YOLO_MODEL,
+            str(BASE_DIR / "models" / "a4_best.engine"),
+        )
 
 
 class CompletedSequenceHistoryTests(unittest.TestCase):

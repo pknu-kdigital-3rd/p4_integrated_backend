@@ -143,8 +143,11 @@ class Settings(BaseSettings):
     def _resolve_yolo_model_path(cls, v: str) -> str:
         path = Path(v).expanduser()
         if not path.is_absolute():
-            path = BASE_DIR / path
-        return str(path)
+            if path.parts and path.parts[0].lower() == "models":
+                path = BASE_DIR / path
+            else:
+                path = BASE_DIR / "models" / path
+        return str(path.resolve())
 
     @field_validator("BBOX_FORMAT", mode="before")
     @classmethod
