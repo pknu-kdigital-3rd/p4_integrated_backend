@@ -50,12 +50,27 @@
         <form id="recordings-form">
           <label for="recording-trip-id">Trip ID</label>
           <input id="recording-trip-id" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="Select a vehicle or enter a trip ID" required>
-          <button type="submit">Load segments</button>
+          <button type="submit">Load trip</button>
         </form>
         <p id="recordings-status" role="status">Select a vehicle to load its trip recordings.</p>
-        <ul id="recordings-list" aria-label="Finalized trip video segments"></ul>
+        <ul id="recordings-list" aria-label="Trip recording segments"></ul>
+        <p id="recording-breaks" aria-label="Recording breaks"></p>
         <div id="recording-player-panel" hidden>
-          <video id="recording-player" controls playsinline preload="metadata" referrerpolicy="no-referrer"></video>
+          <div id="recording-stage">
+            <video id="recording-player" playsinline preload="metadata" referrerpolicy="no-referrer"></video>
+            <canvas id="recording-overlay" aria-hidden="true"></canvas>
+          </div>
+          <div id="recording-controls" aria-label="Trip playback controls">
+            <button id="recording-play" type="button" aria-label="Play trip">Play</button>
+            <button id="recording-back" type="button" aria-label="Back 10 seconds">−10s</button>
+            <button id="recording-forward" type="button" aria-label="Forward 10 seconds">+10s</button>
+            <div id="recording-timeline">
+              <input id="recording-seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Seek through trip recording">
+              <div id="recording-break-markers" aria-hidden="true"></div>
+            </div>
+            <output id="recording-time" for="recording-seek">0:00 / 0:00</output>
+          </div>
+          <p id="recording-overlay-status" role="status"></p>
           <button id="stop-recording" type="button">Stop playback</button>
         </div>
       </section>
