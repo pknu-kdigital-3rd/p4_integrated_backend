@@ -38,6 +38,26 @@
                 android:textColor="#FFFFFFFF"
                 android:textColorHint="#B0FFFFFF" />
 
+            <EditText
+                android:id="@+id/recordingTripId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Trip ID (optional; enables recording)"
+                android:inputType="number"
+                android:singleLine="true"
+                android:textColor="#FFFFFFFF"
+                android:textColorHint="#B0FFFFFF" />
+
+            <EditText
+                android:id="@+id/recordingVehicleId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Vehicle ID (required with Trip ID)"
+                android:inputType="number"
+                android:singleLine="true"
+                android:textColor="#FFFFFFFF"
+                android:textColorHint="#B0FFFFFF" />
+
             <Spinner
                 android:id="@+id/resolutionSpinner"
                 android:layout_width="match_parent"
