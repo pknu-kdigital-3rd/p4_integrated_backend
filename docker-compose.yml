@@ -32,7 +32,7 @@ services:
       sh -c "echo '0 3 * * * pg_dump -h db -U app vehicle_platform > /backups/backup_$$(date +\%Y\%m\%d).sql find /backups -name \"backup_*.sql\" -mtime +14 -delete' | crontab - && crond -f"
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: vehicle-platform-minio
     profiles: ["recording"]
     restart: unless-stopped
