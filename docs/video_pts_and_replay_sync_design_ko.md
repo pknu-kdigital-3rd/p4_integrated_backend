@@ -603,3 +603,25 @@ Vision ↔ Video Mapping
 
 이 구조를 사용하면 프레임 drop, encoder buffering, 실제 FPS 변동, recording segment 분할 등이 발생하더라도
 AI detection과 녹화 영상을 안정적으로 다시 동기화할 수 있다.
+
+## 15. Go relay 녹화 segment와 MinIO replay
+
+Go relay는 Python decode/inference 단계에 들어가기 전, WebRTC RTP에서 이미 완성된 불변 H.264 access unit을 녹화에 재사용한다. 따라서 추가 decode나 re-encode를 수행하지 않는다. 각 MP4/fMP4 segment는 SPS/PPS와 IDR로 시작하고, RTP 90 kHz clock을 MP4 timescale로 사용한다.
+
+`trip_video` row에는 다음 값이 저장된다.
+
+- `recording_session_id`, `segment_index`: Android publisher 세션 안의 segment identity
+- `relay_epoch`, `start_seq`, `end_seq`: relay가 전달한 access unit 범위
+- `start_pts_90k`, `end_pts_90k`: 90 kHz video timeline 범위
+- `storage_bucket`, `object_key`: MinIO의 영구 object identity
+- `started_at`, `ended_at`, `duration_sec`: 관측된 시각과 segment 길이
+
+Node는 trip과 vehicle 관계를 검증한 뒤 finalized metadata를 저장한다. 재생할 때는 인증된 사용자가 Node에서 짧은 만료 시간을 가진 presigned GET URL을 요청하고, 브라우저가 MinIO에서 segment를 직접 읽는다. Node는 영상 바이트를 중계하지 않는다. Presigned URL은 만료되므로 DB에 저장하지 않는다.
+
+기존 replay mapping에서 `video_pts_us`가 필요하면 다음과 같이 변환한다.
+
+```text
+video_pts_us = start_pts_90k * 1_000_000 / 90_000
+```
+
+Segment 경계, relay epoch 변경, RTP 누락으로 인해 연속 segment를 하나의 PTS/sequence 범위로 합치지 않는다. Replay overlay는 먼저 해당 segment의 epoch 및 PTS 범위를 확인한 뒤 기존 `video_time_anchor` mapping에 연결해야 한다.

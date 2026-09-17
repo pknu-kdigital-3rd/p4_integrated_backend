@@ -11,12 +11,14 @@ until every required check below passes.
 | Component | Directory | Runtime | Internal listener | Health check |
 | --- | --- | --- | --- | --- |
 | PostgreSQL/PostGIS | repository root | Docker | `127.0.0.1:5432` | `pg_isready` |
+| MinIO object storage (optional recording profile) | repository root | Docker | `127.0.0.1:9000` API, `127.0.0.1:9001` console | `/minio/health/ready` |
 | Node control API + operator files | `node/` | Node/npm | `127.0.0.1:3000` | `/health/live`, `/health/ready` |
 | Route/tracking + A* | `services/routing-tracking/` | Python/uv | `127.0.0.1:8000` | `/health/live`, `/health/ready` |
 | Go media relay | `services/media-relay/` | Go | `127.0.0.1:39012` | `/healthz`, `/internal/status` |
 | Vision live-view/inference | `services/vision/` | Python/uv + CUDA | `127.0.0.1:39011` | `/health/live` |
 | Operator HTTPS ingress | `deploy/nginx/` | Nginx | `:39001` | HTTPS curl checks |
 | Vision/WSS/signaling HTTPS ingress | `deploy/nginx/` | Nginx | `:39002` | HTTPS curl checks |
+| MinIO signed playback ingress (optional recording profile) | `deploy/nginx/` | Nginx | `:39003` | signed GET / Range GET |
 
 Terminology: Vision is the Python WebRTC/YOLO server. Route/tracking is the
 second Python service. There is no separate fourth Python server in this
@@ -35,6 +37,8 @@ chmod +x scripts/run-linux-stack.sh
 
 The command does not report success until PostgreSQL, Node, route/tracking, the
 Go relay, Vision/CUDA, Nginx, and both public HTTPS origins pass their checks.
+When `RECORDING_ENABLED=true`, it also starts MinIO, checks readiness, and runs
+the bucket and service-user bootstrap to completion.
 Useful lifecycle commands are:
 
 ```bash
@@ -63,8 +67,9 @@ relay binary are available. Restarting Nginx only validates and reloads its
 project-local configuration.
 
 Logs and PID files are kept under the ignored `.runtime/` directory. `stop`
-leaves PostgreSQL running; `down` stops it too. Nginx uses only the unprivileged
-HTTPS ports 39001 and 39002 and runs under the current user.
+leaves PostgreSQL and MinIO running; `down` stops them when recording is enabled.
+Nginx uses only the unprivileged HTTPS ports 39001, 39002, and (when recording
+is enabled) 39003 and runs under the current user.
 
 ## 0. One-time host prerequisites
 
@@ -121,6 +126,16 @@ and the certificate SAN together. For a local smoke test without BIMS, leave
 `TELEMETRY_MODE=playback`. For live BIMS, set
 `TELEMETRY_MODE=live` and add `BUSAN_BIMS_SERVICE_KEY`.
 
+For recording, set `RECORDING_ENABLED=true` and replace the example Node token,
+MinIO root password, relay secret, and Node read secret with independent values.
+Keep `MINIO_ENDPOINT` on loopback for the Go relay and set
+`MINIO_PUBLIC_ENDPOINT` to the HTTPS address on port `39003` that browsers will
+use. The relay and Node credentials are bucket-scoped; the root account is only
+used by bootstrap. Do not expose the MinIO console on port `9001` to the LAN.
+The one-command setup starts MinIO after PostgreSQL is ready, waits for its
+readiness endpoint, and runs `minio-bootstrap` synchronously so a policy or
+credential failure stops setup.
+
 Generate Node signing keys if they do not already exist:
 
 ```bash
@@ -158,6 +173,22 @@ docker compose exec -T db pg_isready -U app -d vehicle_platform
 
 The final command must report that PostgreSQL is accepting connections. If it
 fails, inspect `docker compose logs db` and do not continue.
+
+When enabling the services manually, start MinIO and complete its bootstrap
+before starting the Go relay:
+
+```bash
+if [[ "$RECORDING_ENABLED" == true ]]; then
+  docker compose --profile recording up -d minio
+  curl --fail http://127.0.0.1:9000/minio/health/ready
+  docker compose --profile recording run --rm --no-deps minio-bootstrap
+fi
+```
+
+The bucket is private. Port `9000` is loopback-only for the relay; Nginx
+provides signed object GETs and byte-range requests through HTTPS port `39003`.
+Port `9001` is a loopback-only administration console. Verify the public S3
+endpoint only after a segment has been recorded and Node has registered it.
 
 ## 3. Start the Node control API
 
@@ -234,7 +265,8 @@ curl --fail http://127.0.0.1:39012/internal/status
 ```
 
 `/internal/status` may report `live:false` until the Android publisher connects;
-that is expected. A failed health check is not expected.
+that is expected. It also reports a non-secret `recording` status. A failed
+health check is not expected.
 
 ## 6. Start Vision (Python WebRTC/YOLO service)
 
@@ -320,8 +352,11 @@ can still pass before that publisher is present.
 For live buses, edit the one env file, change `TELEMETRY_MODE=live`, add the
 BIMS service key, then restart route/tracking. For Android, configure the APK's
 `relay.url` to the HTTPS ingress URL and configure TURN credentials as described
-in [COTURN_SETUP.md](../../services/vision/COTURN_SETUP.md). Do not put TURN or
-BIMS secrets in Git.
+in [COTURN_SETUP.md](../../services/vision/COTURN_SETUP.md). When recording is
+enabled, configure both Trip ID and Vehicle ID in the Android publisher; Node
+validates that the trip is active for that vehicle before the relay records.
+Without valid context, live streaming continues and the relay reports recording
+inactive. Do not put TURN, BIMS, or recording secrets in Git.
 
 ## Definition of done
 

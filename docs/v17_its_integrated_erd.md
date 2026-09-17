@@ -40,6 +40,25 @@ erDiagram
     varchar telemetry_source "BIMS_LIVE | BIMS_REPLAY | DEVICE_GPS | RECORDED_GPS"
     timestamptz recorded_at
   }
+  TRIP_VIDEO {
+    bigint trip_video_id PK
+    bigint trip_id FK
+    varchar recording_session_id
+    integer segment_index
+    varchar storage_bucket
+    varchar object_key UK
+    varchar upload_status "FINALIZED | FAILED"
+    bigint relay_epoch
+    bigint start_seq
+    bigint end_seq
+    bigint start_pts_90k
+    bigint end_pts_90k
+    timestamptz started_at
+    timestamptz ended_at
+    integer duration_sec
+  }
 ```
+
+`trip_video` stores one independently playable H.264 MP4 segment per row. The durable object identity is `(storage_bucket, object_key)`; `video_url` remains nullable only for legacy compatibility and never stores a presigned URL. Legacy rows without MinIO objects are retained with `upload_status=FAILED` and a `storage_bucket=legacy` marker.
 
 Node owns all persisted entities. The routing/tracking service supplies transient normalized observations; only authoritative source observations are eligible for persistence. Browser interpolation frames are never stored.
