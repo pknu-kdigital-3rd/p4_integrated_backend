@@ -42,13 +42,17 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.UUID
 
 /** Sends CameraX YUV frames to FastAPI's /offer/android WebRTC endpoint. */
 class WebRtcPublisher(
     context: Context,
     private val offerEndpoint: String,
+    private val recordingTripId: Long? = null,
+    private val recordingVehicleId: Long? = null,
     private val onStatus: (String) -> Unit,
 ) {
+    private val recordingSessionId = UUID.randomUUID().toString()
     private val appContext = context.applicationContext
     private val stopped = AtomicBoolean(true)
     private val disposed = AtomicBoolean(false)
@@ -362,6 +366,11 @@ class WebRtcPublisher(
         val json = JSONObject()
             .put("sdp", local.description)
             .put("type", local.type.canonicalForm())
+        if (recordingTripId != null && recordingVehicleId != null) {
+            json.put("tripId", recordingTripId.toString())
+                .put("vehicleId", recordingVehicleId.toString())
+                .put("recordingSessionId", recordingSessionId)
+        }
         val request = Request.Builder()
             .url(offerEndpoint)
             .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))

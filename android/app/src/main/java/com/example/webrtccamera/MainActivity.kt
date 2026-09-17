@@ -89,6 +89,8 @@ private const val QR_LOG_TAG = "MainActivity"
 // fraction of the lens range because many devices report LENS_FOCUS_DISTANCE as
 // UNCALIBRATED, where the diopter scale is repeatable but not physically true.
 private const val FOCUS_FRACTION_KEY = "focus_fraction"
+private const val RECORDING_TRIP_ID_KEY = "recording_trip_id"
+private const val RECORDING_VEHICLE_ID_KEY = "recording_vehicle_id"
 private const val FOCUS_PINCH_SENSITIVITY = 2.0f
 
 class MainActivity : AppCompatActivity() {
@@ -96,6 +98,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var streamButton: Button
     private lateinit var serverUrl: EditText
+    private lateinit var recordingTripIdInput: EditText
+    private lateinit var recordingVehicleIdInput: EditText
     private lateinit var resolutionSpinner: Spinner
     private lateinit var actualResolutionText: TextView
     private lateinit var qrStatusText: TextView
@@ -175,6 +179,10 @@ class MainActivity : AppCompatActivity() {
         streamButton = findViewById(R.id.streamButton)
         serverUrl = findViewById(R.id.serverUrl)
         serverUrl.setText(BuildConfig.DEFAULT_SERVER_URL)
+        recordingTripIdInput = findViewById(R.id.recordingTripId)
+        recordingVehicleIdInput = findViewById(R.id.recordingVehicleId)
+        recordingTripIdInput.setText(getPreferences(MODE_PRIVATE).getString(RECORDING_TRIP_ID_KEY, ""))
+        recordingVehicleIdInput.setText(getPreferences(MODE_PRIVATE).getString(RECORDING_VEHICLE_ID_KEY, ""))
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         actualResolutionText = findViewById(R.id.actualResolutionText)
         qrStatusText = findViewById(R.id.qrStatusText)
@@ -226,6 +234,25 @@ class MainActivity : AppCompatActivity() {
             setStatus("Enter a valid server URL or host:port")
             return
         }
+        val tripText = recordingTripIdInput.text.toString().trim()
+        val vehicleText = recordingVehicleIdInput.text.toString().trim()
+        val recordingTripId: Long?
+        val recordingVehicleId: Long?
+        if (tripText.isEmpty() && vehicleText.isEmpty()) {
+            recordingTripId = null
+            recordingVehicleId = null
+        } else {
+            recordingTripId = tripText.toLongOrNull()?.takeIf { it > 0 }
+            recordingVehicleId = vehicleText.toLongOrNull()?.takeIf { it > 0 }
+            if (recordingTripId == null || recordingVehicleId == null) {
+                setStatus("Enter positive trip and vehicle IDs, or leave both blank")
+                return
+            }
+        }
+        getPreferences(MODE_PRIVATE).edit {
+            putString(RECORDING_TRIP_ID_KEY, tripText)
+            putString(RECORDING_VEHICLE_ID_KEY, vehicleText)
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             permissionLauncher.launch(Manifest.permission.CAMERA)
             return
@@ -243,7 +270,7 @@ class MainActivity : AppCompatActivity() {
         resolutionSpinner.isEnabled = false
         streamButton.setText(R.string.stop_streaming)
         setStatus("Starting WebRTC…")
-        publisher = WebRtcPublisher(this, endpoint) { message ->
+        publisher = WebRtcPublisher(this, endpoint, recordingTripId, recordingVehicleId) { message ->
             runOnUiThread { if (streaming.get()) setStatus(message) }
         }
         publisher?.start()
