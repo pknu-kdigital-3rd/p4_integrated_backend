@@ -122,3 +122,48 @@ func TestSendFrameScatterWritePreservesWireFormat(t *testing.T) {
 		t.Fatalf("scatter/gather wire output differs from contiguous output")
 	}
 }
+
+func TestSendFrameCarriesValidatedRecordingIdentity(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	feed.SetRecordingIdentity(&RecordingIdentity{
+		TripID:             12,
+		VehicleID:          3,
+		RecordingSessionID: "session-a",
+	})
+	item := feed.Publish(&rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 7, Timestamp: 90000, Marker: true},
+		Payload: []byte{0x65, 0x01, 0x02},
+	})
+	if item == nil || item.Recording == nil {
+		t.Fatal("expected recording identity on a published access unit")
+	}
+
+	server, client := net.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- feed.sendFrame(client, item) }()
+	_, body, err := readRecord(server)
+	if err != nil {
+		server.Close()
+		client.Close()
+		t.Fatal(err)
+	}
+	server.Close()
+	client.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	metadataLength := int(binary.BigEndian.Uint32(body[:4]))
+	var metadata struct {
+		Recording struct {
+			TripID             string `json:"trip_id"`
+			VehicleID          string `json:"vehicle_id"`
+			RecordingSessionID string `json:"recording_session_id"`
+		} `json:"recording"`
+	}
+	if err := json.Unmarshal(body[4:4+metadataLength], &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Recording.TripID != "12" || metadata.Recording.VehicleID != "3" || metadata.Recording.RecordingSessionID != "session-a" {
+		t.Fatalf("unexpected recording identity metadata: %+v", metadata.Recording)
+	}
+}

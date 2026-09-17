@@ -12,12 +12,26 @@ from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
 from app.services.monocular import MonocularTimeline, QRResolver
 from app.core.settings import settings
 from app.services.metrics import metrics_worker
+from app.services.recording_detections import RecordingDetectionWriter
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state = AppState()
     app.state.app_state = state
+    detection_writer = RecordingDetectionWriter(
+        settings.NODE_INTERNAL_BASE_URL,
+        settings.NODE_INTERNAL_SERVICE_TOKEN if settings.RECORDING_ENABLED else None,
+        settings.RECORDING_DETECTION_QUEUE_SIZE,
+    )
+    if detection_writer.enabled:
+        state.recording_writer = detection_writer
+        print(
+            "replay detection persistence enabled: "
+            f"node={settings.NODE_INTERNAL_BASE_URL}; "
+            f"queue={settings.RECORDING_DETECTION_QUEUE_SIZE}",
+            flush=True,
+        )
 
     if settings.MONOCULAR_ENABLED:
         # Keep the resolver alive even when the sidecars are unavailable. The
@@ -55,6 +69,11 @@ async def lifespan(app: FastAPI):
     frame_receiver_task = asyncio.create_task(frame_receiver(state))
     yolo_worker_task = asyncio.create_task(yolo_worker(state))
     metrics_task = asyncio.create_task(metrics_worker(state))
+    detection_writer_task = (
+        asyncio.create_task(detection_writer.run(state.metrics))
+        if detection_writer.enabled
+        else None
+    )
     # Backgrounded, not awaited here: it retries a few times over ~1.5s if
     # the relay isn't reachable yet, and startup shouldn't block on that.
     android_live_sync_task = asyncio.create_task(sync_android_live_from_relay(state))
@@ -77,6 +96,13 @@ async def lifespan(app: FastAPI):
         android_live_sync_task,
         return_exceptions=True,
     )
+    if detection_writer_task is not None:
+        detection_writer.stop()
+        try:
+            await asyncio.wait_for(detection_writer_task, timeout=12.0)
+        except asyncio.TimeoutError:
+            detection_writer_task.cancel()
+            await asyncio.gather(detection_writer_task, return_exceptions=True)
 
 
 app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")

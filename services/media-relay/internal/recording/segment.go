@@ -164,6 +164,7 @@ func (s *segmentWriter) finalize(next *yolofeed.AccessUnit) (Manifest, error) {
 		EndSeq:             s.pending.seq,
 		StartPTS90K:        s.startPTS,
 		EndPTS90K:          s.pending.pts,
+		DurationPTS90K:     durationTicks,
 		StartedAt:          s.startedAt,
 		EndedAt:            endedAt,
 		DurationSec:        int(math.Round(float64(durationTicks) / videoTimeScale)),

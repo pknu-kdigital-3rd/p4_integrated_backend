@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     TLS_CERT_FILE: str | None = None
     TLS_KEY_FILE: str | None = None
 
+    # --- replay detection persistence ---
+    RECORDING_ENABLED: bool = False
+    NODE_INTERNAL_BASE_URL: str = "http://127.0.0.1:3000"
+    NODE_INTERNAL_SERVICE_TOKEN: str | None = None
+    RECORDING_DETECTION_QUEUE_SIZE: int = Field(default=256, ge=1, le=4096)
+
     # --- TURN / ICE ---
     TURN_URL: str = "turn:10.174.96.95:3478?transport=udp"
     TURN_USERNAME: str = "user"
@@ -132,6 +138,8 @@ class Settings(BaseSettings):
         "MONOCULAR_CALIBRATION_FILE",
         "TLS_CERT_FILE",
         "TLS_KEY_FILE",
+        "NODE_INTERNAL_BASE_URL",
+        "NODE_INTERNAL_SERVICE_TOKEN",
         mode="before",
     )
     @classmethod

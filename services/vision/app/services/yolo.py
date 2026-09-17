@@ -61,14 +61,18 @@ def _take_latest_inference_frame(
 
 
 def _source_metadata(inference_frame: InferenceFrame) -> dict[str, object]:
-    return {
+    metadata: dict[str, object] = {
         "epoch": inference_frame.epoch,
         "seq": inference_frame.seq,
         "pts": inference_frame.pts,
+        "pts_90k": inference_frame.pts,
         "time_base": inference_frame.time_base,
         "time": inference_frame.media_time,
         "timestamp_us": inference_frame.timestamp_us,
     }
+    if inference_frame.recording_identity is not None:
+        metadata["recording"] = inference_frame.recording_identity
+    return metadata
 
 
 def _fit_size(width: int, height: int, max_side: int) -> tuple[int, int]:
@@ -580,6 +584,17 @@ async def _queue_decoded_frame(
             qr_source_timestamp_ns=_optional_int(qr.get("source_timestamp_ns")),
             qr_capture_timestamp_ns=_optional_int(qr.get("capture_timestamp_ns")),
             qr_decode_success=bool(qr.get("decode_success", False)),
+            recording_identity=(
+                {
+                    "tripId": str(metadata["recording"]["trip_id"]),
+                    "vehicleId": str(metadata["recording"]["vehicle_id"]),
+                    "recordingSessionId": str(metadata["recording"]["recording_session_id"]),
+                }
+                if isinstance(metadata.get("recording"), dict)
+                and metadata["recording"].get("trip_id") is not None
+                and metadata["recording"].get("recording_session_id")
+                else None
+            ),
         ),
     )
 
@@ -854,6 +869,8 @@ async def yolo_worker(state: AppState) -> None:
         state.last_inference_result = result
         state.last_inference_result_epoch = inference_frame.epoch
         state.metrics.record_inference(result)
+        if state.recording_writer is not None:
+            state.recording_writer.offer(result, state.metrics)
 
         item = PlaybackItem(
             epoch=inference_frame.epoch,

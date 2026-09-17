@@ -42,7 +42,16 @@ type AccessUnit struct {
 	Keyframe     bool
 	Data         []byte
 	QR           *QREvent
+	Recording    *RecordingIdentity
 	receivedAt   time.Time
+}
+
+// RecordingIdentity joins Vision results to the exact trip/session recorded
+// from the same access units. IDs are JSON strings to avoid lossy JS numbers.
+type RecordingIdentity struct {
+	TripID             int64  `json:"trip_id,string"`
+	VehicleID          int64  `json:"vehicle_id,string"`
+	RecordingSessionID string `json:"recording_session_id"`
 }
 
 // QREvent is emitted by the Android publisher over the reliable qr-events
@@ -84,6 +93,7 @@ type Feed struct {
 	parameterSets  []byte
 	qrActive       bool
 	qrEvents       map[uint32]*QREvent
+	recording      *RecordingIdentity
 	sourceEnded    bool
 	endSent        bool
 
@@ -117,6 +127,31 @@ func (f *Feed) SetQRActive(active bool) {
 	f.mu.Lock()
 	f.qrActive = active
 	f.mu.Unlock()
+}
+
+// SetRecordingIdentity labels subsequent frames with the publisher identity.
+// Resetting the feed prevents retained frames from a previous publisher or
+// recording session from being mislabeled with the new identity.
+func (f *Feed) SetRecordingIdentity(identity *RecordingIdentity) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sameRecordingIdentity(f.recording, identity) {
+		return
+	}
+	if identity == nil {
+		f.recording = nil
+	} else {
+		copyIdentity := *identity
+		f.recording = &copyIdentity
+	}
+	f.resetLocked("recording_context_changed")
+}
+
+func sameRecordingIdentity(left, right *RecordingIdentity) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 // PublishQREvent attaches an event to a retained access unit, or holds it
@@ -334,6 +369,10 @@ func (f *Feed) finishAccessUnitLocked(rtpTS uint32) *AccessUnit {
 		Keyframe:     f.assemblyKey,
 		Data:         data,
 		receivedAt:   time.Now(),
+	}
+	if f.recording != nil {
+		identity := *f.recording
+		item.Recording = &identity
 	}
 	if event, ok := f.qrEvents[rtpTS]; ok {
 		item.QR = event
@@ -767,6 +806,9 @@ func (f *Feed) sendFrame(conn net.Conn, item *AccessUnit) error {
 		"pts_90k": item.PTS90K, "timestamp_us": item.TimestampUS,
 		"keyframe": item.Keyframe,
 		"qr":       map[string]any{"decode_success": false},
+	}
+	if item.Recording != nil {
+		metadataValue["recording"] = item.Recording
 	}
 	if item.QR != nil {
 		metadataValue["qr"] = item.QR

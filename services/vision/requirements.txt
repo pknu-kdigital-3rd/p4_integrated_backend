@@ -1,4 +1,5 @@
 fastapi[standard]
+httpx
 opencv-python-headless
 ultralytics
 openai

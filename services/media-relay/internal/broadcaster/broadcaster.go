@@ -40,6 +40,17 @@ func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.Trac
 	b.lifecycleMu.Lock()
 	publisher := &Publisher{pc: pc, track: track, done: make(chan struct{})}
 	old := b.replacePublisher(publisher)
+	if b.yolo != nil {
+		var identity *yolofeed.RecordingIdentity
+		if recordingContext != nil {
+			identity = &yolofeed.RecordingIdentity{
+				TripID:             recordingContext.TripID,
+				VehicleID:          recordingContext.VehicleID,
+				RecordingSessionID: recordingContext.RecordingSessionID,
+			}
+		}
+		b.yolo.SetRecordingIdentity(identity)
+	}
 	if old != nil {
 		log.Printf("Android publisher replaced (SSRC %d -> %d)", old.track.SSRC(), track.SSRC())
 		close(old.done)
@@ -87,6 +98,7 @@ func (b *Broadcaster) RemovePublisher(pc *webrtc.PeerConnection) {
 		b.recorder.Stop("publisher disconnected")
 	}
 	if b.yolo != nil {
+		b.yolo.SetRecordingIdentity(nil)
 		b.yolo.End()
 	}
 	b.onLiveAsync(false)

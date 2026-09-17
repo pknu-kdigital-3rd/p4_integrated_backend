@@ -30,6 +30,7 @@ class InferenceFrame:
     qr_source_timestamp_ns: int | None = None
     qr_capture_timestamp_ns: int | None = None
     qr_decode_success: bool = False
+    recording_identity: dict[str, str] | None = None
 
 
 @dataclass
@@ -59,6 +60,9 @@ class VisionMetrics:
     model_ms_total: float = 0.0
     inference_ms_total: float = 0.0
     postprocess_ms_total: float = 0.0
+    recording_samples_queued: int = 0
+    recording_samples_dropped: int = 0
+    recording_samples_uploaded: int = 0
 
     def record_inference(self, result: dict[str, Any]) -> None:
         self.frames_inferred += 1
@@ -79,6 +83,9 @@ class VisionMetrics:
             "model_ms_total": self.model_ms_total,
             "inference_ms_total": self.inference_ms_total,
             "postprocess_ms_total": self.postprocess_ms_total,
+            "recording_samples_queued": self.recording_samples_queued,
+            "recording_samples_dropped": self.recording_samples_dropped,
+            "recording_samples_uploaded": self.recording_samples_uploaded,
         }
 
 
@@ -127,6 +134,7 @@ class AppState:
     last_inference_result: dict[str, Any] | None = None
     last_inference_result_epoch: int | None = None
     metrics: VisionMetrics = field(default_factory=VisionMetrics)
+    recording_writer: Any | None = None
 
     @property
     def completed_sequence_limit(self) -> int:

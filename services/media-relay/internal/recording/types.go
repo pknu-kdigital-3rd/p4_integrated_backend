@@ -42,6 +42,7 @@ type Manifest struct {
 	EndSeq             uint64    `json:"endSeq,string"`
 	StartPTS90K        int64     `json:"startPts90k,string"`
 	EndPTS90K          int64     `json:"endPts90k,string"`
+	DurationPTS90K     int64     `json:"durationPts90k,string"`
 	StartedAt          time.Time `json:"startedAt"`
 	EndedAt            time.Time `json:"endedAt"`
 	DurationSec        int       `json:"durationSec"`
