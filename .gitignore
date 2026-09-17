@@ -22,3 +22,4 @@ deploy/env.local
 .runtime/
 deploy/nginx/logs/*.log
 deploy/nginx/logs/*.pid
+services/vision/models/
