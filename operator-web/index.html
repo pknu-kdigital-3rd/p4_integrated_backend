@@ -56,9 +56,9 @@
         <div id="recording-delete-tools" hidden>
           <button id="recording-delete-toggle" type="button">Delete segments</button>
           <div id="recording-delete-mode" hidden>
-            <p>Select segments to permanently delete, including their replay detections.</p>
-            <ul id="recording-delete-list" aria-label="Select recording segments to delete"></ul>
-            <button id="recording-delete-selected" type="button" disabled>Delete selected</button>
+            <p>Drag across the replay timeline to select a continuous segment range. Home or End starts at an endpoint; Left/Right extends the range, and Shift+Left/Right adjusts its start.</p>
+            <p id="recording-delete-selection-status" role="status">No segments selected.</p>
+            <button id="recording-delete-selected" type="button" disabled>Delete selected range</button>
             <button id="recording-delete-cancel" type="button">Cancel</button>
           </div>
         </div>
@@ -75,6 +75,10 @@
             <div id="recording-timeline">
               <input id="recording-seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Seek through trip recording">
               <div id="recording-break-markers" aria-hidden="true"></div>
+              <div id="recording-delete-range" hidden tabindex="0" role="group" aria-label="Contiguous segment deletion range" aria-describedby="recording-delete-selection-status">
+                <div id="recording-delete-segments" aria-hidden="true"></div>
+                <div id="recording-delete-selection" hidden aria-hidden="true"></div>
+              </div>
             </div>
             <output id="recording-time" for="recording-seek">0:00 / 0:00</output>
           </div>

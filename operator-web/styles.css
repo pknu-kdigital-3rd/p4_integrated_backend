@@ -33,8 +33,14 @@ body.resizing-layout{user-select:none}
 #recording-delete-toggle{background:#a92f41}
 #recording-delete-mode{margin-top:8px;padding:10px;background:#18283d;border-radius:6px}
 #recording-delete-mode p{margin:0 0 8px;color:#ffcf70;font-size:13px}
-#recording-delete-list{list-style:none;padding:0;margin:0 0 10px;display:grid;gap:6px}
-#recording-delete-list li{display:flex;align-items:center;gap:8px;font-size:13px}
-#recording-delete-list input{accent-color:#f0475f}
+#recording-delete-selection-status{color:#f5a8b2!important;font-variant-numeric:tabular-nums}
 #recording-delete-selected{background:#c83749}
 #recording-delete-cancel{margin-left:6px;background:#35506e}
+
+#recording-break-markers{z-index:3}
+#recording-timeline.is-delete-mode #recording-seek{opacity:.28}
+#recording-delete-range{position:absolute;z-index:2;inset:0 8px;cursor:crosshair;touch-action:none;user-select:none;outline:none}
+#recording-delete-range:focus-visible{border-radius:5px;box-shadow:0 0 0 2px #20a4f3}
+#recording-delete-segments{position:absolute;inset:9px 0;height:8px;border-radius:4px;background:#35506e;overflow:hidden}
+#recording-delete-segments span{display:block;position:absolute;top:0;bottom:0;border-right:1px solid #a9bfd9;background:#52708e66}
+#recording-delete-selection{position:absolute;top:4px;bottom:4px;border:2px solid #ff5368;border-radius:4px;background:#c8374977;pointer-events:none}
