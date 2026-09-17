@@ -308,6 +308,18 @@ pid_is_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
+nginx_pid_is_running() {
+  local pid_file="${NGINX_PREFIX}/logs/nginx.pid"
+  [[ -f "$pid_file" ]] || return 1
+  local pid process_args
+  pid="$(<"$pid_file")"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  process_args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  [[ "$process_args" == *"nginx: master process"* \
+    && "$process_args" == *"$NGINX_PREFIX"* ]]
+}
+
 start_service() {
   local name="$1"
   local workdir="$2"
@@ -335,14 +347,40 @@ start_service() {
 
 start_nginx() {
   local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
+  local public_operator_health_url="${PUBLIC_OPERATOR_URL%/}/health/live"
+  local ca_cert="${TLS_DIR}/development-ca.crt"
   nginx -p "$NGINX_PREFIX" -t -c nginx.conf
-  if [[ -f "$nginx_pid_file" ]] && kill -0 "$(<"$nginx_pid_file")" 2>/dev/null; then
-    log "Reloading Nginx"
-    nginx -p "$NGINX_PREFIX" -c nginx.conf -s reload
-  else
+
+  if nginx_pid_is_running; then
+    if curl -fsS --max-time 3 --cacert "$ca_cert" \
+      "$public_operator_health_url" >/dev/null 2>&1; then
+      log "Reloading Nginx"
+      nginx -p "$NGINX_PREFIX" -c nginx.conf -s reload
+      return 0
+    fi
+
+    local nginx_pid
+    nginx_pid="$(<"$nginx_pid_file")"
+    log "Nginx master is running but the public endpoint is unhealthy; restarting Nginx (PID $nginx_pid)"
+    nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit
+    local attempt
+    for attempt in {1..20}; do
+      nginx_pid_is_running || break
+      sleep 1
+    done
+    nginx_pid_is_running && die "Nginx did not stop; inspect PID $nginx_pid"
     rm -f -- "$nginx_pid_file"
-    log "Starting Nginx"
-    nginx -p "$NGINX_PREFIX" -c nginx.conf
+  elif [[ -f "$nginx_pid_file" ]]; then
+    log "Removing stale Nginx PID file"
+    rm -f -- "$nginx_pid_file"
+  fi
+
+  log "Starting Nginx"
+  nginx -p "$NGINX_PREFIX" -c nginx.conf
+  sleep 1
+  if ! nginx_pid_is_running; then
+    tail -n 80 "${NGINX_PREFIX}/logs/its-error.log" >&2 || true
+    die "Nginx exited during startup; inspect ${NGINX_PREFIX}/logs/its-error.log"
   fi
 }
 
@@ -537,9 +575,16 @@ stop_service() {
 
 stop_nginx() {
   local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
-  if [[ -f "$nginx_pid_file" ]] && kill -0 "$(<"$nginx_pid_file")" 2>/dev/null; then
+  if nginx_pid_is_running; then
     log "Stopping Nginx"
     nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit
+    local attempt
+    for attempt in {1..20}; do
+      nginx_pid_is_running || break
+      sleep 1
+    done
+    nginx_pid_is_running && die "Nginx did not stop; inspect PID $(<"$nginx_pid_file")"
+    rm -f -- "$nginx_pid_file"
   else
     rm -f -- "$nginx_pid_file"
     log "Nginx is not running under the project prefix"
