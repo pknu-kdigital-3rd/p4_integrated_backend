@@ -72,9 +72,10 @@ Install and verify Docker Engine/Compose, `uv`, Go, OpenSSL, and `curl`. Node
 may be installed directly or managed by `nvm`. The one-command script discovers
 the current user's `~/.nvm/nvm.sh` even when NVM was not loaded in the launching
 terminal, then selects or installs `NODE_VERSION`. Set `NVM_DIR` in
-`deploy/env.local` only when NVM uses a custom location. Python must be 3.10 or
-newer. Do not run the GPU test suite on a host that is not the original test
-environment; the CUDA check below is only a runtime prerequisite check.
+`deploy/env.local` only when NVM uses a custom location. Vision requires Python
+3.12; route/tracking supports Python 3.10 or newer. Run the TensorRT smoke test
+and overload benchmark only on this Linux RTX 3090 deployment host, as
+described in [BENCHMARK_YOLO.md](../../services/vision/BENCHMARK_YOLO.md).
 
 ```bash
 docker --version
@@ -245,15 +246,21 @@ another shell:
 cd "$P4_ROOT"
 set -a; source deploy/env.local; set +a
 cd services/vision
-uv sync
+test -f ../../../yolo_custom/yolo_carafe_aspp/ultralytics/__init__.py
+uv sync --locked
+uv run python -c 'import ultralytics; print(ultralytics.__file__)'
 uv run python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0)); print(torch.cuda.get_arch_list())'
 uv run python run.py --no-tls
 ```
 
-`uv sync` installs the CUDA PyTorch wheels declared by this service. The
-runtime check must print the RTX 3090 and the process must log
-`YOLO inference device: cuda:0`. The first model load may download
-`yolo26s-seg.pt`; allow that download to finish.
+`uv sync --locked` selects the Python 3.12 lock and installs the CUDA PyTorch
+wheels declared by this service. The Ultralytics path must resolve to the
+configured editable checkout, not a PyPI copy. Set `YOLO_MODEL` to the deployed
+`.engine` file in `deploy/env.local`; its loader intentionally skips `.to()` and
+`.fuse()`. The CUDA check must print the RTX 3090 and Vision must log
+`YOLO inference device: cuda:0`. Run the smoke test and 10-minute overload test
+in [BENCHMARK_YOLO.md](../../services/vision/BENCHMARK_YOLO.md) before accepting
+the deployment.
 
 Verify:
 

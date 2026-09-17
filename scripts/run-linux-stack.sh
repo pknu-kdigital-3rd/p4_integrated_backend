@@ -249,7 +249,7 @@ setup_stack() {
   log "Installing Vision dependencies and verifying CUDA"
   (
     cd "${PROJECT_ROOT}/services/vision"
-    uv sync
+    uv sync --locked
     uv run python -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; name=torch.cuda.get_device_name(0); assert "3090" in name, name; print(name); print(torch.cuda.get_arch_list())'
   )
 
