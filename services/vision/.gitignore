@@ -1,0 +1,2 @@
+# Per-machine junction/symlink to the custom Ultralytics checkout.
+.ultralytics-custom

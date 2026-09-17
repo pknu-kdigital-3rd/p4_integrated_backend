@@ -1,5 +1,31 @@
 # YOLO throughput benchmark
 
+## Custom Ultralytics checkout
+
+The checkpoint uses classes from the custom Ultralytics fork. The vision
+project and lockfile refer to it through `.ultralytics-custom`, a per-machine
+junction or symlink ignored by Git. Point that link at the fork's checkout
+root (the directory containing `pyproject.toml` and the `ultralytics` package)
+before running `uv sync --locked`.
+
+On Windows PowerShell, from `services/vision`:
+
+```powershell
+$customUltralytics = 'C:\path\to\yolo_carafe_aspp'
+New-Item -ItemType Junction -Path .ultralytics-custom -Target $customUltralytics
+uv sync --locked
+```
+
+On Linux, from `services/vision`:
+
+```bash
+ln -s /home/user/yolo_custom/yolo_carafe_aspp .ultralytics-custom
+uv sync --locked
+```
+
+Create the link once per checkout, using the custom fork's actual location on
+that host. The source path stays identical in the vision project on both OSes.
+
 Run from this directory on the RTX 3090 host:
 
 ```bash

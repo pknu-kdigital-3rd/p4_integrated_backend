@@ -246,7 +246,10 @@ another shell:
 cd "$P4_ROOT"
 set -a; source deploy/env.local; set +a
 cd services/vision
-test -f ../../../yolo_custom/yolo_carafe_aspp/ultralytics/__init__.py
+if [ ! -e .ultralytics-custom ]; then
+  ln -s /home/user/yolo_custom/yolo_carafe_aspp .ultralytics-custom
+fi
+test -f .ultralytics-custom/ultralytics/__init__.py
 uv sync --locked
 uv run python -c 'import ultralytics; print(ultralytics.__file__)'
 uv run python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0)); print(torch.cuda.get_arch_list())'
