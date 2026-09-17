@@ -6,6 +6,11 @@ const envBoolean = z
     .default("false")
     .transform((value) => value === "true");
 
+const envBooleanDefaultTrue = z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true");
+
 const envSchema = z.object({
     NODE_ENV: z
         .enum(["development", "test", "production"])
@@ -36,6 +41,7 @@ const envSchema = z.object({
     OPERATOR_DEMO_PUBLIC: envBoolean,
     TRUST_PROXY: envBoolean,
     RECORDING_ENABLED: envBoolean,
+    RECORDING_REQUIRE_ACTIVE_TRIP: envBooleanDefaultTrue,
     NODE_INTERNAL_SERVICE_TOKEN: z.string().optional(),
     MINIO_RECORDING_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).refine(value => !value.includes("..")).default("p4-trip-recordings"),
     MINIO_NODE_ACCESS_KEY: z.string().optional(),

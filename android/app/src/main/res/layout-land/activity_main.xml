@@ -38,21 +38,57 @@
             android:textColor="#FFFFFFFF"
             android:textColorHint="#B0FFFFFF" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Recording IDs"
+            android:textColor="#FFFFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/recordingContextText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Enter both IDs to send recording context."
+            android:textColor="#FFFFD54F"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Trip ID"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
         <EditText
             android:id="@+id/recordingTripId"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Trip ID (optional; enables recording)"
+            android:hint="Enter a positive trip ID"
             android:inputType="number"
             android:singleLine="true"
             android:textColor="#FFFFFFFF"
             android:textColorHint="#B0FFFFFF" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Vehicle ID"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
         <EditText
             android:id="@+id/recordingVehicleId"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Vehicle ID (required with Trip ID)"
+            android:hint="Enter a positive vehicle ID"
             android:inputType="number"
             android:singleLine="true"
             android:textColor="#FFFFFFFF"

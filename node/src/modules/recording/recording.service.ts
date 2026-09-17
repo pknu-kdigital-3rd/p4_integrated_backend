@@ -47,17 +47,17 @@ function parseDatabaseInteger(value: string, name: string): bigint {
 	return parsed;
 }
 
-async function requireTripVehicle(tripId: bigint, vehicleId: bigint, inProgress: boolean) {
+async function requireTripVehicle(tripId: bigint, vehicleId: bigint, requireInProgress: boolean) {
     const trip = await prisma.trip.findFirst({
         where: {
             tripId,
             vehicleId,
-            ...(inProgress ? { tripStatus: "IN_PROGRESS" } : {}),
+            ...(requireInProgress ? { tripStatus: "IN_PROGRESS" } : {}),
         },
         select: { tripId: true, vehicleId: true },
     });
     if (!trip) {
-        throw new AppError(409, inProgress
+        throw new AppError(409, requireInProgress
             ? "Trip is not active for this vehicle"
             : "Trip does not belong to this vehicle", "RECORDING_TRIP_MISMATCH");
     }
@@ -102,7 +102,7 @@ export const recordingService = {
     async validateContext(context: RecordingContextBody) {
         const tripId = parsePositiveId(context.tripId, "tripId");
         const vehicleId = parsePositiveId(context.vehicleId, "vehicleId");
-        await requireTripVehicle(tripId, vehicleId, true);
+        await requireTripVehicle(tripId, vehicleId, env.RECORDING_REQUIRE_ACTIVE_TRIP);
         return context;
     },
 

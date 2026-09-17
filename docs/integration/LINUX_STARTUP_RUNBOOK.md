@@ -131,6 +131,11 @@ together. For a local smoke test without BIMS, leave
 
 For recording, set `RECORDING_ENABLED=true` and replace the example Node token,
 MinIO root password, relay secret, and Node read secret with independent values.
+By default, Node only accepts a recording context for a trip in `IN_PROGRESS`
+and assigned to the supplied vehicle. To allow a matching trip in any status,
+set `RECORDING_REQUIRE_ACTIVE_TRIP=false` in `deploy/env.local`. The trip must
+still belong to that vehicle; after changing the setting, restart Node. This can
+associate video with a planned, paused, completed, or cancelled trip.
 Keep `MINIO_ENDPOINT` on loopback for the Go relay and set
 `MINIO_PUBLIC_ENDPOINT` to the HTTPS address on port `39003` that browsers will
 use. Set `MINIO_BROWSER_REDIRECT_URL` to

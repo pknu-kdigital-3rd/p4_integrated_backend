@@ -362,7 +362,6 @@ class WebRtcPublisher(
         }
         val local = connection.localDescription ?: return
         offerPosted = true
-        onStatus("Sending offer to server…")
         val json = JSONObject()
             .put("sdp", local.description)
             .put("type", local.type.canonicalForm())
@@ -370,6 +369,9 @@ class WebRtcPublisher(
             json.put("tripId", recordingTripId.toString())
                 .put("vehicleId", recordingVehicleId.toString())
                 .put("recordingSessionId", recordingSessionId)
+            onStatus("Sending offer with Trip ID $recordingTripId and Vehicle ID $recordingVehicleId…")
+        } else {
+            onStatus("Sending live-only offer; no recording IDs sent…")
         }
         val request = Request.Builder()
             .url(offerEndpoint)
@@ -404,7 +406,11 @@ class WebRtcPublisher(
                         }
                         current.setRemoteDescription(SimpleSdpObserver(
                             setSuccess = {
-                                onStatus("Connected to FastAPI")
+                                if (recordingTripId != null && recordingVehicleId != null) {
+                                    onStatus("Connected to relay; sent Trip ID $recordingTripId and Vehicle ID $recordingVehicleId")
+                                } else {
+                                    onStatus("Connected to relay; no recording IDs sent")
+                                }
                                 // outbound-rtp stats have no codecId until the encoder has
                                 // produced at least one packet, so check once immediately
                                 // (may be empty) and once more after the encoder warms up.

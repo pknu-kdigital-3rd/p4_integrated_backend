@@ -13,6 +13,8 @@ import android.hardware.camera2.TotalCaptureResult
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
 import android.util.Range
 import android.util.Size
@@ -100,6 +102,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var serverUrl: EditText
     private lateinit var recordingTripIdInput: EditText
     private lateinit var recordingVehicleIdInput: EditText
+    private lateinit var recordingContextText: TextView
     private lateinit var resolutionSpinner: Spinner
     private lateinit var actualResolutionText: TextView
     private lateinit var qrStatusText: TextView
@@ -181,8 +184,17 @@ class MainActivity : AppCompatActivity() {
         serverUrl.setText(BuildConfig.DEFAULT_SERVER_URL)
         recordingTripIdInput = findViewById(R.id.recordingTripId)
         recordingVehicleIdInput = findViewById(R.id.recordingVehicleId)
+        recordingContextText = findViewById(R.id.recordingContextText)
         recordingTripIdInput.setText(getPreferences(MODE_PRIVATE).getString(RECORDING_TRIP_ID_KEY, ""))
         recordingVehicleIdInput.setText(getPreferences(MODE_PRIVATE).getString(RECORDING_VEHICLE_ID_KEY, ""))
+        val recordingContextWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) = updateRecordingContextText()
+        }
+        recordingTripIdInput.addTextChangedListener(recordingContextWatcher)
+        recordingVehicleIdInput.addTextChangedListener(recordingContextWatcher)
+        updateRecordingContextText()
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         actualResolutionText = findViewById(R.id.actualResolutionText)
         qrStatusText = findViewById(R.id.qrStatusText)
@@ -273,6 +285,8 @@ class MainActivity : AppCompatActivity() {
         publisher = WebRtcPublisher(this, endpoint, recordingTripId, recordingVehicleId) { message ->
             runOnUiThread { if (streaming.get()) setStatus(message) }
         }
+        recordingTripIdInput.isEnabled = false
+        recordingVehicleIdInput.isEnabled = false
         publisher?.start()
         bindCamera()
     }
@@ -647,6 +661,8 @@ class MainActivity : AppCompatActivity() {
         camera = null
         publisher?.dispose()
         publisher = null
+        recordingTripIdInput.isEnabled = true
+        recordingVehicleIdInput.isEnabled = true
         resolutionSpinner.isEnabled = true
         actualResolutionText.text = ""
         streamButton.setText(R.string.start_streaming)
@@ -670,6 +686,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun setStatus(message: String) {
         if (::statusText.isInitialized) statusText.text = message
+    }
+
+    private fun updateRecordingContextText() {
+        if (!::recordingContextText.isInitialized) return
+        val tripText = recordingTripIdInput.text.toString().trim()
+        val vehicleText = recordingVehicleIdInput.text.toString().trim()
+        if (tripText.isEmpty() && vehicleText.isEmpty()) {
+            recordingContextText.text = "No recording IDs. This stream will be live-only."
+            return
+        }
+        val tripId = tripText.toLongOrNull()?.takeIf { it > 0 }
+        val vehicleId = vehicleText.toLongOrNull()?.takeIf { it > 0 }
+        if (tripId == null || vehicleId == null) {
+            recordingContextText.text = "Enter positive Trip ID and Vehicle ID values to enable recording."
+            return
+        }
+        recordingContextText.text = "Will send to relay: Trip ID $tripId · Vehicle ID $vehicleId"
     }
 
     override fun onStop() {
