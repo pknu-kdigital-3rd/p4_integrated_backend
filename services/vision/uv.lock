@@ -1020,7 +1020,7 @@ requires-dist = [
     { name = "pydantic-settings" },
     { name = "torch", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "ultralytics", editable = "../../../yolo_custom/yolo_carafe_aspp" },
+    { name = "ultralytics", editable = ".ultralytics-custom" },
 ]
 
 [[package]]
@@ -1504,7 +1504,7 @@ wheels = [
 
 [[package]]
 name = "ultralytics"
-source = { editable = "../../../yolo_custom/yolo_carafe_aspp" }
+source = { editable = ".ultralytics-custom" }
 dependencies = [
     { name = "cloudpickle" },
     { name = "filelock" },

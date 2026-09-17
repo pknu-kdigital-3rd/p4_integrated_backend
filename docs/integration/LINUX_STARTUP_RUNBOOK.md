@@ -245,7 +245,8 @@ another shell:
 cd "$P4_ROOT"
 set -a; source deploy/env.local; set +a
 cd services/vision
-uv sync
+ln -s /home/user/yolo_custom/yolo_carafe_aspp .ultralytics-custom
+uv sync --locked
 uv run python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0)); print(torch.cuda.get_arch_list())'
 uv run python run.py --no-tls
 ```
