@@ -285,4 +285,46 @@ export const recordingService = {
             segmentIndex: video.segmentIndex,
         };
     },
+
+    async deleteTripVideo(tripVideoIdValue: string) {
+        if (!env.RECORDING_ENABLED || !minioClient) {
+            throw new AppError(503, "Recording deletion is disabled", "RECORDING_DISABLED");
+        }
+        const video = await this.getTripVideo(tripVideoIdValue);
+        if (video.uploadStatus !== "FINALIZED"
+            || video.storageBucket !== env.MINIO_RECORDING_BUCKET
+            || video.endSeq === null) {
+            throw new AppError(409, "Only finalized recording segments can be deleted", "RECORDING_NOT_FINALIZED");
+        }
+        const expectedObjectKey = `trips/${video.tripId}/sessions/${video.recordingSessionId}/segment-${String(video.segmentIndex).padStart(6, "0")}.mp4`;
+        if (video.objectKey !== expectedObjectKey) {
+            throw new AppError(409, "Recording object key does not match its segment identity", "INVALID_RECORDING_OBJECT_KEY");
+        }
+
+        try {
+            await minioClient.removeObject(video.storageBucket, video.objectKey);
+        } catch (error) {
+            logger.error({ err: error, tripVideoId: video.tripVideoId.toString() }, "Could not delete recording segment from MinIO");
+            throw new AppError(503, "Could not delete recording segment from object storage", "RECORDING_DELETE_FAILED");
+        }
+
+        try {
+            await prisma.$transaction([
+                prisma.tripVideoDetectionSample.deleteMany({
+                    where: {
+                        tripId: video.tripId,
+                        recordingSessionId: video.recordingSessionId,
+                        relayEpoch: video.relayEpoch,
+                        frameSeq: { gte: video.startSeq, lte: video.endSeq },
+                    },
+                }),
+                prisma.tripVideo.delete({ where: { tripVideoId: video.tripVideoId } }),
+            ]);
+        } catch (error) {
+            logger.error({ err: error, tripVideoId: video.tripVideoId.toString() }, "MinIO object deleted but recording metadata cleanup failed");
+            throw new AppError(503, "The video object was deleted, but replay metadata cleanup failed. Retry the deletion.", "RECORDING_DELETE_METADATA_FAILED");
+        }
+
+        return { tripVideoId: video.tripVideoId.toString(), deleted: true };
+    },
 };

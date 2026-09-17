@@ -106,6 +106,10 @@ export const recordingDetailResponseSchema = z.object({
     data: recordingSummarySchema,
 });
 
+export const recordingDeleteResponseSchema = z.object({
+    data: z.object({ tripVideoId: z.string(), deleted: z.literal(true) }),
+});
+
 export const registeredSegmentResponseSchema = z.object({
     data: z.object({ tripVideoId: z.string() }),
 });

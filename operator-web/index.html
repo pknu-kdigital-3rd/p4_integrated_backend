@@ -53,6 +53,15 @@
           <button type="submit">Load trip</button>
         </form>
         <p id="recordings-status" role="status">Select a vehicle to load its trip recordings.</p>
+        <div id="recording-delete-tools" hidden>
+          <button id="recording-delete-toggle" type="button">Delete segments</button>
+          <div id="recording-delete-mode" hidden>
+            <p>Select segments to permanently delete, including their replay detections.</p>
+            <ul id="recording-delete-list" aria-label="Select recording segments to delete"></ul>
+            <button id="recording-delete-selected" type="button" disabled>Delete selected</button>
+            <button id="recording-delete-cancel" type="button">Cancel</button>
+          </div>
+        </div>
         <div id="recording-player-panel" hidden>
           <div id="recording-stage">
             <video id="recording-player" playsinline preload="metadata" referrerpolicy="no-referrer"></video>

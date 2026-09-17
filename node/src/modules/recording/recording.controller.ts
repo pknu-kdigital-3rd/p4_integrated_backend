@@ -41,4 +41,9 @@ export const recordingController = {
         const result = await recordingService.createPlaybackUrl(req.params.tripVideoId as string);
         res.status(200).json({ data: result });
     },
+
+    async deleteTripVideo(req: Request, res: Response) {
+        const result = await recordingService.deleteTripVideo(req.params.tripVideoId as string);
+        res.status(200).json({ data: result });
+    },
 };

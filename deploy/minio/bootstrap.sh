@@ -46,6 +46,8 @@ ensure_user() {
 
 create_policy p4-recording-write /policies/relay.json.tmpl
 create_policy p4-recording-read /policies/node.json.tmpl
+create_policy p4-recording-delete /policies/node-delete.json.tmpl
 ensure_user "$MINIO_RELAY_ACCESS_KEY" "$MINIO_RELAY_SECRET_KEY" p4-recording-write
 ensure_user "$MINIO_NODE_ACCESS_KEY" "$MINIO_NODE_SECRET_KEY" p4-recording-read
+ensure_user "$MINIO_NODE_ACCESS_KEY" "$MINIO_NODE_SECRET_KEY" p4-recording-delete
 echo "MinIO bucket $MINIO_RECORDING_BUCKET and recording credentials are ready"

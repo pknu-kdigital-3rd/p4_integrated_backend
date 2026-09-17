@@ -240,6 +240,16 @@ wait_for_database() {
   die "PostgreSQL did not become ready; inspect: docker compose logs db"
 }
 
+bootstrap_recording_storage() {
+  [[ "$RECORDING_ENABLED" == true ]] || die "recording-bootstrap requires RECORDING_ENABLED=true"
+  log "Starting MinIO and applying recording bucket policies"
+  docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" up -d minio
+  wait_for_http "MinIO" "http://127.0.0.1:9000/minio/health/ready" \
+    || die "MinIO health check failed"
+  docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" \
+    run --rm --no-deps minio-bootstrap
+}
+
 setup_stack() {
   preflight
   mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" \
@@ -256,13 +266,7 @@ setup_stack() {
   wait_for_database
 
   if [[ "$RECORDING_ENABLED" == true ]]; then
-    log "Starting MinIO recording storage and applying bucket policies"
-    docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" \
-      up -d minio
-    wait_for_http "MinIO" "http://127.0.0.1:9000/minio/health/ready" \
-      || die "MinIO health check failed"
-    docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" \
-      run --rm --no-deps minio-bootstrap
+    bootstrap_recording_storage
   fi
 
   log "Installing and validating Node dependencies"
@@ -679,7 +683,7 @@ stop_component() {
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/run-linux-stack.sh [all|setup|start|restart|status|stop|down]
+Usage: scripts/run-linux-stack.sh [all|setup|start|restart|status|stop|down|recording-bootstrap]
 
 Individual components:
   scripts/run-linux-stack.sh start <node|routing|relay|vision|nginx>
@@ -693,9 +697,10 @@ Individual components:
   status  Show process and health status; nonzero exit means not fully ready
   stop    Stop Nginx and the four application services; leave PostgreSQL running
   down    Stop the stack and stop PostgreSQL
+  recording-bootstrap  Start MinIO if needed and apply recording bucket policies
 
 Set RECORDING_ENABLED=true in deploy/env.local to start MinIO and create its
-private bucket with separate relay-write and Node-read credentials.
+private bucket with relay-write, Node-read, and Node-delete permissions.
 USAGE
 }
 
@@ -712,6 +717,7 @@ main() {
       start_stack
       ;;
     setup) setup_stack ;;
+    recording-bootstrap) bootstrap_recording_storage ;;
     start)
       if [[ -n "${2:-}" ]]; then start_component "${2//route-tracking/routing}"; else start_stack; fi
       ;;

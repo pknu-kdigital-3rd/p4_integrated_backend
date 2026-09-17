@@ -3,6 +3,7 @@ import { apiErrorSchema } from "../../common/schema/api.schema.ts";
 import {
     playbackUrlResponseSchema,
     recordingContextSchema,
+    recordingDeleteResponseSchema,
     recordingDetailResponseSchema,
     recordingListResponseSchema,
     replayDetectionBatchSchema,
@@ -112,5 +113,22 @@ registry.registerPath({
         200: { description: "Presigned video URL", content: { "application/json": { schema: playbackUrlResponseSchema } } },
         401: { description: "Authentication required", content: { "application/json": { schema: apiErrorSchema } } },
         409: { description: "Segment is not available", content: { "application/json": { schema: apiErrorSchema } } },
+    },
+});
+
+registry.registerPath({
+    method: "delete",
+    path: "/api/v1/trip-videos/{tripVideoId}",
+    tags: ["Recording"],
+    summary: "Permanently delete a finalized recording segment and its replay detections",
+    security: [{ bearerAuth: [] }],
+    request: { params: recordingSummarySchema.pick({ tripVideoId: true }) },
+    responses: {
+        200: { description: "Recording segment deleted", content: { "application/json": { schema: recordingDeleteResponseSchema } } },
+        401: { description: "Authentication required", content: { "application/json": { schema: apiErrorSchema } } },
+        403: { description: "Admin or operator role required", content: { "application/json": { schema: apiErrorSchema } } },
+        404: { description: "Recording segment not found", content: { "application/json": { schema: apiErrorSchema } } },
+        409: { description: "Recording segment cannot be deleted", content: { "application/json": { schema: apiErrorSchema } } },
+        503: { description: "Recording object storage is unavailable", content: { "application/json": { schema: apiErrorSchema } } },
     },
 });

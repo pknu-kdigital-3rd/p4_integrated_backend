@@ -130,7 +130,7 @@ together. For a local smoke test without BIMS, leave
 `TELEMETRY_MODE=live` and add `BUSAN_BIMS_SERVICE_KEY`.
 
 For recording, set `RECORDING_ENABLED=true` and replace the example Node token,
-MinIO root password, relay secret, and Node read secret with independent values.
+MinIO root password, relay secret, and Node MinIO secret with independent values.
 Vision stores every completed inference result by default. Set
 `RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES` in `deploy/env.local` to store one
 result for every N completed inference results: `1` stores all results, `2`
@@ -152,6 +152,11 @@ uses the root credentials to provision MinIO; use `MINIO_ROOT_USER` and
 credentials bucket-scoped and dedicated to those services. The console backend
 stays on loopback port `9001`; Nginx exposes it at
 `https://${TLS_PUBLIC_ADDRESS}:39004`.
+The Node account also receives a separate bucket-scoped `DeleteObject` policy
+for operator replay cleanup. After installing this change, run
+`./scripts/run-linux-stack.sh recording-bootstrap` once so MinIO bootstrap
+creates and attaches that policy. This command loads `deploy/env.local`, starts
+MinIO if needed, and applies the bucket policies without restarting Node.
 The one-command setup starts MinIO after PostgreSQL is ready, waits for its
 readiness endpoint, and runs `minio-bootstrap` synchronously so a policy or
 credential failure stops setup.

@@ -416,7 +416,7 @@ MINIO_RECORDING_BUCKET=p4-trip-recordings
 MINIO_ACCESS_KEY=p4-relay
 MINIO_SECRET_KEY="replace-with-an-independent-random-secret"
 
-# Node backend's read-only MinIO service account and public playback origin
+# Node backend's bucket-scoped MinIO account and public playback origin
 MINIO_NODE_ACCESS_KEY=p4-node
 MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret"
 MINIO_PUBLIC_ENDPOINT=https://10.174.96.95:39003
