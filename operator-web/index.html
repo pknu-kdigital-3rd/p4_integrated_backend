@@ -13,6 +13,37 @@
     <aside>
       <form id="login"><h2>Operator login</h2><input name="loginId" placeholder="Login ID" required><input name="password" type="password" placeholder="Password" required><button>Sign in</button></form>
       <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view" type="button">Live View</button><p id="route-label">Planned Route: unavailable</p></section>
+      <section id="trip-panel" hidden aria-labelledby="trip-title">
+        <h2 id="trip-title">Make and assign a trip</h2>
+        <form id="trip-form">
+          <label for="trip-vehicle">Vehicle</label>
+          <select id="trip-vehicle" required><option value="">Loading vehicles…</option></select>
+          <label for="trip-origin-name">Origin name (optional)</label>
+          <input id="trip-origin-name" maxlength="150" placeholder="Depot or pickup point">
+          <div class="trip-coordinate-heading"><span>Origin coordinates (optional)</span><button type="button" data-trip-map-pick="origin">Pick on map</button></div>
+          <div class="trip-coordinate-grid">
+            <input id="trip-origin-latitude" type="number" min="-90" max="90" step="any" placeholder="Latitude" aria-label="Origin latitude">
+            <input id="trip-origin-longitude" type="number" min="-180" max="180" step="any" placeholder="Longitude" aria-label="Origin longitude">
+          </div>
+          <label for="trip-destination-name">Destination name</label>
+          <input id="trip-destination-name" maxlength="150" placeholder="Destination" required>
+          <div class="trip-coordinate-heading"><span>Destination coordinates</span><button type="button" data-trip-map-pick="destination">Pick on map</button></div>
+          <div class="trip-coordinate-grid">
+            <input id="trip-destination-latitude" type="number" min="-90" max="90" step="any" placeholder="Latitude" aria-label="Destination latitude" required>
+            <input id="trip-destination-longitude" type="number" min="-180" max="180" step="any" placeholder="Longitude" aria-label="Destination longitude" required>
+          </div>
+          <label for="trip-destination-address">Destination address (optional)</label>
+          <input id="trip-destination-address" maxlength="2000" placeholder="Street address">
+          <label for="trip-status">Initial status</label>
+          <select id="trip-status"><option value="IN_PROGRESS" selected>Start now</option><option value="READY">Ready for dispatch</option></select>
+          <label for="trip-planned-start">Planned start (optional)</label>
+          <input id="trip-planned-start" type="datetime-local">
+          <button id="create-trip" type="submit">Create trip and assign vehicle</button>
+        </form>
+        <p id="trip-status-message" role="status" aria-live="polite">Choose a vehicle and destination.</p>
+        <h3>Recent trips</h3>
+        <ul id="trips-list" aria-label="Recent trips"></ul>
+      </section>
       <section id="recordings-panel" aria-labelledby="recordings-title">
         <h2 id="recordings-title">Trip recordings</h2>
         <form id="recordings-form">

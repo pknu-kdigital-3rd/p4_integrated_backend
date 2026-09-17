@@ -9,6 +9,7 @@ import { env } from "../config/env.ts";
 import "../modules/vehicle/vehicle.openapi.ts";
 import "../modules/bootstrap/bootstrap.openapi.ts";
 import "../modules/tracking/tracking.openapi.ts";
+import "../modules/trip/trip.openapi.ts";
 import "../modules/recording/recording.openapi.ts";
 
 const generator = new OpenApiGeneratorV3(

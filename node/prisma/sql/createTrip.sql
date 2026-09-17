@@ -11,6 +11,8 @@
 -- @param {Float} $9:destinationLongitude
 -- @param {Float} $10:destinationLatitude
 -- @param {DateTime} $11:plannedStartAt?
+-- @param {String} $12:tripStatus
+-- @param {DateTime} $13:startedAt?
 
 INSERT INTO trip (
     vehicle_id,
@@ -22,7 +24,8 @@ INSERT INTO trip (
     destination_address,
     destination_location,
     trip_status,
-    planned_start_at
+    planned_start_at,
+    started_at
 )
 VALUES (
     $1,
@@ -36,8 +39,9 @@ VALUES (
     $7,
     $8,
     ST_SetSRID(ST_MakePoint($9, $10), 4326)::geography,
-    'READY',
-    $11
+    $12,
+    $11,
+    $13
 )
 RETURNING
     trip_id          AS "tripId",
