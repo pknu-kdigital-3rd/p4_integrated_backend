@@ -346,6 +346,64 @@ start_nginx() {
   fi
 }
 
+node_dependencies_ready() {
+  local node_dir="${PROJECT_ROOT}/node"
+  local lock_file="${node_dir}/package-lock.json"
+  local installed_lock_file="${node_dir}/node_modules/.package-lock.json"
+
+  [[ -x "${node_dir}/node_modules/.bin/tsx" ]] \
+    && [[ -f "${node_dir}/node_modules/minio/package.json" ]] \
+    && [[ -f "$installed_lock_file" ]] \
+    && [[ ! "$lock_file" -nt "$installed_lock_file" ]] \
+    && (cd "$node_dir" && npm ls --depth=0 >/dev/null 2>&1)
+}
+
+ensure_node_dependencies() {
+  local node_dir="${PROJECT_ROOT}/node"
+  if node_dependencies_ready; then
+    log "Node dependencies are already installed"
+    return 0
+  fi
+
+  log "Installing missing or outdated Node dependencies from package-lock.json"
+  (
+    cd "$node_dir"
+    NODE_ENV=development npm ci --include=dev
+  )
+  node_dependencies_ready || die "Node dependencies are still incomplete after npm ci"
+}
+
+relay_binary_needs_build() {
+  local relay_dir="${PROJECT_ROOT}/services/media-relay"
+  local relay_binary="${BIN_DIR}/media-relay"
+  local newer_source
+
+  [[ -x "$relay_binary" ]] || return 0
+  newer_source="$(find "$relay_dir" -type f \
+    \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) \
+    -newer "$relay_binary" -print -quit)"
+  [[ -n "$newer_source" ]]
+}
+
+ensure_relay_binary() {
+  local relay_dir="${PROJECT_ROOT}/services/media-relay"
+  local relay_binary="${BIN_DIR}/media-relay"
+  require_command go
+
+  if ! relay_binary_needs_build; then
+    log "Go relay binary is current"
+    return 0
+  fi
+
+  log "Building missing or outdated Go relay binary"
+  mkdir -p "$BIN_DIR"
+  (
+    cd "$relay_dir"
+    go mod download
+    go build -o "$relay_binary" .
+  )
+}
+
 show_service_log() {
   local name="$1"
   local log_file="${LOG_DIR}/${name}.log"
@@ -360,7 +418,8 @@ start_stack() {
     "${NGINX_PREFIX}/logs/fastcgi_temp" \
     "${NGINX_PREFIX}/logs/uwsgi_temp" \
     "${NGINX_PREFIX}/logs/scgi_temp"
-  [[ -x "${BIN_DIR}/media-relay" ]] || die "Relay binary is missing. Run setup or all first."
+  ensure_node_dependencies
+  ensure_relay_binary
 
   start_service node "${PROJECT_ROOT}/node" \
     env PORT="$NODE_PORT" "${PROJECT_ROOT}/node/node_modules/.bin/tsx" src/server.ts
@@ -415,6 +474,7 @@ start_component() {
   case "$component" in
     node)
       load_node_runtime
+      ensure_node_dependencies
       start_service node "${PROJECT_ROOT}/node" \
         env PORT="$NODE_PORT" "${PROJECT_ROOT}/node/node_modules/.bin/tsx" src/server.ts
       wait_for_http "Node" "http://${HOST}:${NODE_PORT}/health/ready" \
@@ -427,7 +487,7 @@ start_component() {
         || { show_service_log routing; die "Route/tracking health check failed"; }
       ;;
     relay)
-      [[ -x "${BIN_DIR}/media-relay" ]] || die "Relay binary is missing. Run setup first."
+      ensure_relay_binary
       start_service relay "${PROJECT_ROOT}/services/media-relay" "${BIN_DIR}/media-relay"
       wait_for_http "Go relay" "http://${RELAY_LISTEN_ADDR}/healthz" \
         || { show_service_log relay; die "Relay health check failed"; }
