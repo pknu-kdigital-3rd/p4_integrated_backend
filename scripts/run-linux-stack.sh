@@ -104,7 +104,7 @@ load_environment() {
     local recording_variable recording_secret recording_secret_value
     for recording_variable in NODE_INTERNAL_SERVICE_TOKEN MINIO_ENDPOINT MINIO_ACCESS_KEY \
       MINIO_SECRET_KEY MINIO_NODE_ACCESS_KEY MINIO_NODE_SECRET_KEY MINIO_RECORDING_BUCKET \
-      MINIO_PUBLIC_ENDPOINT MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do
+      MINIO_PUBLIC_ENDPOINT MINIO_BROWSER_REDIRECT_URL MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do
       [[ -n "${!recording_variable:-}" ]] \
         || die "$recording_variable is required when RECORDING_ENABLED=true"
     done
@@ -119,6 +119,8 @@ load_environment() {
       || die "NODE_INTERNAL_SERVICE_TOKEN must contain at least 32 characters"
     [[ "$MINIO_PUBLIC_ENDPOINT" == https://* ]] \
       || die "MINIO_PUBLIC_ENDPOINT must use HTTPS"
+    [[ "$MINIO_BROWSER_REDIRECT_URL" == https://* ]] \
+      || die "MINIO_BROWSER_REDIRECT_URL must use HTTPS"
   fi
 
   [[ "$PUBLIC_OPERATOR_URL" == https://* ]] || die "PUBLIC_OPERATOR_URL must use HTTPS"
@@ -382,10 +384,17 @@ start_stack() {
     || die "Public operator HTTPS health check failed"
   wait_for_http "Public Vision" "${VISION_PUBLIC_BASE_URL%/}/health/live" "$ca_cert" \
     || die "Public Vision HTTPS health check failed"
+  if [[ "$RECORDING_ENABLED" == true ]]; then
+    wait_for_http "MinIO Console" "${MINIO_BROWSER_REDIRECT_URL%/}/" "$ca_cert" \
+      || die "MinIO Console HTTPS check failed"
+  fi
 
   log "Stack is ready"
   log "Operator: ${PUBLIC_OPERATOR_URL%/}/operator/"
   log "Live View: ${LIVE_VIEW_URL}"
+  if [[ "$RECORDING_ENABLED" == true ]]; then
+    log "MinIO Console: ${MINIO_BROWSER_REDIRECT_URL%/}/"
+  fi
 }
 
 prepare_runtime_dirs() {
@@ -431,6 +440,10 @@ start_component() {
       local ca_cert="${TLS_DIR}/development-ca.crt"
       wait_for_http "Public operator" "${PUBLIC_OPERATOR_URL%/}/health/live" "$ca_cert" \
         || die "Public operator HTTPS health check failed"
+      if [[ "$RECORDING_ENABLED" == true ]]; then
+        wait_for_http "MinIO Console" "${MINIO_BROWSER_REDIRECT_URL%/}/" "$ca_cert" \
+          || die "MinIO Console HTTPS check failed"
+      fi
       ;;
     *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
   esac
@@ -500,6 +513,12 @@ status_stack() {
     "${PUBLIC_OPERATOR_URL%/}/health/live" >/dev/null 2>&1 \
     && printf '%-10s READY %s\n' nginx "$PUBLIC_OPERATOR_URL" \
     || { printf '%-10s NOT_READY %s\n' nginx "$PUBLIC_OPERATOR_URL"; failed=1; }
+  if [[ "$RECORDING_ENABLED" == true ]]; then
+    curl -fsS --max-time 3 --cacert "${TLS_DIR}/development-ca.crt" \
+      "${MINIO_BROWSER_REDIRECT_URL%/}/" >/dev/null 2>&1 \
+      && printf '%-10s READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL" \
+      || { printf '%-10s NOT_READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL"; failed=1; }
+  fi
   return "$failed"
 }
 
@@ -515,6 +534,12 @@ status_component() {
         "${PUBLIC_OPERATOR_URL%/}/health/live" >/dev/null 2>&1 \
         && printf '%-10s READY %s\n' nginx "$PUBLIC_OPERATOR_URL" \
         || { printf '%-10s NOT_READY %s\n' nginx "$PUBLIC_OPERATOR_URL"; return 1; }
+      if [[ "$RECORDING_ENABLED" == true ]]; then
+        curl -fsS --max-time 3 --cacert "${TLS_DIR}/development-ca.crt" \
+          "${MINIO_BROWSER_REDIRECT_URL%/}/" >/dev/null 2>&1 \
+          && printf '%-10s READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL" \
+          || { printf '%-10s NOT_READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL"; return 1; }
+      fi
       ;;
     *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
   esac

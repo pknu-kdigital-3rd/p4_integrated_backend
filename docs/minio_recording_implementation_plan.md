@@ -368,9 +368,10 @@ minio:
   environment:
     MINIO_ROOT_USER: ${MINIO_ROOT_USER}
     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL}
   ports:
-    - "9000:9000"
-    - "9001:9001"
+    - "127.0.0.1:9000:9000"
+    - "127.0.0.1:9001:9001"
   volumes:
     - p4_minio_data:/data
 ```
@@ -383,7 +384,9 @@ volumes:
   p4_minio_data:
 ```
 
-For production, do not expose the MinIO console publicly unless required.
+Keep both MinIO ports loopback-bound. When operators need console access, expose
+it through the HTTPS reverse proxy and set `MINIO_BROWSER_REDIRECT_URL` to the
+proxy URL (port `39004` in this deployment).
 
 Create the recording bucket during deployment/bootstrap and keep it private.
 

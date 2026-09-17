@@ -19,6 +19,7 @@ until every required check below passes.
 | Operator HTTPS ingress | `deploy/nginx/` | Nginx | `:39001` | HTTPS curl checks |
 | Vision/WSS/signaling HTTPS ingress | `deploy/nginx/` | Nginx | `:39002` | HTTPS curl checks |
 | MinIO signed playback ingress (optional recording profile) | `deploy/nginx/` | Nginx | `:39003` | signed GET / Range GET |
+| MinIO Console HTTPS ingress (optional recording profile) | `deploy/nginx/` | Nginx | `:39004` | HTTPS browser / curl check |
 
 Terminology: Vision is the Python WebRTC/YOLO server. Route/tracking is the
 second Python service. There is no separate fourth Python server in this
@@ -68,8 +69,8 @@ project-local configuration.
 
 Logs and PID files are kept under the ignored `.runtime/` directory. `stop`
 leaves PostgreSQL and MinIO running; `down` stops them when recording is enabled.
-Nginx uses only the unprivileged HTTPS ports 39001, 39002, and (when recording
-is enabled) 39003 and runs under the current user.
+Nginx uses only the unprivileged HTTPS ports 39001 and 39002, plus 39003 and
+39004 when recording is enabled, and runs under the current user.
 
 ## 0. One-time host prerequisites
 
@@ -122,8 +123,9 @@ set +a
 Set `P4_ROOT` to the real checkout path. Set `NVM_DIR` only if NVM is not under
 the current user's `~/.nvm`. If the server address is not
 `10.174.96.95`, change `PUBLIC_OPERATOR_URL`, `VISION_PUBLIC_BASE_URL`,
-`LIVE_VIEW_URL`, the `server_name` in `deploy/nginx/nginx.conf`, `TURN_URL`,
-and the certificate SAN together. For a local smoke test without BIMS, leave
+`LIVE_VIEW_URL`, `MINIO_PUBLIC_ENDPOINT`, `MINIO_BROWSER_REDIRECT_URL`, the
+`server_name` in `deploy/nginx/nginx.conf`, `TURN_URL`, and the certificate SAN
+together. For a local smoke test without BIMS, leave
 `TELEMETRY_MODE=playback`. For live BIMS, set
 `TELEMETRY_MODE=live` and add `BUSAN_BIMS_SERVICE_KEY`.
 
@@ -131,8 +133,13 @@ For recording, set `RECORDING_ENABLED=true` and replace the example Node token,
 MinIO root password, relay secret, and Node read secret with independent values.
 Keep `MINIO_ENDPOINT` on loopback for the Go relay and set
 `MINIO_PUBLIC_ENDPOINT` to the HTTPS address on port `39003` that browsers will
-use. The relay and Node credentials are bucket-scoped; the root account is only
-used by bootstrap. Do not expose the MinIO console on port `9001` to the LAN.
+use. Set `MINIO_BROWSER_REDIRECT_URL` to
+`https://${TLS_PUBLIC_ADDRESS}:39004` for the HTTPS MinIO Console. Bootstrap
+uses the root credentials to provision MinIO; use `MINIO_ROOT_USER` and
+`MINIO_ROOT_PASSWORD` to sign in to the Console. Keep the relay and Node
+credentials bucket-scoped and dedicated to those services. The console backend
+stays on loopback port `9001`; Nginx exposes it at
+`https://${TLS_PUBLIC_ADDRESS}:39004`.
 The one-command setup starts MinIO after PostgreSQL is ready, waits for its
 readiness endpoint, and runs `minio-bootstrap` synchronously so a policy or
 credential failure stops setup.
@@ -188,8 +195,10 @@ fi
 
 The bucket is private. Port `9000` is loopback-only for the relay; Nginx
 provides signed object GETs and byte-range requests through HTTPS port `39003`.
-Port `9001` is a loopback-only administration console. Verify the public S3
-endpoint only after a segment has been recorded and Node has registered it.
+Port `9001` remains loopback-only. The MinIO Console is available through Nginx
+at `https://10.174.96.95:39004/`; sign in with the MinIO root credentials from
+`deploy/env.local`. Verify the public S3 endpoint only after a segment has been
+recorded and Node has registered it.
 
 ## 3. Start the Node control API
 
@@ -375,6 +384,9 @@ The stack is up only when all of these succeed from a separate shell:
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39001/health/live
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39002/
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39001/operator/
+if [[ "${RECORDING_ENABLED:-false}" == true ]]; then
+  curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39004/
+fi
 curl --fail http://127.0.0.1:"$ROUTING_PORT"/health/ready
 curl --fail http://127.0.0.1:39012/healthz
 ```
