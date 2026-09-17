@@ -112,8 +112,11 @@ load_environment() {
       recording_secret_value="${!recording_secret}"
       [[ "$recording_secret_value" != replace-* ]] \
         || die "$recording_secret must be replaced before recording is enabled"
-      [[ ${#recording_secret_value} -ge 12 ]] \
-        || die "$recording_secret must contain at least 12 characters"
+    done
+    for minio_secret in MINIO_ROOT_PASSWORD MINIO_SECRET_KEY MINIO_NODE_SECRET_KEY; do
+      minio_secret_value="${!minio_secret}"
+      [[ ${#minio_secret_value} -ge 8 ]] \
+        || die "$minio_secret must contain at least 8 characters (MinIO requirement)"
     done
     [[ ${#NODE_INTERNAL_SERVICE_TOKEN} -ge 32 ]] \
       || die "NODE_INTERNAL_SERVICE_TOKEN must contain at least 32 characters"
