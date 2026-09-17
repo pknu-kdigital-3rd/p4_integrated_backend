@@ -143,9 +143,10 @@ trip existence, status, and vehicle match checks; restart Node after changing
 it. The database still requires an existing trip row when segment metadata is
 registered. A segment for a trip ID with no row can upload to MinIO, while its
 database registration fails and the relay retains it for retry.
-Keep `MINIO_ENDPOINT` on loopback for the Go relay and set
-`MINIO_PUBLIC_ENDPOINT` to the HTTPS address on port `39003` that browsers will
-use. Set `MINIO_BROWSER_REDIRECT_URL` to
+Keep `MINIO_ENDPOINT` on loopback for Go relay uploads and Node server-side
+object operations. Set `MINIO_USE_SSL` to match that private endpoint, then set
+`MINIO_PUBLIC_ENDPOINT` to the HTTPS address on port `39003` that browsers use
+for playback. Set `MINIO_BROWSER_REDIRECT_URL` to
 `https://${TLS_PUBLIC_ADDRESS}:39004` for the HTTPS MinIO Console. Bootstrap
 uses the root credentials to provision MinIO; use `MINIO_ROOT_USER` and
 `MINIO_ROOT_PASSWORD` to sign in to the Console. Keep the relay and Node

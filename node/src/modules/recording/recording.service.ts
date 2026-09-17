@@ -11,21 +11,26 @@ import type { RecordingContextBody, RecordingSegmentBody, ReplayDetectionSampleB
 const maxDatabaseId = 9_223_372_036_854_775_807n;
 const minDatabaseInteger = -9_223_372_036_854_775_808n;
 
-const minioClient = (() => {
-    if (!env.RECORDING_ENABLED || !env.MINIO_PUBLIC_ENDPOINT || !env.MINIO_NODE_ACCESS_KEY || !env.MINIO_NODE_SECRET_KEY) {
+function createMinioClient(endpoint: URL | undefined) {
+    if (!env.RECORDING_ENABLED || !endpoint || !env.MINIO_NODE_ACCESS_KEY || !env.MINIO_NODE_SECRET_KEY) {
         return undefined;
     }
-    const endpoint = new URL(env.MINIO_PUBLIC_ENDPOINT);
-    const hostname = endpoint.hostname.replace(/^\[|\]$/g, "");
     return new MinioClient({
-        endPoint: hostname,
+        endPoint: endpoint.hostname.replace(/^\[|\]$/g, ""),
         port: endpoint.port ? Number(endpoint.port) : endpoint.protocol === "https:" ? 443 : 80,
         useSSL: endpoint.protocol === "https:",
         accessKey: env.MINIO_NODE_ACCESS_KEY,
         secretKey: env.MINIO_NODE_SECRET_KEY,
         region: "us-east-1",
     });
-})();
+}
+
+const playbackMinioClient = createMinioClient(
+    env.MINIO_PUBLIC_ENDPOINT ? new URL(env.MINIO_PUBLIC_ENDPOINT) : undefined,
+);
+const storageMinioClient = createMinioClient(
+    new URL(`${env.MINIO_USE_SSL ? "https" : "http"}://${env.MINIO_ENDPOINT}`),
+);
 
 function parsePositiveId(value: string, name: string): bigint {
 	const parsed = parseDatabaseInteger(value, name);
@@ -260,7 +265,7 @@ export const recordingService = {
     },
 
     async createPlaybackUrl(tripVideoIdValue: string) {
-        if (!env.RECORDING_ENABLED || !minioClient) {
+        if (!env.RECORDING_ENABLED || !playbackMinioClient) {
             throw new AppError(503, "Recording playback is disabled", "RECORDING_DISABLED");
         }
         const video = await this.getTripVideo(tripVideoIdValue);
@@ -269,7 +274,7 @@ export const recordingService = {
         }
         let url: string;
         try {
-            url = await minioClient.presignedGetObject(
+            url = await playbackMinioClient.presignedGetObject(
                 video.storageBucket,
                 video.objectKey,
                 env.RECORDING_PLAYBACK_URL_TTL_SECONDS,
@@ -287,7 +292,7 @@ export const recordingService = {
     },
 
     async deleteTripVideo(tripVideoIdValue: string) {
-        if (!env.RECORDING_ENABLED || !minioClient) {
+        if (!env.RECORDING_ENABLED || !storageMinioClient) {
             throw new AppError(503, "Recording deletion is disabled", "RECORDING_DISABLED");
         }
         const video = await this.getTripVideo(tripVideoIdValue);
@@ -302,7 +307,7 @@ export const recordingService = {
         }
 
         try {
-            await minioClient.removeObject(video.storageBucket, video.objectKey);
+            await storageMinioClient.removeObject(video.storageBucket, video.objectKey);
         } catch (error) {
             logger.error({ err: error, tripVideoId: video.tripVideoId.toString() }, "Could not delete recording segment from MinIO");
             throw new AppError(503, "Could not delete recording segment from object storage", "RECORDING_DELETE_FAILED");

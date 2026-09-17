@@ -409,7 +409,7 @@ RECORDING_UPLOAD_QUEUE=8
 NODE_INTERNAL_BASE_URL=http://127.0.0.1:3000
 NODE_INTERNAL_SERVICE_TOKEN="replace-with-a-random-token-at-least-32-characters"
 
-# Go relay's private MinIO API connection and write-only service account
+# Private MinIO API connection used by the Go relay and Node storage operations
 MINIO_ENDPOINT=127.0.0.1:9000
 MINIO_USE_SSL=false
 MINIO_RECORDING_BUCKET=p4-trip-recordings
@@ -433,9 +433,10 @@ Node MinIO account, and MinIO root account. MinIO secret keys must be at least
 8 characters; `NODE_INTERNAL_SERVICE_TOKEN` must be at least 32 characters and
 must have the same value in the Go relay and Node process environments.
 
-`MINIO_ENDPOINT` is the loopback API address used by the relay to upload files.
-`MINIO_PUBLIC_ENDPOINT` is the HTTPS S3 API origin used to create playback
-URLs, and must be reachable by clients at port `39003`. Set
+`MINIO_ENDPOINT` is the private API address used by the relay to upload files
+and Node to delete objects. `MINIO_USE_SSL` controls TLS for this private
+connection. `MINIO_PUBLIC_ENDPOINT` is the HTTPS S3 API origin used to create
+playback URLs, and must be reachable by clients at port `39003`. Set
 `MINIO_BROWSER_REDIRECT_URL` to the HTTPS Console proxy at port `39004`.
 `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` are for MinIO bootstrap and
 administration only; application services use their dedicated accounts.

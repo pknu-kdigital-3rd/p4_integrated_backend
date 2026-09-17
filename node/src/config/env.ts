@@ -44,6 +44,8 @@ const envSchema = z.object({
     RECORDING_VALIDATE_TRIP_CONTEXT: envBooleanDefaultTrue,
     NODE_INTERNAL_SERVICE_TOKEN: z.string().optional(),
     MINIO_RECORDING_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).refine(value => !value.includes("..")).default("p4-trip-recordings"),
+    MINIO_ENDPOINT: z.string().min(1).default("127.0.0.1:9000"),
+    MINIO_USE_SSL: envBoolean,
     MINIO_NODE_ACCESS_KEY: z.string().optional(),
     MINIO_NODE_SECRET_KEY: z.string().optional(),
     MINIO_PUBLIC_ENDPOINT: z.url().optional(),
