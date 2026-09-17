@@ -39,18 +39,15 @@ class Settings(BaseSettings):
     # FP16 is substantially faster on RTX-class CUDA GPUs. It is enabled by
     # default but is automatically ignored when YOLO_DEVICE is CPU.
     YOLO_HALF: bool = True
-    # False keeps mask decode at the model input resolution instead of
-    # upsampling every mask to the full camera frame. The normalized polygon
-    # output contract is unchanged, while this avoids a large per-mask GPU and
-    # CPU contour cost. Enable only when maximum mask detail is required.
-    YOLO_RETINA_MASKS: bool = False
+    # Preserve detail in the source-aligned segmentation masks. Operators can
+    # disable this when inference latency matters more than polygon detail.
+    YOLO_RETINA_MASKS: bool = True
     # Bound NMS and segmentation work for crowded frames. Increase this when
     # the application must publish more than 100 objects in one frame.
     YOLO_MAX_DETECTIONS: int = Field(default=100, ge=1, le=300)
-    # Limit the mask grid used for CPU contour extraction and browser polygons.
-    # 160 matches the native prototype scale of a 640px YOLO input and avoids
-    # transferring an upsampled mask grid for every detection.
-    YOLO_MASK_CONTOUR_SIZE: int = Field(default=160, ge=32, le=640)
+    # Bound the device-side grid used for contour extraction. 640 preserves
+    # detail by default; reduce this to trade polygon fidelity for latency.
+    YOLO_MASK_CONTOUR_SIZE: int = Field(default=640, ge=32, le=640)
     # Optional contour simplification reduces JSON and browser work for masks
     # with noisy boundaries. Keep it off by default so polygon fidelity stays
     # identical until a deployment opts in.

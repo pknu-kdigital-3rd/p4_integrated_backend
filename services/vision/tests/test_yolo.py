@@ -2,15 +2,17 @@ import asyncio
 from contextlib import suppress
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import av
 import numpy as np
 
+from app.core.settings import Settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
     _enqueue_inference_frame,
     _take_latest_inference_frame,
+    load_yolo_model,
     reset_tracker,
     run_yolo,
     yolo_worker,
@@ -112,6 +114,8 @@ class RunYoloTests(unittest.TestCase):
             "app.services.yolo.settings.YOLO_DEVICE", "cpu"
         ), patch(
             "app.services.yolo.settings.YOLO_MAX_IMGSZ", 704
+        ), patch(
+            "app.services.yolo.settings.YOLO_RETINA_MASKS", True
         ):
             result = run_yolo(inference_frame, model)
 
@@ -122,7 +126,7 @@ class RunYoloTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["class"], "dog")
         self.assertEqual(result["items"][0]["mask_format"], "polygon_normalized")
         self.assertTrue(np.allclose(result["items"][0]["mask"], polygons[1]))
-        self.assertFalse(model.predict_kwargs["retina_masks"])
+        self.assertTrue(model.predict_kwargs["retina_masks"])
         self.assertEqual(model.predict_kwargs["max_det"], 100)
 
     def test_resizes_before_bgr_and_maps_pixel_boxes_back_to_source(self):
@@ -178,6 +182,8 @@ class RunYoloTests(unittest.TestCase):
             "app.services.yolo.settings.YOLO_MAX_IMGSZ", 704
         ), patch(
             "app.services.yolo.settings.YOLO_TRACKER_CONFIG", "bytetrack.yaml"
+        ), patch(
+            "app.services.yolo.settings.YOLO_RETINA_MASKS", True
         ):
             result = run_yolo(inference_frame, model)
 
@@ -187,7 +193,7 @@ class RunYoloTests(unittest.TestCase):
         self.assertEqual([item["track_id"] for item in result["items"]], [4, 7])
         self.assertTrue(model.track_kwargs["persist"])
         self.assertEqual(model.track_kwargs["conf"], 0.3)
-        self.assertFalse(model.track_kwargs["retina_masks"])
+        self.assertTrue(model.track_kwargs["retina_masks"])
         self.assertEqual(model.track_kwargs["max_det"], 100)
         self.assertEqual(model.track_kwargs["tracker"], "bytetrack.yaml")
 
@@ -212,6 +218,57 @@ class RunYoloTests(unittest.TestCase):
     def test_reset_tracker_is_a_no_op_before_the_first_inference(self):
         reset_tracker(SimpleNamespace(predictor=None))
         reset_tracker(SimpleNamespace())
+
+
+class ModelLoadingTests(unittest.TestCase):
+    def test_engine_model_skips_device_move_and_fuse(self):
+        model = SimpleNamespace(task="segment", to=Mock(), fuse=Mock())
+        with patch("app.services.yolo.YOLO", return_value=model) as yolo, patch(
+            "app.services.yolo.settings.YOLO_MODEL", "/models/vision.engine"
+        ), patch("app.services.yolo.settings.YOLO_DEVICE", "cpu"):
+            loaded = load_yolo_model()
+
+        self.assertIs(loaded, model)
+        yolo.assert_called_once_with("/models/vision.engine")
+        model.to.assert_not_called()
+        model.fuse.assert_not_called()
+
+    def test_checkpoint_model_moves_to_device_and_fuses(self):
+        model = SimpleNamespace(task="segment", to=Mock(), fuse=Mock())
+        with patch("app.services.yolo.YOLO", return_value=model), patch(
+            "app.services.yolo.settings.YOLO_MODEL", "/models/vision.pt"
+        ), patch("app.services.yolo.settings.YOLO_DEVICE", "cpu"):
+            loaded = load_yolo_model()
+
+        self.assertIs(loaded, model)
+        model.to.assert_called_once_with("cpu")
+        model.fuse.assert_called_once_with()
+
+
+class VisionSettingsDefaultsTests(unittest.TestCase):
+    def test_mask_defaults_keep_detail_first_behavior(self):
+        self.assertIs(Settings.model_fields["YOLO_RETINA_MASKS"].default, True)
+        self.assertEqual(Settings.model_fields["YOLO_MASK_CONTOUR_SIZE"].default, 640)
+
+
+class CompletedSequenceHistoryTests(unittest.TestCase):
+    def test_completed_sequence_deduplication_is_bounded(self):
+        with patch("app.core.settings.settings.BACKLOG_MAX_SECONDS", 1):
+            state = AppState()
+            for seq in range(121):
+                state.mark_completed(1, seq)
+            self.assertEqual(state.completed_sequence_limit, 120)
+            self.assertEqual(len(state.completed_sequences), 120)
+            self.assertNotIn((1, 0), state.completed_sequences)
+            self.assertIn((1, 120), state.completed_sequences)
+
+
+class InferenceQueueBoundsTests(unittest.TestCase):
+    def test_app_state_uses_the_configured_finite_queue_size(self):
+        with patch("app.core.settings.settings.YOLO_INFERENCE_QUEUE_SIZE", 3):
+            state = AppState()
+
+        self.assertEqual(state.inference_queue.maxsize, 3)
 
 
 class PutResultTests(unittest.TestCase):

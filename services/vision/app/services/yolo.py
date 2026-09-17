@@ -268,7 +268,7 @@ async def _publish_skipped_frames(
                     else None
                 ),
             )
-            state.completed_sequences.add(key)
+            state.mark_completed(*key)
             state.put_result(
                 PlaybackItem(
                     epoch=inference_frame.epoch,
@@ -598,7 +598,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
                     state.current_epoch = epoch
                     state.clear_all_results()
                     state.queued_sequences.clear()
-                    state.completed_sequences.clear()
+                    state.clear_completed_sequences()
                     state.last_presented = None
                     _discard_inference_queue(state)
                     state.last_inference_result = None
@@ -617,7 +617,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
                 state.current_epoch = new_epoch
                 state.clear_all_results()
                 state.queued_sequences.clear()
-                state.completed_sequences.clear()
+                state.clear_completed_sequences()
                 state.last_presented = None
                 _discard_inference_queue(state)
                 state.last_inference_result = None
@@ -809,15 +809,19 @@ async def yolo_worker(state: AppState) -> None:
             state.tracker_epoch = inference_frame.epoch
         result = None
         last_error: Exception | None = None
-        for attempt in range(max(1, settings.INFERENCE_RETRY_COUNT)):
-            try:
-                result = await asyncio.to_thread(run_inference, inference_frame)
-                break
-            except Exception as exc:  # retry the same frame, never skip it
-                last_error = exc
-                if attempt + 1 < settings.INFERENCE_RETRY_COUNT:
-                    delays = settings.INFERENCE_RETRY_DELAYS or (0.1,)
-                    await asyncio.sleep(delays[min(attempt, len(delays) - 1)])
+        state.inference_active = True
+        try:
+            for attempt in range(max(1, settings.INFERENCE_RETRY_COUNT)):
+                try:
+                    result = await asyncio.to_thread(run_inference, inference_frame)
+                    break
+                except Exception as exc:  # retry the same frame, never skip it
+                    last_error = exc
+                    if attempt + 1 < settings.INFERENCE_RETRY_COUNT:
+                        delays = settings.INFERENCE_RETRY_DELAYS or (0.1,)
+                        await asyncio.sleep(delays[min(attempt, len(delays) - 1)])
+        finally:
+            state.inference_active = False
         if result is None:
             retry_frame = inference_frame
             state.fault = f"inference failed at epoch={inference_frame.epoch} seq={inference_frame.seq}: {last_error}"
@@ -861,7 +865,7 @@ async def yolo_worker(state: AppState) -> None:
         )
         async with state.result_condition:
             state.queued_sequences.discard((item.epoch, item.seq))
-            state.completed_sequences.add((item.epoch, item.seq))
+            state.mark_completed(item.epoch, item.seq)
             state.put_result(item)
             state.metrics.playback_frames_published += 1
             state.result_condition.notify_all()

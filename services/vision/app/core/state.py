@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any
@@ -106,6 +106,7 @@ class AppState:
     )
     queued_sequences: set[tuple[int, int]] = field(default_factory=set)
     completed_sequences: set[tuple[int, int]] = field(default_factory=set)
+    completed_sequence_order: deque[tuple[int, int]] = field(default_factory=deque)
     # Ordered insertion is important: reconnect replay walks this store from
     # the requested sequence without timestamp matching or latest-value loss.
     result_store: OrderedDict[tuple[int, int], PlaybackItem] = field(
@@ -118,6 +119,7 @@ class AppState:
     # inference worker touches it, which keeps the reset serialized with the
     # inference calls that mutate the same tracker.
     tracker_epoch: int | None = None
+    inference_active: bool = False
     monocular_timeline: Any | None = None
     monocular_resolver: Any | None = None
     # The last completed result is used to create cheap passthrough results
@@ -125,6 +127,29 @@ class AppState:
     last_inference_result: dict[str, Any] | None = None
     last_inference_result_epoch: int | None = None
     metrics: VisionMetrics = field(default_factory=VisionMetrics)
+
+    @property
+    def completed_sequence_limit(self) -> int:
+        # A reconnect can replay from a retained keyframe before the last ACK.
+        # Keep a bounded 60 FPS window matching the relay's time retention so
+        # those frames are deduplicated without retaining an entire session.
+        from app.core.settings import settings
+
+        return max(120, int(settings.BACKLOG_MAX_SECONDS * 60))
+
+    def mark_completed(self, epoch: int, seq: int) -> None:
+        key = (epoch, seq)
+        if key in self.completed_sequences:
+            return
+        self.completed_sequences.add(key)
+        self.completed_sequence_order.append(key)
+        while len(self.completed_sequence_order) > self.completed_sequence_limit:
+            expired = self.completed_sequence_order.popleft()
+            self.completed_sequences.discard(expired)
+
+    def clear_completed_sequences(self) -> None:
+        self.completed_sequences.clear()
+        self.completed_sequence_order.clear()
 
     def put_result(self, item: PlaybackItem) -> None:
         self.result_store[(item.epoch, item.seq)] = item
