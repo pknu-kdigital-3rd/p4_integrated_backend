@@ -84,6 +84,11 @@ load_environment() {
   source "$ENV_FILE"
   set +a
 
+  RECORDING_ENABLED="${RECORDING_ENABLED:-false}"
+  [[ "$RECORDING_ENABLED" == true || "$RECORDING_ENABLED" == false ]] \
+    || die "RECORDING_ENABLED must be true or false"
+  export RECORDING_ENABLED
+
   : "${P4_ROOT:?P4_ROOT is required in $ENV_FILE}"
   : "${HOST:?HOST is required in $ENV_FILE}"
   : "${NODE_PORT:?NODE_PORT is required in $ENV_FILE}"
@@ -94,6 +99,27 @@ load_environment() {
   : "${VISION_PUBLIC_BASE_URL:?VISION_PUBLIC_BASE_URL is required in $ENV_FILE}"
   : "${LIVE_VIEW_URL:?LIVE_VIEW_URL is required in $ENV_FILE}"
   : "${TLS_PUBLIC_ADDRESS:?TLS_PUBLIC_ADDRESS is required in $ENV_FILE}"
+
+  if [[ "$RECORDING_ENABLED" == true ]]; then
+    local recording_variable recording_secret recording_secret_value
+    for recording_variable in NODE_INTERNAL_SERVICE_TOKEN MINIO_ENDPOINT MINIO_ACCESS_KEY \
+      MINIO_SECRET_KEY MINIO_NODE_ACCESS_KEY MINIO_NODE_SECRET_KEY MINIO_RECORDING_BUCKET \
+      MINIO_PUBLIC_ENDPOINT MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do
+      [[ -n "${!recording_variable:-}" ]] \
+        || die "$recording_variable is required when RECORDING_ENABLED=true"
+    done
+    for recording_secret in NODE_INTERNAL_SERVICE_TOKEN MINIO_ROOT_PASSWORD MINIO_SECRET_KEY MINIO_NODE_SECRET_KEY; do
+      recording_secret_value="${!recording_secret}"
+      [[ "$recording_secret_value" != replace-* ]] \
+        || die "$recording_secret must be replaced before recording is enabled"
+      [[ ${#recording_secret_value} -ge 12 ]] \
+        || die "$recording_secret must contain at least 12 characters"
+    done
+    [[ ${#NODE_INTERNAL_SERVICE_TOKEN} -ge 32 ]] \
+      || die "NODE_INTERNAL_SERVICE_TOKEN must contain at least 32 characters"
+    [[ "$MINIO_PUBLIC_ENDPOINT" == https://* ]] \
+      || die "MINIO_PUBLIC_ENDPOINT must use HTTPS"
+  fi
 
   [[ "$PUBLIC_OPERATOR_URL" == https://* ]] || die "PUBLIC_OPERATOR_URL must use HTTPS"
   [[ "$VISION_PUBLIC_BASE_URL" == https://* ]] || die "VISION_PUBLIC_BASE_URL must use HTTPS"
@@ -223,6 +249,16 @@ setup_stack() {
   log "Starting PostgreSQL/PostGIS"
   docker compose -f "${PROJECT_ROOT}/docker-compose.yml" up -d db
   wait_for_database
+
+  if [[ "$RECORDING_ENABLED" == true ]]; then
+    log "Starting MinIO recording storage and applying bucket policies"
+    docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" \
+      up -d minio
+    wait_for_http "MinIO" "http://127.0.0.1:9000/minio/health/ready" \
+      || die "MinIO health check failed"
+    docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" \
+      run --rm --no-deps minio-bootstrap
+  fi
 
   log "Installing and validating Node dependencies"
   (
@@ -509,6 +545,9 @@ Individual components:
   status  Show process and health status; nonzero exit means not fully ready
   stop    Stop Nginx and the four application services; leave PostgreSQL running
   down    Stop the stack and stop PostgreSQL
+
+Set RECORDING_ENABLED=true in deploy/env.local to start MinIO and create its
+private bucket with separate relay-write and Node-read credentials.
 USAGE
 }
 
@@ -543,6 +582,9 @@ main() {
     down)
       stop_stack
       docker compose -f "${PROJECT_ROOT}/docker-compose.yml" stop db
+      if [[ "$RECORDING_ENABLED" == true ]]; then
+        docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" stop minio
+      fi
       ;;
     *) usage; die "Unknown action: $action" ;;
   esac
