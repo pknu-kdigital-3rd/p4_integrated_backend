@@ -1,6 +1,6 @@
 const map=L.map('map').setView([35.1796,129.0756],12);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-const markers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let recordingsRequest=0;let refreshTimer;let tripMapPick;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let recordingsRequest=0;let refreshTimer;let tripMapPick;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function selectVehicle(item){selected=item;details.hidden=false;const t=item.telemetry,r=item.plannedRoute;fields.replaceChildren();for(const [label,value] of [['Vehicle',item.vehicleName||item.vehicleCode||t.external_id],['Source',`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],['Status',item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],['Speed',`${t.speed_kmh??'—'} km/h`],['Observed',t.observed_at_utc||'—'],['Trip ID',item.tripId??'—']]){const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=String(value);fields.append(term,description)}document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}if(r?.routeGeojson){routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map)}document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';if(item.tripId)void loadTripRecordings(String(item.tripId))}
@@ -104,14 +104,26 @@ document.querySelector('#live-view-frame').addEventListener('load',event=>{
 document.querySelector('#close-live-view').addEventListener('click',stopLiveView);
 document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.addEventListener('click',()=>{
   tripMapPick=button.dataset.tripMapPick;
+  document.querySelectorAll('[data-trip-map-pick]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
+  map.getContainer().style.cursor='crosshair';
   document.querySelector('#trip-status-message').textContent=`Click the map to set the ${tripMapPick} coordinates.`;
 }));
 map.on('click',event=>{
   if(!tripMapPick)return;
-  const prefix=tripMapPick==='origin'?'trip-origin':'trip-destination';
-  document.querySelector(`#${prefix}-latitude`).value=event.latlng.lat.toFixed(6);
-  document.querySelector(`#${prefix}-longitude`).value=event.latlng.lng.toFixed(6);
-  document.querySelector('#trip-status-message').textContent=`${tripMapPick==='origin'?'Origin':'Destination'} coordinates set: ${event.latlng.lat.toFixed(6)}, ${event.latlng.lng.toFixed(6)}.`;
+  const kind=tripMapPick,label=kind==='origin'?'Origin':'Destination',prefix=kind==='origin'?'trip-origin':'trip-destination';
+  const latitude=event.latlng.lat.toFixed(6),longitude=event.latlng.lng.toFixed(6);
+  document.querySelector(`#${prefix}-latitude`).value=latitude;
+  document.querySelector(`#${prefix}-longitude`).value=longitude;
+  let marker=tripMapMarkers.get(kind);
+  if(marker)marker.setLatLng(event.latlng);
+  else{
+    marker=L.circleMarker(event.latlng,{radius:9,color:'#fff',weight:3,fillColor:kind==='origin'?'#ff8a3d':'#20a4f3',fillOpacity:1}).addTo(map);
+    marker.bindTooltip(label,{permanent:true,direction:'top',offset:[0,-8],className:'trip-point-label'});
+    tripMapMarkers.set(kind,marker);
+  }
+  document.querySelector('#trip-status-message').textContent=`${label} set at ${latitude}, ${longitude}.`;
+  document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.setAttribute('aria-pressed','false'));
+  map.getContainer().style.cursor='';
   tripMapPick=undefined;
 });
 document.querySelector('#trip-form').addEventListener('submit',async event=>{
