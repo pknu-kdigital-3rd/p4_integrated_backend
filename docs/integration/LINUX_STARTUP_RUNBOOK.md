@@ -131,11 +131,13 @@ together. For a local smoke test without BIMS, leave
 
 For recording, set `RECORDING_ENABLED=true` and replace the example Node token,
 MinIO root password, relay secret, and Node read secret with independent values.
-By default, Node only accepts a recording context for a trip in `IN_PROGRESS`
-and assigned to the supplied vehicle. To allow a matching trip in any status,
-set `RECORDING_REQUIRE_ACTIVE_TRIP=false` in `deploy/env.local`. The trip must
-still belong to that vehicle; after changing the setting, restart Node. This can
-associate video with a planned, paused, completed, or cancelled trip.
+By default, Node only accepts a recording context for an existing trip in
+`IN_PROGRESS` assigned to the supplied vehicle. Set
+`RECORDING_VALIDATE_TRIP_CONTEXT=false` in `deploy/env.local` to skip Node's
+trip existence, status, and vehicle match checks; restart Node after changing
+it. The database still requires an existing trip row when segment metadata is
+registered. A segment for a trip ID with no row can upload to MinIO, while its
+database registration fails and the relay retains it for retry.
 Keep `MINIO_ENDPOINT` on loopback for the Go relay and set
 `MINIO_PUBLIC_ENDPOINT` to the HTTPS address on port `39003` that browsers will
 use. Set `MINIO_BROWSER_REDIRECT_URL` to

@@ -102,7 +102,9 @@ export const recordingService = {
     async validateContext(context: RecordingContextBody) {
         const tripId = parsePositiveId(context.tripId, "tripId");
         const vehicleId = parsePositiveId(context.vehicleId, "vehicleId");
-        await requireTripVehicle(tripId, vehicleId, env.RECORDING_REQUIRE_ACTIVE_TRIP);
+        if (env.RECORDING_VALIDATE_TRIP_CONTEXT) {
+            await requireTripVehicle(tripId, vehicleId, true);
+        }
         return context;
     },
 
@@ -115,7 +117,9 @@ export const recordingService = {
         const endSeq = parseDatabaseInteger(segment.endSeq, "endSeq");
         const startPts90k = parseDatabaseInteger(segment.startPts90k, "startPts90k");
         const endPts90k = parseDatabaseInteger(segment.endPts90k, "endPts90k");
-        await requireTripVehicle(tripId, vehicleId, false);
+        if (env.RECORDING_VALIDATE_TRIP_CONTEXT) {
+            await requireTripVehicle(tripId, vehicleId, false);
+        }
         if (segment.storageBucket !== env.MINIO_RECORDING_BUCKET) {
             throw new AppError(400, "Recording bucket does not match server configuration", "INVALID_RECORDING_BUCKET");
         }

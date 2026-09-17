@@ -320,6 +320,35 @@ nginx_pid_is_running() {
     && "$process_args" == *"$NGINX_PREFIX"* ]]
 }
 
+stop_nginx_master() {
+  local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
+  local nginx_pid
+  local attempt
+  nginx_pid="$(<"$nginx_pid_file")"
+
+  if ! nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit; then
+    log "Nginx graceful shutdown signal failed; checking whether the master is still running"
+  fi
+  for attempt in {1..5}; do
+    nginx_pid_is_running || break
+    sleep 1
+  done
+
+  if nginx_pid_is_running; then
+    log "Nginx is still draining connections; sending fast stop (PID $nginx_pid)"
+    if ! nginx -p "$NGINX_PREFIX" -c nginx.conf -s stop; then
+      log "Nginx fast stop signal failed; checking whether the master is still running"
+    fi
+    for attempt in {1..15}; do
+      nginx_pid_is_running || break
+      sleep 1
+    done
+  fi
+
+  nginx_pid_is_running && die "Nginx did not stop; inspect PID $nginx_pid"
+  rm -f -- "$nginx_pid_file"
+}
+
 start_service() {
   local name="$1"
   local workdir="$2"
@@ -362,14 +391,7 @@ start_nginx() {
     local nginx_pid
     nginx_pid="$(<"$nginx_pid_file")"
     log "Nginx master is running but the public endpoint is unhealthy; restarting Nginx (PID $nginx_pid)"
-    nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit
-    local attempt
-    for attempt in {1..20}; do
-      nginx_pid_is_running || break
-      sleep 1
-    done
-    nginx_pid_is_running && die "Nginx did not stop; inspect PID $nginx_pid"
-    rm -f -- "$nginx_pid_file"
+    stop_nginx_master
   elif [[ -f "$nginx_pid_file" ]]; then
     log "Removing stale Nginx PID file"
     rm -f -- "$nginx_pid_file"
@@ -577,14 +599,7 @@ stop_nginx() {
   local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
   if nginx_pid_is_running; then
     log "Stopping Nginx"
-    nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit
-    local attempt
-    for attempt in {1..20}; do
-      nginx_pid_is_running || break
-      sleep 1
-    done
-    nginx_pid_is_running && die "Nginx did not stop; inspect PID $(<"$nginx_pid_file")"
-    rm -f -- "$nginx_pid_file"
+    stop_nginx_master
   else
     rm -f -- "$nginx_pid_file"
     log "Nginx is not running under the project prefix"
