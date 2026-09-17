@@ -23,13 +23,16 @@ async def lifespan(app: FastAPI):
         settings.NODE_INTERNAL_BASE_URL,
         settings.NODE_INTERNAL_SERVICE_TOKEN if settings.RECORDING_ENABLED else None,
         settings.RECORDING_DETECTION_QUEUE_SIZE,
+        sample_every_n_frames=settings.RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES,
     )
     if detection_writer.enabled:
         state.recording_writer = detection_writer
         print(
             "replay detection persistence enabled: "
             f"node={settings.NODE_INTERNAL_BASE_URL}; "
-            f"queue={settings.RECORDING_DETECTION_QUEUE_SIZE}",
+            f"queue={settings.RECORDING_DETECTION_QUEUE_SIZE}; "
+            "sample_every_n_frames="
+            f"{settings.RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES}",
             flush=True,
         )
 

@@ -7,7 +7,6 @@ from typing import Any
 
 import httpx
 
-SAMPLE_INTERVAL_90K = 45_000  # 500 ms at the relay's 90 kHz clock.
 MAX_BATCH_SIZE = 20
 
 
@@ -61,12 +60,19 @@ def normalized_detections(result: dict[str, Any]) -> list[dict[str, Any]]:
 class RecordingDetectionWriter:
     """Bounded, retrying background writer; offer() never waits on network I/O."""
 
-    def __init__(self, base_url: str, token: str | None, queue_size: int = 256):
+    def __init__(
+        self,
+        base_url: str,
+        token: str | None,
+        queue_size: int = 256,
+        sample_every_n_frames: int = 1,
+    ):
         self.url = f"{base_url.rstrip('/')}/internal/recordings/detections"
         self.token = token
+        self.sample_every_n_frames = max(1, int(sample_every_n_frames))
         self.queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=queue_size)
         self.stopping = asyncio.Event()
-        self._last_pts: OrderedDict[tuple[str, str, int], int] = OrderedDict()
+        self._inference_counts: OrderedDict[tuple[str, str, int], int] = OrderedDict()
 
     @property
     def enabled(self) -> bool:
@@ -91,13 +97,13 @@ class RecordingDetectionWriter:
         except (KeyError, TypeError, ValueError):
             return
         key = (trip_id, session_id, epoch)
-        previous = self._last_pts.get(key)
-        if previous is not None and pts - previous < SAMPLE_INTERVAL_90K:
+        inference_count = self._inference_counts.get(key, 0) + 1
+        self._inference_counts[key] = inference_count
+        self._inference_counts.move_to_end(key)
+        while len(self._inference_counts) > 64:
+            self._inference_counts.popitem(last=False)
+        if inference_count % self.sample_every_n_frames != 0:
             return
-        self._last_pts[key] = pts
-        self._last_pts.move_to_end(key)
-        while len(self._last_pts) > 64:
-            self._last_pts.popitem(last=False)
         sample = {
             "tripId": trip_id,
             "recordingSessionId": session_id,

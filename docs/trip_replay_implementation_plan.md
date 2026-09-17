@@ -15,9 +15,9 @@ Let an operator play one trip as a continuous, seekable timeline across its fina
 ## Detection persistence and synchronization
 
 - Propagate the relay's validated trip, vehicle, and recording-session identity to Vision frame metadata. Each frame already carries relay epoch, sequence, and 90 kHz PTS; preserve these values as the synchronization key.
-- Add a replay detection-sample table. Store one sample every 500 ms of media time, including empty detection lists, with normalized boxes, class labels, confidence, optional track IDs, frame sequence, epoch, and PTS. Key writes idempotently by trip, session, epoch, and frame sequence.
+- Add a replay detection-sample table. By default, store every completed inference result, including empty detection lists, with normalized boxes, class labels, confidence, optional track IDs, frame sequence, epoch, and PTS. `RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES` stores one result every N completed inference results. Key writes idempotently by trip, session, epoch, and frame sequence.
 - Use Prisma schema/migrations as the database schema source of truth. Vision posts batches through a bounded background writer to Node's internal endpoint; Node persists and reads them with Prisma Client. Do not use raw queries in Node.
-- Keep writes out of the inference critical path with a bounded queue. If the database is unavailable or the queue overflows, live inference continues; gaps in the expected 2 Hz PTS samples make replay coverage visibly incomplete.
+- Keep writes out of the inference critical path with a bounded queue. If the database is unavailable or the queue overflows, live inference continues; missing inference samples make replay coverage visibly incomplete.
 - Do not rerun inference during replay or backfill existing videos. Defer risk rules and event markers until an authoritative event source and risk policy exist.
 
 ## API and operator UI

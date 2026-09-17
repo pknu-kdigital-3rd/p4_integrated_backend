@@ -51,7 +51,20 @@ class NormalizedReplayDetectionTests(unittest.TestCase):
 
 
 class RecordingDetectionWriterTests(unittest.TestCase):
-    def test_samples_at_half_second_cadence_and_bounds_queue_without_waiting(self):
+    def test_default_sample_interval_stores_every_inference_result(self):
+        writer = RecordingDetectionWriter("http://node:3000", "secret")
+        metrics = SimpleNamespace(
+            recording_samples_queued=0,
+            recording_samples_dropped=0,
+        )
+        for index, pts in enumerate((0, 1, 1, 90_000, 90_001)):
+            writer.offer(_result(pts, seq=index), metrics)
+
+        samples = [writer.queue.get_nowait() for _ in range(5)]
+        self.assertEqual([sample["frameSeq"] for sample in samples], ["0", "1", "2", "3", "4"])
+        self.assertEqual(metrics.recording_samples_queued, 5)
+
+    def test_queue_is_bounded_without_waiting(self):
         writer = RecordingDetectionWriter("http://node:3000", "secret", queue_size=1)
         metrics = SimpleNamespace(
             recording_samples_queued=0,
@@ -61,9 +74,6 @@ class RecordingDetectionWriterTests(unittest.TestCase):
         writer.offer(_result(134_999), metrics)
         self.assertEqual(writer.queue.qsize(), 1)
         self.assertEqual(metrics.recording_samples_queued, 1)
-
-        writer.offer(_result(135_000), metrics)
-        self.assertEqual(writer.queue.qsize(), 1)
         self.assertEqual(metrics.recording_samples_dropped, 1)
         stored = writer.queue.get_nowait()
         self.assertEqual(stored["tripId"], "12")
@@ -76,6 +86,21 @@ class RecordingDetectionWriterTests(unittest.TestCase):
         metrics = SimpleNamespace(recording_samples_queued=0, recording_samples_dropped=0)
         writer.offer(_result(0), metrics)
         self.assertTrue(writer.queue.empty())
+
+    def test_samples_every_n_completed_inference_results(self):
+        writer = RecordingDetectionWriter(
+            "http://node:3000", "secret", sample_every_n_frames=2
+        )
+        metrics = SimpleNamespace(
+            recording_samples_queued=0,
+            recording_samples_dropped=0,
+        )
+        for index, seq in enumerate((7, 42, 100, 170, 203, 246)):
+            writer.offer(_result(index, seq=seq), metrics)
+
+        samples = [writer.queue.get_nowait() for _ in range(3)]
+        self.assertEqual([sample["frameSeq"] for sample in samples], ["42", "170", "246"])
+        self.assertEqual(metrics.recording_samples_queued, 3)
 
 
 if __name__ == "__main__":

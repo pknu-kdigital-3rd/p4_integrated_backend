@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     NODE_INTERNAL_BASE_URL: str = "http://127.0.0.1:3000"
     NODE_INTERNAL_SERVICE_TOKEN: str | None = None
     RECORDING_DETECTION_QUEUE_SIZE: int = Field(default=256, ge=1, le=4096)
+    # Store one replay detection sample for every N completed inference results.
+    RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES: int = Field(
+        default=1, ge=1, le=10_000
+    )
 
     # --- TURN / ICE ---
     TURN_URL: str = "turn:10.174.96.95:3478?transport=udp"

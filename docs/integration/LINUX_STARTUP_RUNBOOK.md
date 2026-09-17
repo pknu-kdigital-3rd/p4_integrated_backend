@@ -131,6 +131,11 @@ together. For a local smoke test without BIMS, leave
 
 For recording, set `RECORDING_ENABLED=true` and replace the example Node token,
 MinIO root password, relay secret, and Node read secret with independent values.
+Vision stores every completed inference result by default. Set
+`RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES` in `deploy/env.local` to store one
+result for every N completed inference results: `1` stores all results, `2`
+stores results 2, 4, 6, and so on. This reduces replay detection data without
+changing the YOLO inference rate. Restart Vision after changing it.
 By default, Node only accepts a recording context for an existing trip in
 `IN_PROGRESS` assigned to the supplied vehicle. Set
 `RECORDING_VALIDATE_TRIP_CONTEXT=false` in `deploy/env.local` to skip Node's
