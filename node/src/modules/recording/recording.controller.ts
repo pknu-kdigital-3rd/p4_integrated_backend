@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 
-import type { RecordingContextBody, RecordingSegmentBody } from "./recording.schema.ts";
+import type { RecordingContextBody, RecordingSegmentBody, ReplayDetectionSampleBody } from "./recording.schema.ts";
 import { recordingService } from "./recording.service.ts";
 
 export const recordingController = {
@@ -14,6 +14,11 @@ export const recordingController = {
         res.status(result.created ? 201 : 200).json({ data: { tripVideoId: result.tripVideoId } });
     },
 
+    async registerDetectionSamples(req: Request<{}, {}, { samples: ReplayDetectionSampleBody[] }>, res: Response) {
+        const result = await recordingService.registerDetectionSamples(req.body.samples);
+        res.status(200).json({ data: result });
+    },
+
     async listTripVideos(req: Request, res: Response) {
         const videos = await recordingService.listTripVideos(req.params.tripId as string);
         res.status(200).json({ data: videos });
@@ -22,6 +27,14 @@ export const recordingController = {
     async getTripVideo(req: Request, res: Response) {
         const video = await recordingService.getTripVideo(req.params.tripVideoId as string);
         res.status(200).json({ data: video });
+    },
+
+    async listTripVideoDetections(req: Request, res: Response) {
+        const result = await recordingService.listTripVideoDetections(
+            req.params.tripId as string,
+            req.params.tripVideoId as string,
+        );
+        res.status(200).json({ data: result });
     },
 
     async createPlaybackUrl(req: Request, res: Response) {

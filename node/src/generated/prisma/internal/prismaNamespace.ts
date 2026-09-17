@@ -402,6 +402,7 @@ export const ModelName = {
   Driver: 'Driver',
   Trip: 'Trip',
   TripVideo: 'TripVideo',
+  TripVideoDetectionSample: 'TripVideoDetectionSample',
   Route: 'Route',
   VehiclePosition: 'VehiclePosition',
   RouteDeviation: 'RouteDeviation',
@@ -425,7 +426,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "platformAccount" | "vehicle" | "driver" | "trip" | "tripVideo" | "route" | "vehiclePosition" | "routeDeviation" | "objectClass" | "detectionEvent" | "eventImage" | "alert" | "transportGoal"
+    modelProps: "platformAccount" | "vehicle" | "driver" | "trip" | "tripVideo" | "tripVideoDetectionSample" | "route" | "vehiclePosition" | "routeDeviation" | "objectClass" | "detectionEvent" | "eventImage" | "alert" | "transportGoal"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -780,6 +781,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         count: {
           args: Prisma.TripVideoCountArgs<ExtArgs>
           result: runtime.Types.Utils.Optional<Prisma.TripVideoCountAggregateOutputType> | number
+        }
+      }
+    }
+    TripVideoDetectionSample: {
+      payload: Prisma.$TripVideoDetectionSamplePayload<ExtArgs>
+      fields: Prisma.TripVideoDetectionSampleFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.TripVideoDetectionSampleFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.TripVideoDetectionSampleFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>
+        }
+        findFirst: {
+          args: Prisma.TripVideoDetectionSampleFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.TripVideoDetectionSampleFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>
+        }
+        findMany: {
+          args: Prisma.TripVideoDetectionSampleFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>[]
+        }
+        create: {
+          args: Prisma.TripVideoDetectionSampleCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>
+        }
+        createMany: {
+          args: Prisma.TripVideoDetectionSampleCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.TripVideoDetectionSampleCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>[]
+        }
+        delete: {
+          args: Prisma.TripVideoDetectionSampleDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>
+        }
+        update: {
+          args: Prisma.TripVideoDetectionSampleUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>
+        }
+        deleteMany: {
+          args: Prisma.TripVideoDetectionSampleDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.TripVideoDetectionSampleUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.TripVideoDetectionSampleUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>[]
+        }
+        upsert: {
+          args: Prisma.TripVideoDetectionSampleUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$TripVideoDetectionSamplePayload>
+        }
+        aggregate: {
+          args: Prisma.TripVideoDetectionSampleAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateTripVideoDetectionSample>
+        }
+        groupBy: {
+          args: Prisma.TripVideoDetectionSampleGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.TripVideoDetectionSampleGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.TripVideoDetectionSampleCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.TripVideoDetectionSampleCountAggregateOutputType> | number
         }
       }
     }
@@ -1478,6 +1553,7 @@ export const TripVideoScalarFieldEnum = {
   endSeq: 'endSeq',
   startPts90k: 'startPts90k',
   endPts90k: 'endPts90k',
+  durationPts90k: 'durationPts90k',
   startFrameId: 'startFrameId',
   endFrameId: 'endFrameId',
   startedAt: 'startedAt',
@@ -1490,6 +1566,20 @@ export const TripVideoScalarFieldEnum = {
 } as const
 
 export type TripVideoScalarFieldEnum = (typeof TripVideoScalarFieldEnum)[keyof typeof TripVideoScalarFieldEnum]
+
+
+export const TripVideoDetectionSampleScalarFieldEnum = {
+  detectionSampleId: 'detectionSampleId',
+  tripId: 'tripId',
+  recordingSessionId: 'recordingSessionId',
+  relayEpoch: 'relayEpoch',
+  frameSeq: 'frameSeq',
+  videoPts90k: 'videoPts90k',
+  detections: 'detections',
+  createdAt: 'createdAt'
+} as const
+
+export type TripVideoDetectionSampleScalarFieldEnum = (typeof TripVideoDetectionSampleScalarFieldEnum)[keyof typeof TripVideoDetectionSampleScalarFieldEnum]
 
 
 export const RouteScalarFieldEnum = {
@@ -1635,6 +1725,13 @@ export const SortOrder = {
 } as const
 
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
 
 
 export const NullableJsonNullValueInput = {
@@ -1936,6 +2033,7 @@ export type GlobalOmitConfig = {
   driver?: Prisma.DriverOmit
   trip?: Prisma.TripOmit
   tripVideo?: Prisma.TripVideoOmit
+  tripVideoDetectionSample?: Prisma.TripVideoDetectionSampleOmit
   route?: Prisma.RouteOmit
   vehiclePosition?: Prisma.VehiclePositionOmit
   routeDeviation?: Prisma.RouteDeviationOmit

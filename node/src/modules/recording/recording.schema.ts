@@ -25,6 +25,34 @@ export const recordingSegmentSchema = recordingContextSchema.extend({
     startedAt: z.iso.datetime({ offset: true }),
     endedAt: z.iso.datetime({ offset: true }),
     durationSec: z.number().int().nonnegative().max(3600),
+    durationPts90k: positiveIntegerString.optional(),
+});
+
+const normalizedBoxSchema = z.tuple([
+    z.number().min(0).max(1),
+    z.number().min(0).max(1),
+    z.number().min(0).max(1),
+    z.number().min(0).max(1),
+]).refine(([x1, y1, x2, y2]) => x1 <= x2 && y1 <= y2);
+
+export const replayDetectionSchema = z.object({
+    class: z.string().min(1).max(100),
+    confidence: z.number().min(0).max(1),
+    bbox: normalizedBoxSchema,
+    trackId: z.number().int().nonnegative().max(2_147_483_647).optional(),
+});
+
+export const replayDetectionSampleSchema = z.object({
+    tripId: positiveIntegerString,
+    recordingSessionId,
+    relayEpoch: z.string().regex(/^[0-9]{1,20}$/),
+    frameSeq: z.string().regex(/^[0-9]{1,20}$/),
+    videoPts90k: signedIntegerString,
+    detections: z.array(replayDetectionSchema).max(200),
+});
+
+export const replayDetectionBatchSchema = z.object({
+    samples: z.array(replayDetectionSampleSchema).min(1).max(20),
 });
 
 export const recordingIdParamSchema = z.object({
@@ -33,6 +61,10 @@ export const recordingIdParamSchema = z.object({
 
 export const tripIdParamSchema = z.object({
     tripId: positiveIntegerString,
+});
+
+export const tripVideoReplayParamsSchema = tripIdParamSchema.extend({
+    tripVideoId: positiveIntegerString,
 });
 
 export const recordingSummarySchema = z.object({
@@ -53,6 +85,7 @@ export const recordingSummarySchema = z.object({
     startedAt: z.iso.datetime({ offset: true }),
     endedAt: z.iso.datetime({ offset: true }).nullable(),
     durationSec: z.number().int().nullable(),
+    durationPts90k: z.string().nullable(),
     uploadStatus: z.string(),
 });
 
@@ -77,5 +110,17 @@ export const registeredSegmentResponseSchema = z.object({
     data: z.object({ tripVideoId: z.string() }),
 });
 
+export const replayDetectionResponseSchema = z.object({
+    data: z.object({
+        coverageIncomplete: z.boolean(),
+        samples: z.array(z.object({
+            frameSeq: z.string(),
+            videoPts90k: z.string(),
+            detections: z.array(replayDetectionSchema),
+        })),
+    }),
+});
+
 export type RecordingContextBody = z.infer<typeof recordingContextSchema>;
 export type RecordingSegmentBody = z.infer<typeof recordingSegmentSchema>;
+export type ReplayDetectionSampleBody = z.infer<typeof replayDetectionSampleSchema>;

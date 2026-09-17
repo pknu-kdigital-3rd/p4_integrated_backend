@@ -43,6 +43,11 @@ export type Trip = Prisma.TripModel
  */
 export type TripVideo = Prisma.TripVideoModel
 /**
+ * Model TripVideoDetectionSample
+ *
+ */
+export type TripVideoDetectionSample = Prisma.TripVideoDetectionSampleModel
+/**
  * Model Route
  * 
  */

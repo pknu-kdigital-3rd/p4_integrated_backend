@@ -5,9 +5,12 @@ import {
     recordingContextSchema,
     recordingDetailResponseSchema,
     recordingListResponseSchema,
+    replayDetectionBatchSchema,
+    replayDetectionResponseSchema,
     recordingSegmentSchema,
     recordingSummarySchema,
     registeredSegmentResponseSchema,
+    tripVideoReplayParamsSchema,
 } from "./recording.schema.ts";
 
 registry.registerComponent("securitySchemes", "internalServiceToken", {
@@ -45,6 +48,19 @@ registry.registerPath({
 });
 
 registry.registerPath({
+    method: "post",
+    path: "/internal/recordings/detections",
+    tags: ["Internal Recording"],
+    summary: "Idempotently store replay detection samples",
+    security: [{ internalServiceToken: [] }],
+    request: { body: { content: { "application/json": { schema: replayDetectionBatchSchema } } } },
+    responses: {
+        200: { description: "Detection samples accepted", content: { "application/json": { schema: { type: "object" } } } },
+        401: { description: "Invalid internal service token", content: { "application/json": { schema: apiErrorSchema } } },
+    },
+});
+
+registry.registerPath({
     method: "get",
     path: "/api/v1/trips/{tripId}/videos",
     tags: ["Recording"],
@@ -68,6 +84,20 @@ registry.registerPath({
         200: { description: "Recording metadata", content: { "application/json": { schema: recordingDetailResponseSchema } } },
         401: { description: "Authentication required", content: { "application/json": { schema: apiErrorSchema } } },
         404: { description: "Recording not found", content: { "application/json": { schema: apiErrorSchema } } },
+    },
+});
+
+registry.registerPath({
+    method: "get",
+    path: "/api/v1/trips/{tripId}/videos/{tripVideoId}/detections",
+    tags: ["Recording"],
+    summary: "List ordered detection samples for a trip video segment",
+    security: [{ bearerAuth: [] }],
+    request: { params: tripVideoReplayParamsSchema },
+    responses: {
+        200: { description: "Replay detections and coverage status", content: { "application/json": { schema: replayDetectionResponseSchema } } },
+        401: { description: "Authentication required", content: { "application/json": { schema: apiErrorSchema } } },
+        404: { description: "Recording segment not found for this trip", content: { "application/json": { schema: apiErrorSchema } } },
     },
 });
 

@@ -56,6 +56,7 @@ export const ModelName = {
   Driver: 'Driver',
   Trip: 'Trip',
   TripVideo: 'TripVideo',
+  TripVideoDetectionSample: 'TripVideoDetectionSample',
   Route: 'Route',
   VehiclePosition: 'VehiclePosition',
   RouteDeviation: 'RouteDeviation',
@@ -174,6 +175,7 @@ export const TripVideoScalarFieldEnum = {
   endSeq: 'endSeq',
   startPts90k: 'startPts90k',
   endPts90k: 'endPts90k',
+  durationPts90k: 'durationPts90k',
   startFrameId: 'startFrameId',
   endFrameId: 'endFrameId',
   startedAt: 'startedAt',
@@ -186,6 +188,20 @@ export const TripVideoScalarFieldEnum = {
 } as const
 
 export type TripVideoScalarFieldEnum = (typeof TripVideoScalarFieldEnum)[keyof typeof TripVideoScalarFieldEnum]
+
+
+export const TripVideoDetectionSampleScalarFieldEnum = {
+  detectionSampleId: 'detectionSampleId',
+  tripId: 'tripId',
+  recordingSessionId: 'recordingSessionId',
+  relayEpoch: 'relayEpoch',
+  frameSeq: 'frameSeq',
+  videoPts90k: 'videoPts90k',
+  detections: 'detections',
+  createdAt: 'createdAt'
+} as const
+
+export type TripVideoDetectionSampleScalarFieldEnum = (typeof TripVideoDetectionSampleScalarFieldEnum)[keyof typeof TripVideoDetectionSampleScalarFieldEnum]
 
 
 export const RouteScalarFieldEnum = {
@@ -331,6 +347,13 @@ export const SortOrder = {
 } as const
 
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
 
 
 export const NullableJsonNullValueInput = {

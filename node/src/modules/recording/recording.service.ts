@@ -5,7 +5,8 @@ import { env } from "../../config/env.ts";
 import { logger } from "../../config/logger.ts";
 import { Prisma } from "../../generated/prisma/client.ts";
 import { prisma } from "../../infrastructure/database/prisma.ts";
-import type { RecordingContextBody, RecordingSegmentBody } from "./recording.schema.ts";
+import { detectionCoverageIncomplete } from "./recording.replay.ts";
+import type { RecordingContextBody, RecordingSegmentBody, ReplayDetectionSampleBody } from "./recording.schema.ts";
 
 const maxDatabaseId = 9_223_372_036_854_775_807n;
 const minDatabaseInteger = -9_223_372_036_854_775_808n;
@@ -79,6 +80,7 @@ function ensureSameSegment(existing: {
     startedAt: Date;
     endedAt: Date | null;
     durationSec: number | null;
+    durationPts90k: bigint | null;
 }, segment: RecordingSegmentBody, tripId: bigint) {
     if (existing.tripId !== tripId
         || existing.storageBucket !== segment.storageBucket
@@ -93,7 +95,8 @@ function ensureSameSegment(existing: {
         || existing.sizeBytes !== BigInt(segment.sizeBytes)
         || existing.startedAt.getTime() !== new Date(segment.startedAt).getTime()
         || existing.endedAt?.getTime() !== new Date(segment.endedAt).getTime()
-        || existing.durationSec !== segment.durationSec) {
+        || existing.durationSec !== segment.durationSec
+        || (segment.durationPts90k !== undefined && existing.durationPts90k !== BigInt(segment.durationPts90k))) {
         throw new AppError(409, "Recording session segment identity conflicts with an existing object", "RECORDING_SEGMENT_CONFLICT");
     }
 }
@@ -155,6 +158,7 @@ export const recordingService = {
             endSeq,
             startPts90k,
             endPts90k,
+            durationPts90k: segment.durationPts90k === undefined ? null : parsePositiveId(segment.durationPts90k, "durationPts90k"),
             startFrameId: null,
             endFrameId: null,
             startedAt: new Date(segment.startedAt),
@@ -190,7 +194,7 @@ export const recordingService = {
                 tripVideoId: true, tripId: true, recordingSessionId: true, segmentIndex: true,
                 storageBucket: true, objectKey: true, contentType: true, etag: true, sizeBytes: true,
                 relayEpoch: true, startSeq: true, endSeq: true, startPts90k: true, endPts90k: true,
-                startedAt: true, endedAt: true, durationSec: true, uploadStatus: true,
+                startedAt: true, endedAt: true, durationSec: true, durationPts90k: true, uploadStatus: true,
             },
         });
     },
@@ -203,11 +207,56 @@ export const recordingService = {
                 tripVideoId: true, tripId: true, recordingSessionId: true, segmentIndex: true,
                 storageBucket: true, objectKey: true, contentType: true, etag: true, sizeBytes: true,
                 relayEpoch: true, startSeq: true, endSeq: true, startPts90k: true, endPts90k: true,
-                startedAt: true, endedAt: true, durationSec: true, uploadStatus: true,
+                startedAt: true, endedAt: true, durationSec: true, durationPts90k: true, uploadStatus: true,
             },
         });
         if (!video) throw new AppError(404, "Trip video not found", "TRIP_VIDEO_NOT_FOUND");
         return video;
+    },
+
+    async registerDetectionSamples(samples: ReplayDetectionSampleBody[]) {
+        const data = samples.map(sample => ({
+            tripId: parsePositiveId(sample.tripId, "tripId"),
+            recordingSessionId: sample.recordingSessionId,
+            relayEpoch: parseDatabaseInteger(sample.relayEpoch, "relayEpoch"),
+            frameSeq: parseDatabaseInteger(sample.frameSeq, "frameSeq"),
+            videoPts90k: parseDatabaseInteger(sample.videoPts90k, "videoPts90k"),
+            detections: sample.detections as unknown as Prisma.InputJsonValue,
+        }));
+        const result = await prisma.tripVideoDetectionSample.createMany({ data, skipDuplicates: true });
+        return { accepted: result.count };
+    },
+
+    async listTripVideoDetections(tripIdValue: string, tripVideoIdValue: string) {
+        const tripId = parsePositiveId(tripIdValue, "tripId");
+        const tripVideoId = parsePositiveId(tripVideoIdValue, "tripVideoId");
+        const video = await prisma.tripVideo.findFirst({
+            where: { tripId, tripVideoId, uploadStatus: "FINALIZED" },
+            select: {
+                tripId: true, recordingSessionId: true, relayEpoch: true,
+                startSeq: true, endSeq: true, startPts90k: true, endPts90k: true,
+            },
+        });
+        if (!video || video.endSeq === null || video.endPts90k === null) {
+            throw new AppError(404, "Finalized recording segment not found for this trip", "TRIP_VIDEO_NOT_FOUND");
+        }
+        const samples = await prisma.tripVideoDetectionSample.findMany({
+            where: {
+                tripId,
+                recordingSessionId: video.recordingSessionId,
+                relayEpoch: video.relayEpoch,
+                frameSeq: { gte: video.startSeq, lte: video.endSeq },
+                videoPts90k: { gte: video.startPts90k, lte: video.endPts90k },
+            },
+            orderBy: [{ videoPts90k: "asc" }, { frameSeq: "asc" }],
+            select: { frameSeq: true, videoPts90k: true, detections: true },
+        });
+        const coverageIncomplete = detectionCoverageIncomplete(
+            video.startPts90k,
+            video.endPts90k,
+            samples.map(sample => sample.videoPts90k),
+        );
+        return { coverageIncomplete, samples };
     },
 
     async createPlaybackUrl(tripVideoIdValue: string) {

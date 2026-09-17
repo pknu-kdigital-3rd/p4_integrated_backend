@@ -138,6 +138,7 @@ model Trip {
     detectionEvents DetectionEvent[]
     routeDeviations RouteDeviation[]
     tripVideos      TripVideo[]
+    tripVideoDetectionSamples TripVideoDetectionSample[]
     alerts          Alert[]
     transportGoals  TransportGoal[]
 
@@ -160,6 +161,7 @@ model TripVideo {
 	endSeq              BigInt?   @map("end_seq")
 	startPts90k         BigInt    @map("start_pts_90k")
 	endPts90k           BigInt?   @map("end_pts_90k")
+	durationPts90k      BigInt?   @map("duration_pts_90k")
 	startFrameId        BigInt?   @map("start_frame_id")
 	endFrameId          BigInt?   @map("end_frame_id")
 	startedAt           DateTime  @map("started_at") @db.Timestamptz(6)
@@ -176,6 +178,23 @@ model TripVideo {
 	@@index([tripId, startedAt], map: "idx_trip_video_trip_start")
 	@@index([tripId, relayEpoch, startSeq], map: "idx_trip_video_relay_seq")
 	@@map("trip_video")
+}
+
+model TripVideoDetectionSample {
+    detectionSampleId  BigInt   @id @default(autoincrement()) @map("detection_sample_id")
+    tripId             BigInt   @map("trip_id")
+    recordingSessionId String   @map("recording_session_id") @db.VarChar(80)
+    relayEpoch         BigInt   @map("relay_epoch")
+    frameSeq           BigInt   @map("frame_seq")
+    videoPts90k        BigInt   @map("video_pts_90k")
+    detections         Json     @db.JsonB
+    createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    trip Trip @relation(fields: [tripId], references: [tripId])
+
+    @@unique([tripId, recordingSessionId, relayEpoch, frameSeq], map: "uq_trip_video_detection_sample_frame")
+    @@index([tripId, recordingSessionId, relayEpoch, videoPts90k], map: "idx_trip_video_detection_replay")
+    @@map("trip_video_detection_sample")
 }
 
 model Route {

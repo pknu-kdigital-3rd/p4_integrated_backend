@@ -323,6 +323,7 @@ export type TripWhereInput = {
   detectionEvents?: Prisma.DetectionEventListRelationFilter
   routeDeviations?: Prisma.RouteDeviationListRelationFilter
   tripVideos?: Prisma.TripVideoListRelationFilter
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleListRelationFilter
   alerts?: Prisma.AlertListRelationFilter
   transportGoals?: Prisma.TransportGoalListRelationFilter
 }
@@ -351,6 +352,7 @@ export type TripOrderByWithRelationInput = {
   detectionEvents?: Prisma.DetectionEventOrderByRelationAggregateInput
   routeDeviations?: Prisma.RouteDeviationOrderByRelationAggregateInput
   tripVideos?: Prisma.TripVideoOrderByRelationAggregateInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleOrderByRelationAggregateInput
   alerts?: Prisma.AlertOrderByRelationAggregateInput
   transportGoals?: Prisma.TransportGoalOrderByRelationAggregateInput
 }
@@ -382,6 +384,7 @@ export type TripWhereUniqueInput = Prisma.AtLeast<{
   detectionEvents?: Prisma.DetectionEventListRelationFilter
   routeDeviations?: Prisma.RouteDeviationListRelationFilter
   tripVideos?: Prisma.TripVideoListRelationFilter
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleListRelationFilter
   alerts?: Prisma.AlertListRelationFilter
   transportGoals?: Prisma.TransportGoalListRelationFilter
 }, "tripId">
@@ -454,6 +457,7 @@ export type TripUpdateInput = {
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -480,6 +484,7 @@ export type TripUncheckedUpdateInput = {
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -696,6 +701,15 @@ export type TripUpdateOneRequiredWithoutTripVideosNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.TripUpdateToOneWithWhereWithoutTripVideosInput, Prisma.TripUpdateWithoutTripVideosInput>, Prisma.TripUncheckedUpdateWithoutTripVideosInput>
 }
 
+export type TripCreateNestedOneWithoutTripVideoDetectionSamplesInput = {
+  connect?: Prisma.TripWhereUniqueInput
+}
+
+export type TripUpdateOneRequiredWithoutTripVideoDetectionSamplesNestedInput = {
+  connect?: Prisma.TripWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.TripUpdateToOneWithWhereWithoutTripVideoDetectionSamplesInput, Prisma.TripUpdateWithoutTripVideoDetectionSamplesInput>, Prisma.TripUncheckedUpdateWithoutTripVideoDetectionSamplesInput>
+}
+
 export type TripCreateNestedOneWithoutRoutesInput = {
   connect?: Prisma.TripWhereUniqueInput
 }
@@ -818,6 +832,7 @@ export type TripUpdateWithoutTripVideosInput = {
   positions?: Prisma.VehiclePositionUpdateManyWithoutTripNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -843,6 +858,64 @@ export type TripUncheckedUpdateWithoutTripVideosInput = {
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutTripNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
+  alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
+  transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
+}
+
+export type TripUpdateToOneWithWhereWithoutTripVideoDetectionSamplesInput = {
+  where?: Prisma.TripWhereInput
+  data: Prisma.XOR<Prisma.TripUpdateWithoutTripVideoDetectionSamplesInput, Prisma.TripUncheckedUpdateWithoutTripVideoDetectionSamplesInput>
+}
+
+export type TripUpdateWithoutTripVideoDetectionSamplesInput = {
+  tripId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  originName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  originAddress?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  destinationName?: Prisma.StringFieldUpdateOperationsInput | string
+  destinationAddress?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  tripStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  plannedStartAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  actualDistanceM?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  aiSummary?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  aiSummaryGeneratedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  vehicle?: Prisma.VehicleUpdateOneRequiredWithoutTripsNestedInput
+  driver?: Prisma.DriverUpdateOneWithoutTripsNestedInput
+  routes?: Prisma.RouteUpdateManyWithoutTripNestedInput
+  positions?: Prisma.VehiclePositionUpdateManyWithoutTripNestedInput
+  detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
+  routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
+  tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
+  transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
+}
+
+export type TripUncheckedUpdateWithoutTripVideoDetectionSamplesInput = {
+  tripId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  vehicleId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  driverId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  originName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  originAddress?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  destinationName?: Prisma.StringFieldUpdateOperationsInput | string
+  destinationAddress?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  tripStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  plannedStartAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  startedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  actualDistanceM?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  aiSummary?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  aiSummaryGeneratedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  routes?: Prisma.RouteUncheckedUpdateManyWithoutTripNestedInput
+  positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutTripNestedInput
+  detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
+  routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
+  tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -873,6 +946,7 @@ export type TripUpdateWithoutRoutesInput = {
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -898,6 +972,7 @@ export type TripUncheckedUpdateWithoutRoutesInput = {
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -928,6 +1003,7 @@ export type TripUpdateWithoutPositionsInput = {
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -953,6 +1029,7 @@ export type TripUncheckedUpdateWithoutPositionsInput = {
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -983,6 +1060,7 @@ export type TripUpdateWithoutRouteDeviationsInput = {
   positions?: Prisma.VehiclePositionUpdateManyWithoutTripNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1008,6 +1086,7 @@ export type TripUncheckedUpdateWithoutRouteDeviationsInput = {
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutTripNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1038,6 +1117,7 @@ export type TripUpdateWithoutDetectionEventsInput = {
   positions?: Prisma.VehiclePositionUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1063,6 +1143,7 @@ export type TripUncheckedUpdateWithoutDetectionEventsInput = {
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1094,6 +1175,7 @@ export type TripUpdateWithoutAlertsInput = {
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
 
@@ -1119,6 +1201,7 @@ export type TripUncheckedUpdateWithoutAlertsInput = {
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
 
@@ -1149,6 +1232,7 @@ export type TripUpdateWithoutTransportGoalsInput = {
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
 }
 
@@ -1174,6 +1258,7 @@ export type TripUncheckedUpdateWithoutTransportGoalsInput = {
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
 }
 
@@ -1198,6 +1283,7 @@ export type TripUpdateWithoutVehicleInput = {
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1223,6 +1309,7 @@ export type TripUncheckedUpdateWithoutVehicleInput = {
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1266,6 +1353,7 @@ export type TripUpdateWithoutDriverInput = {
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1291,6 +1379,7 @@ export type TripUncheckedUpdateWithoutDriverInput = {
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutTripNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutTripNestedInput
   tripVideos?: Prisma.TripVideoUncheckedUpdateManyWithoutTripNestedInput
+  tripVideoDetectionSamples?: Prisma.TripVideoDetectionSampleUncheckedUpdateManyWithoutTripNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutTripNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedTripNestedInput
 }
@@ -1324,6 +1413,7 @@ export type TripCountOutputType = {
   detectionEvents: number
   routeDeviations: number
   tripVideos: number
+  tripVideoDetectionSamples: number
   alerts: number
   transportGoals: number
 }
@@ -1334,6 +1424,7 @@ export type TripCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.I
   detectionEvents?: boolean | TripCountOutputTypeCountDetectionEventsArgs
   routeDeviations?: boolean | TripCountOutputTypeCountRouteDeviationsArgs
   tripVideos?: boolean | TripCountOutputTypeCountTripVideosArgs
+  tripVideoDetectionSamples?: boolean | TripCountOutputTypeCountTripVideoDetectionSamplesArgs
   alerts?: boolean | TripCountOutputTypeCountAlertsArgs
   transportGoals?: boolean | TripCountOutputTypeCountTransportGoalsArgs
 }
@@ -1386,6 +1477,13 @@ export type TripCountOutputTypeCountTripVideosArgs<ExtArgs extends runtime.Types
 /**
  * TripCountOutputType without action
  */
+export type TripCountOutputTypeCountTripVideoDetectionSamplesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.TripVideoDetectionSampleWhereInput
+}
+
+/**
+ * TripCountOutputType without action
+ */
 export type TripCountOutputTypeCountAlertsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   where?: Prisma.AlertWhereInput
 }
@@ -1422,6 +1520,7 @@ export type TripSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = r
   detectionEvents?: boolean | Prisma.Trip$detectionEventsArgs<ExtArgs>
   routeDeviations?: boolean | Prisma.Trip$routeDeviationsArgs<ExtArgs>
   tripVideos?: boolean | Prisma.Trip$tripVideosArgs<ExtArgs>
+  tripVideoDetectionSamples?: boolean | Prisma.Trip$tripVideoDetectionSamplesArgs<ExtArgs>
   alerts?: boolean | Prisma.Trip$alertsArgs<ExtArgs>
   transportGoals?: boolean | Prisma.Trip$transportGoalsArgs<ExtArgs>
   _count?: boolean | Prisma.TripCountOutputTypeDefaultArgs<ExtArgs>
@@ -1477,6 +1576,7 @@ export type TripInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
   detectionEvents?: boolean | Prisma.Trip$detectionEventsArgs<ExtArgs>
   routeDeviations?: boolean | Prisma.Trip$routeDeviationsArgs<ExtArgs>
   tripVideos?: boolean | Prisma.Trip$tripVideosArgs<ExtArgs>
+  tripVideoDetectionSamples?: boolean | Prisma.Trip$tripVideoDetectionSamplesArgs<ExtArgs>
   alerts?: boolean | Prisma.Trip$alertsArgs<ExtArgs>
   transportGoals?: boolean | Prisma.Trip$transportGoalsArgs<ExtArgs>
   _count?: boolean | Prisma.TripCountOutputTypeDefaultArgs<ExtArgs>
@@ -1496,6 +1596,7 @@ export type $TripPayload<ExtArgs extends runtime.Types.Extensions.InternalArgs =
     detectionEvents: Prisma.$DetectionEventPayload<ExtArgs>[]
     routeDeviations: Prisma.$RouteDeviationPayload<ExtArgs>[]
     tripVideos: Prisma.$TripVideoPayload<ExtArgs>[]
+    tripVideoDetectionSamples: Prisma.$TripVideoDetectionSamplePayload<ExtArgs>[]
     alerts: Prisma.$AlertPayload<ExtArgs>[]
     transportGoals: Prisma.$TransportGoalPayload<ExtArgs>[]
   }
@@ -1846,6 +1947,7 @@ export interface Prisma__TripClient<T, Null = never, ExtArgs extends runtime.Typ
   detectionEvents<T extends Prisma.Trip$detectionEventsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Trip$detectionEventsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$DetectionEventPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   routeDeviations<T extends Prisma.Trip$routeDeviationsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Trip$routeDeviationsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$RouteDeviationPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   tripVideos<T extends Prisma.Trip$tripVideosArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Trip$tripVideosArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TripVideoPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  tripVideoDetectionSamples<T extends Prisma.Trip$tripVideoDetectionSamplesArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Trip$tripVideoDetectionSamplesArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TripVideoDetectionSamplePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   alerts<T extends Prisma.Trip$alertsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Trip$alertsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$AlertPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   transportGoals<T extends Prisma.Trip$transportGoalsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Trip$transportGoalsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TransportGoalPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   /**
@@ -2344,6 +2446,30 @@ export type Trip$tripVideosArgs<ExtArgs extends runtime.Types.Extensions.Interna
   take?: number
   skip?: number
   distinct?: Prisma.TripVideoScalarFieldEnum | Prisma.TripVideoScalarFieldEnum[]
+}
+
+/**
+ * Trip.tripVideoDetectionSamples
+ */
+export type Trip$tripVideoDetectionSamplesArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the TripVideoDetectionSample
+   */
+  select?: Prisma.TripVideoDetectionSampleSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the TripVideoDetectionSample
+   */
+  omit?: Prisma.TripVideoDetectionSampleOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.TripVideoDetectionSampleInclude<ExtArgs> | null
+  where?: Prisma.TripVideoDetectionSampleWhereInput
+  orderBy?: Prisma.TripVideoDetectionSampleOrderByWithRelationInput | Prisma.TripVideoDetectionSampleOrderByWithRelationInput[]
+  cursor?: Prisma.TripVideoDetectionSampleWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.TripVideoDetectionSampleScalarFieldEnum | Prisma.TripVideoDetectionSampleScalarFieldEnum[]
 }
 
 /**

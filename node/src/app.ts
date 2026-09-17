@@ -37,7 +37,7 @@ export function createApp() {
 		return value;
 	});
 
-	app.use(express.json());
+	app.use(express.json({ limit: "1mb" }));
 
 	app.get("/health/live", (_req, res) => {
 		res.json({

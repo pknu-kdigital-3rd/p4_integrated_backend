@@ -36,6 +36,7 @@ export type TripVideoAvgAggregateOutputType = {
   endSeq: number | null
   startPts90k: number | null
   endPts90k: number | null
+  durationPts90k: number | null
   startFrameId: number | null
   endFrameId: number | null
   fps: runtime.Decimal | null
@@ -52,6 +53,7 @@ export type TripVideoSumAggregateOutputType = {
   endSeq: bigint | null
   startPts90k: bigint | null
   endPts90k: bigint | null
+  durationPts90k: bigint | null
   startFrameId: bigint | null
   endFrameId: bigint | null
   fps: runtime.Decimal | null
@@ -74,6 +76,7 @@ export type TripVideoMinAggregateOutputType = {
   endSeq: bigint | null
   startPts90k: bigint | null
   endPts90k: bigint | null
+  durationPts90k: bigint | null
   startFrameId: bigint | null
   endFrameId: bigint | null
   startedAt: Date | null
@@ -101,6 +104,7 @@ export type TripVideoMaxAggregateOutputType = {
   endSeq: bigint | null
   startPts90k: bigint | null
   endPts90k: bigint | null
+  durationPts90k: bigint | null
   startFrameId: bigint | null
   endFrameId: bigint | null
   startedAt: Date | null
@@ -128,6 +132,7 @@ export type TripVideoCountAggregateOutputType = {
   endSeq: number
   startPts90k: number
   endPts90k: number
+  durationPts90k: number
   startFrameId: number
   endFrameId: number
   startedAt: number
@@ -151,6 +156,7 @@ export type TripVideoAvgAggregateInputType = {
   endSeq?: true
   startPts90k?: true
   endPts90k?: true
+  durationPts90k?: true
   startFrameId?: true
   endFrameId?: true
   fps?: true
@@ -167,6 +173,7 @@ export type TripVideoSumAggregateInputType = {
   endSeq?: true
   startPts90k?: true
   endPts90k?: true
+  durationPts90k?: true
   startFrameId?: true
   endFrameId?: true
   fps?: true
@@ -189,6 +196,7 @@ export type TripVideoMinAggregateInputType = {
   endSeq?: true
   startPts90k?: true
   endPts90k?: true
+  durationPts90k?: true
   startFrameId?: true
   endFrameId?: true
   startedAt?: true
@@ -216,6 +224,7 @@ export type TripVideoMaxAggregateInputType = {
   endSeq?: true
   startPts90k?: true
   endPts90k?: true
+  durationPts90k?: true
   startFrameId?: true
   endFrameId?: true
   startedAt?: true
@@ -243,6 +252,7 @@ export type TripVideoCountAggregateInputType = {
   endSeq?: true
   startPts90k?: true
   endPts90k?: true
+  durationPts90k?: true
   startFrameId?: true
   endFrameId?: true
   startedAt?: true
@@ -357,6 +367,7 @@ export type TripVideoGroupByOutputType = {
   endSeq: bigint | null
   startPts90k: bigint
   endPts90k: bigint | null
+  durationPts90k: bigint | null
   startFrameId: bigint | null
   endFrameId: bigint | null
   startedAt: Date
@@ -407,6 +418,7 @@ export type TripVideoWhereInput = {
   endSeq?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startPts90k?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
   endPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  durationPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
@@ -435,6 +447,7 @@ export type TripVideoOrderByWithRelationInput = {
   endSeq?: Prisma.SortOrderInput | Prisma.SortOrder
   startPts90k?: Prisma.SortOrder
   endPts90k?: Prisma.SortOrderInput | Prisma.SortOrder
+  durationPts90k?: Prisma.SortOrderInput | Prisma.SortOrder
   startFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   endFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   startedAt?: Prisma.SortOrder
@@ -467,6 +480,7 @@ export type TripVideoWhereUniqueInput = Prisma.AtLeast<{
   endSeq?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startPts90k?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
   endPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  durationPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
@@ -495,6 +509,7 @@ export type TripVideoOrderByWithAggregationInput = {
   endSeq?: Prisma.SortOrderInput | Prisma.SortOrder
   startPts90k?: Prisma.SortOrder
   endPts90k?: Prisma.SortOrderInput | Prisma.SortOrder
+  durationPts90k?: Prisma.SortOrderInput | Prisma.SortOrder
   startFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   endFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   startedAt?: Prisma.SortOrder
@@ -530,6 +545,7 @@ export type TripVideoScalarWhereWithAggregatesInput = {
   endSeq?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
   startPts90k?: Prisma.BigIntWithAggregatesFilter<"TripVideo"> | bigint | number
   endPts90k?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
+  durationPts90k?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
   startFrameId?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeWithAggregatesFilter<"TripVideo"> | Date | string
@@ -556,6 +572,7 @@ export type TripVideoCreateInput = {
   endSeq?: bigint | number | null
   startPts90k: bigint | number
   endPts90k?: bigint | number | null
+  durationPts90k?: bigint | number | null
   startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
@@ -584,6 +601,7 @@ export type TripVideoUncheckedCreateInput = {
   endSeq?: bigint | number | null
   startPts90k: bigint | number
   endPts90k?: bigint | number | null
+  durationPts90k?: bigint | number | null
   startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
@@ -610,6 +628,7 @@ export type TripVideoUpdateInput = {
   endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  durationPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -638,6 +657,7 @@ export type TripVideoUncheckedUpdateInput = {
   endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  durationPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -665,6 +685,7 @@ export type TripVideoCreateManyInput = {
   endSeq?: bigint | number | null
   startPts90k: bigint | number
   endPts90k?: bigint | number | null
+  durationPts90k?: bigint | number | null
   startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
@@ -691,6 +712,7 @@ export type TripVideoUpdateManyMutationInput = {
   endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  durationPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -718,6 +740,7 @@ export type TripVideoUncheckedUpdateManyInput = {
   endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  durationPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -760,6 +783,7 @@ export type TripVideoCountOrderByAggregateInput = {
   endSeq?: Prisma.SortOrder
   startPts90k?: Prisma.SortOrder
   endPts90k?: Prisma.SortOrder
+  durationPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
@@ -781,6 +805,7 @@ export type TripVideoAvgOrderByAggregateInput = {
   endSeq?: Prisma.SortOrder
   startPts90k?: Prisma.SortOrder
   endPts90k?: Prisma.SortOrder
+  durationPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   fps?: Prisma.SortOrder
@@ -803,6 +828,7 @@ export type TripVideoMaxOrderByAggregateInput = {
   endSeq?: Prisma.SortOrder
   startPts90k?: Prisma.SortOrder
   endPts90k?: Prisma.SortOrder
+  durationPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
@@ -830,6 +856,7 @@ export type TripVideoMinOrderByAggregateInput = {
   endSeq?: Prisma.SortOrder
   startPts90k?: Prisma.SortOrder
   endPts90k?: Prisma.SortOrder
+  durationPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
@@ -851,6 +878,7 @@ export type TripVideoSumOrderByAggregateInput = {
   endSeq?: Prisma.SortOrder
   startPts90k?: Prisma.SortOrder
   endPts90k?: Prisma.SortOrder
+  durationPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   fps?: Prisma.SortOrder
@@ -908,6 +936,7 @@ export type TripVideoCreateWithoutTripInput = {
   endSeq?: bigint | number | null
   startPts90k: bigint | number
   endPts90k?: bigint | number | null
+  durationPts90k?: bigint | number | null
   startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
@@ -934,6 +963,7 @@ export type TripVideoUncheckedCreateWithoutTripInput = {
   endSeq?: bigint | number | null
   startPts90k: bigint | number
   endPts90k?: bigint | number | null
+  durationPts90k?: bigint | number | null
   startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
@@ -990,6 +1020,7 @@ export type TripVideoScalarWhereInput = {
   endSeq?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startPts90k?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
   endPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  durationPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
@@ -1016,6 +1047,7 @@ export type TripVideoUpdateWithoutTripInput = {
   endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  durationPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1042,6 +1074,7 @@ export type TripVideoUncheckedUpdateWithoutTripInput = {
   endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  durationPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1068,6 +1101,7 @@ export type TripVideoCreateManyTripInput = {
   endSeq?: bigint | number | null
   startPts90k: bigint | number
   endPts90k?: bigint | number | null
+  durationPts90k?: bigint | number | null
   startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
@@ -1094,6 +1128,7 @@ export type TripVideoUncheckedUpdateManyWithoutTripInput = {
   endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  durationPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
@@ -1123,6 +1158,7 @@ export type TripVideoSelect<ExtArgs extends runtime.Types.Extensions.InternalArg
   endSeq?: boolean
   startPts90k?: boolean
   endPts90k?: boolean
+  durationPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
@@ -1151,6 +1187,7 @@ export type TripVideoSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Ext
   endSeq?: boolean
   startPts90k?: boolean
   endPts90k?: boolean
+  durationPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
@@ -1179,6 +1216,7 @@ export type TripVideoSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Ext
   endSeq?: boolean
   startPts90k?: boolean
   endPts90k?: boolean
+  durationPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
@@ -1207,6 +1245,7 @@ export type TripVideoSelectScalar = {
   endSeq?: boolean
   startPts90k?: boolean
   endPts90k?: boolean
+  durationPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
@@ -1218,7 +1257,7 @@ export type TripVideoSelectScalar = {
   createdAt?: boolean
 }
 
-export type TripVideoOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"tripVideoId" | "tripId" | "recordingSessionId" | "segmentIndex" | "storageBucket" | "objectKey" | "videoUrl" | "contentType" | "etag" | "sizeBytes" | "relayEpoch" | "startSeq" | "endSeq" | "startPts90k" | "endPts90k" | "startFrameId" | "endFrameId" | "startedAt" | "endedAt" | "fps" | "durationSec" | "uploadStatus" | "failureReason" | "createdAt", ExtArgs["result"]["tripVideo"]>
+export type TripVideoOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"tripVideoId" | "tripId" | "recordingSessionId" | "segmentIndex" | "storageBucket" | "objectKey" | "videoUrl" | "contentType" | "etag" | "sizeBytes" | "relayEpoch" | "startSeq" | "endSeq" | "startPts90k" | "endPts90k" | "durationPts90k" | "startFrameId" | "endFrameId" | "startedAt" | "endedAt" | "fps" | "durationSec" | "uploadStatus" | "failureReason" | "createdAt", ExtArgs["result"]["tripVideo"]>
 export type TripVideoInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   trip?: boolean | Prisma.TripDefaultArgs<ExtArgs>
 }
@@ -1250,6 +1289,7 @@ export type $TripVideoPayload<ExtArgs extends runtime.Types.Extensions.InternalA
     endSeq: bigint | null
     startPts90k: bigint
     endPts90k: bigint | null
+    durationPts90k: bigint | null
     startFrameId: bigint | null
     endFrameId: bigint | null
     startedAt: Date
@@ -1698,6 +1738,7 @@ export interface TripVideoFieldRefs {
   readonly endSeq: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly startPts90k: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly endPts90k: Prisma.FieldRef<"TripVideo", 'BigInt'>
+  readonly durationPts90k: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly startFrameId: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly endFrameId: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly startedAt: Prisma.FieldRef<"TripVideo", 'DateTime'>
