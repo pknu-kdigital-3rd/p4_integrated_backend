@@ -33,12 +33,19 @@ VALUES (
     $3,
     $4,
     CASE
-        WHEN $5 IS NULL OR $6 IS NULL THEN NULL
-        ELSE ST_SetSRID(ST_MakePoint($5, $6), 4326)::geography
+        WHEN CAST($5 AS DOUBLE PRECISION) IS NULL
+          OR CAST($6 AS DOUBLE PRECISION) IS NULL THEN NULL
+        ELSE ST_SetSRID(
+            ST_MakePoint(CAST($5 AS DOUBLE PRECISION), CAST($6 AS DOUBLE PRECISION)),
+            4326
+        )::geography
     END,
     $7,
     $8,
-    ST_SetSRID(ST_MakePoint($9, $10), 4326)::geography,
+    ST_SetSRID(
+        ST_MakePoint(CAST($9 AS DOUBLE PRECISION), CAST($10 AS DOUBLE PRECISION)),
+        4326
+    )::geography,
     $12,
     $11,
     $13
