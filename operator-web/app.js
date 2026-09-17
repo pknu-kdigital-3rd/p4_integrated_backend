@@ -2,6 +2,58 @@ const map=L.map('map').setView([35.1796,129.0756],12);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let recordingsRequest=0;let refreshTimer;let tripMapPick;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
+const operatorLayout=document.querySelector('#operator-layout'),layoutSplitter=document.querySelector('#layout-splitter'),stackedLayout=window.matchMedia('(max-width: 1000px)');
+const splitStorageKey=()=>`itsOperatorSplit:${stackedLayout.matches?'stacked':'columns'}`;
+const readSplitRatio=()=>{const saved=Number(localStorage.getItem(splitStorageKey()));return Number.isFinite(saved)&&saved>0?saved:(stackedLayout.matches ? 0.46 : 0.5)};
+let mapSplitRatio=readSplitRatio(),resizingLayout=false;
+function splitRatioBounds(){
+  if(stackedLayout.matches){const available=Math.max(1,window.innerHeight-64);return [Math.min(.7,280/available),.8]}
+  const width=operatorLayout.clientWidth;return [Math.max(.25,320/width),Math.min(.72,(width-390)/width)];
+}
+function applyLayoutSplit(save=false){
+  const [minimum,maximum]=splitRatioBounds();mapSplitRatio=Math.max(minimum,Math.min(maximum,mapSplitRatio));
+  operatorLayout.style.setProperty('--map-width',`${mapSplitRatio*100}%`);
+  operatorLayout.style.setProperty('--map-height',`${Math.round((window.innerHeight-64)*mapSplitRatio)}px`);
+  const orientation=stackedLayout.matches?'horizontal':'vertical';
+  layoutSplitter.setAttribute('aria-orientation',orientation);
+  layoutSplitter.setAttribute('aria-valuemin',String(Math.round(minimum*100)));
+  layoutSplitter.setAttribute('aria-valuemax',String(Math.round(maximum*100)));
+  layoutSplitter.setAttribute('aria-valuenow',String(Math.round(mapSplitRatio*100)));
+  if(save)localStorage.setItem(splitStorageKey(),String(mapSplitRatio));
+  requestAnimationFrame(()=>map.invalidateSize({pan:false}));
+}
+function moveLayoutSplit(event){
+  const rect=operatorLayout.getBoundingClientRect();
+  mapSplitRatio=stackedLayout.matches?(event.clientY-rect.top)/Math.max(1,window.innerHeight-64):(event.clientX-rect.left)/rect.width;
+  applyLayoutSplit();
+}
+layoutSplitter.addEventListener('pointerdown',event=>{
+  if(event.button!==0)return;
+  resizingLayout=true;layoutSplitter.setPointerCapture(event.pointerId);document.body.classList.add('resizing-layout');event.preventDefault();
+});
+layoutSplitter.addEventListener('pointermove',event=>{if(resizingLayout)moveLayoutSplit(event)});
+function finishLayoutResize(event){
+  if(!resizingLayout)return;
+  resizingLayout=false;document.body.classList.remove('resizing-layout');
+  if(layoutSplitter.hasPointerCapture(event.pointerId))layoutSplitter.releasePointerCapture(event.pointerId);
+  applyLayoutSplit(true);
+}
+layoutSplitter.addEventListener('pointerup',finishLayoutResize);
+layoutSplitter.addEventListener('pointercancel',finishLayoutResize);
+layoutSplitter.addEventListener('keydown',event=>{
+  const [minimum,maximum]=splitRatioBounds(),step=event.shiftKey ? 0.05 : 0.02;
+  if(event.key==='Home')mapSplitRatio=minimum;
+  else if(event.key==='End')mapSplitRatio=maximum;
+  else if(stackedLayout.matches&&event.key==='ArrowDown')mapSplitRatio+=step;
+  else if(stackedLayout.matches&&event.key==='ArrowUp')mapSplitRatio-=step;
+  else if(!stackedLayout.matches&&event.key==='ArrowRight')mapSplitRatio+=step;
+  else if(!stackedLayout.matches&&event.key==='ArrowLeft')mapSplitRatio-=step;
+  else return;
+  event.preventDefault();applyLayoutSplit(true);
+});
+stackedLayout.addEventListener('change',()=>{mapSplitRatio=readSplitRatio();applyLayoutSplit()});
+window.addEventListener('resize',()=>applyLayoutSplit());
+applyLayoutSplit();
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function selectVehicle(item){selected=item;details.hidden=false;const t=item.telemetry,r=item.plannedRoute;fields.replaceChildren();for(const [label,value] of [['Vehicle',item.vehicleName||item.vehicleCode||t.external_id],['Source',`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],['Status',item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],['Speed',`${t.speed_kmh??'—'} km/h`],['Observed',t.observed_at_utc||'—'],['Trip ID',item.tripId??'—']]){const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=String(value);fields.append(term,description)}document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}if(r?.routeGeojson){routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map)}document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';if(item.tripId)void loadTripRecordings(String(item.tripId))}
 function render(snapshot){for(const item of snapshot.vehicles){const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];let entry=markers.get(key);if(!entry){const marker=L.circleMarker(pos,{radius:8,color:'#fff',fillColor:'#16c79a',fillOpacity:.9}).addTo(map);entry={marker,item};marker.on('click',()=>selectVehicle(entry.item));markers.set(key,entry)}else{entry.item=item;entry.marker.setLatLng(pos)}entry.marker.bindTooltip(item.vehicleCode||key)}}

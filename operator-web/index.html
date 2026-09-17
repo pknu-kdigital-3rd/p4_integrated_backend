@@ -8,8 +8,9 @@
 </head>
 <body>
   <header><h1>ITS Operator Dashboard</h1><span id="connection">Signed out</span></header>
-  <main>
+  <main id="operator-layout">
     <section id="map"></section>
+    <div id="layout-splitter" role="separator" aria-label="Resize map and menu" aria-controls="map" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="65" aria-valuenow="50" tabindex="0"></div>
     <aside>
       <form id="login"><h2>Operator login</h2><input name="loginId" placeholder="Login ID" required><input name="password" type="password" placeholder="Password" required><button>Sign in</button></form>
       <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view" type="button">Live View</button><p id="route-label">Planned Route: unavailable</p></section>
