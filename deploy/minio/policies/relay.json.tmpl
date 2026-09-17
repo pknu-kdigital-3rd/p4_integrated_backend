@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": ["arn:aws:s3:::__BUCKET__/*"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucketMultipartUploads"],
+      "Resource": ["arn:aws:s3:::__BUCKET__"]
+    }
+  ]
+}
