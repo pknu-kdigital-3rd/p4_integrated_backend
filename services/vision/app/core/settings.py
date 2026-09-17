@@ -5,7 +5,7 @@ import torch
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent  # .../server
+BASE_DIR = Path(__file__).resolve().parent.parent.parent  # .../services/vision
 INDEX_HTML_PATH = BASE_DIR / "index.html"
 
 
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # --- YOLO / inference ---
     # Segmentation checkpoints use the -seg suffix. Custom trained
     # segmentation checkpoints can be supplied through YOLO_MODEL as usual.
-    YOLO_MODEL: str = "yolo26s-seg.pt"
+    YOLO_MODEL: str = str(BASE_DIR / "models" / "yolo26s-seg.pt")
     YOLO_DEVICE: str = _default_yolo_device()
     # Frames larger than this are aspect-preservingly scaled before BGR
     # materialization, then Ultralytics letterboxes the smaller image to its
@@ -137,6 +137,14 @@ class Settings(BaseSettings):
     @classmethod
     def _strip(cls, v: str) -> str:
         return v.strip() if isinstance(v, str) else v
+
+    @field_validator("YOLO_MODEL")
+    @classmethod
+    def _resolve_yolo_model_path(cls, v: str) -> str:
+        path = Path(v).expanduser()
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        return str(path)
 
     @field_validator("BBOX_FORMAT", mode="before")
     @classmethod

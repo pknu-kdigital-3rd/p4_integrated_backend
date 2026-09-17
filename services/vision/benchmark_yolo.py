@@ -80,7 +80,7 @@ def _measure_forward(net: torch.nn.Module, tensor: torch.Tensor, iterations: int
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default=os.getenv("YOLO_MODEL", "yolo26s-seg.pt"))
+    parser.add_argument("--model", default=settings.YOLO_MODEL)
     parser.add_argument("--device", default=os.getenv("YOLO_DEVICE", "cuda:0"))
     parser.add_argument("--imgsz", type=int, default=int(os.getenv("YOLO_MAX_IMGSZ", "640")))
     parser.add_argument("--width", type=int, default=1280)
