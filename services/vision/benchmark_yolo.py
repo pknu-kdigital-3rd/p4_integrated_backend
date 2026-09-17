@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import gc
 import os
+from pathlib import Path
 from time import perf_counter
 
 import av
@@ -81,7 +82,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=os.getenv("YOLO_MODEL", "yolo26s-seg.pt"))
     parser.add_argument("--device", default=os.getenv("YOLO_DEVICE", "cuda:0"))
-    parser.add_argument("--imgsz", type=int, default=int(os.getenv("YOLO_MAX_IMGSZ", "704")))
+    parser.add_argument("--imgsz", type=int, default=int(os.getenv("YOLO_MAX_IMGSZ", "640")))
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--warmup", type=int, default=20)
@@ -109,7 +110,11 @@ def main() -> None:
     if args.device.startswith("cuda"):
         index = torch.device(args.device).index or 0
         print(f"gpu={torch.cuda.get_device_name(index)}")
-    print(f"input={args.width}x{args.height}, imgsz={args.imgsz}, precision={args.precision}")
+    print(
+        f"input={args.width}x{args.height}, imgsz={args.imgsz}, "
+        f"precision={args.precision}, retina_masks={settings.YOLO_RETINA_MASKS}, "
+        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}"
+    )
 
     model: YOLO = load_yolo_model()
     if model.task != "segment":
@@ -129,21 +134,11 @@ def main() -> None:
     )
     quantize = 16 if args.precision == "fp16" and args.device.startswith("cuda") else 32
 
-    print(f"warming up ({args.warmup} iterations)...")
-    for _ in range(args.warmup):
-        model.predict(
-            image,
-            device=args.device,
-            imgsz=args.imgsz,
-            quantize=quantize,
-            verbose=False,
-        )
+    print(f"warming up exact run_yolo path ({args.warmup} iterations)...")
+    for warmup_index in range(args.warmup):
+        inference_frame.seq = -warmup_index - 1
+        run_yolo(inference_frame, model)
     _sync(args.device)
-
-    # Isolate conversion from the model and from detection postprocessing.
-    conversion_seconds, conversion_fps = _measure_wall(
-        lambda: frame.to_ndarray(format="bgr24"), args.iterations, "cpu"
-    )
 
     # This is the public Ultralytics path used by run_yolo, but without PyAV
     # conversion or our result-to-JSON extraction.
@@ -153,23 +148,40 @@ def main() -> None:
             device=args.device,
             imgsz=args.imgsz,
             quantize=quantize,
+            max_det=settings.YOLO_MAX_DETECTIONS,
+            retina_masks=settings.YOLO_RETINA_MASKS,
             verbose=False,
         ),
         args.iterations,
         args.device,
     )
 
-    # Direct forward on a correctly shaped, normalized tensor isolates the
-    # neural network kernels from Ultralytics preprocessing and postprocessing.
-    net = model.model.eval()
-    dtype = torch.float16 if quantize == 16 else torch.float32
-    if quantize == 16:
-        net.half()
+    # The neural-network-only metric is meaningful for PyTorch checkpoints.
+    # A TensorRT engine is invoked through its backend and has no comparable
+    # torch.nn.Module forward path.
+    direct_forward_available = (
+        Path(args.model).suffix.lower() != ".engine"
+        and isinstance(getattr(model, "model", None), torch.nn.Module)
+    )
+    if direct_forward_available:
+        net = model.model.eval()
+        dtype = torch.float16 if quantize == 16 else torch.float32
+        if quantize == 16:
+            net.half()
+        else:
+            net.float()
+        tensor = torch.zeros((1, 3, args.imgsz, args.imgsz), device=args.device, dtype=dtype)
+        forward_seconds, forward_fps, forward_gpu_ms = _measure_forward(
+            net, tensor, args.iterations, args.device
+        )
     else:
-        net.float()
-    tensor = torch.zeros((1, 3, args.imgsz, args.imgsz), device=args.device, dtype=dtype)
-    forward_seconds, forward_fps, forward_gpu_ms = _measure_forward(
-        net, tensor, args.iterations, args.device
+        forward_seconds = None
+        forward_fps = None
+        forward_gpu_ms = None
+
+    # Isolate conversion from the model and from detection postprocessing.
+    conversion_seconds, conversion_fps = _measure_wall(
+        lambda: frame.to_ndarray(format="bgr24"), args.iterations, "cpu"
     )
 
     # Exact production path, including PyAV conversion and bbox/mask extraction.
@@ -180,13 +192,16 @@ def main() -> None:
     gc.enable()
 
     print("\nResults")
-    print(f"  direct model forward : {forward_fps:6.2f} FPS ({forward_gpu_ms:6.2f} ms GPU event)")
+    if forward_fps is None:
+        print("  direct model forward : n/a (TensorRT backend)")
+    else:
+        print(f"  direct model forward : {forward_fps:6.2f} FPS ({forward_gpu_ms:6.2f} ms GPU event)")
     print(f"  Ultralytics predict  : {predict_fps:6.2f} FPS ({predict_seconds * 1000 / args.iterations:6.2f} ms wall)")
     print(f"  PyAV conversion      : {conversion_fps:6.2f} FPS ({conversion_seconds * 1000 / args.iterations:6.2f} ms wall)")
     print(f"  exact run_yolo path  : {exact_fps:6.2f} FPS ({exact_seconds * 1000 / args.iterations:6.2f} ms wall)")
 
     print("\nInterpretation")
-    if forward_fps < 30:
+    if forward_fps is not None and forward_fps < 30:
         print("  GPU/model is below the 30 FPS target; reduce imgsz or use a faster/exported engine.")
     elif predict_fps < 30:
         print("  GPU forward clears 30 FPS, but Ultralytics preprocessing/postprocessing is the bottleneck.")
