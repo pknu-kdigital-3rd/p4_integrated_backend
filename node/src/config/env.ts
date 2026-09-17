@@ -35,7 +35,35 @@ const envSchema = z.object({
     ROUTING_TRACKING_BASE_URL: z.url().default("http://127.0.0.1:8000"),
     OPERATOR_DEMO_PUBLIC: envBoolean,
     TRUST_PROXY: envBoolean,
+    RECORDING_ENABLED: envBoolean,
+    NODE_INTERNAL_SERVICE_TOKEN: z.string().optional(),
+    MINIO_RECORDING_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/).refine(value => !value.includes("..")).default("p4-trip-recordings"),
+    MINIO_NODE_ACCESS_KEY: z.string().optional(),
+    MINIO_NODE_SECRET_KEY: z.string().optional(),
+    MINIO_PUBLIC_ENDPOINT: z.url().optional(),
+    RECORDING_PLAYBACK_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(604800).default(300),
 }).superRefine((value, context) => {
+    if (value.RECORDING_ENABLED) {
+        if (!value.NODE_INTERNAL_SERVICE_TOKEN || value.NODE_INTERNAL_SERVICE_TOKEN.length < 32) {
+            context.addIssue({ code: "custom", path: ["NODE_INTERNAL_SERVICE_TOKEN"], message: "a service token of at least 32 characters is required when recording is enabled" });
+        } else if (value.NODE_INTERNAL_SERVICE_TOKEN.startsWith("replace-")) {
+            context.addIssue({ code: "custom", path: ["NODE_INTERNAL_SERVICE_TOKEN"], message: "replace the example service token before enabling recording" });
+        }
+        if (!value.MINIO_NODE_ACCESS_KEY || !value.MINIO_NODE_SECRET_KEY) {
+            context.addIssue({ code: "custom", path: ["MINIO_NODE_ACCESS_KEY"], message: "Node MinIO credentials are required when recording is enabled" });
+        } else if (value.MINIO_NODE_SECRET_KEY.length < 12 || value.MINIO_NODE_SECRET_KEY.startsWith("replace-")) {
+            context.addIssue({ code: "custom", path: ["MINIO_NODE_SECRET_KEY"], message: "set a non-example Node MinIO secret of at least 12 characters" });
+        }
+        if (!value.MINIO_PUBLIC_ENDPOINT) {
+            context.addIssue({ code: "custom", path: ["MINIO_PUBLIC_ENDPOINT"], message: "MINIO_PUBLIC_ENDPOINT is required when recording is enabled" });
+        } else {
+            const endpoint = new URL(value.MINIO_PUBLIC_ENDPOINT);
+            if (endpoint.pathname !== "/" || endpoint.search || endpoint.hash) {
+                context.addIssue({ code: "custom", path: ["MINIO_PUBLIC_ENDPOINT"], message: "MINIO_PUBLIC_ENDPOINT must be an origin without a path, query, or fragment" });
+            }
+        }
+    }
+
     if (value.NODE_ENV !== "production") return;
 
     if (!value.PUBLIC_OPERATOR_URL) {
@@ -50,6 +78,10 @@ const envSchema = z.object({
         if (configuredUrl && new URL(configuredUrl).protocol !== "https:") {
             context.addIssue({ code: "custom", path: [name], message: `${name} must use HTTPS in production` });
         }
+    }
+
+    if (value.RECORDING_ENABLED && value.MINIO_PUBLIC_ENDPOINT && new URL(value.MINIO_PUBLIC_ENDPOINT).protocol !== "https:") {
+        context.addIssue({ code: "custom", path: ["MINIO_PUBLIC_ENDPOINT"], message: "MINIO_PUBLIC_ENDPOINT must use HTTPS in production" });
     }
 });
 

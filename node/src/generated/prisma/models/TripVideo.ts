@@ -29,6 +29,13 @@ export type AggregateTripVideo = {
 export type TripVideoAvgAggregateOutputType = {
   tripVideoId: number | null
   tripId: number | null
+  segmentIndex: number | null
+  sizeBytes: number | null
+  relayEpoch: number | null
+  startSeq: number | null
+  endSeq: number | null
+  startPts90k: number | null
+  endPts90k: number | null
   startFrameId: number | null
   endFrameId: number | null
   fps: runtime.Decimal | null
@@ -38,6 +45,13 @@ export type TripVideoAvgAggregateOutputType = {
 export type TripVideoSumAggregateOutputType = {
   tripVideoId: bigint | null
   tripId: bigint | null
+  segmentIndex: number | null
+  sizeBytes: bigint | null
+  relayEpoch: bigint | null
+  startSeq: bigint | null
+  endSeq: bigint | null
+  startPts90k: bigint | null
+  endPts90k: bigint | null
   startFrameId: bigint | null
   endFrameId: bigint | null
   fps: runtime.Decimal | null
@@ -47,39 +61,81 @@ export type TripVideoSumAggregateOutputType = {
 export type TripVideoMinAggregateOutputType = {
   tripVideoId: bigint | null
   tripId: bigint | null
+  recordingSessionId: string | null
+  segmentIndex: number | null
+  storageBucket: string | null
+  objectKey: string | null
   videoUrl: string | null
+  contentType: string | null
+  etag: string | null
+  sizeBytes: bigint | null
+  relayEpoch: bigint | null
+  startSeq: bigint | null
+  endSeq: bigint | null
+  startPts90k: bigint | null
+  endPts90k: bigint | null
   startFrameId: bigint | null
   endFrameId: bigint | null
   startedAt: Date | null
   endedAt: Date | null
   fps: runtime.Decimal | null
   durationSec: number | null
+  uploadStatus: string | null
+  failureReason: string | null
   createdAt: Date | null
 }
 
 export type TripVideoMaxAggregateOutputType = {
   tripVideoId: bigint | null
   tripId: bigint | null
+  recordingSessionId: string | null
+  segmentIndex: number | null
+  storageBucket: string | null
+  objectKey: string | null
   videoUrl: string | null
+  contentType: string | null
+  etag: string | null
+  sizeBytes: bigint | null
+  relayEpoch: bigint | null
+  startSeq: bigint | null
+  endSeq: bigint | null
+  startPts90k: bigint | null
+  endPts90k: bigint | null
   startFrameId: bigint | null
   endFrameId: bigint | null
   startedAt: Date | null
   endedAt: Date | null
   fps: runtime.Decimal | null
   durationSec: number | null
+  uploadStatus: string | null
+  failureReason: string | null
   createdAt: Date | null
 }
 
 export type TripVideoCountAggregateOutputType = {
   tripVideoId: number
   tripId: number
+  recordingSessionId: number
+  segmentIndex: number
+  storageBucket: number
+  objectKey: number
   videoUrl: number
+  contentType: number
+  etag: number
+  sizeBytes: number
+  relayEpoch: number
+  startSeq: number
+  endSeq: number
+  startPts90k: number
+  endPts90k: number
   startFrameId: number
   endFrameId: number
   startedAt: number
   endedAt: number
   fps: number
   durationSec: number
+  uploadStatus: number
+  failureReason: number
   createdAt: number
   _all: number
 }
@@ -88,6 +144,13 @@ export type TripVideoCountAggregateOutputType = {
 export type TripVideoAvgAggregateInputType = {
   tripVideoId?: true
   tripId?: true
+  segmentIndex?: true
+  sizeBytes?: true
+  relayEpoch?: true
+  startSeq?: true
+  endSeq?: true
+  startPts90k?: true
+  endPts90k?: true
   startFrameId?: true
   endFrameId?: true
   fps?: true
@@ -97,6 +160,13 @@ export type TripVideoAvgAggregateInputType = {
 export type TripVideoSumAggregateInputType = {
   tripVideoId?: true
   tripId?: true
+  segmentIndex?: true
+  sizeBytes?: true
+  relayEpoch?: true
+  startSeq?: true
+  endSeq?: true
+  startPts90k?: true
+  endPts90k?: true
   startFrameId?: true
   endFrameId?: true
   fps?: true
@@ -106,39 +176,81 @@ export type TripVideoSumAggregateInputType = {
 export type TripVideoMinAggregateInputType = {
   tripVideoId?: true
   tripId?: true
+  recordingSessionId?: true
+  segmentIndex?: true
+  storageBucket?: true
+  objectKey?: true
   videoUrl?: true
+  contentType?: true
+  etag?: true
+  sizeBytes?: true
+  relayEpoch?: true
+  startSeq?: true
+  endSeq?: true
+  startPts90k?: true
+  endPts90k?: true
   startFrameId?: true
   endFrameId?: true
   startedAt?: true
   endedAt?: true
   fps?: true
   durationSec?: true
+  uploadStatus?: true
+  failureReason?: true
   createdAt?: true
 }
 
 export type TripVideoMaxAggregateInputType = {
   tripVideoId?: true
   tripId?: true
+  recordingSessionId?: true
+  segmentIndex?: true
+  storageBucket?: true
+  objectKey?: true
   videoUrl?: true
+  contentType?: true
+  etag?: true
+  sizeBytes?: true
+  relayEpoch?: true
+  startSeq?: true
+  endSeq?: true
+  startPts90k?: true
+  endPts90k?: true
   startFrameId?: true
   endFrameId?: true
   startedAt?: true
   endedAt?: true
   fps?: true
   durationSec?: true
+  uploadStatus?: true
+  failureReason?: true
   createdAt?: true
 }
 
 export type TripVideoCountAggregateInputType = {
   tripVideoId?: true
   tripId?: true
+  recordingSessionId?: true
+  segmentIndex?: true
+  storageBucket?: true
+  objectKey?: true
   videoUrl?: true
+  contentType?: true
+  etag?: true
+  sizeBytes?: true
+  relayEpoch?: true
+  startSeq?: true
+  endSeq?: true
+  startPts90k?: true
+  endPts90k?: true
   startFrameId?: true
   endFrameId?: true
   startedAt?: true
   endedAt?: true
   fps?: true
   durationSec?: true
+  uploadStatus?: true
+  failureReason?: true
   createdAt?: true
   _all?: true
 }
@@ -232,13 +344,27 @@ export type TripVideoGroupByArgs<ExtArgs extends runtime.Types.Extensions.Intern
 export type TripVideoGroupByOutputType = {
   tripVideoId: bigint
   tripId: bigint
-  videoUrl: string
-  startFrameId: bigint
+  recordingSessionId: string
+  segmentIndex: number
+  storageBucket: string
+  objectKey: string
+  videoUrl: string | null
+  contentType: string
+  etag: string | null
+  sizeBytes: bigint | null
+  relayEpoch: bigint
+  startSeq: bigint
+  endSeq: bigint | null
+  startPts90k: bigint
+  endPts90k: bigint | null
+  startFrameId: bigint | null
   endFrameId: bigint | null
   startedAt: Date
   endedAt: Date | null
   fps: runtime.Decimal | null
   durationSec: number | null
+  uploadStatus: string
+  failureReason: string | null
   createdAt: Date
   _count: TripVideoCountAggregateOutputType | null
   _avg: TripVideoAvgAggregateOutputType | null
@@ -268,13 +394,27 @@ export type TripVideoWhereInput = {
   NOT?: Prisma.TripVideoWhereInput | Prisma.TripVideoWhereInput[]
   tripVideoId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
   tripId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
-  videoUrl?: Prisma.StringFilter<"TripVideo"> | string
-  startFrameId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  recordingSessionId?: Prisma.StringFilter<"TripVideo"> | string
+  segmentIndex?: Prisma.IntFilter<"TripVideo"> | number
+  storageBucket?: Prisma.StringFilter<"TripVideo"> | string
+  objectKey?: Prisma.StringFilter<"TripVideo"> | string
+  videoUrl?: Prisma.StringNullableFilter<"TripVideo"> | string | null
+  contentType?: Prisma.StringFilter<"TripVideo"> | string
+  etag?: Prisma.StringNullableFilter<"TripVideo"> | string | null
+  sizeBytes?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  relayEpoch?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  startSeq?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  endSeq?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  startPts90k?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  endPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  startFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
   endedAt?: Prisma.DateTimeNullableFilter<"TripVideo"> | Date | string | null
   fps?: Prisma.DecimalNullableFilter<"TripVideo"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.IntNullableFilter<"TripVideo"> | number | null
+  uploadStatus?: Prisma.StringFilter<"TripVideo"> | string
+  failureReason?: Prisma.StringNullableFilter<"TripVideo"> | string | null
   createdAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
   trip?: Prisma.XOR<Prisma.TripScalarRelationFilter, Prisma.TripWhereInput>
 }
@@ -282,44 +422,87 @@ export type TripVideoWhereInput = {
 export type TripVideoOrderByWithRelationInput = {
   tripVideoId?: Prisma.SortOrder
   tripId?: Prisma.SortOrder
-  videoUrl?: Prisma.SortOrder
-  startFrameId?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  segmentIndex?: Prisma.SortOrder
+  storageBucket?: Prisma.SortOrder
+  objectKey?: Prisma.SortOrder
+  videoUrl?: Prisma.SortOrderInput | Prisma.SortOrder
+  contentType?: Prisma.SortOrder
+  etag?: Prisma.SortOrderInput | Prisma.SortOrder
+  sizeBytes?: Prisma.SortOrderInput | Prisma.SortOrder
+  relayEpoch?: Prisma.SortOrder
+  startSeq?: Prisma.SortOrder
+  endSeq?: Prisma.SortOrderInput | Prisma.SortOrder
+  startPts90k?: Prisma.SortOrder
+  endPts90k?: Prisma.SortOrderInput | Prisma.SortOrder
+  startFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   endFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   endedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   fps?: Prisma.SortOrderInput | Prisma.SortOrder
   durationSec?: Prisma.SortOrderInput | Prisma.SortOrder
+  uploadStatus?: Prisma.SortOrder
+  failureReason?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   trip?: Prisma.TripOrderByWithRelationInput
 }
 
 export type TripVideoWhereUniqueInput = Prisma.AtLeast<{
   tripVideoId?: bigint | number
+  objectKey?: string
+  recordingSessionId_segmentIndex?: Prisma.TripVideoRecordingSessionIdSegmentIndexCompoundUniqueInput
   AND?: Prisma.TripVideoWhereInput | Prisma.TripVideoWhereInput[]
   OR?: Prisma.TripVideoWhereInput[]
   NOT?: Prisma.TripVideoWhereInput | Prisma.TripVideoWhereInput[]
   tripId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
-  videoUrl?: Prisma.StringFilter<"TripVideo"> | string
-  startFrameId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  recordingSessionId?: Prisma.StringFilter<"TripVideo"> | string
+  segmentIndex?: Prisma.IntFilter<"TripVideo"> | number
+  storageBucket?: Prisma.StringFilter<"TripVideo"> | string
+  videoUrl?: Prisma.StringNullableFilter<"TripVideo"> | string | null
+  contentType?: Prisma.StringFilter<"TripVideo"> | string
+  etag?: Prisma.StringNullableFilter<"TripVideo"> | string | null
+  sizeBytes?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  relayEpoch?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  startSeq?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  endSeq?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  startPts90k?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  endPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  startFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
   endedAt?: Prisma.DateTimeNullableFilter<"TripVideo"> | Date | string | null
   fps?: Prisma.DecimalNullableFilter<"TripVideo"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.IntNullableFilter<"TripVideo"> | number | null
+  uploadStatus?: Prisma.StringFilter<"TripVideo"> | string
+  failureReason?: Prisma.StringNullableFilter<"TripVideo"> | string | null
   createdAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
   trip?: Prisma.XOR<Prisma.TripScalarRelationFilter, Prisma.TripWhereInput>
-}, "tripVideoId">
+}, "tripVideoId" | "objectKey" | "recordingSessionId_segmentIndex">
 
 export type TripVideoOrderByWithAggregationInput = {
   tripVideoId?: Prisma.SortOrder
   tripId?: Prisma.SortOrder
-  videoUrl?: Prisma.SortOrder
-  startFrameId?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  segmentIndex?: Prisma.SortOrder
+  storageBucket?: Prisma.SortOrder
+  objectKey?: Prisma.SortOrder
+  videoUrl?: Prisma.SortOrderInput | Prisma.SortOrder
+  contentType?: Prisma.SortOrder
+  etag?: Prisma.SortOrderInput | Prisma.SortOrder
+  sizeBytes?: Prisma.SortOrderInput | Prisma.SortOrder
+  relayEpoch?: Prisma.SortOrder
+  startSeq?: Prisma.SortOrder
+  endSeq?: Prisma.SortOrderInput | Prisma.SortOrder
+  startPts90k?: Prisma.SortOrder
+  endPts90k?: Prisma.SortOrderInput | Prisma.SortOrder
+  startFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   endFrameId?: Prisma.SortOrderInput | Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   endedAt?: Prisma.SortOrderInput | Prisma.SortOrder
   fps?: Prisma.SortOrderInput | Prisma.SortOrder
   durationSec?: Prisma.SortOrderInput | Prisma.SortOrder
+  uploadStatus?: Prisma.SortOrder
+  failureReason?: Prisma.SortOrderInput | Prisma.SortOrder
   createdAt?: Prisma.SortOrder
   _count?: Prisma.TripVideoCountOrderByAggregateInput
   _avg?: Prisma.TripVideoAvgOrderByAggregateInput
@@ -334,25 +517,53 @@ export type TripVideoScalarWhereWithAggregatesInput = {
   NOT?: Prisma.TripVideoScalarWhereWithAggregatesInput | Prisma.TripVideoScalarWhereWithAggregatesInput[]
   tripVideoId?: Prisma.BigIntWithAggregatesFilter<"TripVideo"> | bigint | number
   tripId?: Prisma.BigIntWithAggregatesFilter<"TripVideo"> | bigint | number
-  videoUrl?: Prisma.StringWithAggregatesFilter<"TripVideo"> | string
-  startFrameId?: Prisma.BigIntWithAggregatesFilter<"TripVideo"> | bigint | number
+  recordingSessionId?: Prisma.StringWithAggregatesFilter<"TripVideo"> | string
+  segmentIndex?: Prisma.IntWithAggregatesFilter<"TripVideo"> | number
+  storageBucket?: Prisma.StringWithAggregatesFilter<"TripVideo"> | string
+  objectKey?: Prisma.StringWithAggregatesFilter<"TripVideo"> | string
+  videoUrl?: Prisma.StringNullableWithAggregatesFilter<"TripVideo"> | string | null
+  contentType?: Prisma.StringWithAggregatesFilter<"TripVideo"> | string
+  etag?: Prisma.StringNullableWithAggregatesFilter<"TripVideo"> | string | null
+  sizeBytes?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
+  relayEpoch?: Prisma.BigIntWithAggregatesFilter<"TripVideo"> | bigint | number
+  startSeq?: Prisma.BigIntWithAggregatesFilter<"TripVideo"> | bigint | number
+  endSeq?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
+  startPts90k?: Prisma.BigIntWithAggregatesFilter<"TripVideo"> | bigint | number
+  endPts90k?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
+  startFrameId?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableWithAggregatesFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeWithAggregatesFilter<"TripVideo"> | Date | string
   endedAt?: Prisma.DateTimeNullableWithAggregatesFilter<"TripVideo"> | Date | string | null
   fps?: Prisma.DecimalNullableWithAggregatesFilter<"TripVideo"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.IntNullableWithAggregatesFilter<"TripVideo"> | number | null
+  uploadStatus?: Prisma.StringWithAggregatesFilter<"TripVideo"> | string
+  failureReason?: Prisma.StringNullableWithAggregatesFilter<"TripVideo"> | string | null
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"TripVideo"> | Date | string
 }
 
 export type TripVideoCreateInput = {
   tripVideoId?: bigint | number
-  videoUrl: string
-  startFrameId: bigint | number
+  recordingSessionId: string
+  segmentIndex: number
+  storageBucket: string
+  objectKey: string
+  videoUrl?: string | null
+  contentType?: string
+  etag?: string | null
+  sizeBytes?: bigint | number | null
+  relayEpoch: bigint | number
+  startSeq: bigint | number
+  endSeq?: bigint | number | null
+  startPts90k: bigint | number
+  endPts90k?: bigint | number | null
+  startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
   endedAt?: Date | string | null
   fps?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: number | null
+  uploadStatus?: string
+  failureReason?: string | null
   createdAt?: Date | string
   trip: Prisma.TripCreateNestedOneWithoutTripVideosInput
 }
@@ -360,25 +571,53 @@ export type TripVideoCreateInput = {
 export type TripVideoUncheckedCreateInput = {
   tripVideoId?: bigint | number
   tripId: bigint | number
-  videoUrl: string
-  startFrameId: bigint | number
+  recordingSessionId: string
+  segmentIndex: number
+  storageBucket: string
+  objectKey: string
+  videoUrl?: string | null
+  contentType?: string
+  etag?: string | null
+  sizeBytes?: bigint | number | null
+  relayEpoch: bigint | number
+  startSeq: bigint | number
+  endSeq?: bigint | number | null
+  startPts90k: bigint | number
+  endPts90k?: bigint | number | null
+  startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
   endedAt?: Date | string | null
   fps?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: number | null
+  uploadStatus?: string
+  failureReason?: string | null
   createdAt?: Date | string
 }
 
 export type TripVideoUpdateInput = {
   tripVideoId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
-  videoUrl?: Prisma.StringFieldUpdateOperationsInput | string
-  startFrameId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  recordingSessionId?: Prisma.StringFieldUpdateOperationsInput | string
+  segmentIndex?: Prisma.IntFieldUpdateOperationsInput | number
+  storageBucket?: Prisma.StringFieldUpdateOperationsInput | string
+  objectKey?: Prisma.StringFieldUpdateOperationsInput | string
+  videoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentType?: Prisma.StringFieldUpdateOperationsInput | string
+  etag?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sizeBytes?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  relayEpoch?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  startSeq?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   fps?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  uploadStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   trip?: Prisma.TripUpdateOneRequiredWithoutTripVideosNestedInput
 }
@@ -386,51 +625,107 @@ export type TripVideoUpdateInput = {
 export type TripVideoUncheckedUpdateInput = {
   tripVideoId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   tripId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
-  videoUrl?: Prisma.StringFieldUpdateOperationsInput | string
-  startFrameId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  recordingSessionId?: Prisma.StringFieldUpdateOperationsInput | string
+  segmentIndex?: Prisma.IntFieldUpdateOperationsInput | number
+  storageBucket?: Prisma.StringFieldUpdateOperationsInput | string
+  objectKey?: Prisma.StringFieldUpdateOperationsInput | string
+  videoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentType?: Prisma.StringFieldUpdateOperationsInput | string
+  etag?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sizeBytes?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  relayEpoch?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  startSeq?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   fps?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  uploadStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TripVideoCreateManyInput = {
   tripVideoId?: bigint | number
   tripId: bigint | number
-  videoUrl: string
-  startFrameId: bigint | number
+  recordingSessionId: string
+  segmentIndex: number
+  storageBucket: string
+  objectKey: string
+  videoUrl?: string | null
+  contentType?: string
+  etag?: string | null
+  sizeBytes?: bigint | number | null
+  relayEpoch: bigint | number
+  startSeq: bigint | number
+  endSeq?: bigint | number | null
+  startPts90k: bigint | number
+  endPts90k?: bigint | number | null
+  startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
   endedAt?: Date | string | null
   fps?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: number | null
+  uploadStatus?: string
+  failureReason?: string | null
   createdAt?: Date | string
 }
 
 export type TripVideoUpdateManyMutationInput = {
   tripVideoId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
-  videoUrl?: Prisma.StringFieldUpdateOperationsInput | string
-  startFrameId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  recordingSessionId?: Prisma.StringFieldUpdateOperationsInput | string
+  segmentIndex?: Prisma.IntFieldUpdateOperationsInput | number
+  storageBucket?: Prisma.StringFieldUpdateOperationsInput | string
+  objectKey?: Prisma.StringFieldUpdateOperationsInput | string
+  videoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentType?: Prisma.StringFieldUpdateOperationsInput | string
+  etag?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sizeBytes?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  relayEpoch?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  startSeq?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   fps?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  uploadStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TripVideoUncheckedUpdateManyInput = {
   tripVideoId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
   tripId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
-  videoUrl?: Prisma.StringFieldUpdateOperationsInput | string
-  startFrameId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  recordingSessionId?: Prisma.StringFieldUpdateOperationsInput | string
+  segmentIndex?: Prisma.IntFieldUpdateOperationsInput | number
+  storageBucket?: Prisma.StringFieldUpdateOperationsInput | string
+  objectKey?: Prisma.StringFieldUpdateOperationsInput | string
+  videoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentType?: Prisma.StringFieldUpdateOperationsInput | string
+  etag?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sizeBytes?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  relayEpoch?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  startSeq?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   fps?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  uploadStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -444,22 +739,48 @@ export type TripVideoOrderByRelationAggregateInput = {
   _count?: Prisma.SortOrder
 }
 
+export type TripVideoRecordingSessionIdSegmentIndexCompoundUniqueInput = {
+  recordingSessionId: string
+  segmentIndex: number
+}
+
 export type TripVideoCountOrderByAggregateInput = {
   tripVideoId?: Prisma.SortOrder
   tripId?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  segmentIndex?: Prisma.SortOrder
+  storageBucket?: Prisma.SortOrder
+  objectKey?: Prisma.SortOrder
   videoUrl?: Prisma.SortOrder
+  contentType?: Prisma.SortOrder
+  etag?: Prisma.SortOrder
+  sizeBytes?: Prisma.SortOrder
+  relayEpoch?: Prisma.SortOrder
+  startSeq?: Prisma.SortOrder
+  endSeq?: Prisma.SortOrder
+  startPts90k?: Prisma.SortOrder
+  endPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   endedAt?: Prisma.SortOrder
   fps?: Prisma.SortOrder
   durationSec?: Prisma.SortOrder
+  uploadStatus?: Prisma.SortOrder
+  failureReason?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
 export type TripVideoAvgOrderByAggregateInput = {
   tripVideoId?: Prisma.SortOrder
   tripId?: Prisma.SortOrder
+  segmentIndex?: Prisma.SortOrder
+  sizeBytes?: Prisma.SortOrder
+  relayEpoch?: Prisma.SortOrder
+  startSeq?: Prisma.SortOrder
+  endSeq?: Prisma.SortOrder
+  startPts90k?: Prisma.SortOrder
+  endPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   fps?: Prisma.SortOrder
@@ -469,32 +790,67 @@ export type TripVideoAvgOrderByAggregateInput = {
 export type TripVideoMaxOrderByAggregateInput = {
   tripVideoId?: Prisma.SortOrder
   tripId?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  segmentIndex?: Prisma.SortOrder
+  storageBucket?: Prisma.SortOrder
+  objectKey?: Prisma.SortOrder
   videoUrl?: Prisma.SortOrder
+  contentType?: Prisma.SortOrder
+  etag?: Prisma.SortOrder
+  sizeBytes?: Prisma.SortOrder
+  relayEpoch?: Prisma.SortOrder
+  startSeq?: Prisma.SortOrder
+  endSeq?: Prisma.SortOrder
+  startPts90k?: Prisma.SortOrder
+  endPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   endedAt?: Prisma.SortOrder
   fps?: Prisma.SortOrder
   durationSec?: Prisma.SortOrder
+  uploadStatus?: Prisma.SortOrder
+  failureReason?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
 export type TripVideoMinOrderByAggregateInput = {
   tripVideoId?: Prisma.SortOrder
   tripId?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  segmentIndex?: Prisma.SortOrder
+  storageBucket?: Prisma.SortOrder
+  objectKey?: Prisma.SortOrder
   videoUrl?: Prisma.SortOrder
+  contentType?: Prisma.SortOrder
+  etag?: Prisma.SortOrder
+  sizeBytes?: Prisma.SortOrder
+  relayEpoch?: Prisma.SortOrder
+  startSeq?: Prisma.SortOrder
+  endSeq?: Prisma.SortOrder
+  startPts90k?: Prisma.SortOrder
+  endPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   startedAt?: Prisma.SortOrder
   endedAt?: Prisma.SortOrder
   fps?: Prisma.SortOrder
   durationSec?: Prisma.SortOrder
+  uploadStatus?: Prisma.SortOrder
+  failureReason?: Prisma.SortOrder
   createdAt?: Prisma.SortOrder
 }
 
 export type TripVideoSumOrderByAggregateInput = {
   tripVideoId?: Prisma.SortOrder
   tripId?: Prisma.SortOrder
+  segmentIndex?: Prisma.SortOrder
+  sizeBytes?: Prisma.SortOrder
+  relayEpoch?: Prisma.SortOrder
+  startSeq?: Prisma.SortOrder
+  endSeq?: Prisma.SortOrder
+  startPts90k?: Prisma.SortOrder
+  endPts90k?: Prisma.SortOrder
   startFrameId?: Prisma.SortOrder
   endFrameId?: Prisma.SortOrder
   fps?: Prisma.SortOrder
@@ -529,27 +885,63 @@ export type TripVideoUncheckedUpdateManyWithoutTripNestedInput = {
   deleteMany?: Prisma.TripVideoScalarWhereInput | Prisma.TripVideoScalarWhereInput[]
 }
 
+export type IntFieldUpdateOperationsInput = {
+  set?: number
+  increment?: number
+  decrement?: number
+  multiply?: number
+  divide?: number
+}
+
 export type TripVideoCreateWithoutTripInput = {
   tripVideoId?: bigint | number
-  videoUrl: string
-  startFrameId: bigint | number
+  recordingSessionId: string
+  segmentIndex: number
+  storageBucket: string
+  objectKey: string
+  videoUrl?: string | null
+  contentType?: string
+  etag?: string | null
+  sizeBytes?: bigint | number | null
+  relayEpoch: bigint | number
+  startSeq: bigint | number
+  endSeq?: bigint | number | null
+  startPts90k: bigint | number
+  endPts90k?: bigint | number | null
+  startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
   endedAt?: Date | string | null
   fps?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: number | null
+  uploadStatus?: string
+  failureReason?: string | null
   createdAt?: Date | string
 }
 
 export type TripVideoUncheckedCreateWithoutTripInput = {
   tripVideoId?: bigint | number
-  videoUrl: string
-  startFrameId: bigint | number
+  recordingSessionId: string
+  segmentIndex: number
+  storageBucket: string
+  objectKey: string
+  videoUrl?: string | null
+  contentType?: string
+  etag?: string | null
+  sizeBytes?: bigint | number | null
+  relayEpoch: bigint | number
+  startSeq: bigint | number
+  endSeq?: bigint | number | null
+  startPts90k: bigint | number
+  endPts90k?: bigint | number | null
+  startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
   endedAt?: Date | string | null
   fps?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: number | null
+  uploadStatus?: string
+  failureReason?: string | null
   createdAt?: Date | string
 }
 
@@ -585,61 +977,131 @@ export type TripVideoScalarWhereInput = {
   NOT?: Prisma.TripVideoScalarWhereInput | Prisma.TripVideoScalarWhereInput[]
   tripVideoId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
   tripId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
-  videoUrl?: Prisma.StringFilter<"TripVideo"> | string
-  startFrameId?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  recordingSessionId?: Prisma.StringFilter<"TripVideo"> | string
+  segmentIndex?: Prisma.IntFilter<"TripVideo"> | number
+  storageBucket?: Prisma.StringFilter<"TripVideo"> | string
+  objectKey?: Prisma.StringFilter<"TripVideo"> | string
+  videoUrl?: Prisma.StringNullableFilter<"TripVideo"> | string | null
+  contentType?: Prisma.StringFilter<"TripVideo"> | string
+  etag?: Prisma.StringNullableFilter<"TripVideo"> | string | null
+  sizeBytes?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  relayEpoch?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  startSeq?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  endSeq?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  startPts90k?: Prisma.BigIntFilter<"TripVideo"> | bigint | number
+  endPts90k?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
+  startFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   endFrameId?: Prisma.BigIntNullableFilter<"TripVideo"> | bigint | number | null
   startedAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
   endedAt?: Prisma.DateTimeNullableFilter<"TripVideo"> | Date | string | null
   fps?: Prisma.DecimalNullableFilter<"TripVideo"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.IntNullableFilter<"TripVideo"> | number | null
+  uploadStatus?: Prisma.StringFilter<"TripVideo"> | string
+  failureReason?: Prisma.StringNullableFilter<"TripVideo"> | string | null
   createdAt?: Prisma.DateTimeFilter<"TripVideo"> | Date | string
 }
 
 export type TripVideoUpdateWithoutTripInput = {
   tripVideoId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
-  videoUrl?: Prisma.StringFieldUpdateOperationsInput | string
-  startFrameId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  recordingSessionId?: Prisma.StringFieldUpdateOperationsInput | string
+  segmentIndex?: Prisma.IntFieldUpdateOperationsInput | number
+  storageBucket?: Prisma.StringFieldUpdateOperationsInput | string
+  objectKey?: Prisma.StringFieldUpdateOperationsInput | string
+  videoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentType?: Prisma.StringFieldUpdateOperationsInput | string
+  etag?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sizeBytes?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  relayEpoch?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  startSeq?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   fps?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  uploadStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TripVideoUncheckedUpdateWithoutTripInput = {
   tripVideoId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
-  videoUrl?: Prisma.StringFieldUpdateOperationsInput | string
-  startFrameId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  recordingSessionId?: Prisma.StringFieldUpdateOperationsInput | string
+  segmentIndex?: Prisma.IntFieldUpdateOperationsInput | number
+  storageBucket?: Prisma.StringFieldUpdateOperationsInput | string
+  objectKey?: Prisma.StringFieldUpdateOperationsInput | string
+  videoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentType?: Prisma.StringFieldUpdateOperationsInput | string
+  etag?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sizeBytes?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  relayEpoch?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  startSeq?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   fps?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  uploadStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type TripVideoCreateManyTripInput = {
   tripVideoId?: bigint | number
-  videoUrl: string
-  startFrameId: bigint | number
+  recordingSessionId: string
+  segmentIndex: number
+  storageBucket: string
+  objectKey: string
+  videoUrl?: string | null
+  contentType?: string
+  etag?: string | null
+  sizeBytes?: bigint | number | null
+  relayEpoch: bigint | number
+  startSeq: bigint | number
+  endSeq?: bigint | number | null
+  startPts90k: bigint | number
+  endPts90k?: bigint | number | null
+  startFrameId?: bigint | number | null
   endFrameId?: bigint | number | null
   startedAt: Date | string
   endedAt?: Date | string | null
   fps?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: number | null
+  uploadStatus?: string
+  failureReason?: string | null
   createdAt?: Date | string
 }
 
 export type TripVideoUncheckedUpdateManyWithoutTripInput = {
   tripVideoId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
-  videoUrl?: Prisma.StringFieldUpdateOperationsInput | string
-  startFrameId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  recordingSessionId?: Prisma.StringFieldUpdateOperationsInput | string
+  segmentIndex?: Prisma.IntFieldUpdateOperationsInput | number
+  storageBucket?: Prisma.StringFieldUpdateOperationsInput | string
+  objectKey?: Prisma.StringFieldUpdateOperationsInput | string
+  videoUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  contentType?: Prisma.StringFieldUpdateOperationsInput | string
+  etag?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sizeBytes?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  relayEpoch?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  startSeq?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endSeq?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startPts90k?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  endPts90k?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  startFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   endFrameId?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
   startedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   endedAt?: Prisma.NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   fps?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   durationSec?: Prisma.NullableIntFieldUpdateOperationsInput | number | null
+  uploadStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  failureReason?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
@@ -648,13 +1110,27 @@ export type TripVideoUncheckedUpdateManyWithoutTripInput = {
 export type TripVideoSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   tripVideoId?: boolean
   tripId?: boolean
+  recordingSessionId?: boolean
+  segmentIndex?: boolean
+  storageBucket?: boolean
+  objectKey?: boolean
   videoUrl?: boolean
+  contentType?: boolean
+  etag?: boolean
+  sizeBytes?: boolean
+  relayEpoch?: boolean
+  startSeq?: boolean
+  endSeq?: boolean
+  startPts90k?: boolean
+  endPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
   endedAt?: boolean
   fps?: boolean
   durationSec?: boolean
+  uploadStatus?: boolean
+  failureReason?: boolean
   createdAt?: boolean
   trip?: boolean | Prisma.TripDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["tripVideo"]>
@@ -662,13 +1138,27 @@ export type TripVideoSelect<ExtArgs extends runtime.Types.Extensions.InternalArg
 export type TripVideoSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   tripVideoId?: boolean
   tripId?: boolean
+  recordingSessionId?: boolean
+  segmentIndex?: boolean
+  storageBucket?: boolean
+  objectKey?: boolean
   videoUrl?: boolean
+  contentType?: boolean
+  etag?: boolean
+  sizeBytes?: boolean
+  relayEpoch?: boolean
+  startSeq?: boolean
+  endSeq?: boolean
+  startPts90k?: boolean
+  endPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
   endedAt?: boolean
   fps?: boolean
   durationSec?: boolean
+  uploadStatus?: boolean
+  failureReason?: boolean
   createdAt?: boolean
   trip?: boolean | Prisma.TripDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["tripVideo"]>
@@ -676,13 +1166,27 @@ export type TripVideoSelectCreateManyAndReturn<ExtArgs extends runtime.Types.Ext
 export type TripVideoSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetSelect<{
   tripVideoId?: boolean
   tripId?: boolean
+  recordingSessionId?: boolean
+  segmentIndex?: boolean
+  storageBucket?: boolean
+  objectKey?: boolean
   videoUrl?: boolean
+  contentType?: boolean
+  etag?: boolean
+  sizeBytes?: boolean
+  relayEpoch?: boolean
+  startSeq?: boolean
+  endSeq?: boolean
+  startPts90k?: boolean
+  endPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
   endedAt?: boolean
   fps?: boolean
   durationSec?: boolean
+  uploadStatus?: boolean
+  failureReason?: boolean
   createdAt?: boolean
   trip?: boolean | Prisma.TripDefaultArgs<ExtArgs>
 }, ExtArgs["result"]["tripVideo"]>
@@ -690,17 +1194,31 @@ export type TripVideoSelectUpdateManyAndReturn<ExtArgs extends runtime.Types.Ext
 export type TripVideoSelectScalar = {
   tripVideoId?: boolean
   tripId?: boolean
+  recordingSessionId?: boolean
+  segmentIndex?: boolean
+  storageBucket?: boolean
+  objectKey?: boolean
   videoUrl?: boolean
+  contentType?: boolean
+  etag?: boolean
+  sizeBytes?: boolean
+  relayEpoch?: boolean
+  startSeq?: boolean
+  endSeq?: boolean
+  startPts90k?: boolean
+  endPts90k?: boolean
   startFrameId?: boolean
   endFrameId?: boolean
   startedAt?: boolean
   endedAt?: boolean
   fps?: boolean
   durationSec?: boolean
+  uploadStatus?: boolean
+  failureReason?: boolean
   createdAt?: boolean
 }
 
-export type TripVideoOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"tripVideoId" | "tripId" | "videoUrl" | "startFrameId" | "endFrameId" | "startedAt" | "endedAt" | "fps" | "durationSec" | "createdAt", ExtArgs["result"]["tripVideo"]>
+export type TripVideoOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"tripVideoId" | "tripId" | "recordingSessionId" | "segmentIndex" | "storageBucket" | "objectKey" | "videoUrl" | "contentType" | "etag" | "sizeBytes" | "relayEpoch" | "startSeq" | "endSeq" | "startPts90k" | "endPts90k" | "startFrameId" | "endFrameId" | "startedAt" | "endedAt" | "fps" | "durationSec" | "uploadStatus" | "failureReason" | "createdAt", ExtArgs["result"]["tripVideo"]>
 export type TripVideoInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   trip?: boolean | Prisma.TripDefaultArgs<ExtArgs>
 }
@@ -719,13 +1237,27 @@ export type $TripVideoPayload<ExtArgs extends runtime.Types.Extensions.InternalA
   scalars: runtime.Types.Extensions.GetPayloadResult<{
     tripVideoId: bigint
     tripId: bigint
-    videoUrl: string
-    startFrameId: bigint
+    recordingSessionId: string
+    segmentIndex: number
+    storageBucket: string
+    objectKey: string
+    videoUrl: string | null
+    contentType: string
+    etag: string | null
+    sizeBytes: bigint | null
+    relayEpoch: bigint
+    startSeq: bigint
+    endSeq: bigint | null
+    startPts90k: bigint
+    endPts90k: bigint | null
+    startFrameId: bigint | null
     endFrameId: bigint | null
     startedAt: Date
     endedAt: Date | null
     fps: runtime.Decimal | null
     durationSec: number | null
+    uploadStatus: string
+    failureReason: string | null
     createdAt: Date
   }, ExtArgs["result"]["tripVideo"]>
   composites: {}
@@ -1153,13 +1685,27 @@ export interface Prisma__TripVideoClient<T, Null = never, ExtArgs extends runtim
 export interface TripVideoFieldRefs {
   readonly tripVideoId: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly tripId: Prisma.FieldRef<"TripVideo", 'BigInt'>
+  readonly recordingSessionId: Prisma.FieldRef<"TripVideo", 'String'>
+  readonly segmentIndex: Prisma.FieldRef<"TripVideo", 'Int'>
+  readonly storageBucket: Prisma.FieldRef<"TripVideo", 'String'>
+  readonly objectKey: Prisma.FieldRef<"TripVideo", 'String'>
   readonly videoUrl: Prisma.FieldRef<"TripVideo", 'String'>
+  readonly contentType: Prisma.FieldRef<"TripVideo", 'String'>
+  readonly etag: Prisma.FieldRef<"TripVideo", 'String'>
+  readonly sizeBytes: Prisma.FieldRef<"TripVideo", 'BigInt'>
+  readonly relayEpoch: Prisma.FieldRef<"TripVideo", 'BigInt'>
+  readonly startSeq: Prisma.FieldRef<"TripVideo", 'BigInt'>
+  readonly endSeq: Prisma.FieldRef<"TripVideo", 'BigInt'>
+  readonly startPts90k: Prisma.FieldRef<"TripVideo", 'BigInt'>
+  readonly endPts90k: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly startFrameId: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly endFrameId: Prisma.FieldRef<"TripVideo", 'BigInt'>
   readonly startedAt: Prisma.FieldRef<"TripVideo", 'DateTime'>
   readonly endedAt: Prisma.FieldRef<"TripVideo", 'DateTime'>
   readonly fps: Prisma.FieldRef<"TripVideo", 'Decimal'>
   readonly durationSec: Prisma.FieldRef<"TripVideo", 'Int'>
+  readonly uploadStatus: Prisma.FieldRef<"TripVideo", 'String'>
+  readonly failureReason: Prisma.FieldRef<"TripVideo", 'String'>
   readonly createdAt: Prisma.FieldRef<"TripVideo", 'DateTime'>
 }
     

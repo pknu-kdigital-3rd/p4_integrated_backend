@@ -585,14 +585,6 @@ export type RouteUncheckedUpdateManyWithoutTripNestedInput = {
   deleteMany?: Prisma.RouteScalarWhereInput | Prisma.RouteScalarWhereInput[]
 }
 
-export type IntFieldUpdateOperationsInput = {
-  set?: number
-  increment?: number
-  decrement?: number
-  multiply?: number
-  divide?: number
-}
-
 export type RouteUpdateOneRequiredWithoutRouteDeviationsNestedInput = {
   create?: Prisma.XOR<Prisma.RouteCreateWithoutRouteDeviationsInput, Prisma.RouteUncheckedCreateWithoutRouteDeviationsInput>
   connectOrCreate?: Prisma.RouteCreateOrConnectWithoutRouteDeviationsInput

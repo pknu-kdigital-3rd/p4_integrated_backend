@@ -1465,13 +1465,27 @@ export type TripScalarFieldEnum = (typeof TripScalarFieldEnum)[keyof typeof Trip
 export const TripVideoScalarFieldEnum = {
   tripVideoId: 'tripVideoId',
   tripId: 'tripId',
+  recordingSessionId: 'recordingSessionId',
+  segmentIndex: 'segmentIndex',
+  storageBucket: 'storageBucket',
+  objectKey: 'objectKey',
   videoUrl: 'videoUrl',
+  contentType: 'contentType',
+  etag: 'etag',
+  sizeBytes: 'sizeBytes',
+  relayEpoch: 'relayEpoch',
+  startSeq: 'startSeq',
+  endSeq: 'endSeq',
+  startPts90k: 'startPts90k',
+  endPts90k: 'endPts90k',
   startFrameId: 'startFrameId',
   endFrameId: 'endFrameId',
   startedAt: 'startedAt',
   endedAt: 'endedAt',
   fps: 'fps',
   durationSec: 'durationSec',
+  uploadStatus: 'uploadStatus',
+  failureReason: 'failureReason',
   createdAt: 'createdAt'
 } as const
 

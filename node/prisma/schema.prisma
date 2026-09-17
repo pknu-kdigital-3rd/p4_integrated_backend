@@ -145,21 +145,37 @@ model Trip {
 }
 
 model TripVideo {
-    tripVideoId  BigInt    @id @default(autoincrement()) @map("trip_video_id")
-    tripId       BigInt    @map("trip_id")
-    videoUrl     String    @map("video_url")
-    startFrameId BigInt    @map("start_frame_id")
-    endFrameId   BigInt?   @map("end_frame_id")
-    startedAt    DateTime  @map("started_at") @db.Timestamptz(6)
-    endedAt      DateTime? @map("ended_at") @db.Timestamptz(6)
-    fps          Decimal?  @db.Decimal(5, 2)
-    durationSec  Int?      @map("duration_sec")
-    createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+	tripVideoId         BigInt    @id @default(autoincrement()) @map("trip_video_id")
+	tripId              BigInt    @map("trip_id")
+	recordingSessionId  String    @map("recording_session_id") @db.VarChar(80)
+	segmentIndex        Int       @map("segment_index")
+	storageBucket       String    @map("storage_bucket") @db.VarChar(100)
+	objectKey           String    @unique(map: "uq_trip_video_object_key") @map("object_key")
+	videoUrl            String?   @map("video_url") // Legacy compatibility; never store a presigned URL.
+	contentType         String    @default("video/mp4") @map("content_type") @db.VarChar(100)
+	etag                String?   @db.VarChar(128)
+	sizeBytes           BigInt?   @map("size_bytes")
+	relayEpoch          BigInt    @map("relay_epoch")
+	startSeq            BigInt    @map("start_seq")
+	endSeq              BigInt?   @map("end_seq")
+	startPts90k         BigInt    @map("start_pts_90k")
+	endPts90k           BigInt?   @map("end_pts_90k")
+	startFrameId        BigInt?   @map("start_frame_id")
+	endFrameId          BigInt?   @map("end_frame_id")
+	startedAt           DateTime  @map("started_at") @db.Timestamptz(6)
+	endedAt             DateTime? @map("ended_at") @db.Timestamptz(6)
+	fps                 Decimal?  @db.Decimal(5, 2)
+	durationSec         Int?      @map("duration_sec")
+	uploadStatus        String    @default("FINALIZED") @map("upload_status") @db.VarChar(20)
+	failureReason       String?   @map("failure_reason")
+	createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
     trip Trip @relation(fields: [tripId], references: [tripId])
 
-    @@index([tripId, startedAt], map: "idx_trip_video_trip_start")
-    @@map("trip_video")
+	@@unique([recordingSessionId, segmentIndex], map: "uq_trip_video_recording_segment")
+	@@index([tripId, startedAt], map: "idx_trip_video_trip_start")
+	@@index([tripId, relayEpoch, startSeq], map: "idx_trip_video_relay_seq")
+	@@map("trip_video")
 }
 
 model Route {
