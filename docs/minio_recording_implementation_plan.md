@@ -394,26 +394,54 @@ Create the recording bucket during deployment/bootstrap and keep it private.
 
 ## 9. Environment variables
 
-Add to `deploy/env.local.example`, `deploy/env.production.example`, and relay config:
+Set these variables in `deploy/env.local` or `deploy/env.production` when
+recording is enabled. The Linux stack script loads this file and passes the
+relevant settings to MinIO, the Go relay, and the Node backend:
 
-```text
-MINIO_ENDPOINT=127.0.0.1:9000
-MINIO_ACCESS_KEY=p4-relay
-MINIO_SECRET_KEY=...
-MINIO_USE_SSL=false
-MINIO_RECORDING_BUCKET=p4-trip-recordings
-
+```dotenv
 RECORDING_ENABLED=true
 RECORDING_SEGMENT_SECONDS=60
+RECORDING_QUEUE_FRAMES=180
 RECORDING_SPOOL_DIR=/var/tmp/p4-recordings
 RECORDING_SPOOL_MAX_BYTES=10737418240
 RECORDING_UPLOAD_QUEUE=8
 
 NODE_INTERNAL_BASE_URL=http://127.0.0.1:3000
-NODE_INTERNAL_SERVICE_TOKEN=...
+NODE_INTERNAL_SERVICE_TOKEN="replace-with-a-random-token-at-least-32-characters"
+
+# Go relay's private MinIO API connection and write-only service account
+MINIO_ENDPOINT=127.0.0.1:9000
+MINIO_USE_SSL=false
+MINIO_RECORDING_BUCKET=p4-trip-recordings
+MINIO_ACCESS_KEY=p4-relay
+MINIO_SECRET_KEY="replace-with-an-independent-random-secret"
+
+# Node backend's read-only MinIO service account and public playback origin
+MINIO_NODE_ACCESS_KEY=p4-node
+MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret"
+MINIO_PUBLIC_ENDPOINT=https://10.174.96.95:39003
+
+# MinIO server/bootstrap administrator credentials and Console URL
+MINIO_ROOT_USER=p4-minio-root
+MINIO_ROOT_PASSWORD="replace-with-an-independent-random-secret"
+MINIO_BROWSER_REDIRECT_URL=https://10.174.96.95:39004
 ```
 
-`Config` additions in `services/media-relay/internal/config/config.go` should be strongly parsed and validated at startup.
+Replace every example secret before setting `RECORDING_ENABLED=true`. Use
+independent secrets for the Node internal-service token, relay MinIO account,
+Node MinIO account, and MinIO root account. MinIO secret keys must be at least
+8 characters; `NODE_INTERNAL_SERVICE_TOKEN` must be at least 32 characters and
+must have the same value in the Go relay and Node process environments.
+
+`MINIO_ENDPOINT` is the loopback API address used by the relay to upload files.
+`MINIO_PUBLIC_ENDPOINT` is the HTTPS S3 API origin used to create playback
+URLs, and must be reachable by clients at port `39003`. Set
+`MINIO_BROWSER_REDIRECT_URL` to the HTTPS Console proxy at port `39004`.
+`MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` are for MinIO bootstrap and
+administration only; application services use their dedicated accounts.
+
+The public URLs above use `10.174.96.95`; change them to match
+`TLS_PUBLIC_ADDRESS` if the host address changes.
 
 ---
 
