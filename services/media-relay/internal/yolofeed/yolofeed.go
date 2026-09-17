@@ -184,9 +184,9 @@ func (f *Feed) PublishQREvent(event QREvent) {
 // Publish converts one RTP packet into an access unit. It deliberately has no
 // non-blocking send or drop branch: the only bounded retention is the explicit
 // source-time/byte backlog, whose overflow creates a labeled new epoch.
-func (f *Feed) Publish(packet *rtp.Packet) {
+func (f *Feed) Publish(packet *rtp.Packet) *AccessUnit {
 	if packet == nil {
-		return
+		return nil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -210,7 +210,7 @@ func (f *Feed) Publish(packet *rtp.Packet) {
 			// completed without. int16 handles the uint16 sequence wraparound
 			// correctly via twos-complement subtraction.
 			if delta := int16(packet.SequenceNumber - expected); delta < 0 {
-				return
+				return nil
 			}
 			f.resetLocked("source_discontinuity")
 		}
@@ -227,8 +227,9 @@ func (f *Feed) Publish(packet *rtp.Packet) {
 
 	f.consumePayloadLocked(packet.Payload)
 	if packet.Header.Marker {
-		f.finishAccessUnitLocked(packet.Header.Timestamp)
+		return f.finishAccessUnitLocked(packet.Header.Timestamp)
 	}
+	return nil
 }
 
 // End marks the source complete without deleting already accepted media. The
@@ -307,14 +308,14 @@ func (f *Feed) appendNALLocked(nal []byte) {
 	}
 }
 
-func (f *Feed) finishAccessUnitLocked(rtpTS uint32) {
+func (f *Feed) finishAccessUnitLocked(rtpTS uint32) *AccessUnit {
 	if len(f.assembly) == 0 {
 		f.resetAssemblyLocked()
-		return
+		return nil
 	}
 	if !f.seenIDR && !f.assemblyKey {
 		f.resetAssemblyLocked()
-		return
+		return nil
 	}
 	data := append([]byte(nil), f.assembly...)
 	if f.assemblyKey {
@@ -370,6 +371,7 @@ func (f *Feed) finishAccessUnitLocked(rtpTS uint32) {
 		f.resetLocked("backlog_overflow")
 	}
 	f.cond.Broadcast()
+	return item
 }
 
 func (f *Feed) extendTimestampLocked(ts uint32) int64 {

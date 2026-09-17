@@ -1,29 +1,38 @@
 package signaling
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 
 	"poc-server-webrtc/relay-go/internal/broadcaster"
+	"poc-server-webrtc/relay-go/internal/recording"
 )
 
 type OfferModel struct {
-	SDP  string
-	Type string
+	SDP                string `json:"sdp"`
+	Type               string `json:"type"`
+	TripID             string `json:"tripId,omitempty"`
+	VehicleID          string `json:"vehicleId,omitempty"`
+	RecordingSessionID string `json:"recordingSessionId,omitempty"`
 }
 
 type Handler struct {
 	api           *webrtc.API
 	configuration webrtc.Configuration
 	broadcaster   *broadcaster.Broadcaster
+	validator     recording.ContextValidator
 }
 
-func NewHandler(api *webrtc.API, configuration webrtc.Configuration, relay *broadcaster.Broadcaster) *Handler {
-	return &Handler{api: api, configuration: configuration, broadcaster: relay}
+func NewHandler(api *webrtc.API, configuration webrtc.Configuration, relay *broadcaster.Broadcaster, validator recording.ContextValidator) *Handler {
+	return &Handler{api: api, configuration: configuration, broadcaster: relay, validator: validator}
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -45,6 +54,7 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	recordingContext := h.validateRecordingContext(r.Context(), offer)
 	pc, err := h.newPeerConnection()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -52,7 +62,7 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 	}
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
-			h.broadcaster.SetPublisher(pc, track)
+			h.broadcaster.SetPublisher(pc, track, recordingContext)
 		}
 	})
 	pc.OnDataChannel(h.broadcaster.HandleDataChannel)
@@ -70,6 +80,35 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, answer)
+}
+
+func (h *Handler) validateRecordingContext(requestContext context.Context, offer OfferModel) *recording.Context {
+	if offer.TripID == "" && offer.VehicleID == "" && offer.RecordingSessionID == "" {
+		return nil
+	}
+	if h.validator == nil {
+		log.Printf("recording identity supplied while recording is disabled; accepting live publisher without recording")
+		return nil
+	}
+	tripID, tripErr := strconv.ParseInt(offer.TripID, 10, 64)
+	vehicleID, vehicleErr := strconv.ParseInt(offer.VehicleID, 10, 64)
+	if tripErr != nil || vehicleErr != nil || offer.RecordingSessionID == "" {
+		log.Printf("recording identity is incomplete or malformed; accepting live publisher without recording")
+		return nil
+	}
+	requested := recording.Context{
+		TripID:             tripID,
+		VehicleID:          vehicleID,
+		RecordingSessionID: offer.RecordingSessionID,
+	}
+	validationContext, cancel := context.WithTimeout(requestContext, 3*time.Second)
+	defer cancel()
+	validated, err := h.validator.ValidateRecordingContext(validationContext, requested)
+	if err != nil {
+		log.Printf("recording identity validation failed; accepting live publisher without recording: %v", err)
+		return nil
+	}
+	return &validated
 }
 
 func (h *Handler) newPeerConnection() (*webrtc.PeerConnection, error) {
@@ -125,7 +164,10 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "GET required")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"live": h.broadcaster.IsLive()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"live":      h.broadcaster.IsLive(),
+		"recording": h.broadcaster.RecordingStatus(),
+	})
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {

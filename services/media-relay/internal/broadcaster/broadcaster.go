@@ -8,6 +8,7 @@ import (
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 
+	"poc-server-webrtc/relay-go/internal/recording"
 	"poc-server-webrtc/relay-go/internal/yolofeed"
 )
 
@@ -18,32 +19,46 @@ type Publisher struct {
 }
 
 type Broadcaster struct {
+	lifecycleMu sync.Mutex
 	mu          sync.RWMutex
 	publisher   *Publisher
 	yolo        *yolofeed.Feed
+	recorder    *recording.Recorder
 	onLive      func(bool)
 }
 
-func New(yolo *yolofeed.Feed, onLive func(bool)) *Broadcaster {
+func New(yolo *yolofeed.Feed, onLive func(bool), recorder *recording.Recorder) *Broadcaster {
 	return &Broadcaster{
-		yolo:        yolo,
-		onLive:      onLive,
+		yolo:     yolo,
+		recorder: recorder,
+		onLive:   onLive,
 	}
 }
 
 // SetPublisher installs the single active publisher. A later publisher wins.
-func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.TrackRemote) {
+func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.TrackRemote, recordingContext *recording.Context) {
+	b.lifecycleMu.Lock()
 	publisher := &Publisher{pc: pc, track: track, done: make(chan struct{})}
 	old := b.replacePublisher(publisher)
 	if old != nil {
 		log.Printf("Android publisher replaced (SSRC %d -> %d)", old.track.SSRC(), track.SSRC())
 		close(old.done)
-		_ = old.pc.Close()
 		if b.yolo != nil {
 			b.yolo.End()
 		}
 	} else {
 		log.Printf("Android publisher connected (SSRC %d)", track.SSRC())
+	}
+	if b.recorder != nil {
+		if recordingContext == nil {
+			b.recorder.Stop("publisher connected without a validated recording context")
+		} else if err := b.recorder.Start(*recordingContext); err != nil {
+			log.Printf("recording context could not be started; live publishing continues: %v", err)
+		}
+	}
+	b.lifecycleMu.Unlock()
+	if old != nil {
+		_ = old.pc.Close()
 	}
 	b.onLiveAsync(true)
 	go b.readPublisher(publisher)
@@ -55,6 +70,8 @@ func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.Trac
 }
 
 func (b *Broadcaster) RemovePublisher(pc *webrtc.PeerConnection) {
+	b.lifecycleMu.Lock()
+	defer b.lifecycleMu.Unlock()
 	b.mu.Lock()
 	if b.publisher == nil || b.publisher.pc != pc {
 		b.mu.Unlock()
@@ -66,6 +83,9 @@ func (b *Broadcaster) RemovePublisher(pc *webrtc.PeerConnection) {
 
 	log.Printf("Android publisher disconnected (SSRC %d)", old.track.SSRC())
 	close(old.done)
+	if b.recorder != nil {
+		b.recorder.Stop("publisher disconnected")
+	}
 	if b.yolo != nil {
 		b.yolo.End()
 	}
@@ -147,6 +167,33 @@ func (b *Broadcaster) IsLive() bool {
 	return b.publisher != nil
 }
 
+func (b *Broadcaster) RecordingStatus() recording.Status {
+	if b.recorder == nil {
+		return recording.Status{Enabled: false}
+	}
+	return b.recorder.Status()
+}
+
+func (b *Broadcaster) Close() {
+	b.lifecycleMu.Lock()
+	b.mu.Lock()
+	publisher := b.publisher
+	b.publisher = nil
+	b.mu.Unlock()
+	if b.recorder != nil {
+		b.recorder.Stop("relay shutdown")
+	}
+	b.lifecycleMu.Unlock()
+	if publisher != nil {
+		close(publisher.done)
+		_ = publisher.pc.Close()
+		if b.yolo != nil {
+			b.yolo.End()
+		}
+		b.onLiveAsync(false)
+	}
+}
+
 func (b *Broadcaster) readPublisher(publisher *Publisher) {
 	for {
 		packet, _, err := publisher.track.ReadRTP()
@@ -155,12 +202,21 @@ func (b *Broadcaster) readPublisher(publisher *Publisher) {
 			return
 		}
 
-		// Feed first: Publish performs ordered depacketization and retains the
-		// compressed access unit. It has no drop branch, so relay ingestion may
-		// backpressure rather than silently losing inference input.
-		if b.yolo != nil {
-			b.yolo.Publish(packet)
+		b.mu.RLock()
+		if b.publisher != publisher {
+			b.mu.RUnlock()
+			return
 		}
+		// Feed first: Publish performs ordered depacketization and retains the
+		// compressed access unit. The recorder receives that same immutable
+		// object through a bounded non-blocking queue.
+		if b.yolo != nil {
+			item := b.yolo.Publish(packet)
+			if item != nil && b.recorder != nil {
+				b.recorder.Publish(item)
+			}
+		}
+		b.mu.RUnlock()
 	}
 }
 

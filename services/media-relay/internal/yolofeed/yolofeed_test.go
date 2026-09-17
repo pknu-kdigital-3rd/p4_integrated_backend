@@ -51,6 +51,25 @@ func TestPublishedAccessUnitIsNotChangedByAssemblyReuse(t *testing.T) {
 	}
 }
 
+func TestPublishReturnsTheRetainedImmutableAccessUnit(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	item := feed.Publish(&rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 7, Timestamp: 90000, Marker: true},
+		Payload: []byte{0x65, 0x01, 0x02},
+	})
+	if item == nil {
+		t.Fatal("expected marker packet to complete an IDR access unit")
+	}
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+	if len(feed.backlog) != 1 || feed.backlog[0] != item {
+		t.Fatal("Publish must return the same access unit retained by the feed")
+	}
+	if !item.Keyframe || item.Seq != 0 || item.Epoch != feed.epoch {
+		t.Fatalf("unexpected access unit identity: %+v", item)
+	}
+}
+
 func TestSendFrameScatterWritePreservesWireFormat(t *testing.T) {
 	item := &AccessUnit{
 		Epoch:        4,
