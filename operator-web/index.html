@@ -13,6 +13,20 @@
     <aside>
       <form id="login"><h2>Operator login</h2><input name="loginId" placeholder="Login ID" required><input name="password" type="password" placeholder="Password" required><button>Sign in</button></form>
       <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view" type="button">Live View</button><p id="route-label">Planned Route: unavailable</p></section>
+      <section id="recordings-panel" aria-labelledby="recordings-title">
+        <h2 id="recordings-title">Trip recordings</h2>
+        <form id="recordings-form">
+          <label for="recording-trip-id">Trip ID</label>
+          <input id="recording-trip-id" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="Select a vehicle or enter a trip ID" required>
+          <button type="submit">Load segments</button>
+        </form>
+        <p id="recordings-status" role="status">Select a vehicle to load its trip recordings.</p>
+        <ul id="recordings-list" aria-label="Finalized trip video segments"></ul>
+        <div id="recording-player-panel" hidden>
+          <video id="recording-player" controls playsinline preload="metadata" referrerpolicy="no-referrer"></video>
+          <button id="stop-recording" type="button">Stop playback</button>
+        </div>
+      </section>
       <p id="error" role="alert"></p>
     </aside>
   </main>
