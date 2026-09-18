@@ -1,6 +1,6 @@
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
-import {createLiveMapFollower,FLEET_MARKER_STYLE,LIVE_MARKER_STYLE} from './live-map.js';
+import {createAndroidMarkerRevealer,createLiveMapFollower,FLEET_MARKER_STYLE,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
@@ -21,6 +21,7 @@ const liveMapFollower=createLiveMapFollower({
   createEntry:(item,position)=>createMarkerEntry(item,position,{liveOnly:true}),
   onFollowingChange:following=>{liveRecenterButton.hidden=following;liveRecenterButton.setAttribute('aria-pressed',String(following))},
 });
+const revealAndroidMarker=createAndroidMarkerRevealer({map});
 map.on('dragstart',()=>liveMapFollower.pause());
 const splitStorageKey=()=>`itsOperatorSplit:${stackedLayout.matches?'stacked':'columns'}`;
 const readSplitRatio=()=>{const saved=Number(localStorage.getItem(splitStorageKey()));return Number.isFinite(saved)&&saved>0?saved:(stackedLayout.matches ? 0.46 : 0.5)};
@@ -117,7 +118,7 @@ function render(snapshot){
   for(const item of snapshot.vehicles){
     const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
     let entry=markers.get(key);
-    if(!entry)entry=createMarkerEntry(item,pos);
+    if(!entry){entry=createMarkerEntry(item,pos);revealAndroidMarker(item,pos)}
     else{entry.item=item;entry.liveOnly=false}
     if(liveView?.markerKey===key)entry.marker.setStyle(LIVE_MARKER_STYLE);
     else entry.marker.setStyle(FLEET_MARKER_STYLE);

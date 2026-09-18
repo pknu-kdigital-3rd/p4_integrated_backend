@@ -1,8 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createLiveMapFollower, FLEET_MARKER_STYLE } from "../operator-web/live-map.js";
+import { createAndroidMarkerRevealer, createLiveMapFollower, FLEET_MARKER_STYLE } from "../operator-web/live-map.js";
 
 describe("live map follower", () => {
+    it("reveals the first Android GPS marker at a useful zoom", () => {
+        const map = { getZoom: () => 12, setView: vi.fn(), panTo: vi.fn() };
+        const reveal = createAndroidMarkerRevealer({ map });
+
+        expect(reveal({ telemetry: { telemetry_source: "BIMS_LIVE" } }, [35.1, 129.1])).toBe(false);
+        expect(reveal({ telemetry: { telemetry_source: "DEVICE_GPS" } }, [35.1, 129.1])).toBe(true);
+        expect(map.setView).toHaveBeenCalledWith([35.1, 129.1], 15, { animate: false });
+        expect(reveal({ telemetry: { telemetry_source: "RECORDED_GPS" } }, [36.2, 128.2])).toBe(false);
+
+        const laterMap = { getZoom: () => 16, setView: vi.fn(), panTo: vi.fn() };
+        const revealLater = createAndroidMarkerRevealer({ map: laterMap });
+        expect(revealLater({ telemetry: { telemetry_source: "DEVICE_GPS" } }, [35.1, 129.1])).toBe(true);
+        expect(laterMap.setView).toHaveBeenCalledWith([35.1, 129.1], 16, { animate: false });
+    });
+
     it("creates a marker without a fleet poll and follows live positions", () => {
         let timestamp = 1000;
         const marker = { setLatLng: vi.fn(), setStyle: vi.fn() };

@@ -12,6 +12,19 @@ export const FLEET_MARKER_STYLE = {
   fillOpacity: 0.9,
 };
 
+/** Centers the map on the first Android GPS marker so it is visible to select. */
+export function createAndroidMarkerRevealer({ map, minimumZoom = 15 }) {
+  let handled = false;
+  return (item, position) => {
+    const source = item?.telemetry?.telemetry_source;
+    if (handled || !['DEVICE_GPS', 'RECORDED_GPS'].includes(source)) return false;
+    if (!Array.isArray(position) || !position.every(Number.isFinite)) return false;
+    handled = true;
+    map.setView(position, Math.max(map.getZoom(), minimumZoom), { animate: false });
+    return true;
+  };
+}
+
 /**
  * Owns the selected vehicle marker and map-follow behavior while Live View is
  * open. Map and marker objects are injected so the behavior is unit-testable.
