@@ -75,6 +75,24 @@ func (c *NodeClient) RegisterSegment(ctx context.Context, segment Manifest) erro
 	return c.postJSON(ctx, "/internal/recordings/segments", segment, nil)
 }
 
+// PostJSON posts to any Node internal API path with service authentication.
+func (c *NodeClient) PostJSON(ctx context.Context, path string, value any) error {
+	return c.postJSON(ctx, path, value, nil)
+}
+
+// HTTPStatusError is returned for a non-2xx Node response so callers can tell
+// a rejected request from a transient outage.
+type HTTPStatusError struct {
+	Status  int
+	Message string
+}
+
+func (e *HTTPStatusError) Error() string {
+	return fmt.Sprintf("Node internal API returned HTTP %d: %s", e.Status, e.Message)
+}
+
+func (e *HTTPStatusError) StatusCode() int { return e.Status }
+
 func (c *NodeClient) postJSON(ctx context.Context, path string, value any, result any) error {
 	body, err := json.Marshal(value)
 	if err != nil {
@@ -96,7 +114,7 @@ func (c *NodeClient) postJSON(ctx context.Context, path string, value any, resul
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
-		return fmt.Errorf("Node internal API returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(message)))
+		return &HTTPStatusError{Status: response.StatusCode, Message: strings.TrimSpace(string(message))}
 	}
 	if result != nil {
 		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(result); err != nil {

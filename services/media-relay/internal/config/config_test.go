@@ -31,3 +31,28 @@ func TestRecordingConfigIsStrictAndValidatesRequiredSettings(t *testing.T) {
 		t.Fatal("invalid recording interval should fail configuration loading")
 	}
 }
+
+func TestAndroidTelemetryRequiresNodeInternalSettingsWithoutRecording(t *testing.T) {
+	t.Setenv("RECORDING_ENABLED", "false")
+	t.Setenv("ANDROID_TELEMETRY_ENABLED", "true")
+	t.Setenv("NODE_INTERNAL_BASE_URL", "http://127.0.0.1:3000")
+	t.Setenv("NODE_INTERNAL_SERVICE_TOKEN", "short")
+	if _, err := Load(); err == nil {
+		t.Fatal("telemetry without a valid Node service token must fail")
+	}
+
+	t.Setenv("NODE_INTERNAL_SERVICE_TOKEN", "0123456789abcdef0123456789abcdef")
+	t.Setenv("PY_TELEMETRY_URL", "http://127.0.0.1:39011/internal/telemetry")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AndroidTelemetryEnabled || !cfg.NodeInternalRequired() || cfg.RecordingEnabled {
+		t.Fatalf("telemetry settings were not parsed: %+v", cfg)
+	}
+
+	t.Setenv("PY_TELEMETRY_URL", "not a url")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid Vision telemetry URL must fail")
+	}
+}

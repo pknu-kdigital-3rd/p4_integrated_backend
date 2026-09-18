@@ -9,13 +9,20 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	"poc-server-webrtc/relay-go/internal/recording"
+	"poc-server-webrtc/relay-go/internal/telemetry"
 	"poc-server-webrtc/relay-go/internal/yolofeed"
 )
 
+const (
+	qrChannelLabel        = "qr-events"
+	telemetryChannelLabel = "telemetry-events"
+)
+
 type Publisher struct {
-	pc    *webrtc.PeerConnection
-	track *webrtc.TrackRemote
-	done  chan struct{}
+	pc       *webrtc.PeerConnection
+	track    *webrtc.TrackRemote
+	done     chan struct{}
+	identity *telemetry.StreamIdentity
 }
 
 type Broadcaster struct {
@@ -24,6 +31,7 @@ type Broadcaster struct {
 	publisher   *Publisher
 	yolo        *yolofeed.Feed
 	recorder    *recording.Recorder
+	telemetry   *telemetry.Service
 	onLive      func(bool)
 }
 
@@ -35,11 +43,37 @@ func New(yolo *yolofeed.Feed, onLive func(bool), recorder *recording.Recorder) *
 	}
 }
 
+// SetTelemetry enables telemetry-events ingestion. Call before serving offers.
+func (b *Broadcaster) SetTelemetry(service *telemetry.Service) {
+	b.telemetry = service
+}
+
+// StreamIdentity converts a Node-validated recording context into the trusted
+// telemetry identity; nil means the stream carries no trusted identity.
+func StreamIdentity(recordingContext *recording.Context) *telemetry.StreamIdentity {
+	if recordingContext == nil {
+		return nil
+	}
+	return &telemetry.StreamIdentity{
+		TripID:             recordingContext.TripID,
+		VehicleID:          recordingContext.VehicleID,
+		RecordingSessionID: recordingContext.RecordingSessionID,
+	}
+}
+
 // SetPublisher installs the single active publisher. A later publisher wins.
 func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.TrackRemote, recordingContext *recording.Context) {
 	b.lifecycleMu.Lock()
-	publisher := &Publisher{pc: pc, track: track, done: make(chan struct{})}
+	identity := StreamIdentity(recordingContext)
+	publisher := &Publisher{pc: pc, track: track, done: make(chan struct{}), identity: identity}
 	old := b.replacePublisher(publisher)
+	if b.telemetry != nil {
+		if identity != nil {
+			b.telemetry.Activate(*identity)
+		} else if old != nil && old.identity != nil {
+			b.telemetry.Deactivate(old.identity.RecordingSessionID)
+		}
+	}
 	if b.yolo != nil {
 		var identity *yolofeed.RecordingIdentity
 		if recordingContext != nil {
@@ -94,6 +128,9 @@ func (b *Broadcaster) RemovePublisher(pc *webrtc.PeerConnection) {
 
 	log.Printf("Android publisher disconnected (SSRC %d)", old.track.SSRC())
 	close(old.done)
+	if b.telemetry != nil && old.identity != nil {
+		b.telemetry.Deactivate(old.identity.RecordingSessionID)
+	}
 	if b.recorder != nil {
 		b.recorder.Stop("publisher disconnected")
 	}
@@ -128,13 +165,49 @@ func (b *Broadcaster) RequestKeyFrame() {
 	}
 }
 
-// HandleDataChannel receives Android's QR decode events. The channel is
-// reliable/ordered by default; media remains on the RTP track and is never
-// blocked by a slow QR scanner.
-func (b *Broadcaster) HandleDataChannel(channel *webrtc.DataChannel) {
-	if channel == nil || channel.Label() != "qr-events" {
+// HandleDataChannel routes Android's DataChannels. pc and recordingContext are
+// the peer connection the channel belongs to and its Node-validated identity;
+// telemetry is bound to that identity, never to identity fields in the payload.
+// Unknown labels are ignored.
+func (b *Broadcaster) HandleDataChannel(pc *webrtc.PeerConnection, recordingContext *recording.Context, channel *webrtc.DataChannel) {
+	if channel == nil {
 		return
 	}
+	switch channel.Label() {
+	case qrChannelLabel:
+		b.handleQRChannel(channel)
+	case telemetryChannelLabel:
+		if b.telemetry == nil {
+			return
+		}
+		identity := StreamIdentity(recordingContext)
+		channel.OnMessage(func(message webrtc.DataChannelMessage) {
+			_ = b.HandleTelemetryMessage(pc, identity, message.Data)
+		})
+	}
+}
+
+// HandleTelemetryMessage ingests one telemetry-events message. It returns
+// without blocking: persistence and Vision forwarding are queued. Messages from
+// a peer connection that is not the active publisher are rejected so a
+// replaced or reconnecting peer cannot inject telemetry into the live stream.
+func (b *Broadcaster) HandleTelemetryMessage(pc *webrtc.PeerConnection, identity *telemetry.StreamIdentity, data []byte) error {
+	if b.telemetry == nil {
+		return nil
+	}
+	b.mu.RLock()
+	active := b.publisher != nil && b.publisher.pc == pc
+	b.mu.RUnlock()
+	if !active {
+		return b.telemetry.RejectStale()
+	}
+	return b.telemetry.HandleMessage(identity, data)
+}
+
+// handleQRChannel receives Android's QR decode events. The channel is
+// reliable/ordered by default; media remains on the RTP track and is never
+// blocked by a slow QR scanner.
+func (b *Broadcaster) handleQRChannel(channel *webrtc.DataChannel) {
 	if b.yolo != nil {
 		b.yolo.SetQRActive(true)
 	}

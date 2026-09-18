@@ -40,6 +40,20 @@ type Config struct {
 	MinioRecordingBucket    string
 	NodeInternalBaseURL     string
 	NodeInternalToken       string
+
+	// Android telemetry needs a Node-validated trip/vehicle/session even when
+	// video recording is disabled, so identity validation is enabled whenever
+	// either feature is.
+	AndroidTelemetryEnabled bool
+	PythonTelemetryURL      string
+	TelemetryNodeQueue      int
+	TelemetryVisionQueue    int
+	TelemetryCurrentMaxAge  time.Duration
+}
+
+// NodeInternalRequired reports whether a Node internal client must exist.
+func (c Config) NodeInternalRequired() bool {
+	return c.RecordingEnabled || c.AndroidTelemetryEnabled
 }
 
 func Load() (Config, error) {
@@ -68,8 +82,45 @@ func Load() (Config, error) {
 		MinioRecordingBucket:    env("MINIO_RECORDING_BUCKET", "p4-trip-recordings"),
 		NodeInternalBaseURL:     env("NODE_INTERNAL_BASE_URL", "http://127.0.0.1:3000"),
 		NodeInternalToken:       os.Getenv("NODE_INTERNAL_SERVICE_TOKEN"),
+		PythonTelemetryURL:      env("PY_TELEMETRY_URL", "http://127.0.0.1:39011/internal/telemetry"),
+		TelemetryNodeQueue:      512,
+		TelemetryVisionQueue:    64,
+		TelemetryCurrentMaxAge:  30 * time.Second,
 	}
 	var parseErrors []error
+
+	if value, ok := os.LookupEnv("ANDROID_TELEMETRY_ENABLED"); ok {
+		parsed, err := parseBool("ANDROID_TELEMETRY_ENABLED", value)
+		if err != nil {
+			parseErrors = append(parseErrors, err)
+		} else {
+			cfg.AndroidTelemetryEnabled = parsed
+		}
+	}
+	if value, ok := os.LookupEnv("TELEMETRY_NODE_QUEUE"); ok {
+		parsed, err := parseInt("TELEMETRY_NODE_QUEUE", value)
+		if err != nil {
+			parseErrors = append(parseErrors, err)
+		} else {
+			cfg.TelemetryNodeQueue = parsed
+		}
+	}
+	if value, ok := os.LookupEnv("TELEMETRY_VISION_QUEUE"); ok {
+		parsed, err := parseInt("TELEMETRY_VISION_QUEUE", value)
+		if err != nil {
+			parseErrors = append(parseErrors, err)
+		} else {
+			cfg.TelemetryVisionQueue = parsed
+		}
+	}
+	if value, ok := os.LookupEnv("TELEMETRY_CURRENT_MAX_AGE_SECONDS"); ok {
+		parsed, err := parseInt("TELEMETRY_CURRENT_MAX_AGE_SECONDS", value)
+		if err != nil {
+			parseErrors = append(parseErrors, err)
+		} else {
+			cfg.TelemetryCurrentMaxAge = time.Duration(parsed) * time.Second
+		}
+	}
 
 	if value, ok := os.LookupEnv("RECORDING_ENABLED"); ok {
 		parsed, err := parseBool("RECORDING_ENABLED", value)
@@ -132,9 +183,52 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if !c.RecordingEnabled {
-		return nil
+	var validationErrors []error
+	if c.RecordingEnabled {
+		validationErrors = append(validationErrors, c.validateRecording()...)
 	}
+	if c.AndroidTelemetryEnabled {
+		validationErrors = append(validationErrors, c.validateTelemetry()...)
+	}
+	if c.NodeInternalRequired() {
+		validationErrors = append(validationErrors, c.validateNodeInternal()...)
+	}
+	return errors.Join(validationErrors...)
+}
+
+func (c Config) validateTelemetry() []error {
+	var validationErrors []error
+	parsedURL, err := url.Parse(c.PythonTelemetryURL)
+	if err != nil || parsedURL == nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		validationErrors = append(validationErrors, errors.New("PY_TELEMETRY_URL must be an absolute http(s) URL"))
+	}
+	if c.TelemetryNodeQueue < 1 || c.TelemetryNodeQueue > 100000 {
+		validationErrors = append(validationErrors, errors.New("TELEMETRY_NODE_QUEUE must be between 1 and 100000"))
+	}
+	if c.TelemetryVisionQueue < 1 || c.TelemetryVisionQueue > 10000 {
+		validationErrors = append(validationErrors, errors.New("TELEMETRY_VISION_QUEUE must be between 1 and 10000"))
+	}
+	if c.TelemetryCurrentMaxAge < time.Second || c.TelemetryCurrentMaxAge > time.Hour {
+		validationErrors = append(validationErrors, errors.New("TELEMETRY_CURRENT_MAX_AGE_SECONDS must be between 1 and 3600"))
+	}
+	return validationErrors
+}
+
+func (c Config) validateNodeInternal() []error {
+	var validationErrors []error
+	parsedURL, err := url.Parse(c.NodeInternalBaseURL)
+	if err != nil || parsedURL == nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+		validationErrors = append(validationErrors, errors.New("NODE_INTERNAL_BASE_URL must be an absolute http(s) URL without query or fragment"))
+	}
+	if len(c.NodeInternalToken) < 32 {
+		validationErrors = append(validationErrors, errors.New("NODE_INTERNAL_SERVICE_TOKEN must contain at least 32 characters"))
+	} else if strings.HasPrefix(c.NodeInternalToken, "replace-") {
+		validationErrors = append(validationErrors, errors.New("NODE_INTERNAL_SERVICE_TOKEN must be replaced before recording or Android telemetry is enabled"))
+	}
+	return validationErrors
+}
+
+func (c Config) validateRecording() []error {
 	var validationErrors []error
 	if c.RecordingSegmentSeconds < 1 || c.RecordingSegmentSeconds > 3600 {
 		validationErrors = append(validationErrors, errors.New("RECORDING_SEGMENT_SECONDS must be between 1 and 3600"))
@@ -165,16 +259,7 @@ func (c Config) Validate() error {
 	} else if numericPort, err := strconv.Atoi(port); err != nil || numericPort < 1 || numericPort > 65535 {
 		validationErrors = append(validationErrors, errors.New("MINIO_ENDPOINT port must be between 1 and 65535"))
 	}
-	parsedURL, err := url.Parse(c.NodeInternalBaseURL)
-	if err != nil || parsedURL == nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
-		validationErrors = append(validationErrors, errors.New("NODE_INTERNAL_BASE_URL must be an absolute http(s) URL without query or fragment"))
-	}
-	if len(c.NodeInternalToken) < 32 {
-		validationErrors = append(validationErrors, errors.New("NODE_INTERNAL_SERVICE_TOKEN must contain at least 32 characters"))
-	} else if strings.HasPrefix(c.NodeInternalToken, "replace-") {
-		validationErrors = append(validationErrors, errors.New("NODE_INTERNAL_SERVICE_TOKEN must be replaced before recording is enabled"))
-	}
-	return errors.Join(validationErrors...)
+	return validationErrors
 }
 
 func parseBool(name, value string) (bool, error) {

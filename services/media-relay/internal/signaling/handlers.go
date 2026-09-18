@@ -14,6 +14,7 @@ import (
 
 	"poc-server-webrtc/relay-go/internal/broadcaster"
 	"poc-server-webrtc/relay-go/internal/recording"
+	"poc-server-webrtc/relay-go/internal/telemetry"
 )
 
 type OfferModel struct {
@@ -29,10 +30,17 @@ type Handler struct {
 	configuration webrtc.Configuration
 	broadcaster   *broadcaster.Broadcaster
 	validator     recording.ContextValidator
+	telemetry     *telemetry.Service
 }
 
 func NewHandler(api *webrtc.API, configuration webrtc.Configuration, relay *broadcaster.Broadcaster, validator recording.ContextValidator) *Handler {
 	return &Handler{api: api, configuration: configuration, broadcaster: relay, validator: validator}
+}
+
+// SetTelemetry exposes the current-device telemetry API. Leave unset to keep
+// the telemetry endpoints returning an empty, disabled snapshot.
+func (h *Handler) SetTelemetry(service *telemetry.Service) {
+	h.telemetry = service
 }
 
 func (h *Handler) Routes() http.Handler {
@@ -40,8 +48,42 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("/offer/android", h.offerAndroid)
 	mux.HandleFunc("/internal/request-keyframe", h.requestKeyframe)
 	mux.HandleFunc("/internal/status", h.status)
+	mux.HandleFunc("/internal/telemetry/vehicles", h.telemetryVehicles)
+	mux.HandleFunc("/internal/telemetry/status", h.telemetryStatus)
 	mux.HandleFunc("/healthz", h.health)
 	return withCORS(mux)
+}
+
+// telemetryVehicles is the source-neutral current device snapshot read by the
+// routing/tracking service. external_id is only a tracking-contract key; the
+// real vehicle identity is in source_metadata.
+func (h *Handler) telemetryVehicles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+	vehicles := []telemetry.VehicleState{}
+	if h.telemetry != nil {
+		vehicles = h.telemetry.Vehicles()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":          h.telemetry != nil,
+		"generated_at_utc": time.Now().UTC().Format(time.RFC3339Nano),
+		"vehicles":         vehicles,
+		"warnings":         []string{},
+	})
+}
+
+func (h *Handler) telemetryStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "GET required")
+		return
+	}
+	if h.telemetry == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "metrics": h.telemetry.Metrics()})
 }
 
 func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +107,9 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 			h.broadcaster.SetPublisher(pc, track, recordingContext)
 		}
 	})
-	pc.OnDataChannel(h.broadcaster.HandleDataChannel)
+	pc.OnDataChannel(func(channel *webrtc.DataChannel) {
+		h.broadcaster.HandleDataChannel(pc, recordingContext, channel)
+	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if isGone(state) {
 			h.broadcaster.RemovePublisher(pc)
@@ -87,7 +131,7 @@ func (h *Handler) validateRecordingContext(requestContext context.Context, offer
 		return nil
 	}
 	if h.validator == nil {
-		log.Printf("recording identity supplied while recording is disabled; accepting live publisher without recording")
+		log.Printf("stream identity supplied while recording and Android telemetry are disabled; accepting live publisher without identity")
 		return nil
 	}
 	tripID, tripErr := strconv.ParseInt(offer.TripID, 10, 64)

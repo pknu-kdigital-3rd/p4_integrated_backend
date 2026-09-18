@@ -21,6 +21,7 @@ import (
 	"poc-server-webrtc/relay-go/internal/config"
 	"poc-server-webrtc/relay-go/internal/recording"
 	"poc-server-webrtc/relay-go/internal/signaling"
+	"poc-server-webrtc/relay-go/internal/telemetry"
 	"poc-server-webrtc/relay-go/internal/yolofeed"
 )
 
@@ -48,14 +49,16 @@ func main() {
 	feed := yolofeed.NewWithLimits(cfg.YoloFeedSocketPath, cfg.BacklogMaxSeconds, cfg.BacklogMaxBytes)
 	var recorderInstance *recording.Recorder
 	var nodeClient *recording.NodeClient
+	if cfg.NodeInternalRequired() {
+		nodeClient, err = recording.NewNodeClient(cfg.NodeInternalBaseURL, cfg.NodeInternalToken)
+		if err != nil {
+			log.Fatalf("Node internal client: %v", err)
+		}
+	}
 	if cfg.RecordingEnabled {
 		store, err := recording.NewMinioStore(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioUseSSL)
 		if err != nil {
 			log.Fatalf("recording MinIO client: %v", err)
-		}
-		nodeClient, err = recording.NewNodeClient(cfg.NodeInternalBaseURL, cfg.NodeInternalToken)
-		if err != nil {
-			log.Fatalf("recording Node client: %v", err)
 		}
 		recorderInstance, err = recording.New(recording.Config{
 			SegmentDuration: time.Duration(cfg.RecordingSegmentSeconds) * time.Second,
@@ -80,17 +83,41 @@ func main() {
 		recorderInstance.SetRequestKeyframe(relay.RequestKeyFrame)
 	}
 
+	telemetryContext, stopTelemetry := context.WithCancel(context.Background())
+	defer stopTelemetry()
+	var telemetryService *telemetry.Service
+	if cfg.AndroidTelemetryEnabled {
+		metrics := &telemetry.Metrics{}
+		telemetryService = telemetry.NewService(
+			telemetry.NewStore(cfg.TelemetryCurrentMaxAge),
+			telemetry.NewNodeSink(nodeClient, cfg.TelemetryNodeQueue, metrics),
+			telemetry.NewVisionSink(telemetry.HTTPPoster{
+				URL:    cfg.PythonTelemetryURL,
+				Client: &http.Client{Timeout: 3 * time.Second},
+			}, cfg.TelemetryVisionQueue, metrics),
+			metrics,
+		)
+		telemetryService.Run(telemetryContext)
+		relay.SetTelemetry(telemetryService)
+		log.Printf("android telemetry enabled: vision=%s node=%s", cfg.PythonTelemetryURL, cfg.NodeInternalBaseURL)
+	}
+
 	// Wired up before Run() starts accepting, so every Python feed reconnect
 	// triggers a fresh keyframe for a decodable epoch.
 	feed.OnClientConnect = relay.RequestKeyFrame
 	feed.OnResync = relay.RequestKeyFrame
-	startDiagnostics(cfg, feed, recorderInstance)
+	startDiagnostics(cfg, feed, recorderInstance, telemetryService)
 	go func() {
 		if err := feed.Run(); err != nil {
 			log.Fatalf("YOLO feed: %v", err)
 		}
 	}()
-	handler := signaling.NewHandler(api, configuration, relay, nodeClient)
+	var validator recording.ContextValidator
+	if nodeClient != nil {
+		validator = nodeClient
+	}
+	handler := signaling.NewHandler(api, configuration, relay, validator)
+	handler.SetTelemetry(telemetryService)
 	server := &http.Server{
 		Addr:              cfg.RelayListenAddr,
 		Handler:           handler.Routes(),
@@ -124,9 +151,12 @@ func main() {
 	}
 }
 
-func startDiagnostics(cfg config.Config, feed *yolofeed.Feed, recorderInstance *recording.Recorder) {
+func startDiagnostics(cfg config.Config, feed *yolofeed.Feed, recorderInstance *recording.Recorder, telemetryService *telemetry.Service) {
 	if cfg.MetricsInterval > 0 {
 		go logRuntimeMetrics(feed, recorderInstance, cfg.MetricsInterval)
+		if telemetryService != nil {
+			go logTelemetryMetrics(telemetryService, cfg.MetricsInterval)
+		}
 	}
 	if cfg.PprofAddr != "" {
 		go func() {
@@ -181,6 +211,27 @@ func logRuntimeMetrics(feed *yolofeed.Feed, recorderInstance *recording.Recorder
 			recordingStatus.UploadFailures,
 			recordingStatus.DroppedSegments,
 			recordingStatus.LastUploadMS,
+		)
+	}
+}
+
+func logTelemetryMetrics(service *telemetry.Service, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		m := service.Metrics()
+		log.Printf(
+			"[relay-telemetry] telemetry_batches_received_total=%d telemetry_batches_invalid_total=%d "+
+				"telemetry_identity_mismatch_total=%d telemetry_stale_or_unidentified_total=%d "+
+				"telemetry_gps_samples_total=%d telemetry_imu_samples_total=%d telemetry_store_sessions=%d "+
+				"telemetry_node_queue_depth=%d gps_persistence_jobs_total=%d telemetry_node_failures_total=%d "+
+				"dropped_gps_persistence_total=%d telemetry_vision_queue_depth=%d "+
+				"telemetry_batches_forwarded_vision_total=%d telemetry_vision_dropped_total=%d telemetry_vision_failures_total=%d",
+			m.BatchesReceivedTotal, m.BatchesInvalidTotal, m.IdentityMismatchTotal, m.StaleOrUnidentifiedTotal,
+			m.GPSSamplesTotal, m.IMUSamplesTotal, m.StoreSessions,
+			m.NodeQueueDepth, m.GPSPersistenceJobsTotal, m.GPSPersistenceFailuresTotal,
+			m.DroppedGPSPersistenceTotal, m.VisionQueueDepth,
+			m.VisionForwardedTotal, m.VisionDroppedTotal, m.VisionFailuresTotal,
 		)
 	}
 }
