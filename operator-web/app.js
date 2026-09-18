@@ -88,6 +88,10 @@ function releaseLiveMarker(){
   }
 }
 function liveTargetLabel(item){return item?.vehicleCode||item?.vehicleName||`Vehicle ID ${item?.vehicleId??item?.telemetry?.external_id??'unknown'}`}
+function notifyLiveFrameFullscreen(fullscreen=document.fullscreenElement===livePanel){
+  if(!liveView)return;
+  liveFrame.contentWindow?.postMessage({type:'operator-live-view-fullscreen',fullscreen},liveView.frameOrigin);
+}
 function retargetLiveView(item){
   if(!liveView||sameLiveTarget(liveView,item))return;
   const frameOrigin=liveView.frameOrigin;
@@ -333,6 +337,7 @@ liveFrame.addEventListener('load',event=>{
   }catch{
     diagnostic.textContent+=' — iframe loaded; inspect its console if playback does not start';
   }
+  notifyLiveFrameFullscreen();
 });
 document.querySelector('#close-live-view').addEventListener('click',stopLiveView);
 liveRecenterButton.addEventListener('click',()=>liveMapFollower.recenter());
@@ -341,7 +346,7 @@ function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement=
 if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
 else{
   liveFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===livePanel)await document.exitFullscreen();else await livePanel.requestFullscreen()}catch{document.querySelector('#live-view-diagnostic').textContent='Full-screen Live View is unavailable in this browser.'}});
-  document.addEventListener('fullscreenchange',()=>{syncLiveFullscreenButton();requestAnimationFrame(()=>map.invalidateSize({pan:false}))});
+  document.addEventListener('fullscreenchange',()=>{syncLiveFullscreenButton();notifyLiveFrameFullscreen();requestAnimationFrame(()=>map.invalidateSize({pan:false}))});
   syncLiveFullscreenButton();
 }
 document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.addEventListener('click',()=>{

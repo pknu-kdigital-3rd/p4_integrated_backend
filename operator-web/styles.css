@@ -67,6 +67,9 @@ body.resizing-layout{user-select:none}
 #live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle]{color:#ffcf70}
 #operator-layout.live-view-open #live-view-frame{display:block;width:100%;height:100%;min-height:0;border:0;background:#000}
 #operator-layout.live-view-open #live-view-panel:not([hidden]):fullscreen{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:10000;grid-column:auto;grid-row:auto;border:0;border-radius:0;box-shadow:none}
+#operator-layout.live-view-open #live-view-panel:not([hidden]):fullscreen{display:grid;grid-template-rows:52px minmax(0,1fr)}
+#operator-layout.live-view-open #live-view-panel:not([hidden]):fullscreen #live-view-diagnostic,
+#operator-layout.live-view-open #live-view-panel:not([hidden]):fullscreen #live-telemetry-status{display:none}
 @media(max-width:1000px){
   #operator-layout.live-view-open{height:calc(100dvh - 64px);min-height:0;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,var(--map-height,46vh)) 10px minmax(0,1fr)}
   #operator-layout.live-view-open #map{height:100%;min-height:0;grid-column:1;grid-row:1}

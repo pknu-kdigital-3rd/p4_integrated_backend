@@ -23,6 +23,12 @@
     #telemetry dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0; }
     #telemetry dt { color: #999; }
     #telemetry dd { margin: 0; }
+    html.operator-live-view-fullscreen,
+    html.operator-live-view-fullscreen body { width: 100%; height: 100%; overflow: hidden; }
+    html.operator-live-view-fullscreen body { padding: 0; display: grid; place-items: center; }
+    html.operator-live-view-fullscreen main { width: 100%; height: 100%; max-width: none; margin: 0; display: grid; place-items: center; }
+    html.operator-live-view-fullscreen main > :not(#stage) { display: none; }
+    html.operator-live-view-fullscreen #stage { max-width: none; max-height: none; }
   </style>
 </head>
 <body>
@@ -175,17 +181,29 @@
   }
 
   function setStatus(text, color = '#aaa') { statusEl.textContent = text; statusEl.style.color = color; }
+  function updateStageSize() {
+    const stage = document.getElementById('stage');
+    const fullscreen = document.documentElement.classList.contains('operator-live-view-fullscreen');
+    if (!fullscreen || !videoCanvas.width || !videoCanvas.height) {
+      stage.style.width = '100%';
+      stage.style.height = 'auto';
+      stage.style.aspectRatio = `${videoCanvas.width || 16} / ${videoCanvas.height || 9}`;
+      return;
+    }
+    const scale = Math.min(window.innerWidth / videoCanvas.width, window.innerHeight / videoCanvas.height);
+    stage.style.width = `${videoCanvas.width * scale}px`;
+    stage.style.height = `${videoCanvas.height * scale}px`;
+    stage.style.aspectRatio = 'auto';
+  }
   function resize(w, h) {
     if (!w || !h) return;
     videoCanvas.width = overlayCanvas.width = w;
     videoCanvas.height = overlayCanvas.height = h;
-    const stage = document.getElementById('stage');
     // Keep the visible stage at the source dimensions as well as keeping the
     // canvas backing store in that same coordinate space.
-    stage.style.width = '100%';
-    stage.style.height = 'auto';
-    stage.style.aspectRatio = `${w} / ${h}`;
+    updateStageSize();
   }
+  window.addEventListener('resize', updateStageSize);
   function bufferedSeconds() {
     if (queue.length < 2) return 0;
     return Math.max(0, (queue[queue.length - 1].timestamp_us - queue[0].timestamp_us) / 1e6);
@@ -702,7 +720,10 @@
   window.addEventListener('focus', resumeFromBackground);
   window.addEventListener('message', event => {
     if (event.source !== window.parent || !parentOrigin || event.origin !== parentOrigin) return;
-    if (event.data?.type === 'operator-live-view-returned' && !document.hidden) resumeAtLive();
+    if (event.data?.type === 'operator-live-view-fullscreen') {
+      document.documentElement.classList.toggle('operator-live-view-fullscreen', event.data.fullscreen === true);
+      updateStageSize();
+    } else if (event.data?.type === 'operator-live-view-returned' && !document.hidden) resumeAtLive();
   });
   // The operator dashboard opts into immediate playback when it opens this
   // page in its live-view panel. Direct visits remain manual-start by default.
