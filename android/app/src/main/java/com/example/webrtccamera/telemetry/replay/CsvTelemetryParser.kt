@@ -102,15 +102,19 @@ object CsvTelemetryParser {
         columns[name]?.toLongOrNull()
             ?: throw CsvParseException("Invalid or missing '$name' at line $lineNumber")
 
-    private fun requireDouble(columns: Map<String, String>, name: String, lineNumber: Int): Double =
-        columns[name]?.toDoubleOrNull()
-            ?: throw CsvParseException("Invalid or missing '$name' at line $lineNumber")
+    private fun requireDouble(columns: Map<String, String>, name: String, lineNumber: Int): Double {
+        val value = columns[name]?.toDoubleOrNull()
+        if (value == null || !value.isFinite()) {
+            throw CsvParseException("Invalid or missing '$name' at line $lineNumber")
+        }
+        return value
+    }
 
     private fun optionalLong(columns: Map<String, String>, name: String): Long? =
         columns[name]?.takeIf { it.isNotEmpty() }?.toLongOrNull()
 
     private fun optionalDouble(columns: Map<String, String>, name: String): Double? =
-        columns[name]?.takeIf { it.isNotEmpty() }?.toDoubleOrNull()
+        columns[name]?.takeIf { it.isNotEmpty() }?.toDoubleOrNull()?.takeIf { it.isFinite() }
 
     private fun optionalInt(columns: Map<String, String>, name: String): Int? =
         columns[name]?.takeIf { it.isNotEmpty() }?.toIntOrNull()

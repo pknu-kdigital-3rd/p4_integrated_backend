@@ -41,6 +41,8 @@ class TelemetryReplayScheduler(
     private val pendingGps = ArrayList<GpsSample>()
     private val pendingImu = ArrayList<ImuSample>()
     private var lastFlushElapsedMs = 0L
+    private var lastProgressStatusElapsedMs = 0L
+    private var lastBatchQueueError: String? = null
     @Volatile private var running = false
     private var lastReportedQrClockState: SourceClockState? = null
     private var endOfDatasetLogged = false
@@ -65,6 +67,8 @@ class TelemetryReplayScheduler(
             pendingGps.clear()
             pendingImu.clear()
             lastFlushElapsedMs = elapsedMillis()
+            lastProgressStatusElapsedMs = lastFlushElapsedMs
+            lastBatchQueueError = null
             val sourceNow = sourceClock.currentSourceTimestampNs()
             if (sourceNow != null) {
                 resyncCursors(sourceNow)
@@ -119,7 +123,16 @@ class TelemetryReplayScheduler(
             )
         }
         val sourceNow = sourceClock.currentSourceTimestampNs() ?: return
-        advanceCursors(sourceNow, elapsedMillis())
+        val nowMs = elapsedMillis()
+        advanceCursors(sourceNow, nowMs)
+        if (clockState == SourceClockState.RUNNING && nowMs - lastProgressStatusElapsedMs >= PROGRESS_STATUS_INTERVAL_MS) {
+            lastProgressStatusElapsedMs = nowMs
+            val queueError = lastBatchQueueError?.let { "; last queue error: $it" }.orEmpty()
+            onStatus(
+                "Telemetry: QR synced; queued GPS=${gpsSentCount.get()} IMU=${imuSentCount.get()} " +
+                    "batches=${batchSentCount.get()}$queueError"
+            )
+        }
     }
 
     /** Core due-sample selection and batching, factored out so tests can drive it directly. */
@@ -154,13 +167,23 @@ class TelemetryReplayScheduler(
             gps = ArrayList(pendingGps),
             imu = ArrayList(pendingImu),
         )
-        gpsSentCount.addAndGet(pendingGps.size.toLong())
-        imuSentCount.addAndGet(pendingImu.size.toLong())
-        batchSentCount.incrementAndGet()
-        pendingGps.clear()
-        pendingImu.clear()
-        lastFlushElapsedMs = nowMs
-        onBatchReady(batch)
+        try {
+            onBatchReady(batch)
+            gpsSentCount.addAndGet(pendingGps.size.toLong())
+            imuSentCount.addAndGet(pendingImu.size.toLong())
+            batchSentCount.incrementAndGet()
+            lastBatchQueueError = null
+        } catch (error: Exception) {
+            // A serialization/queueing error must not escape the scheduled tick: an exception
+            // from scheduleWithFixedDelay would cancel every future replay tick, leaving the QR
+            // clock synchronized while telemetry silently stops.
+            lastBatchQueueError = error.message ?: error.javaClass.simpleName
+            onStatus("Telemetry: could not queue batch ($lastBatchQueueError)")
+        } finally {
+            pendingGps.clear()
+            pendingImu.clear()
+            lastFlushElapsedMs = nowMs
+        }
     }
 
     /** Test-only: position cursors without a real QR clock/executor round-trip. */
@@ -171,6 +194,7 @@ class TelemetryReplayScheduler(
         // tick granularity - the source timestamps, not the tick time, decide what is due.
         const val TICK_INTERVAL_MS = 10L
         const val FLUSH_INTERVAL_MS = 40L
+        const val PROGRESS_STATUS_INTERVAL_MS = 1_000L
         const val MAX_IMU_PER_BATCH = 16
 
         internal fun <T> firstIndexAtOrAfter(list: List<T>, target: Long, selector: (T) -> Long): Int {

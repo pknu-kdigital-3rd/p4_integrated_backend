@@ -29,10 +29,13 @@ data class TelemetryBatch(
                     .put("utc_epoch_ms", sample.utcEpochMs?.let { it } ?: JSONObject.NULL)
                     .put("latitude", sample.latitude)
                     .put("longitude", sample.longitude)
-                    .put("altitude_m", sample.altitudeM ?: JSONObject.NULL)
-                    .put("speed_mps", sample.speedMps ?: JSONObject.NULL)
-                    .put("bearing_deg", sample.bearingDeg ?: JSONObject.NULL)
-                    .put("horizontal_accuracy_m", sample.horizontalAccuracyM ?: JSONObject.NULL)
+                    .put("altitude_m", sample.altitudeM?.takeIf { it.isFinite() } ?: JSONObject.NULL)
+                    .put("speed_mps", sample.speedMps?.takeIf { it.isFinite() } ?: JSONObject.NULL)
+                    .put("bearing_deg", sample.bearingDeg?.takeIf { it.isFinite() } ?: JSONObject.NULL)
+                    .put(
+                        "horizontal_accuracy_m",
+                        sample.horizontalAccuracyM?.takeIf { it.isFinite() } ?: JSONObject.NULL
+                    )
             )
         }
         val imuArray = JSONArray()
