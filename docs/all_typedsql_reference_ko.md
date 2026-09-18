@@ -15,6 +15,8 @@ prisma/sql/
 ├── insertVehiclePosition.sql
 ├── getLatestVehiclePosition.sql
 ├── getTripPositionTrack.sql
+├── insertDeviceGpsPosition.sql            (v18 추가, 25절)
+├── getLatestReceivedVehiclePosition.sql   (v18 추가, 25절)
 ├── saveRouteFromGeoJson.sql
 ├── getCurrentRouteDeviation.sql
 ├── insertRouteDeviationIfExceeded.sql
@@ -979,3 +981,37 @@ Route LineString storage
 Point-to-route distance
 Spatial history/replay/search
 ```
+
+---
+
+# 25. v18 추가: Android/디바이스 GPS (`vehicle_position` v18)
+
+스키마 변경은 `docs/v18_its_integrated_erd.md`와 마이그레이션
+`20260918000000_vehicle_position_device_telemetry`를 참조한다.
+`vehicle_position`에 `recording_session_id`, `source_timestamp_ns`, `altitude_m`,
+`horizontal_accuracy_m`, `received_at`이 추가되었다.
+
+## `insertDeviceGpsPosition.sql`
+
+- 목적: 미디어 릴레이가 `POST /internal/telemetry/gps`로 전달한 **원본 GPS fix 1개 = 1행** 저장.
+  보간/예측된 지도 표시 좌표는 절대 저장하지 않는다.
+- `speed_kmh = speed_mps * 3.6`, `heading_deg = GPS bearing_deg` (IMU yaw 아님).
+- `recorded_at` = 원본 GPS UTC(`utc_epoch_ms`, 없으면 `received_at`),
+  `received_at` = 서버 수신 시각. REPLAY 모드에서는 두 값이 의도적으로 다르다.
+- `telemetry_source`: `REPLAY → RECORDED_GPS`, `LIVE → DEVICE_GPS`.
+- `ON CONFLICT (recording_session_id, source_timestamp_ns) DO NOTHING` 으로
+  릴레이 재시도/WebRTC 재연결 중복을 멱등 처리한다.
+- 구현은 다중 행 버전(`telemetry.persistence.ts`)을 `$queryRaw`로 실행한다.
+
+## `getLatestReceivedVehiclePosition.sql`
+
+- 목적: "서버가 **가장 최근에 수신한** 위치". `ORDER BY received_at DESC`.
+- `getLatestVehiclePosition.sql`(`recorded_at DESC`)은 원본 시간 기준 의미를 유지한다.
+  REPLAY fix는 과거 날짜의 `recorded_at`을 가지므로 "현재 위치" 판단에 사용하면 안 된다.
+
+## 기존 파일 변경
+
+- `getTripPositionTrack.sql`: 원본 시간 순서는 그대로 두고 `received_at`,
+  `telemetry_source`, `recording_session_id`, `source_timestamp_ns`,
+  `horizontal_accuracy_m` 컬럼을 함께 반환한다.
+- `getLatestVehiclePosition.sql`: 의미(원본 시간 기준)는 변경 없음, 주석만 보강.

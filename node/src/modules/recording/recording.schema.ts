@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-const positiveIntegerString = z.string().regex(/^[1-9][0-9]{0,18}$/);
+export const positiveIntegerString = z.string().regex(/^[1-9][0-9]{0,18}$/);
 const signedIntegerString = z.string().regex(/^-?[0-9]{1,19}$/);
-const recordingSessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/).refine(value => !value.includes(".."));
+export const recordingSessionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/).refine(value => !value.includes(".."));
 
 export const recordingContextSchema = z.object({
     tripId: positiveIntegerString,

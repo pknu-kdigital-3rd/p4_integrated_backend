@@ -1,5 +1,5 @@
 
-> Historical v15 plan. The current integrated schema and architecture are documented in `v17_its_integrated_erd.md` and the repository root `README.md`.
+> Historical v15 plan. The current integrated schema and architecture are documented in `v18_its_integrated_erd.md` and the repository root `README.md`.
 
 # Node / Express Control & Business Backend
 ## Detailed Implementation Plan — v15 Architecture Baseline

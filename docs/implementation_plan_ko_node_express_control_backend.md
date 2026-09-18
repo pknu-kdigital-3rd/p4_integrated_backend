@@ -1,4 +1,4 @@
-> 이전 v15 계획 문서입니다. 현재 통합 스키마와 구조는 `v17_its_integrated_erd.md` 및 루트 `README.md`를 참조하십시오.
+> 이전 v15 계획 문서입니다. 현재 통합 스키마와 구조는 `v18_its_integrated_erd.md` 및 루트 `README.md`를 참조하십시오.
 
 # Node / Express Control & Business Backend
 ## 상세 구현 계획 — v15 아키텍처 기준

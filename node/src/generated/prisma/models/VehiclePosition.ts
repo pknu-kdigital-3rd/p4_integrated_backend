@@ -32,6 +32,9 @@ export type VehiclePositionAvgAggregateOutputType = {
   tripId: number | null
   speedKmh: runtime.Decimal | null
   headingDeg: runtime.Decimal | null
+  sourceTimestampNs: number | null
+  altitudeM: runtime.Decimal | null
+  horizontalAccuracyM: runtime.Decimal | null
 }
 
 export type VehiclePositionSumAggregateOutputType = {
@@ -40,6 +43,9 @@ export type VehiclePositionSumAggregateOutputType = {
   tripId: bigint | null
   speedKmh: runtime.Decimal | null
   headingDeg: runtime.Decimal | null
+  sourceTimestampNs: bigint | null
+  altitudeM: runtime.Decimal | null
+  horizontalAccuracyM: runtime.Decimal | null
 }
 
 export type VehiclePositionMinAggregateOutputType = {
@@ -50,6 +56,11 @@ export type VehiclePositionMinAggregateOutputType = {
   headingDeg: runtime.Decimal | null
   recordedAt: Date | null
   telemetrySource: string | null
+  recordingSessionId: string | null
+  sourceTimestampNs: bigint | null
+  altitudeM: runtime.Decimal | null
+  horizontalAccuracyM: runtime.Decimal | null
+  receivedAt: Date | null
 }
 
 export type VehiclePositionMaxAggregateOutputType = {
@@ -60,6 +71,11 @@ export type VehiclePositionMaxAggregateOutputType = {
   headingDeg: runtime.Decimal | null
   recordedAt: Date | null
   telemetrySource: string | null
+  recordingSessionId: string | null
+  sourceTimestampNs: bigint | null
+  altitudeM: runtime.Decimal | null
+  horizontalAccuracyM: runtime.Decimal | null
+  receivedAt: Date | null
 }
 
 export type VehiclePositionCountAggregateOutputType = {
@@ -70,6 +86,11 @@ export type VehiclePositionCountAggregateOutputType = {
   headingDeg: number
   recordedAt: number
   telemetrySource: number
+  recordingSessionId: number
+  sourceTimestampNs: number
+  altitudeM: number
+  horizontalAccuracyM: number
+  receivedAt: number
   _all: number
 }
 
@@ -80,6 +101,9 @@ export type VehiclePositionAvgAggregateInputType = {
   tripId?: true
   speedKmh?: true
   headingDeg?: true
+  sourceTimestampNs?: true
+  altitudeM?: true
+  horizontalAccuracyM?: true
 }
 
 export type VehiclePositionSumAggregateInputType = {
@@ -88,6 +112,9 @@ export type VehiclePositionSumAggregateInputType = {
   tripId?: true
   speedKmh?: true
   headingDeg?: true
+  sourceTimestampNs?: true
+  altitudeM?: true
+  horizontalAccuracyM?: true
 }
 
 export type VehiclePositionMinAggregateInputType = {
@@ -98,6 +125,11 @@ export type VehiclePositionMinAggregateInputType = {
   headingDeg?: true
   recordedAt?: true
   telemetrySource?: true
+  recordingSessionId?: true
+  sourceTimestampNs?: true
+  altitudeM?: true
+  horizontalAccuracyM?: true
+  receivedAt?: true
 }
 
 export type VehiclePositionMaxAggregateInputType = {
@@ -108,6 +140,11 @@ export type VehiclePositionMaxAggregateInputType = {
   headingDeg?: true
   recordedAt?: true
   telemetrySource?: true
+  recordingSessionId?: true
+  sourceTimestampNs?: true
+  altitudeM?: true
+  horizontalAccuracyM?: true
+  receivedAt?: true
 }
 
 export type VehiclePositionCountAggregateInputType = {
@@ -118,6 +155,11 @@ export type VehiclePositionCountAggregateInputType = {
   headingDeg?: true
   recordedAt?: true
   telemetrySource?: true
+  recordingSessionId?: true
+  sourceTimestampNs?: true
+  altitudeM?: true
+  horizontalAccuracyM?: true
+  receivedAt?: true
   _all?: true
 }
 
@@ -215,6 +257,11 @@ export type VehiclePositionGroupByOutputType = {
   headingDeg: runtime.Decimal | null
   recordedAt: Date
   telemetrySource: string
+  recordingSessionId: string | null
+  sourceTimestampNs: bigint | null
+  altitudeM: runtime.Decimal | null
+  horizontalAccuracyM: runtime.Decimal | null
+  receivedAt: Date
   _count: VehiclePositionCountAggregateOutputType | null
   _avg: VehiclePositionAvgAggregateOutputType | null
   _sum: VehiclePositionSumAggregateOutputType | null
@@ -248,6 +295,11 @@ export type VehiclePositionWhereInput = {
   headingDeg?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFilter<"VehiclePosition"> | Date | string
   telemetrySource?: Prisma.StringFilter<"VehiclePosition"> | string
+  recordingSessionId?: Prisma.StringNullableFilter<"VehiclePosition"> | string | null
+  sourceTimestampNs?: Prisma.BigIntNullableFilter<"VehiclePosition"> | bigint | number | null
+  altitudeM?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFilter<"VehiclePosition"> | Date | string
   vehicle?: Prisma.XOR<Prisma.VehicleScalarRelationFilter, Prisma.VehicleWhereInput>
   trip?: Prisma.XOR<Prisma.TripNullableScalarRelationFilter, Prisma.TripWhereInput> | null
 }
@@ -260,12 +312,18 @@ export type VehiclePositionOrderByWithRelationInput = {
   headingDeg?: Prisma.SortOrderInput | Prisma.SortOrder
   recordedAt?: Prisma.SortOrder
   telemetrySource?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrderInput | Prisma.SortOrder
+  sourceTimestampNs?: Prisma.SortOrderInput | Prisma.SortOrder
+  altitudeM?: Prisma.SortOrderInput | Prisma.SortOrder
+  horizontalAccuracyM?: Prisma.SortOrderInput | Prisma.SortOrder
+  receivedAt?: Prisma.SortOrder
   vehicle?: Prisma.VehicleOrderByWithRelationInput
   trip?: Prisma.TripOrderByWithRelationInput
 }
 
 export type VehiclePositionWhereUniqueInput = Prisma.AtLeast<{
   positionId?: bigint | number
+  recordingSessionId_sourceTimestampNs?: Prisma.VehiclePositionRecordingSessionIdSourceTimestampNsCompoundUniqueInput
   AND?: Prisma.VehiclePositionWhereInput | Prisma.VehiclePositionWhereInput[]
   OR?: Prisma.VehiclePositionWhereInput[]
   NOT?: Prisma.VehiclePositionWhereInput | Prisma.VehiclePositionWhereInput[]
@@ -275,9 +333,14 @@ export type VehiclePositionWhereUniqueInput = Prisma.AtLeast<{
   headingDeg?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFilter<"VehiclePosition"> | Date | string
   telemetrySource?: Prisma.StringFilter<"VehiclePosition"> | string
+  recordingSessionId?: Prisma.StringNullableFilter<"VehiclePosition"> | string | null
+  sourceTimestampNs?: Prisma.BigIntNullableFilter<"VehiclePosition"> | bigint | number | null
+  altitudeM?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFilter<"VehiclePosition"> | Date | string
   vehicle?: Prisma.XOR<Prisma.VehicleScalarRelationFilter, Prisma.VehicleWhereInput>
   trip?: Prisma.XOR<Prisma.TripNullableScalarRelationFilter, Prisma.TripWhereInput> | null
-}, "positionId">
+}, "positionId" | "recordingSessionId_sourceTimestampNs">
 
 export type VehiclePositionOrderByWithAggregationInput = {
   positionId?: Prisma.SortOrder
@@ -287,6 +350,11 @@ export type VehiclePositionOrderByWithAggregationInput = {
   headingDeg?: Prisma.SortOrderInput | Prisma.SortOrder
   recordedAt?: Prisma.SortOrder
   telemetrySource?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrderInput | Prisma.SortOrder
+  sourceTimestampNs?: Prisma.SortOrderInput | Prisma.SortOrder
+  altitudeM?: Prisma.SortOrderInput | Prisma.SortOrder
+  horizontalAccuracyM?: Prisma.SortOrderInput | Prisma.SortOrder
+  receivedAt?: Prisma.SortOrder
   _count?: Prisma.VehiclePositionCountOrderByAggregateInput
   _avg?: Prisma.VehiclePositionAvgOrderByAggregateInput
   _max?: Prisma.VehiclePositionMaxOrderByAggregateInput
@@ -305,6 +373,11 @@ export type VehiclePositionScalarWhereWithAggregatesInput = {
   headingDeg?: Prisma.DecimalNullableWithAggregatesFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeWithAggregatesFilter<"VehiclePosition"> | Date | string
   telemetrySource?: Prisma.StringWithAggregatesFilter<"VehiclePosition"> | string
+  recordingSessionId?: Prisma.StringNullableWithAggregatesFilter<"VehiclePosition"> | string | null
+  sourceTimestampNs?: Prisma.BigIntNullableWithAggregatesFilter<"VehiclePosition"> | bigint | number | null
+  altitudeM?: Prisma.DecimalNullableWithAggregatesFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.DecimalNullableWithAggregatesFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeWithAggregatesFilter<"VehiclePosition"> | Date | string
 }
 
 export type VehiclePositionUpdateInput = {
@@ -313,6 +386,11 @@ export type VehiclePositionUpdateInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   vehicle?: Prisma.VehicleUpdateOneRequiredWithoutPositionsNestedInput
   trip?: Prisma.TripUpdateOneWithoutPositionsNestedInput
 }
@@ -325,6 +403,11 @@ export type VehiclePositionUncheckedUpdateInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type VehiclePositionUpdateManyMutationInput = {
@@ -333,6 +416,11 @@ export type VehiclePositionUpdateManyMutationInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type VehiclePositionUncheckedUpdateManyInput = {
@@ -343,6 +431,11 @@ export type VehiclePositionUncheckedUpdateManyInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type VehiclePositionListRelationFilter = {
@@ -355,6 +448,11 @@ export type VehiclePositionOrderByRelationAggregateInput = {
   _count?: Prisma.SortOrder
 }
 
+export type VehiclePositionRecordingSessionIdSourceTimestampNsCompoundUniqueInput = {
+  recordingSessionId: string
+  sourceTimestampNs: bigint | number
+}
+
 export type VehiclePositionCountOrderByAggregateInput = {
   positionId?: Prisma.SortOrder
   vehicleId?: Prisma.SortOrder
@@ -363,6 +461,11 @@ export type VehiclePositionCountOrderByAggregateInput = {
   headingDeg?: Prisma.SortOrder
   recordedAt?: Prisma.SortOrder
   telemetrySource?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  sourceTimestampNs?: Prisma.SortOrder
+  altitudeM?: Prisma.SortOrder
+  horizontalAccuracyM?: Prisma.SortOrder
+  receivedAt?: Prisma.SortOrder
 }
 
 export type VehiclePositionAvgOrderByAggregateInput = {
@@ -371,6 +474,9 @@ export type VehiclePositionAvgOrderByAggregateInput = {
   tripId?: Prisma.SortOrder
   speedKmh?: Prisma.SortOrder
   headingDeg?: Prisma.SortOrder
+  sourceTimestampNs?: Prisma.SortOrder
+  altitudeM?: Prisma.SortOrder
+  horizontalAccuracyM?: Prisma.SortOrder
 }
 
 export type VehiclePositionMaxOrderByAggregateInput = {
@@ -381,6 +487,11 @@ export type VehiclePositionMaxOrderByAggregateInput = {
   headingDeg?: Prisma.SortOrder
   recordedAt?: Prisma.SortOrder
   telemetrySource?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  sourceTimestampNs?: Prisma.SortOrder
+  altitudeM?: Prisma.SortOrder
+  horizontalAccuracyM?: Prisma.SortOrder
+  receivedAt?: Prisma.SortOrder
 }
 
 export type VehiclePositionMinOrderByAggregateInput = {
@@ -391,6 +502,11 @@ export type VehiclePositionMinOrderByAggregateInput = {
   headingDeg?: Prisma.SortOrder
   recordedAt?: Prisma.SortOrder
   telemetrySource?: Prisma.SortOrder
+  recordingSessionId?: Prisma.SortOrder
+  sourceTimestampNs?: Prisma.SortOrder
+  altitudeM?: Prisma.SortOrder
+  horizontalAccuracyM?: Prisma.SortOrder
+  receivedAt?: Prisma.SortOrder
 }
 
 export type VehiclePositionSumOrderByAggregateInput = {
@@ -399,6 +515,9 @@ export type VehiclePositionSumOrderByAggregateInput = {
   tripId?: Prisma.SortOrder
   speedKmh?: Prisma.SortOrder
   headingDeg?: Prisma.SortOrder
+  sourceTimestampNs?: Prisma.SortOrder
+  altitudeM?: Prisma.SortOrder
+  horizontalAccuracyM?: Prisma.SortOrder
 }
 
 export type VehiclePositionCreateNestedManyWithoutVehicleInput = {
@@ -470,6 +589,11 @@ export type VehiclePositionScalarWhereInput = {
   headingDeg?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFilter<"VehiclePosition"> | Date | string
   telemetrySource?: Prisma.StringFilter<"VehiclePosition"> | string
+  recordingSessionId?: Prisma.StringNullableFilter<"VehiclePosition"> | string | null
+  sourceTimestampNs?: Prisma.BigIntNullableFilter<"VehiclePosition"> | bigint | number | null
+  altitudeM?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.DecimalNullableFilter<"VehiclePosition"> | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFilter<"VehiclePosition"> | Date | string
 }
 
 export type VehiclePositionUpdateWithWhereUniqueWithoutTripInput = {
@@ -488,6 +612,11 @@ export type VehiclePositionUpdateWithoutVehicleInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   trip?: Prisma.TripUpdateOneWithoutPositionsNestedInput
 }
 
@@ -498,6 +627,11 @@ export type VehiclePositionUncheckedUpdateWithoutVehicleInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type VehiclePositionUncheckedUpdateManyWithoutVehicleInput = {
@@ -507,6 +641,11 @@ export type VehiclePositionUncheckedUpdateManyWithoutVehicleInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type VehiclePositionUpdateWithoutTripInput = {
@@ -515,6 +654,11 @@ export type VehiclePositionUpdateWithoutTripInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   vehicle?: Prisma.VehicleUpdateOneRequiredWithoutPositionsNestedInput
 }
 
@@ -525,6 +669,11 @@ export type VehiclePositionUncheckedUpdateWithoutTripInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 export type VehiclePositionUncheckedUpdateManyWithoutTripInput = {
@@ -534,6 +683,11 @@ export type VehiclePositionUncheckedUpdateManyWithoutTripInput = {
   headingDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
   recordedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   telemetrySource?: Prisma.StringFieldUpdateOperationsInput | string
+  recordingSessionId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  sourceTimestampNs?: Prisma.NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+  altitudeM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  horizontalAccuracyM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  receivedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
 }
 
 
@@ -546,6 +700,11 @@ export type VehiclePositionSelect<ExtArgs extends runtime.Types.Extensions.Inter
   headingDeg?: boolean
   recordedAt?: boolean
   telemetrySource?: boolean
+  recordingSessionId?: boolean
+  sourceTimestampNs?: boolean
+  altitudeM?: boolean
+  horizontalAccuracyM?: boolean
+  receivedAt?: boolean
   vehicle?: boolean | Prisma.VehicleDefaultArgs<ExtArgs>
   trip?: boolean | Prisma.VehiclePosition$tripArgs<ExtArgs>
 }, ExtArgs["result"]["vehiclePosition"]>
@@ -559,6 +718,11 @@ export type VehiclePositionSelectUpdateManyAndReturn<ExtArgs extends runtime.Typ
   headingDeg?: boolean
   recordedAt?: boolean
   telemetrySource?: boolean
+  recordingSessionId?: boolean
+  sourceTimestampNs?: boolean
+  altitudeM?: boolean
+  horizontalAccuracyM?: boolean
+  receivedAt?: boolean
   vehicle?: boolean | Prisma.VehicleDefaultArgs<ExtArgs>
   trip?: boolean | Prisma.VehiclePosition$tripArgs<ExtArgs>
 }, ExtArgs["result"]["vehiclePosition"]>
@@ -571,9 +735,14 @@ export type VehiclePositionSelectScalar = {
   headingDeg?: boolean
   recordedAt?: boolean
   telemetrySource?: boolean
+  recordingSessionId?: boolean
+  sourceTimestampNs?: boolean
+  altitudeM?: boolean
+  horizontalAccuracyM?: boolean
+  receivedAt?: boolean
 }
 
-export type VehiclePositionOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"positionId" | "vehicleId" | "tripId" | "speedKmh" | "headingDeg" | "recordedAt" | "telemetrySource", ExtArgs["result"]["vehiclePosition"]>
+export type VehiclePositionOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = runtime.Types.Extensions.GetOmit<"positionId" | "vehicleId" | "tripId" | "speedKmh" | "headingDeg" | "recordedAt" | "telemetrySource" | "recordingSessionId" | "sourceTimestampNs" | "altitudeM" | "horizontalAccuracyM" | "receivedAt", ExtArgs["result"]["vehiclePosition"]>
 export type VehiclePositionInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   vehicle?: boolean | Prisma.VehicleDefaultArgs<ExtArgs>
   trip?: boolean | Prisma.VehiclePosition$tripArgs<ExtArgs>
@@ -597,6 +766,11 @@ export type $VehiclePositionPayload<ExtArgs extends runtime.Types.Extensions.Int
     headingDeg: runtime.Decimal | null
     recordedAt: Date
     telemetrySource: string
+    recordingSessionId: string | null
+    sourceTimestampNs: bigint | null
+    altitudeM: runtime.Decimal | null
+    horizontalAccuracyM: runtime.Decimal | null
+    receivedAt: Date
   }, ExtArgs["result"]["vehiclePosition"]>
   composites: {}
 }
@@ -958,6 +1132,11 @@ export interface VehiclePositionFieldRefs {
   readonly headingDeg: Prisma.FieldRef<"VehiclePosition", 'Decimal'>
   readonly recordedAt: Prisma.FieldRef<"VehiclePosition", 'DateTime'>
   readonly telemetrySource: Prisma.FieldRef<"VehiclePosition", 'String'>
+  readonly recordingSessionId: Prisma.FieldRef<"VehiclePosition", 'String'>
+  readonly sourceTimestampNs: Prisma.FieldRef<"VehiclePosition", 'BigInt'>
+  readonly altitudeM: Prisma.FieldRef<"VehiclePosition", 'Decimal'>
+  readonly horizontalAccuracyM: Prisma.FieldRef<"VehiclePosition", 'Decimal'>
+  readonly receivedAt: Prisma.FieldRef<"VehiclePosition", 'DateTime'>
 }
     
 

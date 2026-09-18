@@ -1607,7 +1607,12 @@ export const VehiclePositionScalarFieldEnum = {
   speedKmh: 'speedKmh',
   headingDeg: 'headingDeg',
   recordedAt: 'recordedAt',
-  telemetrySource: 'telemetrySource'
+  telemetrySource: 'telemetrySource',
+  recordingSessionId: 'recordingSessionId',
+  sourceTimestampNs: 'sourceTimestampNs',
+  altitudeM: 'altitudeM',
+  horizontalAccuracyM: 'horizontalAccuracyM',
+  receivedAt: 'receivedAt'
 } as const
 
 export type VehiclePositionScalarFieldEnum = (typeof VehiclePositionScalarFieldEnum)[keyof typeof VehiclePositionScalarFieldEnum]

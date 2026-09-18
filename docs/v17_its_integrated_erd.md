@@ -1,6 +1,8 @@
 # v17 ITS Integrated ERD
 
-Current schema: `node/prisma/schema.prisma` (13 tables). This document supersedes earlier ERDs for the integrated product while preserving them as historical records.
+> Historical. Superseded by `v18_its_integrated_erd.md` (Android/device GPS provenance on `vehicle_position`).
+
+Schema at v17: `node/prisma/schema.prisma` (13 tables). This document supersedes earlier ERDs for the integrated product while preserving them as historical records.
 
 ```mermaid
 erDiagram

@@ -1,4 +1,8 @@
 -- prisma/sql/getLatestVehiclePosition.sql
+-- Source-time semantics: the fix with the latest recorded_at (sensor UTC).
+-- v18: for "most recently received by the server" use
+-- getLatestReceivedVehiclePosition.sql; replay fixes carry historical
+-- recorded_at values.
 -- Prisma introspects this against the real `vehicle_position` table, so
 -- ST_Y/ST_X return `Float` in the generated TS type automatically —
 -- no hand-written return-type annotation needed (unlike $queryRaw<T>()).

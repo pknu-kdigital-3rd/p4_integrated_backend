@@ -50,13 +50,17 @@ const envSchema = z.object({
     MINIO_NODE_SECRET_KEY: z.string().optional(),
     MINIO_PUBLIC_ENDPOINT: z.url().optional(),
     RECORDING_PLAYBACK_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(604800).default(300),
+    // Enables POST /internal/telemetry/gps (Go relay -> authoritative GPS persistence).
+    ANDROID_TELEMETRY_ENABLED: envBoolean,
 }).superRefine((value, context) => {
-    if (value.RECORDING_ENABLED) {
+    if (value.RECORDING_ENABLED || value.ANDROID_TELEMETRY_ENABLED) {
         if (!value.NODE_INTERNAL_SERVICE_TOKEN || value.NODE_INTERNAL_SERVICE_TOKEN.length < 32) {
-            context.addIssue({ code: "custom", path: ["NODE_INTERNAL_SERVICE_TOKEN"], message: "a service token of at least 32 characters is required when recording is enabled" });
+            context.addIssue({ code: "custom", path: ["NODE_INTERNAL_SERVICE_TOKEN"], message: "a service token of at least 32 characters is required when recording or Android telemetry is enabled" });
         } else if (value.NODE_INTERNAL_SERVICE_TOKEN.startsWith("replace-")) {
-            context.addIssue({ code: "custom", path: ["NODE_INTERNAL_SERVICE_TOKEN"], message: "replace the example service token before enabling recording" });
+            context.addIssue({ code: "custom", path: ["NODE_INTERNAL_SERVICE_TOKEN"], message: "replace the example service token before enabling recording or Android telemetry" });
         }
+    }
+    if (value.RECORDING_ENABLED) {
         if (!value.MINIO_NODE_ACCESS_KEY || !value.MINIO_NODE_SECRET_KEY) {
             context.addIssue({ code: "custom", path: ["MINIO_NODE_ACCESS_KEY"], message: "Node MinIO credentials are required when recording is enabled" });
         } else if (value.MINIO_NODE_SECRET_KEY.length < 12 || value.MINIO_NODE_SECRET_KEY.startsWith("replace-")) {

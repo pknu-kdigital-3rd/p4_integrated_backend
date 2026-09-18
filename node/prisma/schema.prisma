@@ -1,6 +1,6 @@
 // ============================================================================
 // schema.prisma — Prisma ORM 7
-// 지능형 교통 시스템 통합 스키마 (v17, 13 tables)
+// 지능형 교통 시스템 통합 스키마 (v18, 13 tables)
 // ============================================================================
 // Prisma 7 notes baked into this file:
 //   - generator provider is "prisma-client" (the old "prisma-client-js" is
@@ -222,20 +222,33 @@ model Route {
     @@map("route")
 }
 
+// v18: recordedAt is the source/sensor UTC observation time (for REPLAY this is
+// the original recording's GPS UTC); receivedAt is when the server received the
+// fix. "Latest current position" must order by receivedAt, "where was the
+// vehicle in the source recording" by recordedAt/sourceTimestampNs.
 model VehiclePosition {
-    positionId BigInt                                @id @default(autoincrement()) @map("position_id")
-    vehicleId  BigInt                                @map("vehicle_id")
-    tripId     BigInt?                               @map("trip_id")
-    location   Unsupported("geography(Point, 4326)") // NOT NULL
-    speedKmh   Decimal?                              @map("speed_kmh") @db.Decimal(6, 2)
-    headingDeg Decimal?                              @map("heading_deg") @db.Decimal(6, 2)
-    recordedAt DateTime                              @map("recorded_at") @db.Timestamptz(6)
-    telemetrySource String                            @default("DEVICE_GPS") @map("telemetry_source") @db.VarChar(30) // CHECK: BIMS_LIVE|BIMS_REPLAY|DEVICE_GPS|RECORDED_GPS
+    positionId          BigInt                                @id @default(autoincrement()) @map("position_id")
+    vehicleId           BigInt                                @map("vehicle_id")
+    tripId              BigInt?                               @map("trip_id")
+    location            Unsupported("geography(Point, 4326)") // NOT NULL
+    speedKmh            Decimal?                              @map("speed_kmh") @db.Decimal(6, 2)
+    headingDeg          Decimal?                              @map("heading_deg") @db.Decimal(6, 2)
+    recordedAt          DateTime                              @map("recorded_at") @db.Timestamptz(6)
+    telemetrySource     String                                @default("DEVICE_GPS") @map("telemetry_source") @db.VarChar(30) // CHECK: BIMS_LIVE|BIMS_REPLAY|DEVICE_GPS|RECORDED_GPS
+    recordingSessionId  String?                               @map("recording_session_id") @db.VarChar(80) // v18
+    sourceTimestampNs   BigInt?                               @map("source_timestamp_ns") // v18: source recording timeline
+    altitudeM           Decimal?                              @map("altitude_m") @db.Decimal(10, 3) // v18
+    horizontalAccuracyM Decimal?                              @map("horizontal_accuracy_m") @db.Decimal(10, 3) // v18
+    receivedAt          DateTime                              @default(now()) @map("received_at") @db.Timestamptz(6) // v18
 
     vehicle Vehicle @relation(fields: [vehicleId], references: [vehicleId])
     trip    Trip?   @relation(fields: [tripId], references: [tripId])
 
+    // NULLs are distinct in PostgreSQL unique indexes, so BIMS rows (no
+    // session/source timestamp) never conflict; device GPS retries do.
+    @@unique([recordingSessionId, sourceTimestampNs], map: "uq_vehicle_position_session_source_ts")
     @@index([vehicleId, recordedAt], map: "idx_vehicle_position_vehicle_time")
+    @@index([vehicleId, receivedAt], map: "idx_vehicle_position_vehicle_received")
     @@index([location], type: Gist, map: "idx_vehicle_position_location")
     @@map("vehicle_position")
 }

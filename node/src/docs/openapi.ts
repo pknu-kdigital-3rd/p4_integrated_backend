@@ -11,6 +11,7 @@ import "../modules/bootstrap/bootstrap.openapi.ts";
 import "../modules/tracking/tracking.openapi.ts";
 import "../modules/trip/trip.openapi.ts";
 import "../modules/recording/recording.openapi.ts";
+import "../modules/telemetry/telemetry.openapi.ts";
 
 const generator = new OpenApiGeneratorV3(
     registry.definitions,

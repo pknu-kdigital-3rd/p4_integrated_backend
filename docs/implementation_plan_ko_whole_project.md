@@ -1,4 +1,4 @@
-> 이전 v15 계획 문서입니다. 현재 ITS 통합 내용은 `v17_its_integrated_erd.md` 및 루트 `README.md`를 참조하십시오.
+> 이전 v15 계획 문서입니다. 현재 ITS 통합 내용은 `v18_its_integrated_erd.md` 및 루트 `README.md`를 참조하십시오.
 
 # 차량 지능형 위험 감지 및 경로 관제 플랫폼
 ## 전체 프로젝트 구현 계획 — v15 아키텍처 기준
