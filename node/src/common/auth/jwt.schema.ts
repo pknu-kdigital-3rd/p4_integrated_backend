@@ -15,7 +15,7 @@ export const accessTokenPayloadSchema = z.object({
         z.array(z.string()),
     ]),
     iat: z.number(),
-    exp: z.number(),
+    exp: z.number().optional(),
 });
 
 export type AccessTokenPayload =

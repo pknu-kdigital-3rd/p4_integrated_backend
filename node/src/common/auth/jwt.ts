@@ -44,7 +44,7 @@ export interface SignAccessTokenInput {
 export async function signAccessToken(
     input: SignAccessTokenInput,
 ): Promise<string> {
-    return new SignJWT({
+    const token = new SignJWT({
         role: input.role,
     })
         .setProtectedHeader({
@@ -55,9 +55,13 @@ export async function signAccessToken(
         .setIssuer(env.JWT_ISSUER)
         .setAudience(env.JWT_AUDIENCE)
         .setSubject(input.userId)
-        .setIssuedAt()
-        .setExpirationTime(env.JWT_ACCESS_TOKEN_TTL)
-        .sign(privateKey);
+        .setIssuedAt();
+
+    if (env.JWT_ACCESS_TOKEN_TTL.toLowerCase() !== "never") {
+        token.setExpirationTime(env.JWT_ACCESS_TOKEN_TTL);
+    }
+
+    return token.sign(privateKey);
 }
 
 export async function verifyAccessToken(
