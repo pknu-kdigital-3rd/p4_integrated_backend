@@ -28,6 +28,7 @@ const (
 	maxPendingQREvents = 1024
 	defaultAssemblyCap = 64 * 1024
 	maxReusableAUCap   = 512 * 1024
+	qrPairingWait      = 150 * time.Millisecond
 )
 
 // AccessUnit is the authoritative compressed frame retained by the relay.
@@ -67,35 +68,63 @@ type QREvent struct {
 	receivedAt         time.Time
 }
 
+// QRStatus reports whether publisher QR events are reaching the relay and
+// whether they are being attached to the corresponding video access units.
+type QRStatus struct {
+	ChannelObserved                      bool   `json:"channel_observed"`
+	EventsReceivedTotal                  uint64 `json:"events_received_total"`
+	DecodeSuccessTotal                   uint64 `json:"decode_success_total"`
+	PairedTotal                          uint64 `json:"paired_total"`
+	PairedDecodeSuccessTotal             uint64 `json:"paired_decode_success_total"`
+	PairedExactTimestampTotal            uint64 `json:"paired_exact_timestamp_total"`
+	PairedArrivalTimeTotal               uint64 `json:"paired_arrival_time_total"`
+	FramesSentTotal                      uint64 `json:"frames_sent_total"`
+	FramesSentWithQREventTotal           uint64 `json:"frames_sent_with_qr_event_total"`
+	FramesSentWithSuccessfulQREventTotal uint64 `json:"frames_sent_with_successful_qr_total"`
+	PendingEvents                        int    `json:"pending_events"`
+	LastEventAgeMS                       int64  `json:"last_event_age_ms"`
+	OldestPendingEventAgeMS              int64  `json:"oldest_pending_event_age_ms"`
+}
+
 type Feed struct {
 	socketPath string
 	maxSeconds float64
 	maxBytes   int64
 
-	mu             sync.Mutex
-	cond           *sync.Cond
-	backlog        []*AccessUnit
-	backlogBytes   int64
-	epoch          uint64
-	nextSeq        uint64
-	seenIDR        bool
-	lastPacketSeq  uint16
-	havePacketSeq  bool
-	lastRTPTs      uint32
-	haveRTPTs      bool
-	assemblyRTPTs  uint32
-	haveAssemblyTs bool
-	rtpCycles      int64
-	assembly       []byte
-	assemblyKey    bool
-	assemblyParams bool
-	fuActive       bool
-	parameterSets  []byte
-	qrActive       bool
-	qrEvents       map[uint32]*QREvent
-	recording      *RecordingIdentity
-	sourceEnded    bool
-	endSent        bool
+	mu                    sync.Mutex
+	cond                  *sync.Cond
+	backlog               []*AccessUnit
+	backlogBytes          int64
+	epoch                 uint64
+	nextSeq               uint64
+	seenIDR               bool
+	lastPacketSeq         uint16
+	havePacketSeq         bool
+	lastRTPTs             uint32
+	haveRTPTs             bool
+	assemblyRTPTs         uint32
+	haveAssemblyTs        bool
+	rtpCycles             int64
+	assembly              []byte
+	assemblyKey           bool
+	assemblyParams        bool
+	fuActive              bool
+	parameterSets         []byte
+	qrActive              bool
+	qrEvents              map[uint32]*QREvent
+	qrEventsReceived      uint64
+	qrDecodeSuccess       uint64
+	qrPaired              uint64
+	qrPairedDecodeSuccess uint64
+	qrPairedExact         uint64
+	qrPairedArrival       uint64
+	framesSent            uint64
+	framesSentWithQR      uint64
+	framesSentWithQRValid uint64
+	lastQREventAt         time.Time
+	recording             *RecordingIdentity
+	sourceEnded           bool
+	endSent               bool
 
 	// OnClientConnect requests a fresh IDR when Python reconnects. OnResync is
 	// called after an explicit or automatic reset so the publisher can recover.
@@ -127,6 +156,40 @@ func (f *Feed) SetQRActive(active bool) {
 	f.mu.Lock()
 	f.qrActive = active
 	f.mu.Unlock()
+}
+
+func (f *Feed) QRStatus() QRStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now()
+	status := QRStatus{
+		ChannelObserved:                      f.qrActive,
+		EventsReceivedTotal:                  f.qrEventsReceived,
+		DecodeSuccessTotal:                   f.qrDecodeSuccess,
+		PairedTotal:                          f.qrPaired,
+		PairedDecodeSuccessTotal:             f.qrPairedDecodeSuccess,
+		PairedExactTimestampTotal:            f.qrPairedExact,
+		PairedArrivalTimeTotal:               f.qrPairedArrival,
+		FramesSentTotal:                      f.framesSent,
+		FramesSentWithQREventTotal:           f.framesSentWithQR,
+		FramesSentWithSuccessfulQREventTotal: f.framesSentWithQRValid,
+		PendingEvents:                        len(f.qrEvents),
+		LastEventAgeMS:                       -1,
+		OldestPendingEventAgeMS:              -1,
+	}
+	if !f.lastQREventAt.IsZero() {
+		status.LastEventAgeMS = now.Sub(f.lastQREventAt).Milliseconds()
+	}
+	for _, event := range f.qrEvents {
+		if event == nil || event.receivedAt.IsZero() {
+			continue
+		}
+		age := now.Sub(event.receivedAt).Milliseconds()
+		if status.OldestPendingEventAgeMS < 0 || age > status.OldestPendingEventAgeMS {
+			status.OldestPendingEventAgeMS = age
+		}
+	}
+	return status
 }
 
 // SetRecordingIdentity labels subsequent frames with the publisher identity.
@@ -164,10 +227,16 @@ func (f *Feed) PublishQREvent(event QREvent) {
 	if event.receivedAt.IsZero() {
 		event.receivedAt = time.Now()
 	}
+	f.qrEventsReceived++
+	if event.DecodeSuccess && event.SourceTimestampNS != nil {
+		f.qrDecodeSuccess++
+	}
+	f.lastQREventAt = event.receivedAt
 	copyEvent := event
 	for _, item := range f.backlog {
 		if item.RTPTimestamp == event.RTPTimestamp {
 			item.QR = &copyEvent
+			f.recordQREventPairLocked(copyEvent, true)
 			f.cond.Broadcast()
 			return
 		}
@@ -199,6 +268,7 @@ func (f *Feed) PublishQREvent(event QREvent) {
 	}
 	if nearest != nil && nearestDelta <= 250*time.Millisecond {
 		nearest.QR = &copyEvent
+		f.recordQREventPairLocked(copyEvent, false)
 		f.cond.Broadcast()
 		return
 	}
@@ -214,6 +284,18 @@ func (f *Feed) PublishQREvent(event QREvent) {
 	}
 	f.qrEvents[event.RTPTimestamp] = &copyEvent
 	f.cond.Broadcast()
+}
+
+func (f *Feed) recordQREventPairLocked(event QREvent, exactTimestamp bool) {
+	f.qrPaired++
+	if event.DecodeSuccess && event.SourceTimestampNS != nil {
+		f.qrPairedDecodeSuccess++
+	}
+	if exactTimestamp {
+		f.qrPairedExact++
+	} else {
+		f.qrPairedArrival++
+	}
 }
 
 // Publish converts one RTP packet into an access unit. It deliberately has no
@@ -376,6 +458,7 @@ func (f *Feed) finishAccessUnitLocked(rtpTS uint32) *AccessUnit {
 	}
 	if event, ok := f.qrEvents[rtpTS]; ok {
 		item.QR = event
+		f.recordQREventPairLocked(*event, true)
 		delete(f.qrEvents, rtpTS)
 	} else {
 		// The data channel can beat the first RTP packet by a few milliseconds.
@@ -399,6 +482,7 @@ func (f *Feed) finishAccessUnitLocked(rtpTS uint32) *AccessUnit {
 		}
 		if nearest != nil && nearestDelta <= 250*time.Millisecond {
 			item.QR = nearest
+			f.recordQREventPairLocked(*nearest, false)
 			delete(f.qrEvents, nearestKey)
 		}
 	}
@@ -586,6 +670,38 @@ func (f *Feed) find(epoch, seq uint64) *AccessUnit {
 	return nil
 }
 
+// findForSend gives the asynchronous Android QR scanner a short window to
+// attach metadata before this access unit is copied for Vision. The pairing
+// decision and copy happen under the same lock, so an event cannot slip
+// between a separate wait check and the metadata snapshot.
+func (f *Feed) findForSend(epoch, seq uint64, now time.Time) (*AccessUnit, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, item := range f.backlog {
+		if item.Epoch == epoch && item.Seq == seq {
+			if f.qrActive && item.QR == nil && now.Sub(item.receivedAt) < qrPairingWait {
+				return nil, true
+			}
+			copyItem := *item
+			return &copyItem, false
+		}
+	}
+	return nil, false
+}
+
+func (f *Feed) recordFrameSent(item *AccessUnit) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.framesSent++
+	if item.QR == nil {
+		return
+	}
+	f.framesSentWithQR++
+	if item.QR.DecodeSuccess && item.QR.SourceTimestampNS != nil {
+		f.framesSentWithQRValid++
+	}
+}
+
 func (f *Feed) sourceComplete(epoch, nextSeq uint64) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -767,13 +883,17 @@ func (f *Feed) serve(conn net.Conn) error {
 				}
 			}
 			for {
-				item := f.find(epoch, nextSeq)
+				item, waitForQR := f.findForSend(epoch, nextSeq, time.Now())
+				if waitForQR {
+					break
+				}
 				if item == nil {
 					break
 				}
 				if err := f.sendFrame(conn, item); err != nil {
 					return err
 				}
+				f.recordFrameSent(item)
 				nextSeq++
 			}
 			if f.sourceComplete(epoch, nextSeq) {

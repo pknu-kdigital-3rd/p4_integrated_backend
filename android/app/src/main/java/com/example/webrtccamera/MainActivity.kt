@@ -68,9 +68,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 private data class ResolutionOption(val label: String, val size: Size)
 private data class QrInput(val data: ByteArray, val width: Int, val height: Int)
+private class QrScanAttempt(val startedAtNs: Long)
 
 private val RESOLUTION_OPTIONS = listOf(
     ResolutionOption("720p (1280x720)", Size(1280, 720)),
@@ -88,6 +90,8 @@ private const val TARGET_CAPTURE_FPS = 30
 // preserve those updates while the one-in-flight guard prevents ML Kit tasks
 // from accumulating behind the camera analyzer.
 private const val QR_SCAN_EVERY_N_FRAMES = 2L
+private const val QR_SCAN_TIMEOUT_NS = 1_000_000_000L
+private const val QR_SCANNER_RESTART_FAILURE_THRESHOLD = 3
 private const val QR_MAX_WIDTH = 640
 private const val QR_MAX_HEIGHT = 360
 private const val QR_FAILURE_LOG_INTERVAL_NS = 1_000_000_000L
@@ -140,13 +144,11 @@ class MainActivity : AppCompatActivity() {
     private var qrScanningEnabled = true
     private var focusRangeDiopters: Float? = null
     private var focusFraction = 0f
-    private val qrScanner = BarcodeScanning.getClient(
-        BarcodeScannerOptions.Builder()
-            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
-            .build()
-    )
+    @Volatile
+    private var qrScanner = createQrScanner()
     private val qrCaptureIndex = AtomicLong(0)
-    private val qrScanInFlight = AtomicBoolean(false)
+    private val activeQrScanAttempt = AtomicReference<QrScanAttempt?>(null)
+    private val qrScannerResetRequested = AtomicBoolean(false)
     private var qrFrameCounter = 0L
     private val qrConsecutiveFailures = AtomicInteger(0)
     private var lastQrFailureLogNs = 0L
@@ -353,7 +355,8 @@ class MainActivity : AppCompatActivity() {
 
         streaming.set(true)
         qrCaptureIndex.set(0)
-        qrScanInFlight.set(false)
+        activeQrScanAttempt.set(null)
+        cameraExecutor.execute { if (streaming.get()) resetQrScanner() }
         qrFrameCounter = 0L
         qrConsecutiveFailures.set(0)
         lastQrFailureLogNs = 0L
@@ -597,19 +600,41 @@ class MainActivity : AppCompatActivity() {
         var handedOffToQrScan = false
         try {
             publisher?.push(image, timestamp)
-            if (qrScanningEnabled && tryStartQrScan()) {
+            val qrAttempt = if (qrScanningEnabled) tryStartQrScan() else null
+            if (qrAttempt != null) {
                 handedOffToQrScan = true
-                scanQrFrame(image, timestamp)
+                scanQrFrame(image, timestamp, qrAttempt)
             }
         } finally {
             if (!handedOffToQrScan) image.close()
         }
     }
 
-    private fun tryStartQrScan(): Boolean {
-        if (qrFrameCounter % QR_SCAN_EVERY_N_FRAMES != 0L) return false
-        if (!qrScanInFlight.compareAndSet(false, true)) return false
-        return true
+    private fun tryStartQrScan(): QrScanAttempt? {
+        val now = SystemClock.elapsedRealtimeNanos()
+        if (activeQrScanAttempt.get() == null && qrScannerResetRequested.compareAndSet(true, false)) {
+            resetQrScanner()
+            setQrStatus("QR: restarting scanner after repeated errors")
+        }
+        val activeAttempt = activeQrScanAttempt.get()
+        if (activeAttempt != null) {
+            if (now - activeAttempt.startedAtNs <= QR_SCAN_TIMEOUT_NS) return null
+            if (!activeQrScanAttempt.compareAndSet(activeAttempt, null)) return null
+
+            // ML Kit normally completes each task. If it stops calling back,
+            // invalidate that scanner and its reusable input buffer so late
+            // work cannot block or corrupt subsequent scans.
+            resetQrScanner()
+            reportQrFailure(
+                "ML Kit timeout",
+                IllegalStateException("scan did not complete within ${QR_SCAN_TIMEOUT_NS / 1_000_000}ms"),
+            )
+            setQrStatus("QR: scan timed out; restarting scanner")
+        }
+
+        if (qrFrameCounter % QR_SCAN_EVERY_N_FRAMES != 0L) return null
+        val attempt = QrScanAttempt(startedAtNs = now)
+        return if (activeQrScanAttempt.compareAndSet(null, attempt)) attempt else null
     }
 
     /** Measures frames delivered to CameraX before WebRTC encoding or server processing. */
@@ -625,14 +650,14 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread { if (streaming.get()) updateCaptureLabel() }
     }
 
-    private fun scanQrFrame(image: ImageProxy, timestamp: Long) {
+    private fun scanQrFrame(image: ImageProxy, timestamp: Long, attempt: QrScanAttempt) {
         val captureIndex = qrCaptureIndex.getAndIncrement()
         val start = System.nanoTime()
         val rotation = image.imageInfo.rotationDegrees
         val qrInput = try {
             createQrInput(image)
         } catch (error: Exception) {
-            qrScanInFlight.set(false)
+            activeQrScanAttempt.compareAndSet(attempt, null)
             image.close()
             reportQrFailure("image conversion", error)
             publisher?.sendQrEvent(
@@ -658,6 +683,7 @@ class MainActivity : AppCompatActivity() {
             )
             qrScanner.process(input)
                 .addOnSuccessListener { barcodes ->
+                    if (activeQrScanAttempt.get() !== attempt) return@addOnSuccessListener
                     val raw = barcodes.firstOrNull()?.rawValue
                     val decoded = raw?.toLongOrNull()
                     qrConsecutiveFailures.set(0)
@@ -680,6 +706,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 .addOnFailureListener { error ->
+                    if (activeQrScanAttempt.get() !== attempt) return@addOnFailureListener
                     reportQrFailure("ML Kit", error)
                     publisher?.sendQrEvent(
                         timestamp,
@@ -690,16 +717,38 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 .addOnCompleteListener {
-                    qrScanInFlight.set(false)
+                    activeQrScanAttempt.compareAndSet(attempt, null)
                 }
         } catch (error: Exception) {
-            qrScanInFlight.set(false)
+            activeQrScanAttempt.compareAndSet(attempt, null)
             reportQrFailure("ML Kit setup", error)
         }
     }
 
+    private fun createQrScanner() = BarcodeScanning.getClient(
+        BarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .build()
+    )
+
+    private fun resetQrScanner() {
+        activeQrScanAttempt.set(null)
+        qrScannerResetRequested.set(false)
+        qrConsecutiveFailures.set(0)
+        qrImageBuffer = ByteArray(0)
+        val oldScanner = qrScanner
+        qrScanner = createQrScanner()
+        oldScanner.close()
+    }
+
     private fun reportQrFailure(stage: String, error: Throwable) {
         val consecutiveFailures = qrConsecutiveFailures.incrementAndGet()
+        if ((stage == "ML Kit" || stage == "ML Kit setup") &&
+            consecutiveFailures >= QR_SCANNER_RESTART_FAILURE_THRESHOLD
+        ) {
+            qrScannerResetRequested.set(true)
+        }
+        setQrStatus("QR: $stage error; retrying")
         val now = SystemClock.elapsedRealtimeNanos()
         if (now - lastQrFailureLogNs < QR_FAILURE_LOG_INTERVAL_NS) return
         lastQrFailureLogNs = now

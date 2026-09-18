@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/pion/rtp"
 )
@@ -67,6 +68,94 @@ func TestPublishReturnsTheRetainedImmutableAccessUnit(t *testing.T) {
 	}
 	if !item.Keyframe || item.Seq != 0 || item.Epoch != feed.epoch {
 		t.Fatalf("unexpected access unit identity: %+v", item)
+	}
+}
+
+func TestQRStatusTracksReceiptAndExactPairing(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	feed.SetQRActive(true)
+	publishSingleNAL(feed, 1, 90000, []byte{0x65, 0x01})
+	sourceTimestamp := int64(123456789)
+	feed.PublishQREvent(QREvent{
+		RTPTimestamp:      90000,
+		SourceTimestampNS: &sourceTimestamp,
+		DecodeSuccess:     true,
+	})
+
+	status := feed.QRStatus()
+	if !status.ChannelObserved || status.EventsReceivedTotal != 1 || status.DecodeSuccessTotal != 1 {
+		t.Fatalf("unexpected QR receipt status: %+v", status)
+	}
+	if status.PairedTotal != 1 || status.PairedDecodeSuccessTotal != 1 || status.PairedExactTimestampTotal != 1 {
+		t.Fatalf("expected successful exact timestamp pairing: %+v", status)
+	}
+	if status.PendingEvents != 0 {
+		t.Fatalf("expected no pending QR events, got %+v", status)
+	}
+	feed.recordFrameSent(feed.find(1, 0))
+	status = feed.QRStatus()
+	if status.FramesSentTotal != 1 || status.FramesSentWithQREventTotal != 1 || status.FramesSentWithSuccessfulQREventTotal != 1 {
+		t.Fatalf("expected sent frame to include its successful QR event: %+v", status)
+	}
+}
+
+func TestQRStatusTracksPendingArrivalTimePairing(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	sourceTimestamp := int64(123456789)
+	feed.PublishQREvent(QREvent{
+		RTPTimestamp:      1,
+		SourceTimestampNS: &sourceTimestamp,
+		DecodeSuccess:     true,
+	})
+	if status := feed.QRStatus(); status.PendingEvents != 1 || status.PairedTotal != 0 {
+		t.Fatalf("expected QR event to wait for its video frame: %+v", status)
+	}
+
+	publishSingleNAL(feed, 1, 90000, []byte{0x65, 0x01})
+	status := feed.QRStatus()
+	if status.PendingEvents != 0 || status.PairedTotal != 1 || status.PairedArrivalTimeTotal != 1 {
+		t.Fatalf("expected pending QR event to pair by arrival time: %+v", status)
+	}
+}
+
+func TestFrameWaitsBrieflyForQRMetadataBeforeSending(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	feed.SetQRActive(true)
+	item := feed.Publish(&rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 1, Timestamp: 90000, Marker: true},
+		Payload: []byte{0x65, 0x01},
+	})
+	if item == nil {
+		t.Fatal("expected a retained video access unit")
+	}
+	if copyItem, wait := feed.findForSend(item.Epoch, item.Seq, time.Now()); !wait || copyItem != nil {
+		t.Fatal("an unpaired frame should wait briefly for its QR event")
+	}
+
+	sourceTimestamp := int64(123456789)
+	feed.PublishQREvent(QREvent{
+		RTPTimestamp:      item.RTPTimestamp,
+		SourceTimestampNS: &sourceTimestamp,
+		DecodeSuccess:     true,
+	})
+	copyItem, wait := feed.findForSend(item.Epoch, item.Seq, time.Now())
+	if wait || copyItem == nil || copyItem.QR == nil {
+		t.Fatal("a frame already paired with QR must not wait")
+	}
+}
+
+func TestFrameStopsWaitingAfterQRPairingWindow(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	feed.SetQRActive(true)
+	item := feed.Publish(&rtp.Packet{
+		Header:  rtp.Header{SequenceNumber: 1, Timestamp: 90000, Marker: true},
+		Payload: []byte{0x65, 0x01},
+	})
+	if item == nil {
+		t.Fatal("expected a retained video access unit")
+	}
+	if copyItem, wait := feed.findForSend(item.Epoch, item.Seq, item.receivedAt.Add(qrPairingWait)); wait || copyItem == nil {
+		t.Fatal("frame must be released after the bounded QR pairing window")
 	}
 }
 

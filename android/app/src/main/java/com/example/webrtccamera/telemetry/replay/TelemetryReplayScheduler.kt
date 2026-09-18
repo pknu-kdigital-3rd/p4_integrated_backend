@@ -42,6 +42,7 @@ class TelemetryReplayScheduler(
     private val pendingImu = ArrayList<ImuSample>()
     private var lastFlushElapsedMs = 0L
     @Volatile private var running = false
+    private var lastReportedQrClockState: SourceClockState? = null
     private var endOfDatasetLogged = false
 
     val gpsSentCount = AtomicLong(0)
@@ -59,6 +60,7 @@ class TelemetryReplayScheduler(
         postOrRun {
             if (running) return@postOrRun
             running = true
+            lastReportedQrClockState = null
             endOfDatasetLogged = false
             pendingGps.clear()
             pendingImu.clear()
@@ -105,6 +107,17 @@ class TelemetryReplayScheduler(
 
     private fun tick() {
         if (!running) return
+        val clockState = sourceClock.state()
+        if (clockState != lastReportedQrClockState) {
+            lastReportedQrClockState = clockState
+            onStatus(
+                when (clockState) {
+                    SourceClockState.WAITING_FOR_QR -> "Telemetry: waiting for QR timestamp"
+                    SourceClockState.RUNNING -> "Telemetry: QR clock synchronized"
+                    SourceClockState.STALE -> "Telemetry: QR clock stale; waiting for next QR"
+                }
+            )
+        }
         val sourceNow = sourceClock.currentSourceTimestampNs() ?: return
         advanceCursors(sourceNow, elapsedMillis())
     }

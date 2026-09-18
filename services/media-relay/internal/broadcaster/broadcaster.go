@@ -259,6 +259,14 @@ func (b *Broadcaster) RecordingStatus() recording.Status {
 	return b.recorder.Status()
 }
 
+// QRStatus reports publisher QR event receipt and pairing with video frames.
+func (b *Broadcaster) QRStatus() yolofeed.QRStatus {
+	if b.yolo == nil {
+		return yolofeed.QRStatus{LastEventAgeMS: -1, OldestPendingEventAgeMS: -1}
+	}
+	return b.yolo.QRStatus()
+}
+
 func (b *Broadcaster) Close() {
 	b.lifecycleMu.Lock()
 	b.mu.Lock()

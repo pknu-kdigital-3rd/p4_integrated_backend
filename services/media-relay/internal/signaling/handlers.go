@@ -83,7 +83,14 @@ func (h *Handler) telemetryStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "metrics": h.telemetry.Metrics()})
+	response := map[string]any{
+		"enabled": true,
+		"metrics": h.telemetry.Metrics(),
+	}
+	if h.broadcaster != nil {
+		response["qr_events"] = h.broadcaster.QRStatus()
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
