@@ -18,6 +18,24 @@ describe("live map follower", () => {
         expect(laterMap.setView).toHaveBeenCalledWith([35.1, 129.1], 16, { animate: false });
     });
 
+    it("reveals an existing Android marker again for a restarted stream session", () => {
+        const map = { getZoom: () => 12, setView: vi.fn(), panTo: vi.fn() };
+        const reveal = createAndroidMarkerRevealer({ map });
+        const item = (recordingSessionId: string) => ({
+            telemetry: {
+                external_id: "device:2",
+                telemetry_source: "RECORDED_GPS",
+                source_metadata: { recordingSessionId },
+            },
+        });
+
+        expect(reveal(item("stream-1"), [35.1, 129.1])).toBe(true);
+        expect(reveal(item("stream-1"), [35.2, 129.2])).toBe(false);
+        expect(reveal(item("stream-2"), [35.3, 129.3])).toBe(true);
+        expect(map.setView).toHaveBeenCalledTimes(2);
+        expect(map.setView).toHaveBeenLastCalledWith([35.3, 129.3], 15, { animate: false });
+    });
+
     it("creates a marker without a fleet poll and follows live positions", () => {
         let timestamp = 1000;
         const marker = { setLatLng: vi.fn(), setStyle: vi.fn() };

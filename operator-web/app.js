@@ -1,6 +1,6 @@
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
-import {createAndroidMarkerRevealer,createLiveMapFollower,FLEET_MARKER_STYLE,LIVE_MARKER_STYLE} from './live-map.js';
+import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
@@ -9,10 +9,10 @@ const error=document.querySelector('#error'),details=document.querySelector('#de
 const operatorLayout=document.querySelector('#operator-layout'),layoutSplitter=document.querySelector('#layout-splitter'),stackedLayout=window.matchMedia('(max-width: 1000px)');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
 function createMarkerEntry(item,position,{liveOnly=false}={}){
-  const marker=L.circleMarker(position,{radius:liveOnly?10:8,...(liveOnly?LIVE_MARKER_STYLE:FLEET_MARKER_STYLE)}).addTo(map);
+  const androidGps=isAndroidGpsItem(item),marker=L.circleMarker(position,{radius:liveOnly||androidGps?10:8,...(liveOnly?LIVE_MARKER_STYLE:fleetMarkerStyle(item))}).addTo(map);
   const entry={marker,item,liveOnly};
   marker.on('click',()=>selectVehicle(entry.item));
-  marker.bindTooltip(item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle');
+  marker.bindTooltip(androidGps?`Android GPS · ${item?.vehicleCode||item?.telemetry?.external_id||'vehicle'}`:item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle');
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
   return entry;
 }
@@ -118,10 +118,14 @@ function render(snapshot){
   for(const item of snapshot.vehicles){
     const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
     let entry=markers.get(key);
-    if(!entry){entry=createMarkerEntry(item,pos);revealAndroidMarker(item,pos)}
+    if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
-    if(liveView?.markerKey===key)entry.marker.setStyle(LIVE_MARKER_STYLE);
-    else entry.marker.setStyle(FLEET_MARKER_STYLE);
+    // A new Android stream reuses device:<vehicleId>; reveal it again when its
+    // recording session changes, even though the Leaflet marker already exists.
+    revealAndroidMarker(item,pos);
+    const liveSelected=liveView?.markerKey===key;
+    entry.marker.setStyle(liveSelected?LIVE_MARKER_STYLE:fleetMarkerStyle(item));
+    entry.marker.setRadius(liveSelected||isAndroidGpsItem(item)?10:8);
     // Live frames own the selected marker between successful fleet polls.
     if(!isLiveOverride(liveView,key,Date.now())){
       entry.marker.setLatLng(pos);
@@ -130,7 +134,7 @@ function render(snapshot){
     const session=t.source_metadata?.recordingSessionId;
     // A new stream session supersedes the old one; reject its late frames.
     if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
-    entry.marker.bindTooltip(item.vehicleCode||key);
+    entry.marker.bindTooltip(isAndroidGpsItem(item)?`Android GPS · ${item.vehicleCode||key}`:item.vehicleCode||key);
   }
 }
 async function refresh(){try{render(await api('/api/v1/tracking/vehicles'));error.textContent='';document.querySelector('#connection').textContent='Tracking connected'}catch(e){error.textContent=e.message;document.querySelector('#connection').textContent='Tracking unavailable'}}

@@ -12,14 +12,33 @@ export const FLEET_MARKER_STYLE = {
   fillOpacity: 0.9,
 };
 
-/** Centers the map on the first Android GPS marker so it is visible to select. */
+export const ANDROID_GPS_MARKER_STYLE = {
+  color: '#ffffff',
+  weight: 3,
+  fillColor: '#9b59ff',
+  fillOpacity: 1,
+};
+
+export function isAndroidGpsItem(item) {
+  return ['DEVICE_GPS', 'RECORDED_GPS'].includes(item?.telemetry?.telemetry_source);
+}
+
+export function fleetMarkerStyle(item) {
+  return isAndroidGpsItem(item) ? ANDROID_GPS_MARKER_STYLE : FLEET_MARKER_STYLE;
+}
+
+/** Centers the map on the first Android GPS marker for each recording session. */
 export function createAndroidMarkerRevealer({ map, minimumZoom = 15 }) {
-  let handled = false;
+  const revealedSessions = new Set();
   return (item, position) => {
-    const source = item?.telemetry?.telemetry_source;
-    if (handled || !['DEVICE_GPS', 'RECORDED_GPS'].includes(source)) return false;
+    if (!isAndroidGpsItem(item)) return false;
     if (!Array.isArray(position) || !position.every(Number.isFinite)) return false;
-    handled = true;
+    const telemetry = item.telemetry;
+    const markerKey = telemetry.external_id || 'android-device';
+    const sessionId = telemetry.source_metadata?.recordingSessionId || 'default-session';
+    const revealKey = `${markerKey}:${sessionId}`;
+    if (revealedSessions.has(revealKey)) return false;
+    revealedSessions.add(revealKey);
     map.setView(position, Math.max(map.getZoom(), minimumZoom), { animate: false });
     return true;
   };
@@ -104,7 +123,10 @@ export function createLiveMapFollower({
       liveOnly: Boolean(entry?.liveOnly),
       position: lastPosition,
     };
-    if (entry && !entry.liveOnly) entry.marker.setStyle?.(FLEET_MARKER_STYLE);
+    if (entry && !entry.liveOnly) {
+      entry.marker.setStyle?.(fleetMarkerStyle(entry.item));
+      entry.marker.setRadius?.(isAndroidGpsItem(entry.item) ? 10 : 8);
+    }
     liveView = null;
     following = false;
     centered = false;
