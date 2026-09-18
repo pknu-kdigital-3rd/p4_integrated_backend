@@ -156,6 +156,21 @@ async def metrics_worker(state: AppState) -> None:
                 f"{peak_reserved / 1024**2:.0f}MiB",
                 flush=True,
             )
+            telemetry = state.telemetry_store.counters
+            gps_buffer, imu_buffer = state.telemetry_store.buffer_sizes()
+            print(
+                "[telemetry] "
+                f"telemetry_batches_received={telemetry.batches_received} "
+                f"telemetry_batches_rejected={telemetry.batches_rejected} "
+                f"telemetry_gps_buffer_size={gps_buffer} "
+                f"telemetry_imu_buffer_size={imu_buffer} "
+                f"telemetry_match_ok={telemetry.match_ok} "
+                f"telemetry_gps_stale={telemetry.gps_stale} "
+                f"telemetry_imu_stale={telemetry.imu_stale} "
+                f"source_timeline_resets={state.source_timeline.resets} "
+                f"source_playback_rate={state.source_timeline.playback_rate:.2f}",
+                flush=True,
+            )
 
             if profile_enabled and now >= next_profile_at:
                 snapshot = tracemalloc.take_snapshot()

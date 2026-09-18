@@ -10,6 +10,9 @@ from av import VideoFrame
 from starlette.requests import HTTPConnection
 from ultralytics import YOLO
 
+from app.services.source_timeline import SourceTimelineResolver
+from app.services.telemetry import TelemetryStore
+
 
 @dataclass
 class InferenceFrame:
@@ -31,6 +34,11 @@ class InferenceFrame:
     qr_capture_timestamp_ns: int | None = None
     qr_decode_success: bool = False
     recording_identity: dict[str, str] | None = None
+    # Position on the source recording timeline (QR anchor + PTS
+    # extrapolation). Telemetry is matched on this, never on receive time.
+    resolved_source_timestamp_ns: int | None = None
+    source_timeline_status: str = "unavailable"
+    source_timeline_generation: int = 0
 
 
 @dataclass
@@ -135,6 +143,8 @@ class AppState:
     last_inference_result_epoch: int | None = None
     metrics: VisionMetrics = field(default_factory=VisionMetrics)
     recording_writer: Any | None = None
+    telemetry_store: TelemetryStore = field(default_factory=TelemetryStore)
+    source_timeline: SourceTimelineResolver = field(default_factory=SourceTimelineResolver)
 
     @property
     def completed_sequence_limit(self) -> int:

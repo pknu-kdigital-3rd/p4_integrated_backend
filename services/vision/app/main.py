@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import internal, pages, playback
+from app.api import internal, pages, playback, telemetry
 from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
 from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
@@ -127,4 +127,5 @@ app.add_middleware(
 
 app.include_router(playback.router)
 app.include_router(internal.router)
+app.include_router(telemetry.router)
 app.include_router(pages.router)

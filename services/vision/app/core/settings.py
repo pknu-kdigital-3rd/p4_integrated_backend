@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     YOLO_FEED_SOCKET: str = "/tmp/poc-relay-yolo.sock"
     RELAY_KEYFRAME_URL: str = "http://127.0.0.1:39012/internal/request-keyframe"
     RELAY_STATUS_URL: str = "http://127.0.0.1:39012/internal/status"
+    # Comma-separated operator origins allowed to receive presented-frame
+    # telemetry via postMessage when this page is embedded (e.g.
+    # "https://its.example.internal:39001"). Empty allows only a parent page on
+    # the same hostname as this Vision page.
+    LIVE_VIEW_PARENT_ORIGINS: str = ""
     CLIENT_PREFETCH_SECONDS: float = Field(default=2.0, ge=0.1, le=30.0)
     CLIENT_LOW_WATERMARK_SECONDS: float = Field(default=0.5, ge=0.05, le=10.0)
     CLIENT_BUFFER_MAX_BYTES: int = Field(default=64 * 1024 * 1024, ge=1)

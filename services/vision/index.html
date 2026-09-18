@@ -14,6 +14,15 @@
     #model-label { margin-top: 10px; color: #8fd3ff; font: 13px ui-monospace, monospace; }
     button { padding: 8px 14px; margin: 12px 6px 8px 0; cursor: pointer; }
     #status, #stats { color: #aaa; font-family: ui-monospace, monospace; white-space: pre-wrap; }
+    #telemetry { margin-top: 12px; padding: 10px 12px; background: #222; border-radius: 6px; font: 13px ui-monospace, monospace; }
+    #telemetry h3 { margin: 0 0 6px; font: 600 14px system-ui, sans-serif; }
+    #telemetry-state { margin-bottom: 6px; font-weight: 600; }
+    #telemetry-state[data-level="ok"] { color: #6c6; }
+    #telemetry-state[data-level="warn"] { color: #fc6; }
+    #telemetry-state[data-level="bad"] { color: #f66; }
+    #telemetry dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0; }
+    #telemetry dt { color: #999; }
+    #telemetry dd { margin: 0; }
   </style>
 </head>
 <body>
@@ -42,6 +51,11 @@
     <input id="ghostFrames" type="number" min="0" max="30" step="1" value="0" />
   </label>
   <div id="status">Stopped</div><div id="model-label">Segmentation model: --</div><div id="stats"></div>
+  <section id="telemetry" aria-live="polite">
+    <h3>Vehicle telemetry (presented frame)</h3>
+    <div id="telemetry-state" data-level="warn">Waiting for telemetry</div>
+    <dl id="telemetry-fields"></dl>
+  </section>
 </main>
 <script>
 (() => {
@@ -89,6 +103,75 @@
   const TRACK_CONFIRM_HITS = 2;
   const GHOST_OPACITY = 0.18;
   let targetSeconds = 2, lowWatermarkSeconds = 0.5, maxBufferBytes = 64 * 1024 * 1024;
+  const telemetryStateEl = document.getElementById('telemetry-state');
+  const telemetryFieldsEl = document.getElementById('telemetry-fields');
+  // Operator origins allowed to receive telemetry; injected by the server from
+  // LIVE_VIEW_PARENT_ORIGINS. Never post to an unverified parent with '*'.
+  const CONFIGURED_PARENT_ORIGINS = __LIVE_VIEW_PARENT_ORIGINS__;
+  const parentOrigin = resolveParentOrigin();
+  const TELEMETRY_STATES = {
+    ok: ['Synchronized', 'ok'],
+    gps_stale: ['GPS stale', 'warn'],
+    imu_stale: ['IMU stale', 'warn'],
+    stale: ['GPS and IMU stale', 'bad'],
+    waiting_for_telemetry: ['Waiting for telemetry', 'warn'],
+    session_mismatch: ['Session mismatch - telemetry ignored', 'bad'],
+    source_timestamp_unavailable: ['Source timestamp unavailable', 'warn'],
+    no_recording_identity: ['No recording identity on this stream', 'warn'],
+  };
+
+  function resolveParentOrigin() {
+    if (window.parent === window) return null;
+    let origin = null;
+    try {
+      if (location.ancestorOrigins && location.ancestorOrigins.length) origin = location.ancestorOrigins[0];
+      else if (document.referrer) origin = new URL(document.referrer).origin;
+    } catch (_) { origin = null; }
+    if (!origin || origin === 'null') return null;
+    if (CONFIGURED_PARENT_ORIGINS.length) return CONFIGURED_PARENT_ORIGINS.includes(origin) ? origin : null;
+    try { return new URL(origin).hostname === location.hostname ? origin : null; } catch (_) { return null; }
+  }
+  function fmt(value, digits, unit = '') {
+    return value === null || value === undefined || Number.isNaN(Number(value)) ? '—' : `${Number(value).toFixed(digits)}${unit}`;
+  }
+  function renderTelemetry(telemetry, source) {
+    telemetry = telemetry || {};
+    const [label, level] = TELEMETRY_STATES[telemetry.status] || [`Telemetry: ${telemetry.status || 'unknown'}`, 'warn'];
+    telemetryStateEl.textContent = label;
+    telemetryStateEl.dataset.level = level;
+    const recording = telemetry.recording || (source && source.recording) || {};
+    const gps = telemetry.gps, imu = telemetry.imu, match = telemetry.match || {};
+    const rows = [
+      ['Vehicle ID', recording.vehicleId || '—'],
+      ['Trip ID', recording.tripId || '—'],
+      ['Mode', telemetry.mode || '—'],
+      ['Position', gps ? `${fmt(gps.latitude, 7)}, ${fmt(gps.longitude, 7)}` : '—'],
+      ['Speed', gps ? fmt(gps.speed_kmh, 1, ' km/h') : '—'],
+      ['Bearing', gps ? fmt(gps.bearing_deg, 1, '°') : '—'],
+      ['GPS accuracy', gps ? `${fmt(gps.horizontal_accuracy_m, 1, ' m')} (${gps.accuracy_quality || 'unknown'})` : '—'],
+      ['Altitude', gps ? fmt(gps.altitude_m, 1, ' m') : '—'],
+      ['Pitch / Roll / Yaw', imu ? `${fmt(imu.pitch_deg, 1, '°')} / ${fmt(imu.roll_deg, 1, '°')} / ${fmt(imu.yaw_deg, 1, '°')}` : '—'],
+      ['Match', `gps=${match.gps || '—'} (${fmt(match.gps_age_ms, 0, ' ms')})  imu=${match.imu || '—'} (${fmt(match.imu_delta_ms, 1, ' ms')})`],
+      ['Source time', `${telemetry.source_timestamp_ns || (source && source.resolved_source_timestamp_ns) || '—'} [${telemetry.source_timeline_status || (source && source.source_timeline_status) || '—'}]`],
+    ];
+    telemetryFieldsEl.replaceChildren(...rows.flatMap(([term, value]) => {
+      const dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = term; dd.textContent = String(value);
+      return [dt, dd];
+    }));
+  }
+  function postPresentedTelemetry(pair) {
+    if (!parentOrigin) return;
+    const source = pair.source || {};
+    window.parent.postMessage({
+      type: 'live-vehicle-telemetry',
+      epoch: pair.epoch,
+      seq: pair.seq,
+      sourceTimestampNs: source.resolved_source_timestamp_ns || null,
+      recording: (pair.telemetry && pair.telemetry.recording) || source.recording || null,
+      telemetry: pair.telemetry || null,
+    }, parentOrigin);
+  }
 
   function setStatus(text, color = '#aaa') { statusEl.textContent = text; statusEl.style.color = color; }
   function resize(w, h) {
@@ -256,6 +339,9 @@
     sessionStorage.setItem('playback-epoch', String(pair.epoch));
     sessionStorage.setItem('playback-last-seq', String(pair.seq));
     send({ type: 'presented', epoch: pair.epoch, seq: pair.seq });
+    // The map follows the frame actually painted, not the newest received.
+    renderTelemetry(pair.telemetry, pair.source);
+    postPresentedTelemetry(pair);
     decoding = false;
     // Keep the session in the playing state even when the queue momentarily
     // empties. The pump is naturally idle until enqueue() supplies the next
@@ -438,7 +524,7 @@
     if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
     if (known.has(key) || meta.epoch !== epoch) return;
     known.add(key);
-    const pair = { epoch: meta.epoch, seq: meta.seq, timestamp_us: Number(meta.source.timestamp_us), keyframe: !!meta.encoded.keyframe, data, inference: meta.inference, frame: meta.frame };
+    const pair = { epoch: meta.epoch, seq: meta.seq, timestamp_us: Number(meta.source.timestamp_us), keyframe: !!meta.encoded.keyframe, data, inference: meta.inference, frame: meta.frame, source: meta.source, telemetry: meta.telemetry };
     queue.push(pair);
     queue.sort((a, b) => a.seq - b.seq);
     if (!decoder) configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height });

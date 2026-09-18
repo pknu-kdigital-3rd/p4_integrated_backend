@@ -15,15 +15,32 @@ router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
 
 
+def _frame_telemetry(state: AppState, source: dict) -> dict:
+    """GPS/IMU for this frame's source time, looked up only under the frame's
+    own validated recording session. Built here rather than by the inference
+    worker so skipped/passthrough frames get exactly the same treatment."""
+
+    resolved = source.get("resolved_source_timestamp_ns")
+    try:
+        source_timestamp_ns = None if resolved is None else int(resolved)
+    except (TypeError, ValueError):
+        source_timestamp_ns = None
+    telemetry = state.telemetry_store.match(source.get("recording"), source_timestamp_ns)
+    telemetry["source_timeline_status"] = source.get("source_timeline_status", "unavailable")
+    return telemetry
+
+
 def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     result = item.result
+    source = result.get("source", {})
     metadata = {
         "type": "frame",
         "session_id": state.session_id,
         "model_filename": Path(settings.YOLO_MODEL).name,
         "epoch": item.epoch,
         "seq": item.seq,
-        "source": result.get("source", {}),
+        "source": source,
+        "telemetry": _frame_telemetry(state, source),
         "encoded": {
             "codec": "avc1.42E01F",
             "keyframe": item.keyframe,

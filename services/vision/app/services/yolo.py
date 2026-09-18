@@ -69,6 +69,14 @@ def _source_metadata(inference_frame: InferenceFrame) -> dict[str, object]:
         "time_base": inference_frame.time_base,
         "time": inference_frame.media_time,
         "timestamp_us": inference_frame.timestamp_us,
+        # 64-bit nanoseconds are strings so they survive JavaScript numbers.
+        "resolved_source_timestamp_ns": (
+            None
+            if inference_frame.resolved_source_timestamp_ns is None
+            else str(inference_frame.resolved_source_timestamp_ns)
+        ),
+        "source_timeline_status": inference_frame.source_timeline_status,
+        "source_timeline_generation": inference_frame.source_timeline_generation,
     }
     if inference_frame.recording_identity is not None:
         metadata["recording"] = inference_frame.recording_identity
@@ -569,6 +577,11 @@ async def _queue_decoded_frame(
     state.queued_sequences.add(key)
     time_base = float(RTP_VIDEO_TIME_BASE)
     qr = metadata.get("qr") if isinstance(metadata.get("qr"), dict) else {}
+    qr_source_timestamp_ns = _optional_int(qr.get("source_timestamp_ns"))
+    qr_decode_success = bool(qr.get("decode_success", False))
+    # Resolved here, in decode order, for every frame - including frames the
+    # inference worker later skips - so telemetry never depends on YOLO.
+    source_time = state.source_timeline.resolve(pts, qr_source_timestamp_ns, qr_decode_success)
     await _enqueue_inference_frame(
         state,
         InferenceFrame(
@@ -581,9 +594,12 @@ async def _queue_decoded_frame(
             media_time=(pts * time_base if pts is not None else None),
             timestamp_us=timestamp_us,
             keyframe=bool(metadata.get("keyframe", False)),
-            qr_source_timestamp_ns=_optional_int(qr.get("source_timestamp_ns")),
+            qr_source_timestamp_ns=qr_source_timestamp_ns,
             qr_capture_timestamp_ns=_optional_int(qr.get("capture_timestamp_ns")),
-            qr_decode_success=bool(qr.get("decode_success", False)),
+            qr_decode_success=qr_decode_success,
+            resolved_source_timestamp_ns=source_time.source_timestamp_ns,
+            source_timeline_status=source_time.status,
+            source_timeline_generation=source_time.generation,
             recording_identity=(
                 {
                     "tripId": str(metadata["recording"]["trip_id"]),
@@ -625,6 +641,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             pending_by_pts.clear()
             if state.monocular_resolver is not None:
                 state.monocular_resolver.reset()
+            state.source_timeline.reset()
         elif kind == K_RESET:
             metadata = json.loads(body.tobytes() or b"{}")
             new_epoch = int(metadata.get("new_epoch", metadata.get("epoch", 0)))
@@ -644,6 +661,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             pending_by_pts.clear()
             if state.monocular_resolver is not None:
                 state.monocular_resolver.reset()
+            state.source_timeline.reset()
         elif kind == K_FRAME:
             if len(body) < FRAME_META_LENGTH.size:
                 raise ValueError("short FRAME record")
