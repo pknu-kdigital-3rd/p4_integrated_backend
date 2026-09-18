@@ -61,14 +61,34 @@ export function createLiveMapFollower({
   let centered = false;
   let lastPosition = null;
   let lastPanAt = 0;
+  const scrollWheelZoomMode = map.options?.scrollWheelZoom;
+
+  function setFollowing(value) {
+    following = value;
+    // Leaflet normally zooms the wheel around the cursor. While following,
+    // anchor that zoom at the map center, which tracks the vehicle.
+    if (scrollWheelZoomMode) map.options.scrollWheelZoom = value ? 'center' : scrollWheelZoomMode;
+    onFollowingChange(value);
+  }
+
+  function centerOnVehicle(animate = false) {
+    if (!liveView?.markerKey || !following || !lastPosition) return false;
+    map.setView(lastPosition, map.getZoom(), { animate });
+    centered = true;
+    lastPanAt = now();
+    return true;
+  }
 
   function begin(target) {
     liveView = target;
-    following = Boolean(target?.markerKey);
+    setFollowing(Boolean(target?.markerKey));
     centered = false;
-    lastPosition = null;
+    const telemetry = target?.item?.telemetry;
+    lastPosition = Number.isFinite(telemetry?.latitude) && Number.isFinite(telemetry?.longitude)
+      ? [telemetry.latitude, telemetry.longitude]
+      : null;
     lastPanAt = 0;
-    onFollowingChange(following);
+    if (following && lastPosition) centerOnVehicle();
   }
 
   function update(position) {
@@ -101,19 +121,13 @@ export function createLiveMapFollower({
 
   function pause() {
     if (!liveView || !following) return;
-    following = false;
-    onFollowingChange(false);
+    setFollowing(false);
   }
 
   function recenter() {
     if (!liveView) return;
-    following = true;
-    if (lastPosition) {
-      map.setView(lastPosition, map.getZoom(), { animate: true });
-      centered = true;
-      lastPanAt = now();
-    }
-    onFollowingChange(true);
+    setFollowing(true);
+    centerOnVehicle(true);
   }
 
   function end() {
@@ -128,13 +142,14 @@ export function createLiveMapFollower({
       entry.marker.setRadius?.(isAndroidGpsItem(entry.item) ? 10 : 8);
     }
     liveView = null;
-    following = false;
+    setFollowing(false);
     centered = false;
     lastPosition = null;
     lastPanAt = 0;
-    onFollowingChange(false);
     return result;
   }
 
-  return { begin, update, pause, recenter, end, isFollowing: () => following };
+  map.on?.('zoomend', () => centerOnVehicle());
+
+  return { begin, update, pause, recenter, end, centerOnVehicle, isFollowing: () => following };
 }

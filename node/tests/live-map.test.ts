@@ -60,6 +60,37 @@ describe("live map follower", () => {
         expect(following).toHaveBeenLastCalledWith(true);
     });
 
+    it("keeps the followed vehicle as the zoom center", () => {
+        let zoomEnd: (() => void) | undefined;
+        const map = {
+            options: { scrollWheelZoom: true },
+            getZoom: () => 14,
+            setView: vi.fn(),
+            panTo: vi.fn(),
+            on: vi.fn((event: string, handler: () => void) => {
+                if (event === "zoomend") zoomEnd = handler;
+            }),
+        };
+        const marker = { setLatLng: vi.fn(), setStyle: vi.fn() };
+        const follower = createLiveMapFollower({
+            map,
+            markers: new Map([["device:3", { marker, item: {}, liveOnly: false }]]),
+            createEntry: vi.fn(),
+        });
+        follower.begin({
+            markerKey: "device:3",
+            item: { telemetry: { latitude: 35.1, longitude: 129.1 } },
+        });
+        follower.update([35.2, 129.2]);
+
+        expect(map.options.scrollWheelZoom).toBe("center");
+        zoomEnd?.();
+        expect(map.setView).toHaveBeenLastCalledWith([35.2, 129.2], 14, { animate: false });
+
+        follower.pause();
+        expect(map.options.scrollWheelZoom).toBe(true);
+    });
+
     it("pauses on manual pan, recenters on request, and restores a polled marker on close", () => {
         let timestamp = 1000;
         const marker = { setLatLng: vi.fn(), setStyle: vi.fn() };
