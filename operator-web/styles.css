@@ -44,3 +44,10 @@ body.resizing-layout{user-select:none}
 #recording-delete-segments{position:absolute;inset:9px 0;height:8px;border-radius:4px;background:#35506e;overflow:hidden}
 #recording-delete-segments span{display:block;position:absolute;top:0;bottom:0;border-right:1px solid #a9bfd9;background:#52708e66}
 #recording-delete-selection{position:absolute;top:4px;bottom:4px;border:2px solid #ff5368;border-radius:4px;background:#c8374977;pointer-events:none}
+
+/* Live View keeps the map visible so the selected marker can follow the footage. */
+#live-telemetry-status{height:30px;margin:0;padding:6px 14px;background:#13243a;font:13px ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#live-telemetry-status[data-level=ok]{color:#7be0a8}
+#live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle]{color:#ffcf70}
+#live-view-frame{height:calc(100% - 112px)}
+@media(min-width:1001px){#live-view-panel{inset:76px 16px 16px auto;width:min(760px,50vw)}}

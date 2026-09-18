@@ -1,7 +1,8 @@
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
+import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout'),layoutSplitter=document.querySelector('#layout-splitter'),stackedLayout=window.matchMedia('(max-width: 1000px)');
 const splitStorageKey=()=>`itsOperatorSplit:${stackedLayout.matches?'stacked':'columns'}`;
@@ -57,7 +58,15 @@ window.addEventListener('resize',()=>applyLayoutSplit());
 applyLayoutSplit();
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function selectVehicle(item){selected=item;details.hidden=false;const t=item.telemetry,r=item.plannedRoute;fields.replaceChildren();for(const [label,value] of [['Vehicle',item.vehicleName||item.vehicleCode||t.external_id],['Source',`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],['Status',item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],['Speed',`${t.speed_kmh??'—'} km/h`],['Observed',t.observed_at_utc||'—'],['Trip ID',item.tripId??'—']]){const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=String(value);fields.append(term,description)}document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}if(r?.routeGeojson){routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map)}document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';if(item.tripId)void loadTripRecordings(String(item.tripId))}
-function render(snapshot){for(const item of snapshot.vehicles){const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];let entry=markers.get(key);if(!entry){const marker=L.circleMarker(pos,{radius:8,color:'#fff',fillColor:'#16c79a',fillOpacity:.9}).addTo(map);entry={marker,item};marker.on('click',()=>selectVehicle(entry.item));markers.set(key,entry)}else{entry.item=item;entry.marker.setLatLng(pos)}entry.marker.bindTooltip(item.vehicleCode||key)}}
+function render(snapshot){for(const item of snapshot.vehicles){const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];let entry=markers.get(key);if(!entry){const marker=L.circleMarker(pos,{radius:8,color:'#fff',fillColor:'#16c79a',fillOpacity:.9}).addTo(map);entry={marker,item};marker.on('click',()=>selectVehicle(entry.item));markers.set(key,entry)}else{entry.item=item;
+    // The live-view marker follows the presented video frame; the coarse fleet
+    // poll must not pull it back to the 1 Hz server position meanwhile.
+    if(!isLiveOverride(liveView,key,Date.now()))entry.marker.setLatLng(pos)}
+  const session=t.source_metadata?.recordingSessionId;
+  // A new stream session for the live-view vehicle supersedes the old one, so
+  // late frames from the previous session are rejected from here on.
+  if(liveView&&liveView.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
+  entry.marker.bindTooltip(item.vehicleCode||key)}}
 async function refresh(){try{render(await api('/api/v1/tracking/vehicles'));error.textContent='';document.querySelector('#connection').textContent='Tracking connected'}catch(e){error.textContent=e.message;document.querySelector('#connection').textContent='Tracking unavailable'}}
 async function loadTripAssignments(){
   const [vehicles,trips]=await Promise.all([api('/api/v1/vehicles',{},true),api('/api/v1/trips',{},true)]);
@@ -189,6 +198,12 @@ function browserReachableUrl(configuredUrl){
   if(url.hostname==='127.0.0.1'||url.hostname==='localhost')url.hostname=window.location.hostname;
   return url.href;
 }
+function renderLiveTelemetryStatus(){
+  const element=document.querySelector('#live-telemetry-status');
+  const status=describeLiveTelemetry(liveView,lastLiveMessage,Date.now());
+  element.textContent=status.text;
+  element.dataset.level=status.level;
+}
 function stopLiveView(){
   const panel=document.querySelector('#live-view-panel');
   const frame=document.querySelector('#live-view-frame');
@@ -197,7 +212,23 @@ function stopLiveView(){
   frame.src='about:blank';
   panel.hidden=true;
   document.querySelector('#live-view-diagnostic').textContent='';
+  // Hand the marker back to fleet polling at its last polled position.
+  const entry=liveView&&markers.get(liveView.markerKey);
+  if(entry)entry.marker.setLatLng([entry.item.telemetry.latitude,entry.item.telemetry.longitude]);
+  liveView=null;lastLiveMessage=null;
+  clearInterval(liveStatusTimer);liveStatusTimer=undefined;
+  renderLiveTelemetryStatus();
 }
+window.addEventListener('message',event=>{
+  const frame=document.querySelector('#live-view-frame');
+  const message=acceptLiveTelemetry(liveView,event,frame.contentWindow);
+  if(!message)return;
+  lastLiveMessage=message;
+  const position=applyLiveTelemetry(liveView,message,Date.now());
+  const entry=markers.get(liveView.markerKey);
+  if(position&&entry)entry.marker.setLatLng(position);
+  renderLiveTelemetryStatus();
+});
 document.querySelector('#live-view').addEventListener('click',()=>{
   if(!bootstrap)return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
@@ -206,6 +237,9 @@ document.querySelector('#live-view').addEventListener('click',()=>{
   const diagnostic=document.querySelector('#live-view-diagnostic');
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
+  liveView=selected?createLiveView(selected,new URL(liveViewUrl).origin):null;lastLiveMessage=null;
+  clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
+  renderLiveTelemetryStatus();
   document.querySelector('#live-view-panel').hidden=false;
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
