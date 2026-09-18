@@ -102,7 +102,10 @@ class TelemetryReplayScheduler(
     }
 
     private fun resyncCursors(sourceNs: Long) {
-        nextGpsIndex = firstIndexAtOrAfter(dataset.gps, sourceNs) { it.timestampNs }
+        // Restore the last known vehicle position immediately after a QR seek or
+        // screen-sleep pause. Starting at the first future fix can leave the map
+        // empty until the next (possibly sparse) GPS sample arrives.
+        nextGpsIndex = latestIndexAtOrBefore(dataset.gps, sourceNs) { it.timestampNs }
         nextImuIndex = firstIndexAtOrAfter(dataset.imu, sourceNs) { it.timestampNs }
         pendingGps.clear()
         pendingImu.clear()
@@ -205,6 +208,16 @@ class TelemetryReplayScheduler(
                 if (selector(list[mid]) < target) lo = mid + 1 else hi = mid
             }
             return lo
+        }
+
+        private fun <T> latestIndexAtOrBefore(list: List<T>, target: Long, selector: (T) -> Long): Int {
+            val afterOrAt = firstIndexAtOrAfter(list, target, selector)
+            return when {
+                afterOrAt == list.size -> (list.size - 1).coerceAtLeast(0)
+                selector(list[afterOrAt]) == target -> afterOrAt
+                afterOrAt == 0 -> 0
+                else -> afterOrAt - 1
+            }
         }
     }
 }

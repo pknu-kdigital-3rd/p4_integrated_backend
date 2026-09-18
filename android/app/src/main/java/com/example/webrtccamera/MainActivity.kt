@@ -130,6 +130,7 @@ class MainActivity : AppCompatActivity() {
     private var camera: Camera? = null
     private var publisher: WebRtcPublisher? = null
     private val streaming = AtomicBoolean(false)
+    private var resumeStreamOnForeground = false
     @Volatile
     private var telemetryEnabled = false
     private var selectedTelemetryDataset: TelemetryDataset? = null
@@ -278,6 +279,14 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
         telemetryIoExecutor = Executors.newSingleThreadExecutor()
         setStatus("Ready")
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (resumeStreamOnForeground) {
+            resumeStreamOnForeground = false
+            startStreaming()
+        }
     }
 
     /** Runs entirely on [telemetryIoExecutor]; parsing a 54k-row IMU CSV must stay off the UI thread. */
@@ -881,6 +890,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        // CameraX and the publisher are stopped while Android has the screen
+        // locked or the app is backgrounded. Remember the operator's intent so
+        // the stream (and its map GPS marker) comes back automatically on wake.
+        resumeStreamOnForeground = streaming.get()
         stopStreaming()
         super.onStop()
     }

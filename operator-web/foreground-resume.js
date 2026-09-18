@@ -17,11 +17,15 @@ export function installForegroundResume(windowRef, documentRef, onResume) {
 
   windowRef.addEventListener('blur', markAway);
   windowRef.addEventListener('focus', resume);
+  windowRef.addEventListener('pagehide', markAway);
+  windowRef.addEventListener('pageshow', resume);
   documentRef.addEventListener('visibilitychange', onVisibilityChange);
 
   return () => {
     windowRef.removeEventListener('blur', markAway);
     windowRef.removeEventListener('focus', resume);
+    windowRef.removeEventListener('pagehide', markAway);
+    windowRef.removeEventListener('pageshow', resume);
     documentRef.removeEventListener('visibilitychange', onVisibilityChange);
   };
 }

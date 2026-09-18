@@ -74,6 +74,7 @@
   const ghostFramesEl = document.getElementById('ghostFrames');
   let socket = null, reconnectTimer = null, reconnectAttempt = 0, stopped = true;
   let jumpPending = false, awaitingLiveEpoch = false, backgroundedWhilePlaying = false;
+  let foregroundResumePending = false, foregroundResumeTimer = null, foregroundReconnectAttempts = 0;
   let sessionId = sessionStorage.getItem('playback-session-id');
   let epoch = Number(sessionStorage.getItem('playback-epoch') || 0);
   let lastPresentedSeq = Number(sessionStorage.getItem('playback-last-seq') || -1);
@@ -567,6 +568,7 @@
       setStatus('Connected; buffering inference results');
       send({ type: 'open', session_id: sessionId, epoch, last_presented_seq: lastPresentedSeq, decoder_state_preserved: !!decoder });
       if (jumpPending) { jumpPending = false; send({ type: 'jump_to_live' }); }
+      if (foregroundResumePending) armForegroundResumeWatchdog();
     };
     ws.onmessage = (event) => {
       if (socket !== ws) return;
@@ -582,6 +584,11 @@
       const bytes = new Uint8Array(event.data), view = new DataView(event.data);
       if (bytes.byteLength < 4) return;
       const metaLen = view.getUint32(0), meta = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)));
+      if (foregroundResumePending) {
+        foregroundResumePending = false;
+        foregroundReconnectAttempts = 0;
+        clearForegroundResumeTimer();
+      }
       // Keep the WebSocket message's ArrayBuffer alive through decode instead
       // of copying the metadata and H.264 payload into two new buffers. The
       // queue/pending maps never mutate these views.
@@ -609,7 +616,37 @@
     setStatus('Connecting…');
     openSocket();
   }
-  function stop() { stopped = true; jumpPending = false; awaitingLiveEpoch = false; backgroundedWhilePlaying = false; playing = false; nextPaintAt = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; invalidateDecoder(); queue = []; known.clear(); pending.clear(); resetCompensation(); browserFps = 0; fpsWindowStarted = performance.now(); fpsWindowFrames = 0; fpsOverlayEl.textContent = 'Browser FPS: --'; updateStats(); setStatus('Stopped'); }
+  function clearForegroundResumeTimer() {
+    if (foregroundResumeTimer) clearTimeout(foregroundResumeTimer);
+    foregroundResumeTimer = null;
+  }
+  function reconnectAfterForegroundStall() {
+    if (stopped || document.hidden || !foregroundResumePending) return;
+    if (foregroundReconnectAttempts >= 2) {
+      setStatus('Live stream is still reconnecting; waiting for the next frame', '#fc6');
+      return;
+    }
+    foregroundReconnectAttempts++;
+    setStatus('Live stream did not resume; reconnecting…', '#fc6');
+    const oldSocket = socket;
+    socket = null;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (!stopped) openSocket();
+    }, 250);
+    if (oldSocket && (oldSocket.readyState === WebSocket.OPEN || oldSocket.readyState === WebSocket.CONNECTING)) {
+      oldSocket.close(4000, 'foreground resume stalled');
+    }
+  }
+  function armForegroundResumeWatchdog() {
+    clearForegroundResumeTimer();
+    foregroundResumeTimer = setTimeout(() => {
+      foregroundResumeTimer = null;
+      reconnectAfterForegroundStall();
+    }, 5000);
+  }
+  function stop() { stopped = true; jumpPending = false; awaitingLiveEpoch = false; backgroundedWhilePlaying = false; foregroundResumePending = false; clearForegroundResumeTimer(); playing = false; nextPaintAt = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; invalidateDecoder(); queue = []; known.clear(); pending.clear(); resetCompensation(); browserFps = 0; fpsWindowStarted = performance.now(); fpsWindowFrames = 0; fpsOverlayEl.textContent = 'Browser FPS: --'; updateStats(); setStatus('Stopped'); }
   function jumpLive(allowStopped = true) {
     if (awaitingLiveEpoch || (stopped && !allowStopped)) return;
     awaitingLiveEpoch = true;
@@ -621,7 +658,18 @@
     setStatus('Rejoining live stream…', '#fc6');
     updateStats();
   }
-  function resumeAtLive() { if (!stopped) jumpLive(false); }
+  function resumeAtLive() {
+    if (stopped) return;
+    foregroundResumePending = true;
+    foregroundReconnectAttempts = 0;
+    jumpLive(false);
+    armForegroundResumeWatchdog();
+  }
+  function resumeFromBackground() {
+    if (!backgroundedWhilePlaying || document.hidden) return;
+    backgroundedWhilePlaying = false;
+    resumeAtLive();
+  }
   compensationModeEl.addEventListener('change', () => {
     compensationMode = compensationModeEl.value;
     localStorage.setItem('playback-compensation-mode', compensationMode);
@@ -647,8 +695,11 @@
   document.getElementById('live').onclick = jumpLive;
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (!stopped) backgroundedWhilePlaying = true; return; }
-    if (backgroundedWhilePlaying) { backgroundedWhilePlaying = false; resumeAtLive(); }
+    resumeFromBackground();
   });
+  window.addEventListener('pagehide', () => { if (!stopped) backgroundedWhilePlaying = true; });
+  window.addEventListener('pageshow', resumeFromBackground);
+  window.addEventListener('focus', resumeFromBackground);
   window.addEventListener('message', event => {
     if (event.source !== window.parent || !parentOrigin || event.origin !== parentOrigin) return;
     if (event.data?.type === 'operator-live-view-returned' && !document.hidden) resumeAtLive();
