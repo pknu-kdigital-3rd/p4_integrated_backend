@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.camera.core.ImageProxy
+import com.example.webrtccamera.telemetry.model.StreamSessionContext
+import com.example.webrtccamera.telemetry.model.TelemetryBatch
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -42,17 +44,14 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.UUID
 
 /** Sends CameraX YUV frames to FastAPI's /offer/android WebRTC endpoint. */
 class WebRtcPublisher(
     context: Context,
     private val offerEndpoint: String,
-    private val recordingTripId: Long? = null,
-    private val recordingVehicleId: Long? = null,
+    private val sessionContext: StreamSessionContext? = null,
     private val onStatus: (String) -> Unit,
 ) {
-    private val recordingSessionId = UUID.randomUUID().toString()
     private val appContext = context.applicationContext
     private val stopped = AtomicBoolean(true)
     private val disposed = AtomicBoolean(false)
@@ -72,6 +71,8 @@ class WebRtcPublisher(
     private var videoSender: RtpSender? = null
     private var qrChannel: DataChannel? = null
     private val pendingQrEvents = ArrayDeque<ByteArray>()
+    private var telemetryChannel: DataChannel? = null
+    private val pendingTelemetry = ArrayDeque<PendingTelemetry>()
     private val bitrateCapApplied = AtomicBoolean(false)
     // Reused by the CameraX analyzer thread to avoid allocating conversion
     // buffers for every frame.
@@ -160,6 +161,17 @@ class WebRtcPublisher(
 
                 override fun onStateChange() {
                     if (channel.state() == DataChannel.State.OPEN) postRtc { flushQrEvents() }
+                }
+
+                override fun onMessage(buffer: DataChannel.Buffer) = Unit
+            })
+        }
+        telemetryChannel = connection.createDataChannel("telemetry-events", DataChannel.Init()).also { channel ->
+            channel.registerObserver(object : DataChannel.Observer {
+                override fun onBufferedAmountChange(previousAmount: Long) = Unit
+
+                override fun onStateChange() {
+                    if (channel.state() == DataChannel.State.OPEN) postRtc { flushTelemetry() }
                 }
 
                 override fun onMessage(buffer: DataChannel.Buffer) = Unit
@@ -278,6 +290,25 @@ class WebRtcPublisher(
         }
     }
 
+    /**
+     * Sends one replay/live telemetry batch on the `telemetry-events` channel, independent of
+     * `qr-events` since the two have different buffering semantics. Under backpressure, an
+     * IMU-only batch is dropped before a batch carrying a GPS fix - historical vehicle tracking
+     * needs GPS more than it needs an old orientation sample.
+     */
+    fun sendTelemetryBatch(batch: TelemetryBatch) {
+        if (batch.isEmpty) return
+        val pending = PendingTelemetry(batch.toJsonBytes(), hasGps = batch.gps.isNotEmpty())
+        postRtc {
+            if (pendingTelemetry.size >= MAX_PENDING_TELEMETRY_BATCHES) {
+                val dropIndex = pendingTelemetry.indexOfFirst { !it.hasGps }
+                if (dropIndex >= 0) pendingTelemetry.removeAt(dropIndex) else pendingTelemetry.removeFirst()
+            }
+            pendingTelemetry.addLast(pending)
+            flushTelemetry()
+        }
+    }
+
     private fun applyBitrateCap(frameWidth: Int, frameHeight: Int) {
         val sender = videoSender ?: return
         val capBps = (frameWidth.toLong() * frameHeight * BITRATE_TARGET_FPS * BITS_PER_PIXEL_PER_FRAME)
@@ -365,11 +396,12 @@ class WebRtcPublisher(
         val json = JSONObject()
             .put("sdp", local.description)
             .put("type", local.type.canonicalForm())
-        if (recordingTripId != null && recordingVehicleId != null) {
-            json.put("tripId", recordingTripId.toString())
-                .put("vehicleId", recordingVehicleId.toString())
-                .put("recordingSessionId", recordingSessionId)
-            onStatus("Sending offer with Trip ID $recordingTripId and Vehicle ID $recordingVehicleId…")
+        val session = sessionContext
+        if (session != null) {
+            json.put("tripId", session.tripId.toString())
+                .put("vehicleId", session.vehicleId.toString())
+                .put("recordingSessionId", session.recordingSessionId)
+            onStatus("Sending offer with Trip ID ${session.tripId} and Vehicle ID ${session.vehicleId}…")
         } else {
             onStatus("Sending live-only offer; no recording IDs sent…")
         }
@@ -406,8 +438,12 @@ class WebRtcPublisher(
                         }
                         current.setRemoteDescription(SimpleSdpObserver(
                             setSuccess = {
-                                if (recordingTripId != null && recordingVehicleId != null) {
-                                    onStatus("Connected to relay; sent Trip ID $recordingTripId and Vehicle ID $recordingVehicleId")
+                                val connectedSession = sessionContext
+                                if (connectedSession != null) {
+                                    onStatus(
+                                        "Connected to relay; sent Trip ID ${connectedSession.tripId} " +
+                                            "and Vehicle ID ${connectedSession.vehicleId}"
+                                    )
                                 } else {
                                     onStatus("Connected to relay; no recording IDs sent")
                                 }
@@ -449,6 +485,13 @@ class WebRtcPublisher(
         qrChannel?.dispose()
         qrChannel = null
         pendingQrEvents.clear()
+        // Telemetry belongs to the same failed PeerConnection/SCTP association. Clearing the
+        // queue here (rather than carrying it into the new channel) avoids replaying a stale
+        // backlog once telemetry-events reopens - the scheduler will simply pick up wherever
+        // the QR-derived source clock currently is.
+        telemetryChannel?.dispose()
+        telemetryChannel = null
+        pendingTelemetry.clear()
         peer?.close()
         peer?.dispose()
         peer = null
@@ -471,6 +514,9 @@ class WebRtcPublisher(
                 qrChannel?.dispose()
                 qrChannel = null
                 pendingQrEvents.clear()
+                telemetryChannel?.dispose()
+                telemetryChannel = null
+                pendingTelemetry.clear()
                 synchronized(captureLock) {
                     if (capturerStarted) videoSource.capturerObserver.onCapturerStopped()
                     videoTrack.dispose()
@@ -518,6 +564,16 @@ class WebRtcPublisher(
             val event = pendingQrEvents.first()
             if (!channel.send(DataChannel.Buffer(ByteBuffer.wrap(event), false))) return
             pendingQrEvents.removeFirst()
+        }
+    }
+
+    private fun flushTelemetry() {
+        val channel = telemetryChannel ?: return
+        if (channel.state() != DataChannel.State.OPEN) return
+        while (pendingTelemetry.isNotEmpty()) {
+            val event = pendingTelemetry.first()
+            if (!channel.send(DataChannel.Buffer(ByteBuffer.wrap(event.bytes), false))) return
+            pendingTelemetry.removeFirst()
         }
     }
 
@@ -642,6 +698,8 @@ class WebRtcPublisher(
         }
     }
 
+    private data class PendingTelemetry(val bytes: ByteArray, val hasGps: Boolean)
+
     private class SimpleSdpObserver(
         private val createSuccess: (SessionDescription) -> Unit = {},
         private val setSuccess: () -> Unit = {},
@@ -677,6 +735,10 @@ class WebRtcPublisher(
         private const val NANOS_PER_SECOND = 1_000_000_000L
         private const val RTP_CLOCK_RATE = 90_000L
         private const val MAX_PENDING_QR_EVENTS = 300
+        // Bounds the telemetry backlog so a network slowdown cannot turn into seconds of
+        // delayed vehicle tracking; ~50 batches at the 40ms flush interval is ~2s of backlog
+        // before older, GPS-less batches start being dropped.
+        private const val MAX_PENDING_TELEMETRY_BATCHES = 50
 
         // Fixed retry interval rather than exponential backoff - matches this
         // project's other reconnect loops (the relay feed retry in yolo.py), and a

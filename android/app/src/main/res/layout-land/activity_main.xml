@@ -129,6 +129,41 @@
             android:textSize="14sp"
             android:textStyle="bold" />
 
+        <Switch
+            android:id="@+id/telemetrySwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checked="false"
+            android:text="Telemetry simulation"
+            android:textColor="#FFFFFFFF" />
+
+        <Button
+            android:id="@+id/selectDatasetButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Select dataset folder" />
+
+        <TextView
+            android:id="@+id/datasetSummaryText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="No dataset selected"
+            android:textColor="#B0FFFFFF"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/telemetryStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Telemetry: disabled"
+            android:textColor="#FFFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
         <Button
             android:id="@+id/streamButton"
             android:layout_width="match_parent"

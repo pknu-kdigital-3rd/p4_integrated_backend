@@ -1,6 +1,7 @@
 package com.example.webrtccamera
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.ImageFormat
@@ -51,10 +52,17 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import com.example.webrtccamera.telemetry.model.StreamSessionContext
+import com.example.webrtccamera.telemetry.model.TelemetryDataset
+import com.example.webrtccamera.telemetry.model.TelemetryMode
+import com.example.webrtccamera.telemetry.replay.CsvReplayTelemetrySource
+import com.example.webrtccamera.telemetry.replay.DatasetLoadException
+import com.example.webrtccamera.telemetry.transport.TelemetryDataChannelSender
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -107,12 +115,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var actualResolutionText: TextView
     private lateinit var qrStatusText: TextView
     private lateinit var qrScanningSwitch: Switch
+    private lateinit var telemetrySwitch: Switch
+    private lateinit var selectDatasetButton: Button
+    private lateinit var datasetSummaryText: TextView
+    private lateinit var telemetryStatusText: TextView
     private lateinit var cameraExecutor: ExecutorService
+    private lateinit var telemetryIoExecutor: ExecutorService
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
     private var publisher: WebRtcPublisher? = null
     private val streaming = AtomicBoolean(false)
+    @Volatile
+    private var telemetryEnabled = false
+    private var selectedTelemetryDataset: TelemetryDataset? = null
+    private var telemetryReplaySource: CsvReplayTelemetrySource? = null
+    private var activeSessionContext: StreamSessionContext? = null
     private var captureSummary = ""
     @Volatile
     private var captureFps = 0f
@@ -173,6 +191,11 @@ class MainActivity : AppCompatActivity() {
             if (granted) startStreaming() else setStatus("Camera permission is required")
         }
 
+    private val datasetFolderLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri != null) onDatasetFolderSelected(uri)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -203,6 +226,21 @@ class MainActivity : AppCompatActivity() {
             qrScanningEnabled = enabled
             setQrStatus(if (enabled) "QR: waiting for scan…" else "QR: disabled")
         }
+        telemetrySwitch = findViewById(R.id.telemetrySwitch)
+        selectDatasetButton = findViewById(R.id.selectDatasetButton)
+        datasetSummaryText = findViewById(R.id.datasetSummaryText)
+        telemetryStatusText = findViewById(R.id.telemetryStatusText)
+        telemetrySwitch.setOnCheckedChangeListener { _, enabled ->
+            telemetryEnabled = enabled
+            setTelemetryStatus(
+                when {
+                    !enabled -> "Telemetry: disabled"
+                    selectedTelemetryDataset != null -> "Telemetry: dataset ready"
+                    else -> "Telemetry: no dataset selected"
+                }
+            )
+        }
+        selectDatasetButton.setOnClickListener { datasetFolderLauncher.launch(null) }
         focusFraction = getPreferences(MODE_PRIVATE).getFloat(FOCUS_FRACTION_KEY, 0f)
         viewFinder.setOnTouchListener { view, event ->
             focusGestureDetector.onTouchEvent(event)
@@ -236,7 +274,41 @@ class MainActivity : AppCompatActivity() {
         }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
+        telemetryIoExecutor = Executors.newSingleThreadExecutor()
         setStatus("Ready")
+    }
+
+    /** Runs entirely on [telemetryIoExecutor]; parsing a 54k-row IMU CSV must stay off the UI thread. */
+    private fun onDatasetFolderSelected(folderUri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(folderUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Persisting is best-effort; the folder is still usable for this session.
+        }
+        selectedTelemetryDataset = null
+        datasetSummaryText.text = "Loading dataset…"
+        setTelemetryStatus("Telemetry: loading dataset…")
+        CsvReplayTelemetrySource.loadDatasetFromFolder(this, folderUri, telemetryIoExecutor) { result ->
+            runOnUiThread {
+                result.onSuccess { dataset ->
+                    selectedTelemetryDataset = dataset
+                    datasetSummaryText.text =
+                        "${dataset.displayName}\n" +
+                            "gps: ${dataset.gps.size} samples (${dataset.gpsStartNs} .. ${dataset.gpsEndNs})\n" +
+                            "imu: ${dataset.imu.size} samples (${dataset.imuStartNs} .. ${dataset.imuEndNs})"
+                    if (telemetryEnabled) setTelemetryStatus("Telemetry: dataset ready")
+                }.onFailure { error ->
+                    selectedTelemetryDataset = null
+                    datasetSummaryText.text = "Failed to load dataset: ${error.message}"
+                    if (telemetryEnabled) {
+                        val mismatch = error is DatasetLoadException && error.message?.contains("mismatch") == true
+                        setTelemetryStatus(
+                            if (mismatch) "Telemetry: dataset timestamp mismatch" else "Telemetry: dataset error"
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun startStreaming() {
@@ -261,6 +333,15 @@ class MainActivity : AppCompatActivity() {
                 return
             }
         }
+        if (telemetryEnabled && (recordingTripId == null || recordingVehicleId == null)) {
+            setStatus("Enter Trip ID and Vehicle ID to enable telemetry simulation")
+            return
+        }
+        val telemetryDataset = selectedTelemetryDataset
+        if (telemetryEnabled && telemetryDataset == null) {
+            setStatus("Select a telemetry dataset folder first")
+            return
+        }
         getPreferences(MODE_PRIVATE).edit {
             putString(RECORDING_TRIP_ID_KEY, tripText)
             putString(RECORDING_VEHICLE_ID_KEY, vehicleText)
@@ -280,14 +361,40 @@ class MainActivity : AppCompatActivity() {
         captureWindowStartedNs = 0L
         captureWindowFrames = 0
         resolutionSpinner.isEnabled = false
+        telemetrySwitch.isEnabled = false
+        selectDatasetButton.isEnabled = false
         streamButton.setText(R.string.stop_streaming)
         setStatus("Starting WebRTC…")
-        publisher = WebRtcPublisher(this, endpoint, recordingTripId, recordingVehicleId) { message ->
+        val sessionContext = if (recordingTripId != null && recordingVehicleId != null) {
+            StreamSessionContext(
+                tripId = recordingTripId,
+                vehicleId = recordingVehicleId,
+                recordingSessionId = UUID.randomUUID().toString(),
+                telemetryMode = TelemetryMode.REPLAY,
+            )
+        } else {
+            null
+        }
+        activeSessionContext = sessionContext
+        publisher = WebRtcPublisher(this, endpoint, sessionContext) { message ->
             runOnUiThread { if (streaming.get()) setStatus(message) }
         }
         recordingTripIdInput.isEnabled = false
         recordingVehicleIdInput.isEnabled = false
         publisher?.start()
+        telemetryReplaySource = if (telemetryEnabled && sessionContext != null && telemetryDataset != null) {
+            CsvReplayTelemetrySource(
+                dataset = telemetryDataset,
+                sessionContext = sessionContext,
+                sender = TelemetryDataChannelSender(publisher!!),
+                onStatus = { message -> runOnUiThread { if (streaming.get()) setTelemetryStatus(message) } },
+            ).also {
+                it.start()
+                setTelemetryStatus("Telemetry: waiting for QR…")
+            }
+        } else {
+            null
+        }
         bindCamera()
     }
 
@@ -561,13 +668,16 @@ class MainActivity : AppCompatActivity() {
                             else -> "QR: ts=$decoded"
                         }
                     )
-                    publisher?.sendQrEvent(
-                        timestamp,
-                        decoded,
-                        decoded != null,
-                        captureIndex,
-                        (System.nanoTime() - start) / 1_000_000,
-                    )
+                    val latencyMs = (System.nanoTime() - start) / 1_000_000
+                    publisher?.sendQrEvent(timestamp, decoded, decoded != null, captureIndex, latencyMs)
+                    // A failed/absent/malformed decode must not touch the replay clock.
+                    if (decoded != null) {
+                        telemetryReplaySource?.onQrTimestamp(
+                            sourceTimestampNs = decoded,
+                            captureTimestampNs = timestamp,
+                            decodeLatencyMs = latencyMs,
+                        )
+                    }
                 }
                 .addOnFailureListener { error ->
                     reportQrFailure("ML Kit", error)
@@ -654,18 +764,34 @@ class MainActivity : AppCompatActivity() {
         if (::qrStatusText.isInitialized) runOnUiThread { qrStatusText.text = text }
     }
 
+    private fun setTelemetryStatus(text: String) {
+        if (::telemetryStatusText.isInitialized) runOnUiThread { telemetryStatusText.text = text }
+    }
+
     private fun stopStreaming() {
         if (!streaming.getAndSet(false)) return
         cameraProvider?.unbindAll()
         cameraProvider = null
         camera = null
+        telemetryReplaySource?.stop()
+        telemetryReplaySource = null
+        activeSessionContext = null
         publisher?.dispose()
         publisher = null
         recordingTripIdInput.isEnabled = true
         recordingVehicleIdInput.isEnabled = true
         resolutionSpinner.isEnabled = true
+        telemetrySwitch.isEnabled = true
+        selectDatasetButton.isEnabled = true
         actualResolutionText.text = ""
         streamButton.setText(R.string.start_streaming)
+        setTelemetryStatus(
+            when {
+                !telemetryEnabled -> "Telemetry: disabled"
+                selectedTelemetryDataset != null -> "Telemetry: dataset ready"
+                else -> "Telemetry: no dataset selected"
+            }
+        )
         setStatus("Stopped")
     }
 
@@ -713,6 +839,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         qrScanner.close()
         cameraExecutor.shutdownNow()
+        telemetryIoExecutor.shutdownNow()
         super.onDestroy()
     }
 }

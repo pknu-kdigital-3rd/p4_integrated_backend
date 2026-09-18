@@ -63,8 +63,12 @@ dependencies {
     implementation(libs.webrtc.android)
     implementation(libs.okhttp)
     implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.androidx.documentfile)
 
     testImplementation(libs.junit)
+    // Overrides the SDK's mockable-jar stub for org.json, which throws "not mocked" at
+    // runtime; a real implementation is needed for TelemetryBatch's JSON serialization tests.
+    testImplementation(libs.json)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }
