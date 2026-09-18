@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import csv
+import json
+import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -72,6 +74,95 @@ class BimsPlaybackSource:
                         source_metadata={"lineNumber": row.get("line_number"), "lineId": row.get("line_id"), "state": "replay"},
                     ))
         return {"generated_at_utc": None, "vehicles": list(latest.values()), "warnings": []}
+
+
+DEVICE_TELEMETRY_SOURCES = frozenset({"DEVICE_GPS", "RECORDED_GPS"})
+
+
+def _fetch_json(url: str, timeout: float) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 - internal loopback URL
+        return json.loads(response.read().decode("utf-8"))
+
+
+class DeviceRelaySource:
+    """Current Android/device positions from the media relay.
+
+    The relay has already validated identity; this source only normalizes the
+    snapshot. `external_id` (``device:<vehicleId>``) is a tracking-contract key,
+    never a BIMS identity - the real vehicle/trip/session ids stay in
+    ``source_metadata``. A relay outage degrades to a warning so BIMS tracking
+    keeps working.
+    """
+
+    def __init__(self, base_url: str, timeout: float = 1.0, fetch=_fetch_json):
+        self.url = base_url.rstrip("/") + "/internal/telemetry/vehicles"
+        self.timeout = timeout
+        self.fetch = fetch
+
+    def snapshot(self) -> dict:
+        try:
+            raw = self.fetch(self.url, self.timeout)
+        except (OSError, ValueError) as exc:
+            return {
+                "generated_at_utc": None,
+                "vehicles": [],
+                "warnings": [{"source": "device_relay", "message": f"media relay telemetry unavailable: {exc}"}],
+            }
+        observations = []
+        for item in raw.get("vehicles", []) or []:
+            if item.get("telemetry_source") not in DEVICE_TELEMETRY_SOURCES:
+                continue
+            metadata = item.get("source_metadata") or {}
+            if not metadata.get("vehicleId") or not metadata.get("recordingSessionId"):
+                continue
+            try:
+                observations.append(asdict(TelemetryObservation(
+                    external_id=str(item["external_id"]),
+                    latitude=float(item["latitude"]),
+                    longitude=float(item["longitude"]),
+                    telemetry_source=item["telemetry_source"],
+                    observed_at_utc=item.get("observed_at_utc"),
+                    speed_kmh=item.get("speed_kmh"),
+                    heading_deg=item.get("heading_deg"),
+                    route_progress_pct=None,
+                    source_metadata=dict(metadata),
+                )))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return {"generated_at_utc": raw.get("generated_at_utc"), "vehicles": observations, "warnings": list(raw.get("warnings", []) or [])}
+
+
+class CompositeTelemetrySource:
+    """BIMS observations plus device observations in one snapshot.
+
+    The primary (BIMS) source's generation time is kept. Device observations are
+    de-duplicated by vehicleId + recordingSessionId; BIMS observations are never
+    suppressed because device vehicles carry their own identities.
+    """
+
+    def __init__(self, primary: TelemetrySource, *secondary: TelemetrySource):
+        self.sources = (primary, *secondary)
+
+    def snapshot(self) -> dict:
+        vehicles: list[dict] = []
+        warnings: list = []
+        generated_at = None
+        device_index: dict[tuple, int] = {}
+        for position, source in enumerate(self.sources):
+            result = source.snapshot()
+            if position == 0:
+                generated_at = result.get("generated_at_utc")
+            warnings.extend(result.get("warnings", []) or [])
+            for vehicle in result.get("vehicles", []) or []:
+                if vehicle.get("telemetry_source") in DEVICE_TELEMETRY_SOURCES:
+                    metadata = vehicle.get("source_metadata") or {}
+                    key = (metadata.get("vehicleId"), metadata.get("recordingSessionId"))
+                    if key in device_index:
+                        vehicles[device_index[key]] = vehicle
+                        continue
+                    device_index[key] = len(vehicles)
+                vehicles.append(vehicle)
+        return {"generated_at_utc": generated_at, "vehicles": vehicles, "warnings": warnings}
 
 
 class VehicleTracker:

@@ -17,7 +17,13 @@ from pydantic import BaseModel
 
 from graph_backend import load_graph, TRUCK_PROFILES, get_override_locations
 from hybrid_bus import HybridBusService, load_route_ids
-from telemetry import BimsLiveSource, BimsPlaybackSource, VehicleTracker
+from telemetry import (
+    BimsLiveSource,
+    BimsPlaybackSource,
+    CompositeTelemetrySource,
+    DeviceRelaySource,
+    VehicleTracker,
+)
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PBF_PATH = "busan-roads_osm.pbf"  # <-- point this at your .pbf file
@@ -58,6 +64,10 @@ BUS_RAW_PATH = Path(os.environ.get(
     "BUSAN_BUS_RAW_PATH",
     str(LOCAL_DATA_DIR / "busan_bus_live.csv"),
 ))
+# Android/device GPS current state comes from the media relay; it is merged
+# with the BIMS source and never replaces it.
+MEDIA_RELAY_INTERNAL_BASE_URL = os.environ.get("MEDIA_RELAY_INTERNAL_BASE_URL", "http://127.0.0.1:39012")
+DEVICE_TELEMETRY_TIMEOUT_S = float(os.environ.get("DEVICE_TELEMETRY_TIMEOUT_S", "1.0"))
 
 app = FastAPI(title="A* Route API")
 
@@ -99,9 +109,13 @@ def startup():
     hybrid_bus_service.start()
     if os.environ.get("TELEMETRY_MODE", "live").lower() == "playback":
         hybrid_bus_service.stop()
-        vehicle_tracker = VehicleTracker(BimsPlaybackSource(BUS_HISTORY_PATH))
+        bims_source = BimsPlaybackSource(BUS_HISTORY_PATH)
     else:
-        vehicle_tracker = VehicleTracker(BimsLiveSource(hybrid_bus_service))
+        bims_source = BimsLiveSource(hybrid_bus_service)
+    vehicle_tracker = VehicleTracker(CompositeTelemetrySource(
+        bims_source,
+        DeviceRelaySource(MEDIA_RELAY_INTERNAL_BASE_URL, timeout=DEVICE_TELEMETRY_TIMEOUT_S),
+    ))
     print(f"Graph loaded and ready. {len(override_locations)} manual override location(s) found.")
 
 

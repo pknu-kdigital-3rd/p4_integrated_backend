@@ -157,6 +157,19 @@ python -B -m unittest discover -s tests -v
 The static cache is preparation for the later OSM route-model builder. It does
 not itself generate road polylines, record a new GPS stream, or change tracking.
 
+## Android/device vehicles
+
+`GET /internal/vehicles` merges the BIMS source (live or playback) with
+current Android/device GPS read from the media relay's
+`GET /internal/telemetry/vehicles` (`MEDIA_RELAY_INTERNAL_BASE_URL`, default
+`http://127.0.0.1:39012`, timeout `DEVICE_TELEMETRY_TIMEOUT_S`, default 1 s).
+Device observations use `telemetry_source` `RECORDED_GPS` (Android replay) or
+`DEVICE_GPS` (real sensors) and carry `vehicleId`, `tripId`, and
+`recordingSessionId` in `source_metadata`; their `external_id`
+(`device:<vehicleId>`) is only a tracking key and is never registered as a BIMS
+vehicle. If the relay is unavailable the snapshot still returns BIMS vehicles
+with a `device_relay` warning.
+
 ## Using your own PBF file
 
 Change `PBF_PATH` at the top of `main.py` to point at a different `.osm.pbf`
