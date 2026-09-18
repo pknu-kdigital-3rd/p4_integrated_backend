@@ -1,4 +1,6 @@
 import unittest
+import queue
+import time
 
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -69,6 +71,42 @@ class FreshViewerJoinsLiveTests(unittest.TestCase):
 
         self.assertIn((3, 0), self.state.result_store)
         self.assertTrue(self.state.feed_commands.empty())
+
+
+class LiveResyncTests(unittest.TestCase):
+    def setUp(self):
+        self.state = AppState()
+        self.state.current_epoch = 3
+        self.state.session_id = "existing-session"
+        self.state.put_result(PlaybackItem(
+            epoch=3, seq=0, encoded=b"queued-old-frame", timestamp_us=0, keyframe=True,
+            result={"width": 1, "height": 1, "items": []},
+        ))
+        self.client = _make_client(self.state)
+
+    def test_jump_to_live_discards_queued_results_and_requests_resync(self):
+        with self.client.websocket_connect("/ws/playback") as ws:
+            ws.send_json({
+                "type": "open",
+                "session_id": "existing-session",
+                "epoch": 3,
+                "last_presented_seq": -1,
+                "decoder_state_preserved": True,
+            })
+            self.assertEqual(ws.receive_json()["mode"], "resumed")
+            ws.send_json({"type": "jump_to_live"})
+
+            deadline = time.monotonic() + 1
+            command = None
+            while time.monotonic() < deadline:
+                try:
+                    command = self.state.feed_commands.get_nowait()
+                    break
+                except queue.Empty:
+                    time.sleep(0.01)
+
+            self.assertEqual(command, {"type": "resync", "reason": "jump_to_live"})
+            self.assertEqual(self.state.result_store, {})
 
 
 class FrameTelemetryMetadataTests(unittest.TestCase):

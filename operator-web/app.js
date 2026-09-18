@@ -1,22 +1,40 @@
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
+import {createLiveMapFollower,FLEET_MARKER_STYLE,LIVE_MARKER_STYLE} from './live-map.js';
+import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout'),layoutSplitter=document.querySelector('#layout-splitter'),stackedLayout=window.matchMedia('(max-width: 1000px)');
+const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
+function createMarkerEntry(item,position,{liveOnly=false}={}){
+  const marker=L.circleMarker(position,{radius:liveOnly?10:8,...(liveOnly?LIVE_MARKER_STYLE:FLEET_MARKER_STYLE)}).addTo(map);
+  const entry={marker,item,liveOnly};
+  marker.on('click',()=>selectVehicle(entry.item));
+  marker.bindTooltip(item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle');
+  if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
+  return entry;
+}
+const liveMapFollower=createLiveMapFollower({
+  map,markers,
+  createEntry:(item,position)=>createMarkerEntry(item,position,{liveOnly:true}),
+  onFollowingChange:following=>{liveRecenterButton.hidden=following;liveRecenterButton.setAttribute('aria-pressed',String(following))},
+});
+map.on('dragstart',()=>liveMapFollower.pause());
 const splitStorageKey=()=>`itsOperatorSplit:${stackedLayout.matches?'stacked':'columns'}`;
 const readSplitRatio=()=>{const saved=Number(localStorage.getItem(splitStorageKey()));return Number.isFinite(saved)&&saved>0?saved:(stackedLayout.matches ? 0.46 : 0.5)};
 let mapSplitRatio=readSplitRatio(),resizingLayout=false;
 function splitRatioBounds(){
-  if(stackedLayout.matches){const available=Math.max(1,window.innerHeight-64);return [Math.min(.7,280/available),.8]}
-  const width=operatorLayout.clientWidth;return [Math.max(.25,320/width),Math.min(.72,(width-390)/width)];
+  if(stackedLayout.matches){const available=Math.max(1,window.innerHeight-64);return [Math.min(.7,240/available),.8]}
+  const width=operatorLayout.clientWidth,minPane=liveView?320:380;return [Math.max(.25,320/width),Math.min(.72,(width-minPane)/width)];
 }
 function applyLayoutSplit(save=false){
   const [minimum,maximum]=splitRatioBounds();mapSplitRatio=Math.max(minimum,Math.min(maximum,mapSplitRatio));
   operatorLayout.style.setProperty('--map-width',`${mapSplitRatio*100}%`);
   operatorLayout.style.setProperty('--map-height',`${Math.round((window.innerHeight-64)*mapSplitRatio)}px`);
   const orientation=stackedLayout.matches?'horizontal':'vertical';
+  layoutSplitter.setAttribute('aria-label',liveView?'Resize map and Live View':'Resize map and menu');
   layoutSplitter.setAttribute('aria-orientation',orientation);
   layoutSplitter.setAttribute('aria-valuemin',String(Math.round(minimum*100)));
   layoutSplitter.setAttribute('aria-valuemax',String(Math.round(maximum*100)));
@@ -58,15 +76,25 @@ window.addEventListener('resize',()=>applyLayoutSplit());
 applyLayoutSplit();
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function selectVehicle(item){selected=item;details.hidden=false;const t=item.telemetry,r=item.plannedRoute;fields.replaceChildren();for(const [label,value] of [['Vehicle',item.vehicleName||item.vehicleCode||t.external_id],['Source',`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],['Status',item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],['Speed',`${t.speed_kmh??'—'} km/h`],['Observed',t.observed_at_utc||'—'],['Trip ID',item.tripId??'—']]){const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=String(value);fields.append(term,description)}document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}if(r?.routeGeojson){routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map)}document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';if(item.tripId)void loadTripRecordings(String(item.tripId))}
-function render(snapshot){for(const item of snapshot.vehicles){const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];let entry=markers.get(key);if(!entry){const marker=L.circleMarker(pos,{radius:8,color:'#fff',fillColor:'#16c79a',fillOpacity:.9}).addTo(map);entry={marker,item};marker.on('click',()=>selectVehicle(entry.item));markers.set(key,entry)}else{entry.item=item;
-    // The live-view marker follows the presented video frame; the coarse fleet
-    // poll must not pull it back to the 1 Hz server position meanwhile.
-    if(!isLiveOverride(liveView,key,Date.now()))entry.marker.setLatLng(pos)}
-  const session=t.source_metadata?.recordingSessionId;
-  // A new stream session for the live-view vehicle supersedes the old one, so
-  // late frames from the previous session are rejected from here on.
-  if(liveView&&liveView.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
-  entry.marker.bindTooltip(item.vehicleCode||key)}}
+function render(snapshot){
+  for(const item of snapshot.vehicles){
+    const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
+    let entry=markers.get(key);
+    if(!entry)entry=createMarkerEntry(item,pos);
+    else{entry.item=item;entry.liveOnly=false}
+    if(liveView?.markerKey===key)entry.marker.setStyle(LIVE_MARKER_STYLE);
+    else entry.marker.setStyle(FLEET_MARKER_STYLE);
+    // Live frames own the selected marker between successful fleet polls.
+    if(!isLiveOverride(liveView,key,Date.now())){
+      entry.marker.setLatLng(pos);
+      if(liveView?.markerKey===key&&liveMapFollower.isFollowing())liveMapFollower.update(pos);
+    }
+    const session=t.source_metadata?.recordingSessionId;
+    // A new stream session supersedes the old one; reject its late frames.
+    if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
+    entry.marker.bindTooltip(item.vehicleCode||key);
+  }
+}
 async function refresh(){try{render(await api('/api/v1/tracking/vehicles'));error.textContent='';document.querySelector('#connection').textContent='Tracking connected'}catch(e){error.textContent=e.message;document.querySelector('#connection').textContent='Tracking unavailable'}}
 async function loadTripAssignments(){
   const [vehicles,trips]=await Promise.all([api('/api/v1/vehicles',{},true),api('/api/v1/trips',{},true)]);
@@ -201,52 +229,65 @@ function browserReachableUrl(configuredUrl){
 function renderLiveTelemetryStatus(){
   const element=document.querySelector('#live-telemetry-status');
   const status=describeLiveTelemetry(liveView,lastLiveMessage,Date.now());
-  element.textContent=status.text;
+  const entry=liveView&&markers.get(liveView.markerKey);
+  element.textContent=entry?.liveOnly&&status.text==='Live telemetry: stale - marker follows fleet polling'
+    ?'Live telemetry: stale - showing last known position':status.text;
   element.dataset.level=status.level;
 }
 function stopLiveView(){
-  const panel=document.querySelector('#live-view-panel');
-  const frame=document.querySelector('#live-view-frame');
+  if(document.fullscreenElement===livePanel)void document.exitFullscreen().catch(()=>{});
+  const markerState=liveMapFollower.end();
+  if(markerState.markerKey){
+    const entry=markers.get(markerState.markerKey);
+    if(entry?.liveOnly){map.removeLayer(entry.marker);markers.delete(markerState.markerKey)}
+    else if(entry){const telemetry=entry.item?.telemetry;if(Number.isFinite(telemetry?.latitude)&&Number.isFinite(telemetry?.longitude))entry.marker.setLatLng([telemetry.latitude,telemetry.longitude])}
+  }
   // Navigating the iframe away from the Vision page closes its WebRTC peer
   // connection and releases the browser media resources.
-  frame.src='about:blank';
-  panel.hidden=true;
+  liveFrame.src='about:blank';
+  livePanel.hidden=true;
+  operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
-  // Hand the marker back to fleet polling at its last polled position.
-  const entry=liveView&&markers.get(liveView.markerKey);
-  if(entry)entry.marker.setLatLng([entry.item.telemetry.latitude,entry.item.telemetry.longitude]);
   liveView=null;lastLiveMessage=null;
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
+  applyLayoutSplit();
+  document.querySelector('#live-view').focus({preventScroll:true});
   renderLiveTelemetryStatus();
 }
 window.addEventListener('message',event=>{
-  const frame=document.querySelector('#live-view-frame');
-  const message=acceptLiveTelemetry(liveView,event,frame.contentWindow);
+  const message=acceptLiveTelemetry(liveView,event,liveFrame.contentWindow);
   if(!message)return;
   lastLiveMessage=message;
   const position=applyLiveTelemetry(liveView,message,Date.now());
-  const entry=markers.get(liveView.markerKey);
-  if(position&&entry)entry.marker.setLatLng(position);
+  if(position)liveMapFollower.update(position);
   renderLiveTelemetryStatus();
 });
+installForegroundResume(window,document,()=>{
+  if(!liveView||document.hidden)return;
+  liveFrame.contentWindow?.postMessage({type:FOREGROUND_RESUME_MESSAGE},liveView.frameOrigin);
+});
 document.querySelector('#live-view').addEventListener('click',()=>{
-  if(!bootstrap)return;
+  if(!bootstrap||!selected)return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
   liveViewUrlObject.searchParams.set('autostart','1');
   const liveViewUrl=liveViewUrlObject.href;
   const diagnostic=document.querySelector('#live-view-diagnostic');
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
-  liveView=selected?createLiveView(selected,new URL(liveViewUrl).origin):null;lastLiveMessage=null;
+  liveView=createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
+  liveMapFollower.begin(liveView);
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
-  document.querySelector('#live-view-panel').hidden=false;
+  operatorLayout.classList.add('live-view-open');
+  livePanel.hidden=false;
+  applyLayoutSplit();
+  document.querySelector('#close-live-view').focus({preventScroll:true});
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
-  document.querySelector('#live-view-frame').src=liveViewUrl;
+  liveFrame.src=liveViewUrl;
 });
-document.querySelector('#live-view-frame').addEventListener('load',event=>{
-  if(document.querySelector('#live-view-panel').hidden)return;
+liveFrame.addEventListener('load',event=>{
+  if(livePanel.hidden)return;
   const diagnostic=document.querySelector('#live-view-diagnostic');
   try{
     diagnostic.textContent+=event.currentTarget.contentWindow.isSecureContext?' — secure context ready':' — iframe is not a secure context';
@@ -255,6 +296,15 @@ document.querySelector('#live-view-frame').addEventListener('load',event=>{
   }
 });
 document.querySelector('#close-live-view').addEventListener('click',stopLiveView);
+liveRecenterButton.addEventListener('click',()=>liveMapFollower.recenter());
+const liveFullscreenButton=document.querySelector('#live-fullscreen');
+function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.textContent=fullscreen?'Exit full screen':'Full screen';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
+if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
+else{
+  liveFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===livePanel)await document.exitFullscreen();else await livePanel.requestFullscreen()}catch{document.querySelector('#live-view-diagnostic').textContent='Full-screen Live View is unavailable in this browser.'}});
+  document.addEventListener('fullscreenchange',()=>{syncLiveFullscreenButton();requestAnimationFrame(()=>map.invalidateSize({pan:false}))});
+  syncLiveFullscreenButton();
+}
 document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.addEventListener('click',()=>{
   tripMapPick=button.dataset.tripMapPick;
   document.querySelectorAll('[data-trip-map-pick]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));

@@ -6,8 +6,8 @@
   <title>Inference playback</title>
   <style>
     body { margin: 0; padding: 20px; color: #eee; background: #181818; font-family: system-ui, sans-serif; }
-    main { max-width: 980px; margin: auto; }
-    #stage { position: relative; width: fit-content; height: fit-content; background: #000; overflow: hidden; }
+    main { width: 100%; max-width: 980px; margin: auto; }
+    #stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }
     canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     #overlay { pointer-events: none; }
     #fps-overlay { position: absolute; top: 8px; left: 8px; z-index: 2; padding: 4px 7px; color: #fff; background: #000b; border-radius: 4px; font: 13px ui-monospace, monospace; pointer-events: none; }
@@ -73,12 +73,12 @@
   const compensationModeEl = document.getElementById('compensationMode');
   const ghostFramesEl = document.getElementById('ghostFrames');
   let socket = null, reconnectTimer = null, reconnectAttempt = 0, stopped = true;
-  let jumpPending = false;
+  let jumpPending = false, awaitingLiveEpoch = false, backgroundedWhilePlaying = false;
   let sessionId = sessionStorage.getItem('playback-session-id');
   let epoch = Number(sessionStorage.getItem('playback-epoch') || 0);
   let lastPresentedSeq = Number(sessionStorage.getItem('playback-last-seq') || -1);
   let queue = [], known = new Set(), pending = new Map();
-  let decoder = null, decoding = false, playing = false, sourceEnded = false;
+  let decoder = null, decoderGeneration = 0, decoding = false, playing = false, sourceEnded = false;
   let lastPresentedTs = null, lastInferenceMs = 0, presentedCount = 0;
   let browserFps = 0, fpsWindowStarted = performance.now(), fpsWindowFrames = 0;
   let lastMonocular = {};
@@ -181,8 +181,9 @@
     const stage = document.getElementById('stage');
     // Keep the visible stage at the source dimensions as well as keeping the
     // canvas backing store in that same coordinate space.
-    stage.style.width = `${w}px`;
-    stage.style.height = `${h}px`;
+    stage.style.width = '100%';
+    stage.style.height = 'auto';
+    stage.style.aspectRatio = `${w} / ${h}`;
   }
   function bufferedSeconds() {
     if (queue.length < 2) return 0;
@@ -282,9 +283,12 @@
   }
 
   function configureDecoder(meta) {
-    if (decoder && decoder.state !== 'closed') decoder.close();
-    decoder = new VideoDecoder({
+    invalidateDecoder();
+    const generation = decoderGeneration;
+    let configuredDecoder;
+    configuredDecoder = new VideoDecoder({
       output(frame) {
+        if (generation !== decoderGeneration || decoder !== configuredDecoder) { frame.close(); return; }
         const pair = pending.get(frame.timestamp);
         if (!pair) {
           // A jump/epoch reset may invalidate an in-flight decode. Do not
@@ -307,15 +311,27 @@
         if (lastPresentedTs == null || nextPaintAt == null) nextPaintAt = now;
         else nextPaintAt = Math.max(nextPaintAt + sourceDelta, now);
         const delay = Math.max(0, nextPaintAt - now);
-        setTimeout(() => requestAnimationFrame(() => paint(frame, pair)), delay);
+        setTimeout(() => requestAnimationFrame(() => {
+          if (generation !== decoderGeneration || decoder !== configuredDecoder || awaitingLiveEpoch || stopped) { frame.close(); return; }
+          paint(frame, pair);
+        }), delay);
       },
       error(error) {
+        if (generation !== decoderGeneration || decoder !== configuredDecoder) return;
         setStatus(`Decoder error: ${error.message || error}`, '#f66');
         decoding = false;
-        if (!stopped) { try { decoder.close(); } catch (_) {} decoder = null; pump(); updateStats(); }
+        invalidateDecoder();
+        if (!stopped) { pump(); updateStats(); }
       }
     });
+    decoder = configuredDecoder;
     decoder.configure({ codec: meta.codec || 'avc1.42E01F', codedWidth: meta.width || 1280, codedHeight: meta.height || 720, optimizeForLatency: false });
+  }
+  function invalidateDecoder() {
+    decoderGeneration++;
+    const previous = decoder;
+    decoder = null;
+    if (previous && previous.state !== 'closed') { try { previous.close(); } catch (_) {} }
   }
   function paint(frame, pair) {
     // Use the dimensions produced by the server's inference frame as the
@@ -521,7 +537,7 @@
       modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
     }
     const key = `${meta.epoch}:${meta.seq}`;
-    if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
+    if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; awaitingLiveEpoch = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
     if (known.has(key) || meta.epoch !== epoch) return;
     known.add(key);
     const pair = { epoch: meta.epoch, seq: meta.seq, timestamp_us: Number(meta.source.timestamp_us), keyframe: !!meta.encoded.keyframe, data, inference: meta.inference, frame: meta.frame, source: meta.source, telemetry: meta.telemetry };
@@ -557,11 +573,12 @@
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
         if (message.type === 'session') { sessionId = message.session_id; epoch = message.epoch; targetSeconds = message.buffer.target_seconds; lowWatermarkSeconds = message.buffer.low_watermark_seconds; maxBufferBytes = message.buffer.client_max_bytes; sessionStorage.setItem('playback-session-id', sessionId); }
-        else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; if (decoder) { try { decoder.close(); } catch (_) {} decoder = null; } }
+        else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); awaitingLiveEpoch = false; setStatus('Live IDR received; starting playback', '#4fdb8a'); updateStats(); }
         else if (message.type === 'fault') setStatus(message.detail, '#f66');
-        else if (message.type === 'resume_unavailable') { setStatus(`Resume unavailable: ${message.reason}; resyncing`, '#fc6'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; }
+        else if (message.type === 'resume_unavailable') { setStatus(`Resume unavailable: ${message.reason}; resyncing`, '#fc6'); awaitingLiveEpoch = true; queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); }
         return;
       }
+      if (awaitingLiveEpoch) return;
       const bytes = new Uint8Array(event.data), view = new DataView(event.data);
       if (bytes.byteLength < 4) return;
       const metaLen = view.getUint32(0), meta = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)));
@@ -592,8 +609,19 @@
     setStatus('Connecting…');
     openSocket();
   }
-  function stop() { stopped = true; playing = false; nextPaintAt = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; if (decoder) { try { decoder.close(); } catch (_) {} decoder = null; } queue = []; known.clear(); pending.clear(); resetCompensation(); browserFps = 0; fpsWindowStarted = performance.now(); fpsWindowFrames = 0; fpsOverlayEl.textContent = 'Browser FPS: --'; updateStats(); setStatus('Stopped'); }
-  function jumpLive() { queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; playing = false; lastPresentedSeq = -1; sessionStorage.setItem('playback-last-seq', '-1'); jumpPending = true; send({ type: 'jump_to_live' }); setStatus('Resynchronizing at live IDR…', '#fc6'); }
+  function stop() { stopped = true; jumpPending = false; awaitingLiveEpoch = false; backgroundedWhilePlaying = false; playing = false; nextPaintAt = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; invalidateDecoder(); queue = []; known.clear(); pending.clear(); resetCompensation(); browserFps = 0; fpsWindowStarted = performance.now(); fpsWindowFrames = 0; fpsOverlayEl.textContent = 'Browser FPS: --'; updateStats(); setStatus('Stopped'); }
+  function jumpLive(allowStopped = true) {
+    if (awaitingLiveEpoch || (stopped && !allowStopped)) return;
+    awaitingLiveEpoch = true;
+    queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; sourceEnded = false; lastPresentedSeq = -1;
+    sessionStorage.setItem('playback-last-seq', '-1');
+    invalidateDecoder();
+    jumpPending = !socket || socket.readyState !== WebSocket.OPEN;
+    if (!jumpPending) send({ type: 'jump_to_live' });
+    setStatus('Rejoining live stream…', '#fc6');
+    updateStats();
+  }
+  function resumeAtLive() { if (!stopped) jumpLive(false); }
   compensationModeEl.addEventListener('change', () => {
     compensationMode = compensationModeEl.value;
     localStorage.setItem('playback-compensation-mode', compensationMode);
@@ -617,6 +645,14 @@
   document.getElementById('start').onclick = start;
   document.getElementById('stop').onclick = stop;
   document.getElementById('live').onclick = jumpLive;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { if (!stopped) backgroundedWhilePlaying = true; return; }
+    if (backgroundedWhilePlaying) { backgroundedWhilePlaying = false; resumeAtLive(); }
+  });
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent || !parentOrigin || event.origin !== parentOrigin) return;
+    if (event.data?.type === 'operator-live-view-returned' && !document.hidden) resumeAtLive();
+  });
   // The operator dashboard opts into immediate playback when it opens this
   // page in its live-view panel. Direct visits remain manual-start by default.
   if (new URLSearchParams(location.search).get('autostart') === '1') start();

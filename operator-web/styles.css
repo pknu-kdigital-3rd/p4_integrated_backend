@@ -51,3 +51,31 @@ body.resizing-layout{user-select:none}
 #live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle]{color:#ffcf70}
 #live-view-frame{height:calc(100% - 112px)}
 @media(min-width:1001px){#live-view-panel{inset:76px 16px 16px auto;width:min(760px,50vw)}}
+
+/* Live View is a non-modal dashboard pane, not an overlay. */
+#operator-layout.live-view-open{grid-template-columns:minmax(320px,var(--map-width,50%)) 10px minmax(320px,1fr)}
+#operator-layout.live-view-open #operator-sidebar{display:none}
+#operator-layout.live-view-open #live-view-panel:not([hidden]){position:relative;inset:auto;z-index:auto;width:auto;height:auto;min-width:0;min-height:0;margin:0;border-radius:0;box-shadow:none;grid-column:3;grid-row:1;display:grid;grid-template-rows:52px 30px 30px minmax(0,1fr)}
+#live-view-panel[hidden]{display:none}
+.live-view-header{height:52px;min-width:0;padding:0 12px;gap:8px}
+.live-view-header h2{font-size:16px;white-space:nowrap}
+.live-view-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
+.live-view-actions button{padding:7px 9px;font-size:12px;white-space:nowrap}
+#live-view-diagnostic,#live-telemetry-status{height:30px;min-width:0;margin:0;padding:6px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ffcf70;background:#18283d;font:12px ui-monospace,monospace}
+#live-telemetry-status{background:#13243a}
+#live-telemetry-status[data-level=ok]{color:#7be0a8}
+#live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle]{color:#ffcf70}
+#operator-layout.live-view-open #live-view-frame{display:block;width:100%;height:100%;min-height:0;border:0;background:#000}
+#operator-layout.live-view-open #live-view-panel:not([hidden]):fullscreen{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:10000;grid-column:auto;grid-row:auto;border:0;border-radius:0;box-shadow:none}
+@media(max-width:1000px){
+  #operator-layout.live-view-open{height:calc(100dvh - 64px);min-height:0;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,var(--map-height,46vh)) 10px minmax(0,1fr)}
+  #operator-layout.live-view-open #map{height:100%;min-height:0;grid-column:1;grid-row:1}
+  #operator-layout.live-view-open #layout-splitter{grid-column:1;grid-row:2}
+  #operator-layout.live-view-open #live-view-panel:not([hidden]){grid-column:1;grid-row:3}
+}
+@media(max-width:520px){
+  .live-view-header{padding:0 6px}
+  .live-view-header h2{font-size:14px}
+  .live-view-actions{gap:3px}
+  .live-view-actions button{padding:6px;font-size:11px}
+}

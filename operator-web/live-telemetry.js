@@ -13,6 +13,9 @@ export function createLiveView(item, frameOrigin) {
   const metadata = item?.telemetry?.source_metadata || {};
   return {
     markerKey: item?.telemetry?.external_id ?? null,
+    // Retain the selected item as a fallback for creating a live-only marker
+    // before the fleet polling endpoint has returned this vehicle.
+    item,
     vehicleId: item?.vehicleId != null ? String(item.vehicleId) : null,
     tripId: item?.tripId != null ? String(item.tripId) : null,
     // Unknown until the tracking snapshot or the first accepted frame names it.
