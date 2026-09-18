@@ -88,6 +88,18 @@ load_environment() {
   [[ "$RECORDING_ENABLED" == true || "$RECORDING_ENABLED" == false ]] \
     || die "RECORDING_ENABLED must be true or false"
   export RECORDING_ENABLED
+  ANDROID_TELEMETRY_ENABLED="${ANDROID_TELEMETRY_ENABLED:-false}"
+  [[ "$ANDROID_TELEMETRY_ENABLED" == true || "$ANDROID_TELEMETRY_ENABLED" == false ]] \
+    || die "ANDROID_TELEMETRY_ENABLED must be true or false"
+  export ANDROID_TELEMETRY_ENABLED
+  # Android telemetry validates stream identity and persists GPS through Node
+  # even when recording is disabled, so it needs the internal URL and token too.
+  if [[ "$ANDROID_TELEMETRY_ENABLED" == true ]]; then
+    [[ -n "${NODE_INTERNAL_BASE_URL:-}" ]] \
+      || die "NODE_INTERNAL_BASE_URL is required when ANDROID_TELEMETRY_ENABLED=true"
+    [[ ${#NODE_INTERNAL_SERVICE_TOKEN} -ge 32 && "$NODE_INTERNAL_SERVICE_TOKEN" != replace-* ]] \
+      || die "NODE_INTERNAL_SERVICE_TOKEN must be a real token of at least 32 characters when ANDROID_TELEMETRY_ENABLED=true"
+  fi
 
   : "${P4_ROOT:?P4_ROOT is required in $ENV_FILE}"
   : "${HOST:?HOST is required in $ENV_FILE}"

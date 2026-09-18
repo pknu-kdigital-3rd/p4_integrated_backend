@@ -31,3 +31,21 @@ The SVG intentionally shows only topology, protocols, and short responsibility l
 - Live joining uses `session_id + frame_id` rather than arrival order.
 - Replay aligns capture time with video PTS through stored time anchors.
 - FastAPI persistence is asynchronous/batched and remains outside the inference critical path.
+
+## Android GPS/IMU telemetry (v18)
+
+Android sends `telemetry-events` on the same WebRTC PeerConnection as video and `qr-events` (`mode=REPLAY` when replaying a recorded dataset, `LIVE` for real sensors; the server path is identical).
+
+| Flow | Purpose / payload |
+|---|---|
+| Android → Go relay — `telemetry-events` DataChannel | Batches of GPS (~1 Hz) and processed IMU (~125 Hz) samples, each with its source `timestamp_ns`. |
+| Go relay → Node — `POST /internal/telemetry/gps` | Every authoritative GPS fix, bound to the relay-validated trip/vehicle/session, persisted idempotently to `vehicle_position` (`REPLAY→RECORDED_GPS`, `LIVE→DEVICE_GPS`). |
+| Go relay → Vision — `POST /internal/telemetry` | Full GPS/IMU batches for the live-video source timeline (bounded, stale IMU dropped first). |
+| Routing/tracking → Go relay — `GET /internal/telemetry/vehicles` | Current device positions merged with BIMS in `/internal/vehicles`. |
+| Vision → browser — frame metadata `telemetry` | GPS/IMU matched to the frame's resolved source timestamp (interpolated/extrapolated/held/stale status explicit). |
+| Vision iframe → operator page — `postMessage` | Telemetry of the frame actually presented; drives only the selected Live View marker. |
+
+- Identity is server-authoritative: telemetry is bound to the Node-validated `tripId`/`vehicleId`/`recordingSessionId` of the SDP offer; payload identity that disagrees is rejected, and a replaced PeerConnection cannot inject telemetry.
+- `recordingSessionId + source_timestamp_ns` locate telemetry in the source footage; `vehicleId + tripId` identify the real vehicle/trip; `received_at` is when the server received it. These stay separate end to end.
+- Vision resolves each frame's source time from QR anchors plus RTP PTS (playback rate estimated, rewinds/seeks start a new generation) and matches telemetry only within the frame's own session.
+- Only real source GPS fixes are persisted. IMU and display positions are transient.

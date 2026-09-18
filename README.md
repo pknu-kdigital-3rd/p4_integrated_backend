@@ -26,4 +26,8 @@ Public HTTP redirects to HTTPS. Node, Vision, routing/tracking, and relay HTTP l
 For a Linux host, use the single-environment, health-checked startup procedure in [docs/integration/LINUX_STARTUP_RUNBOOK.md](docs/integration/LINUX_STARTUP_RUNBOOK.md) and copy [deploy/env.local.example](deploy/env.local.example) to the untracked `deploy/env.local`.
 After editing that file, `scripts/run-linux-stack.sh all` performs setup, startup, and health verification in one command.
 
+## Android GPS/IMU telemetry
+
+With `ANDROID_TELEMETRY_ENABLED=true` (relay and Node), Android's `telemetry-events` DataChannel feeds the live map and Live View: the Go relay binds each batch to the Node-validated trip/vehicle/recording session, persists every GPS fix through `POST /internal/telemetry/gps` (`vehicle_position`, see [docs/v18_its_integrated_erd.md](docs/v18_its_integrated_erd.md)), forwards GPS/IMU to Vision for source-time matching against the displayed video, and publishes current device positions that routing/tracking merges with BIMS. Vision's Live View shows the telemetry of the presented frame and posts it to the operator page, where it moves the selected vehicle's marker; the 3-second fleet poll still drives all other markers. See [docs/pipeline_architecture_control_vision_v6_notes.md](docs/pipeline_architecture_control_vision_v6_notes.md) for the flows.
+
 GPU-dependent vision tests and Android device streaming require their original environment and are not part of CPU-only verification. No SUMO, Tauri, route reassignment, or multi-stream media routing is included.

@@ -129,6 +129,17 @@ together. For a local smoke test without BIMS, leave
 `TELEMETRY_MODE=playback`. For live BIMS, set
 `TELEMETRY_MODE=live` and add `BUSAN_BIMS_SERVICE_KEY`.
 
+For Android GPS/IMU telemetry (live map + synchronized Live View), set
+`ANDROID_TELEMETRY_ENABLED=true` and replace the example Node token; this is
+independent of recording. The relay then validates each Android stream's
+Trip/Vehicle/Recording Session through Node, persists every GPS fix through
+`POST /internal/telemetry/gps`, forwards GPS/IMU to Vision
+(`PY_TELEMETRY_URL`), and exposes current device positions to routing/tracking
+(`MEDIA_RELAY_INTERNAL_BASE_URL`). Set `LIVE_VIEW_PARENT_ORIGINS` to the
+operator origin so the Live View iframe may report presented-frame telemetry
+to the map. Relay counters appear in the `[relay-telemetry]` log line and at
+`GET /internal/telemetry/status`; Vision logs a `[telemetry]` line.
+
 For recording, set `RECORDING_ENABLED=true` and replace the example Node token,
 MinIO root password, relay secret, and Node MinIO secret with independent values.
 Vision stores every completed inference result by default. Set
