@@ -49,6 +49,27 @@ describe("live map follower", () => {
         expect(marker.setStyle).toHaveBeenLastCalledWith(FLEET_MARKER_STYLE);
     });
 
+    it("follows the newly selected vehicle after switching markers", () => {
+        const firstMarker = { setLatLng: vi.fn(), setStyle: vi.fn() };
+        const secondMarker = { setLatLng: vi.fn(), setStyle: vi.fn() };
+        const markers = new Map([
+            ["device:3", { marker: firstMarker, item: {}, liveOnly: false }],
+            ["device:4", { marker: secondMarker, item: {}, liveOnly: false }],
+        ]);
+        const map = { getZoom: () => 12, setView: vi.fn(), panTo: vi.fn() };
+        const follower = createLiveMapFollower({ map, markers, createEntry: vi.fn() });
+
+        follower.begin({ markerKey: "device:3" });
+        follower.update([35.1, 129.1]);
+        follower.end();
+        follower.begin({ markerKey: "device:4" });
+        follower.update([36.2, 128.2]);
+
+        expect(firstMarker.setLatLng).toHaveBeenLastCalledWith([35.1, 129.1]);
+        expect(secondMarker.setLatLng).toHaveBeenLastCalledWith([36.2, 128.2]);
+        expect(map.setView).toHaveBeenLastCalledWith([36.2, 128.2], 12, { animate: false });
+    });
+
     it("ignores missing or malformed GPS positions", () => {
         const map = { getZoom: () => 12, setView: vi.fn(), panTo: vi.fn() };
         const follower = createLiveMapFollower({ map, markers: new Map(), createEntry: vi.fn() });

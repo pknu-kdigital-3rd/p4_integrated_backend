@@ -75,7 +75,44 @@ stackedLayout.addEventListener('change',()=>{mapSplitRatio=readSplitRatio();appl
 window.addEventListener('resize',()=>applyLayoutSplit());
 applyLayoutSplit();
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
-function selectVehicle(item){selected=item;details.hidden=false;const t=item.telemetry,r=item.plannedRoute;fields.replaceChildren();for(const [label,value] of [['Vehicle',item.vehicleName||item.vehicleCode||t.external_id],['Source',`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],['Status',item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],['Speed',`${t.speed_kmh??'—'} km/h`],['Observed',t.observed_at_utc||'—'],['Trip ID',item.tripId??'—']]){const term=document.createElement('dt'),description=document.createElement('dd');term.textContent=label;description.textContent=String(value);fields.append(term,description)}document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}if(r?.routeGeojson){routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map)}document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';if(item.tripId)void loadTripRecordings(String(item.tripId))}
+function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)&&liveTarget?.tripId===(item?.tripId!=null?String(item.tripId):null)}
+function releaseLiveMarker(){
+  const markerState=liveMapFollower.end();
+  if(!markerState.markerKey)return;
+  const entry=markers.get(markerState.markerKey);
+  if(entry?.liveOnly){map.removeLayer(entry.marker);markers.delete(markerState.markerKey)}
+  else if(entry){
+    const telemetry=entry.item?.telemetry;
+    if(Number.isFinite(telemetry?.latitude)&&Number.isFinite(telemetry?.longitude))entry.marker.setLatLng([telemetry.latitude,telemetry.longitude]);
+  }
+}
+function liveTargetLabel(item){return item?.vehicleCode||item?.vehicleName||`Vehicle ID ${item?.vehicleId??item?.telemetry?.external_id??'unknown'}`}
+function retargetLiveView(item){
+  if(!liveView||sameLiveTarget(liveView,item))return;
+  const frameOrigin=liveView.frameOrigin;
+  releaseLiveMarker();
+  liveView=createLiveView(item,frameOrigin);
+  lastLiveMessage=null;
+  liveMapFollower.begin(liveView);
+  document.querySelector('#live-view-title').textContent=`Live View · ${liveTargetLabel(item)}`;
+  renderLiveTelemetryStatus();
+}
+function selectVehicle(item){
+  selected=item;
+  details.hidden=false;
+  const t=item.telemetry,r=item.plannedRoute;
+  fields.replaceChildren();
+  for(const [label,value] of [['Vehicle',item.vehicleName||item.vehicleCode||t.external_id],['Source',`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],['Status',item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],['Speed',`${t.speed_kmh??'—'} km/h`],['Observed',t.observed_at_utc||'—'],['Trip ID',item.tripId??'—']]){
+    const term=document.createElement('dt'),description=document.createElement('dd');
+    term.textContent=label;description.textContent=String(value);fields.append(term,description);
+  }
+  document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;
+  if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}
+  if(r?.routeGeojson)routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map);
+  document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';
+  if(item.tripId)void loadTripRecordings(String(item.tripId));
+  retargetLiveView(item);
+}
 function render(snapshot){
   for(const item of snapshot.vehicles){
     const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
@@ -236,12 +273,7 @@ function renderLiveTelemetryStatus(){
 }
 function stopLiveView(){
   if(document.fullscreenElement===livePanel)void document.exitFullscreen().catch(()=>{});
-  const markerState=liveMapFollower.end();
-  if(markerState.markerKey){
-    const entry=markers.get(markerState.markerKey);
-    if(entry?.liveOnly){map.removeLayer(entry.marker);markers.delete(markerState.markerKey)}
-    else if(entry){const telemetry=entry.item?.telemetry;if(Number.isFinite(telemetry?.latitude)&&Number.isFinite(telemetry?.longitude))entry.marker.setLatLng([telemetry.latitude,telemetry.longitude])}
-  }
+  releaseLiveMarker();
   // Navigating the iframe away from the Vision page closes its WebRTC peer
   // connection and releases the browser media resources.
   liveFrame.src='about:blank';
@@ -249,6 +281,7 @@ function stopLiveView(){
   operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
   liveView=null;lastLiveMessage=null;
+  document.querySelector('#live-view-title').textContent='Live View';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
   applyLayoutSplit();
   document.querySelector('#live-view').focus({preventScroll:true});
@@ -276,6 +309,7 @@ document.querySelector('#live-view').addEventListener('click',()=>{
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
   liveView=createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
   liveMapFollower.begin(liveView);
+  document.querySelector('#live-view-title').textContent=`Live View · ${liveTargetLabel(selected)}`;
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
   operatorLayout.classList.add('live-view-open');
