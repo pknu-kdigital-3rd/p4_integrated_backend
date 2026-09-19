@@ -61,12 +61,166 @@ function distanceMeters(first: Coordinate, second: Coordinate): number {
     return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
-function anchorRerouteAtPosition(route: Awaited<ReturnType<typeof routingInternalClient.route>>, position: Coordinate) {
+type RerouteContinuation = {
+    origin: Coordinate;
+    coordinates: number[][];
+    distanceM: number;
+    edge: Record<string, unknown>;
+};
+
+function routeCoordinates(value: unknown): number[][] {
+    const candidate = value as { coordinates?: unknown } | null;
+    if (!candidate || !Array.isArray(candidate.coordinates)) return [];
+    return candidate.coordinates.flatMap((pair) => {
+        if (!Array.isArray(pair) || pair.length < 2) return [];
+        const lon = Number(pair[0]);
+        const lat = Number(pair[1]);
+        return Number.isFinite(lon) && Number.isFinite(lat) ? [[lon, lat]] : [];
+    });
+}
+
+function routeLineLength(coordinates: number[][]): number {
+    let total = 0;
+    for (let index = 1; index < coordinates.length; index += 1) {
+        total += distanceMeters(
+            { lat: Number(coordinates[index - 1]![1]), lon: Number(coordinates[index - 1]![0]) },
+            { lat: Number(coordinates[index]![1]), lon: Number(coordinates[index]![0]) },
+        );
+    }
+    return total;
+}
+
+function sliceRouteLine(coordinates: number[][], startM: number, endM: number): number[][] {
+    if (coordinates.length < 2) return coordinates;
+    const total = routeLineLength(coordinates);
+    const start = Math.max(0, Math.min(total, startM));
+    const end = Math.max(start, Math.min(total, endM));
+    const result: number[][] = [];
+    let traversed = 0;
+    for (let index = 1; index < coordinates.length; index += 1) {
+        const from = coordinates[index - 1]!;
+        const to = coordinates[index]!;
+        const segmentM = distanceMeters(
+            { lat: Number(from[1]), lon: Number(from[0]) },
+            { lat: Number(to[1]), lon: Number(to[0]) },
+        );
+        const next = traversed + segmentM;
+        if (segmentM <= 0) {
+            traversed = next;
+            continue;
+        }
+        if (next >= start && traversed <= end) {
+            const startRatio = Math.max(0, Math.min(1, (start - traversed) / segmentM));
+            const endRatio = Math.max(0, Math.min(1, (end - traversed) / segmentM));
+            const startPoint = [
+                from[0]! + (to[0]! - from[0]!) * startRatio,
+                from[1]! + (to[1]! - from[1]!) * startRatio,
+            ];
+            const endPoint = [
+                from[0]! + (to[0]! - from[0]!) * endRatio,
+                from[1]! + (to[1]! - from[1]!) * endRatio,
+            ];
+            if (!result.length) result.push(startPoint);
+            if (endRatio > startRatio || result.length === 1) result.push(endPoint);
+        }
+        traversed = next;
+        if (traversed >= end) break;
+    }
+    return result.length >= 2 ? result : [];
+}
+
+function activeRouteForReroute(current: Awaited<ReturnType<typeof activeVehicleState>>) {
+    const routes = current?.trip?.routes ?? [];
+    return routes.find((route) => String(route.routeId) === String(current?.activeRouteId)) ?? routes.at(-1);
+}
+
+function forwardContinuationForReroute(
+    current: Awaited<ReturnType<typeof activeVehicleState>>,
+    position: Coordinate,
+): RerouteContinuation | null {
+    if (!current?.currentEdgeId) return null;
+    // The simulation worker records the next blocked edge when it stops at
+    // its entry boundary.  That edge is not occupied yet; preserving it as a
+    // continuation would cross the closure before searching for an option.
+    // NO_ROUTE likewise retries from the saved checkpoint rather than
+    // replaying the old route's edge remainder.
+    if (["BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"].includes(current.simStatus)) return null;
+    const route = activeRouteForReroute(current);
+    if (!route) return null;
+    const itinerary = Array.isArray(route.directedItinerary)
+        ? route.directedItinerary as Array<Record<string, unknown>>
+        : [];
+    const edge = itinerary.find((item) => item.edgeId === current.currentEdgeId);
+    if (!edge) return null;
+    const edgeStartM = Number(edge.cumulativeStartM);
+    const edgeLengthM = Number(edge.lengthM);
+    if (!Number.isFinite(edgeStartM) || !Number.isFinite(edgeLengthM) || edgeLengthM <= 0) return null;
+    const currentOffsetM = Number(current.offsetM);
+    const startM = Number.isFinite(currentOffsetM)
+        ? Math.max(edgeStartM, Math.min(edgeStartM + edgeLengthM, currentOffsetM))
+        : edgeStartM;
+    const endM = edgeStartM + edgeLengthM;
+    const coordinates = sliceRouteLine(routeCoordinates(route.routeGeojson), startM, endM);
+    if (coordinates.length < 2) return null;
+    coordinates[0] = [position.lon, position.lat];
+    const distanceM = routeLineLength(coordinates);
+    const last = coordinates.at(-1)!;
+    const continuationEdge = {
+        ...edge,
+        cumulativeStartM: 0,
+        lengthM: distanceM,
+    };
+    return {
+        origin: { lat: Number(last[1]), lon: Number(last[0]) },
+        coordinates,
+        distanceM,
+        edge: continuationEdge,
+    };
+}
+
+function anchorRerouteAtPosition(
+    route: Awaited<ReturnType<typeof routingInternalClient.route>>,
+    position: Coordinate,
+    continuation?: RerouteContinuation | null,
+) {
     const coordinates = route.routeGeojson?.coordinates;
     const first = coordinates?.[0];
     if (!Array.isArray(first) || first.length < 2
         || !Number.isFinite(position.lat) || !Number.isFinite(position.lon)
         || !Number.isFinite(Number(first[0])) || !Number.isFinite(Number(first[1]))) return route;
+
+    if (continuation) {
+        const continuationLast = continuation.coordinates.at(-1)!;
+        const connectorDistanceM = distanceMeters(
+            { lat: Number(continuationLast[1]), lon: Number(continuationLast[0]) },
+            { lat: Number(first[1]), lon: Number(first[0]) },
+        );
+        const prefix = [...continuation.coordinates];
+        if (connectorDistanceM >= 1) prefix.push([Number(first[0]), Number(first[1])]);
+        const prefixDistanceM = continuation.distanceM + (connectorDistanceM >= 1 ? connectorDistanceM : 0);
+        const averageSpeedMps = Number.isFinite(route.distanceM) && Number.isFinite(route.durationSec)
+            && route.durationSec > 0 && route.distanceM > 0
+            ? Math.max(1, route.distanceM / route.durationSec)
+            : 8;
+        const shiftedItinerary = Array.isArray(route.directedItinerary)
+            ? route.directedItinerary.map((rawEdge) => {
+                const edge = { ...rawEdge };
+                const cumulativeStartM = Number(edge.cumulativeStartM);
+                if (Number.isFinite(cumulativeStartM)) edge.cumulativeStartM = cumulativeStartM + prefixDistanceM;
+                return edge;
+            })
+            : route.directedItinerary;
+        return {
+            ...route,
+            routeGeojson: {
+                ...route.routeGeojson,
+                coordinates: [...prefix, ...coordinates.slice(1)],
+            },
+            directedItinerary: [continuation.edge, ...(shiftedItinerary ?? [])],
+            distanceM: route.distanceM + prefixDistanceM,
+            durationSec: route.durationSec + prefixDistanceM / averageSpeedMps,
+        };
+    }
 
     const snappedOrigin = { lat: Number(first[1]), lon: Number(first[0]) };
     const connectorDistanceM = distanceMeters(position, snappedOrigin);
@@ -564,8 +718,13 @@ export const virtualService = {
             .filter((waypoint) => waypoint.status !== "REACHED")
             .map((waypoint) => point(waypoint.originalPoint));
         const currentPosition = point(current.lastPosition);
+        const continuation = forwardContinuationForReroute(current, currentPosition);
         const routeInput = {
-            origin: currentPosition,
+            // Start the graph solve at the forward endpoint of the edge the
+            // vehicle currently occupies.  The edge remainder is prefixed to
+            // the returned route below, so the vehicle keeps moving from its
+            // real checkpoint while A* searches only the legal continuation.
+            origin: continuation?.origin ?? currentPosition,
             destination: options.destination ?? point(current.trip.destination),
             waypoints: remainingWaypoints,
             vehicleProfile: profileForVehicle(vehicle),
@@ -584,7 +743,7 @@ export const virtualService = {
             if (!(error instanceof AppError) || error.code !== "ROUTE_NOT_FOUND" || !current.currentEdgeId) throw error;
             route = await routingInternalClient.route(routeInput);
         }
-        route = anchorRerouteAtPosition(route, currentPosition);
+        route = anchorRerouteAtPosition(route, currentPosition, continuation);
         const scenario = await getScenario(current.scenarioId);
         return prisma.$transaction(async (tx) => {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
@@ -608,6 +767,8 @@ export const virtualService = {
                 },
             });
             const motionState = latestTrip.stateRecord.simStatus === "PAUSED" ? "PAUSED" : "DRIVING";
+            const nextEdgeId = itineraryEdge(route.directedItinerary, "edgeId");
+            const nextPhysicalSegmentId = itineraryEdge(route.directedItinerary, "physicalSegmentId");
             await tx.virtualTrip.update({
                 where: { virtualTripId: current.virtualTripId },
                 data: {
@@ -618,7 +779,7 @@ export const virtualService = {
                     ...(options.destination ? { destination: json(options.destination), tripRevision: { increment: 1 } } : {}),
                 },
             });
-            await tx.virtualVehicleState.update({ where: { vehicleId }, data: { activeRouteId: nextRoute.routeId, routeVersion: nextVersion, graphVersion: route.graphVersion, simStatus: motionState, simElapsedMs: 0, lastCheckpointAt: new Date(), blockedReason: null, commandVersion: { increment: 1 } } });
+            await tx.virtualVehicleState.update({ where: { vehicleId }, data: { activeRouteId: nextRoute.routeId, routeVersion: nextVersion, graphVersion: route.graphVersion, simStatus: motionState, simElapsedMs: 0, currentEdgeId: nextEdgeId, currentPhysicalSegmentId: nextPhysicalSegmentId, offsetM: 0, lastCheckpointAt: new Date(), blockedReason: null, commandVersion: { increment: 1 } } });
             await createEvent(tx, { scenarioId: current.scenarioId, virtualTripId: current.virtualTripId, actorId: options.actorId ?? null, eventType: "ROUTE_RECALCULATED", payload: { reason: options.reason ?? "FOLLOWING_ENABLED", routeVersion: nextVersion } });
             return nextRoute;
         }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 15000 });
