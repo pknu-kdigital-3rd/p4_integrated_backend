@@ -8,6 +8,7 @@ const status = document.querySelector('#virtual-status');
 const scenarioSelect = document.querySelector('#virtual-scenario');
 const vehicleSelect = document.querySelector('#virtual-vehicle');
 const routeLayerGroup = L.layerGroup().addTo(map);
+const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
@@ -67,6 +68,13 @@ function renderDraft() {
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
   document.querySelector('#virtual-dispatch').disabled = false;
 }
+function renderActiveTripRoute(vehicle) {
+  activeRouteLayerGroup.clearLayers();
+  const trip = vehicle?.state?.trip;
+  const route = trip?.routes?.find((item) => item.isCurrent) || trip?.routes?.[0];
+  if (!route?.routeGeojson) return;
+  L.geoJSON(route.routeGeojson, { style: { color: '#e76f51', weight: 5, opacity: 0.9, dashArray: '8 5' } }).addTo(activeRouteLayerGroup);
+}
 function renderVehicles() {
   const selected = selectedVehicleId;
   vehicleSelect.replaceChildren(new Option('Select a virtual vehicle', ''));
@@ -89,6 +97,7 @@ function renderVehicles() {
 function renderSelectedVehicle(vehicle) {
   const controls = document.querySelector('#virtual-trip-controls');
   const trip = vehicle?.state?.trip;
+  renderActiveTripRoute(vehicle);
   controls.hidden = !trip;
   if (!trip) return;
   const settings = vehicle.following || { autoFollowEnabled: true };
@@ -221,12 +230,12 @@ async function switchMode(next) {
   document.querySelector('#live-view-panel').hidden = true;
   if (next === 'virtual') {
     map.eachLayer((layer) => {
-      if (layer !== routeLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && !layer._url) map.removeLayer(layer);
+      if (layer !== routeLayerGroup && layer !== activeRouteLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && !layer._url) map.removeLayer(layer);
     });
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
-    routeLayerGroup.clearLayers(); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
+    routeLayerGroup.clearLayers(); activeRouteLayerGroup.clearLayers(); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     window.__virtualMode = false;
   }
