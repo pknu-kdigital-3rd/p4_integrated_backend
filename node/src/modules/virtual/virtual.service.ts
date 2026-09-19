@@ -365,19 +365,33 @@ export const virtualService = {
             const route = trip.routes[0];
             if (!route) throw new AppError(500, "Accepted trip has no route", "ROUTE_INITIALIZATION_FAILED");
             await tx.virtualTrip.update({ where: { virtualTripId: trip.virtualTripId }, data: { activeRouteId: route.routeId } });
-            await tx.virtualVehicleState.create({
-                data: {
-                    vehicleId: request.selectedVehicleId,
-                    scenarioId: request.scenarioId,
-                    virtualTripId: trip.virtualTripId,
-                    activeRouteId: route.routeId,
-                    simStatus: "DRIVING",
-                    graphVersion: route.graphVersion,
-                    currentEdgeId: itineraryEdge(request.draft.directedItinerary, "edgeId"),
-                    currentPhysicalSegmentId: itineraryEdge(request.draft.directedItinerary, "physicalSegmentId"),
-                    lastPosition: json(request.draft.origin),
-                    speedKmh: 30,
-                },
+            const initialState = {
+                scenarioId: request.scenarioId,
+                virtualTripId: trip.virtualTripId,
+                activeRouteId: route.routeId,
+                simStatus: "DRIVING",
+                routeVersion: 1,
+                commandVersion: 1,
+                eventSequence: 0n,
+                graphVersion: route.graphVersion,
+                currentEdgeId: itineraryEdge(request.draft.directedItinerary, "edgeId"),
+                currentPhysicalSegmentId: itineraryEdge(request.draft.directedItinerary, "physicalSegmentId"),
+                offsetM: null,
+                speedKmh: 30,
+                speedFactor: 1,
+                simElapsedMs: 0n,
+                lastPosition: json(request.draft.origin),
+                blockedReason: null,
+                lastCheckpointAt: new Date(),
+                updatedAt: new Date(),
+            };
+            // A vehicle keeps its terminal checkpoint row for history. Reuse
+            // that row when assigning the vehicle to its next trip; the
+            // vehicle-level primary key must never be duplicated.
+            await tx.virtualVehicleState.upsert({
+                where: { vehicleId: request.selectedVehicleId },
+                create: { vehicleId: request.selectedVehicleId, ...initialState },
+                update: initialState,
             });
             await tx.virtualDispatchRequest.update({ where: { requestId }, data: { state: "ACCEPTED", acceptedTripId: trip.virtualTripId, decidedAt: new Date(), decidedBy: actorId ?? null, revision: { increment: 1 } } });
             await tx.vehicle.update({ where: { vehicleId: request.selectedVehicleId }, data: { vehicleStatus: "DRIVING" } });
