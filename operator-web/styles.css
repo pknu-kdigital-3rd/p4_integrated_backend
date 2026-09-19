@@ -46,6 +46,8 @@ body.resizing-layout{user-select:none}
 #virtual-trip-controls{display:grid;gap:7px}
 #virtual-trip-controls button{padding:7px 9px}
 #virtual-status[data-level=error]{color:#ff9c9c}
+.virtual-route-arrow{background:transparent;border:0;pointer-events:none}
+.virtual-route-arrow span{display:block;font-size:18px;font-weight:900;line-height:18px;text-shadow:0 0 2px #fff,0 0 4px #fff;transform-origin:50% 50%}
 body.virtual-mode #operator-sidebar{padding-top:12px}
 @media(max-width:700px){#workspace-nav{order:3;width:100%;margin:4px 0 0}header{height:auto;min-height:64px;flex-wrap:wrap;padding:8px 12px}}
 @media(min-width:1001px){body.resizing-layout{cursor:col-resize}}

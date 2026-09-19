@@ -59,6 +59,86 @@ function renderPoints() {
   document.querySelector('#virtual-destination').textContent = formatPoint(points.destination);
   document.querySelector('#virtual-waypoints').textContent = points.waypoints.length ? points.waypoints.map(formatPoint).join(' · ') : 'none';
 }
+function routePoints(routeGeojson) {
+  if (routeGeojson?.type !== 'LineString' || !Array.isArray(routeGeojson.coordinates)) return [];
+  return routeGeojson.coordinates.flatMap((coordinate) => {
+    if (!Array.isArray(coordinate) || coordinate.length < 2) return [];
+    const lon = Number(coordinate[0]);
+    const lat = Number(coordinate[1]);
+    return Number.isFinite(lat) && Number.isFinite(lon) ? [{ lat, lon }] : [];
+  });
+}
+function routeDistanceM(a, b) {
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const dLat = lat2 - lat1;
+  const dLon = (b.lon - a.lon) * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+function routeArrowPoints(routeGeojson) {
+  const points = routePoints(routeGeojson);
+  if (points.length < 2) return [];
+  const lengths = points.slice(1).map((point, index) => routeDistanceM(points[index], point));
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  if (total < 20) return [];
+  const spacing = total <= 160 ? total / 2 : Math.max(180, total / 45);
+  const targets = [];
+  for (let target = spacing / 2; target < total; target += spacing) targets.push(target);
+  if (!targets.length) targets.push(total / 2);
+  const arrows = [];
+  let traversed = 0;
+  let targetIndex = 0;
+  for (let index = 0; index < lengths.length && targetIndex < targets.length; index += 1) {
+    const length = lengths[index];
+    if (length <= 0) continue;
+    while (targetIndex < targets.length && targets[targetIndex] <= traversed + length) {
+      const from = points[index];
+      const to = points[index + 1];
+      const ratio = (targets[targetIndex] - traversed) / length;
+      const latitude = from.lat + (to.lat - from.lat) * ratio;
+      const longitude = from.lon + (to.lon - from.lon) * ratio;
+      const latitudeScale = Math.cos(((from.lat + to.lat) / 2) * Math.PI / 180);
+      const angle = Math.atan2(-(to.lat - from.lat), (to.lon - from.lon) * latitudeScale) * 180 / Math.PI;
+      arrows.push({ lat: latitude, lon: longitude, angle });
+      targetIndex += 1;
+    }
+    traversed += length;
+  }
+  return arrows;
+}
+function addRouteVisual(group, routeGeojson, style, tooltip) {
+  if (!routeGeojson) return;
+  L.geoJSON(routeGeojson, {
+    style: {
+      color: style.casingColor,
+      weight: style.casingWeight,
+      opacity: style.casingOpacity,
+      lineCap: 'round',
+      lineJoin: 'round',
+    },
+  }).addTo(group);
+  const line = L.geoJSON(routeGeojson, {
+    style: {
+      color: style.lineColor,
+      weight: style.lineWeight,
+      opacity: style.lineOpacity,
+      dashArray: style.dashArray,
+      lineCap: 'round',
+      lineJoin: 'round',
+    },
+  }).addTo(group);
+  if (tooltip) line.bindTooltip(tooltip);
+  for (const arrow of routeArrowPoints(routeGeojson)) {
+    const icon = L.divIcon({
+      className: 'virtual-route-arrow',
+      html: `<span style="color:${style.arrowColor};transform:rotate(${arrow.angle.toFixed(1)}deg)">➤</span>`,
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+    L.marker([arrow.lat, arrow.lon], { icon, interactive: false, keyboard: false }).addTo(group);
+  }
+}
 function renderDraft() {
   routeLayerGroup.clearLayers();
   if (!draft) {
@@ -66,7 +146,10 @@ function renderDraft() {
     document.querySelector('#virtual-dispatch').disabled = true;
     return;
   }
-  if (draft.routeGeojson) L.geoJSON(draft.routeGeojson, { style: { color: '#6a4c93', weight: 6, opacity: 0.9 } }).addTo(routeLayerGroup);
+  addRouteVisual(routeLayerGroup, draft.routeGeojson, {
+    casingColor: '#ffffff', casingWeight: 14, casingOpacity: 0.9,
+    lineColor: '#7c3aed', lineWeight: 8, lineOpacity: 0.98, arrowColor: '#4c1d95',
+  }, 'Route preview');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
   document.querySelector('#virtual-dispatch').disabled = false;
 }
@@ -81,12 +164,10 @@ function renderActiveTripRoute(vehicle) {
     .sort((a, b) => Number(b.routeVersion || 0) - Number(a.routeVersion || 0))[0];
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
-    const layer = L.geoJSON(route.routeGeojson, {
-      style: current
-        ? { color: '#e76f51', weight: 5, opacity: 0.9, dashArray: '8 5' }
-        : { color: '#6b7280', weight: 4, opacity: 0.35, dashArray: '4 7' },
-    }).addTo(activeRouteLayerGroup);
-    layer.bindTooltip(current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
+    addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
+      ? { casingColor: '#ffffff', casingWeight: 14, casingOpacity: 0.95, lineColor: '#0875f5', lineWeight: 8, lineOpacity: 1, arrowColor: '#034a9b' }
+      : { casingColor: '#ffffff', casingWeight: 14, casingOpacity: 0.95, lineColor: '#f59e0b', lineWeight: 8, lineOpacity: 1, arrowColor: '#9a5b00' },
+    current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
 function renderVehicles() {
