@@ -153,7 +153,7 @@ function renderDraft() {
     return;
   }
   addRouteVisual(routeLayerGroup, draft.routeGeojson, {
-    outlineColor: '#3b225c', outlineWeight: 19, outlineOpacity: 0.96,
+    outlineColor: '#493b5d', outlineWeight: 14, outlineOpacity: 0.78,
     lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true,
   }, 'Route preview');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
@@ -171,8 +171,8 @@ function renderActiveTripRoute(vehicle) {
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
-      ? { outlineColor: '#063b70', outlineWeight: 19, outlineOpacity: 0.98, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true }
-      : { outlineColor: '#6a3800', outlineWeight: 17, outlineOpacity: 0.86, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true },
+      ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true }
+      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
