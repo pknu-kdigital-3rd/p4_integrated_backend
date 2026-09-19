@@ -73,9 +73,17 @@ function renderDraft() {
 function renderActiveTripRoute(vehicle) {
   activeRouteLayerGroup.clearLayers();
   const trip = vehicle?.state?.trip;
-  const route = trip?.routes?.find((item) => item.isCurrent) || trip?.routes?.[0];
-  if (!route?.routeGeojson) return;
-  L.geoJSON(route.routeGeojson, { style: { color: '#e76f51', weight: 5, opacity: 0.9, dashArray: '8 5' } }).addTo(activeRouteLayerGroup);
+  const routes = Array.isArray(trip?.routes) ? trip.routes.filter((route) => route?.routeGeojson) : [];
+  if (!routes.length) return;
+  for (const route of routes) {
+    const current = Boolean(route.isCurrent);
+    const layer = L.geoJSON(route.routeGeojson, {
+      style: current
+        ? { color: '#e76f51', weight: 5, opacity: 0.9, dashArray: '8 5' }
+        : { color: '#6b7280', weight: 4, opacity: 0.35, dashArray: '4 7' },
+    }).addTo(activeRouteLayerGroup);
+    layer.bindTooltip(current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
+  }
 }
 function renderVehicles() {
   const selected = selectedVehicleId;

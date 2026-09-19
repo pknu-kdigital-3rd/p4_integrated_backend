@@ -200,7 +200,10 @@ export const virtualService = {
         });
         const states = await prisma.virtualVehicleState.findMany({
             where: { scenarioId, vehicleId: { in: vehicles.map((vehicle) => vehicle.vehicleId) } },
-            include: { trip: { include: { routes: { where: { isCurrent: true } }, waypoints: { orderBy: { sequence: "asc" } } } } },
+            // Return the complete immutable route history so the operator map
+            // can show how a blockage or penalty changed the trip. The
+            // simulation worker still reads only its current route.
+            include: { trip: { include: { routes: { orderBy: { routeVersion: "asc" } }, waypoints: { orderBy: { sequence: "asc" } } } } },
         });
         const settings = await prisma.virtualVehicleSettings.findMany({
             where: { vehicleId: { in: vehicles.map((vehicle) => vehicle.vehicleId) } },
