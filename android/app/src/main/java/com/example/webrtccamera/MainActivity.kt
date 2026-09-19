@@ -87,10 +87,10 @@ private const val DEFAULT_RESOLUTION_INDEX = 0 // 720p, matches the previous har
 // raise gain rather than hold the shutter open and smear motion into the pixels.
 private const val TARGET_CAPTURE_FPS = 30
 
-// The source QR is redrawn as its timestamp changes. Sampling every second
-// camera frame avoids catching the redraw transition while the one-in-flight
-// guard prevents ML Kit tasks from accumulating behind the analyzer.
-private const val QR_SCAN_EVERY_N_FRAMES = 2L
+// GPS replay advances at roughly one tick per second. One QR attempt per tick
+// is sufficient to re-anchor that clock while avoiding a continuous ML Kit
+// workload on the camera analyzer.
+private const val QR_SCAN_INTERVAL_NS = 1_000_000_000L
 private const val QR_SCAN_TIMEOUT_NS = 1_500_000_000L
 private const val QR_SCANNER_RESTART_FAILURE_THRESHOLD = 3
 // Use the smaller input for the normal path so QR analysis does not steal
@@ -158,7 +158,7 @@ class MainActivity : AppCompatActivity() {
     private val qrCaptureIndex = AtomicLong(0)
     private val activeQrScanAttempt = AtomicReference<QrScanAttempt?>(null)
     private val qrScannerResetRequested = AtomicBoolean(false)
-    private var qrFrameCounter = 0L
+    private var lastQrAttemptElapsedNs = 0L
     private val qrConsecutiveFailures = AtomicInteger(0)
     private var lastQrFailureLogNs = 0L
     @Volatile
@@ -382,7 +382,7 @@ class MainActivity : AppCompatActivity() {
         qrCaptureIndex.set(0)
         activeQrScanAttempt.set(null)
         cameraExecutor.execute { if (streaming.get()) resetQrScanner() }
-        qrFrameCounter = 0L
+        lastQrAttemptElapsedNs = 0L
         qrConsecutiveFailures.set(0)
         lastQrFailureLogNs = 0L
         lastQrSuccessElapsedNs = 0L
@@ -629,7 +629,6 @@ class MainActivity : AppCompatActivity() {
         }
         recordCaptureFrame()
         val timestamp = image.imageInfo.timestamp.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos()
-        qrFrameCounter += 1
         // scanQrFrame takes over closing `image` once handed off, since ML
         // Kit reads it asynchronously. Only one sampled frame may be held by
         // ML Kit at a time; all other frames close immediately so CameraX can
@@ -682,9 +681,12 @@ class MainActivity : AppCompatActivity() {
             setQrStatus("QR: scan timed out; restarting scanner")
         }
 
-        if (qrFrameCounter % QR_SCAN_EVERY_N_FRAMES != 0L) return null
+        if (lastQrAttemptElapsedNs > 0L && now - lastQrAttemptElapsedNs < QR_SCAN_INTERVAL_NS) return null
         val attempt = QrScanAttempt(startedAtNs = now)
-        return if (activeQrScanAttempt.compareAndSet(null, attempt)) attempt else null
+        return if (activeQrScanAttempt.compareAndSet(null, attempt)) {
+            lastQrAttemptElapsedNs = now
+            attempt
+        } else null
     }
 
     /** Measures frames delivered to CameraX before WebRTC encoding or server processing. */
