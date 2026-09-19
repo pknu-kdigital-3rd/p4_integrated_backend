@@ -44,6 +44,7 @@ const PROFILE_DIMENSIONS: Record<string, { heightM: number; widthM: number; leng
     semi: { heightM: 4, widthM: 2.5, lengthM: 18, maxLoadKg: 40_000 },
     special: { heightM: 4.5, widthM: 3, lengthM: 20, maxLoadKg: 40_000 },
 };
+const DEFAULT_SIMULATION_SPEED_KMH = 30;
 
 function point(value: unknown): Coordinate {
     const candidate = value as Partial<Coordinate>;
@@ -686,6 +687,12 @@ export const virtualService = {
             return prisma.$transaction(async (tx) => { await tx.vehicle.update({ where: { vehicleId: trip.vehicleId }, data: { vehicleStatus: "READY" } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "CANCELLED", commandVersion: { increment: 1 } } }); const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "CANCELLED", endedAt: new Date(), commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_CANCELLED", payload: {} }); return result; });
         }
         if (input.command === "SET_SPEED_FACTOR") return prisma.$transaction(async (tx) => { const result = await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { speedFactor: input.speedFactor, commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "SPEED_FACTOR_CHANGED", payload: { speedFactor: input.speedFactor } }); return result; });
+        if (input.command === "SET_SPEED_KMH") return prisma.$transaction(async (tx) => {
+            const speedFactor = input.speedKmh / DEFAULT_SIMULATION_SPEED_KMH;
+            const result = await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { speedKmh: input.speedKmh, speedFactor, commandVersion: { increment: 1 } } });
+            await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "SPEED_CHANGED", payload: { speedKmh: input.speedKmh, speedFactor } });
+            return result;
+        });
         throw new AppError(409, "No route candidate is available", "NO_ROUTE_CANDIDATE");
     },
 

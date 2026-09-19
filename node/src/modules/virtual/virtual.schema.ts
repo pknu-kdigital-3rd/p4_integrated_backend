@@ -64,6 +64,7 @@ export const commandSchema = z.discriminatedUnion("command", [
     z.object({ command: z.literal("RESUME") }),
     z.object({ command: z.literal("CANCEL_TRIP") }),
     z.object({ command: z.literal("SET_SPEED_FACTOR"), speedFactor: z.number().positive().max(20) }),
+    z.object({ command: z.literal("SET_SPEED_KMH"), speedKmh: z.union([z.literal(25), z.literal(50), z.literal(100), z.literal(200)]) }),
     z.object({ command: z.literal("APPLY_ROUTE_CANDIDATE") }),
 ]);
 

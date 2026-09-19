@@ -58,6 +58,8 @@ body.resizing-layout{user-select:none}
 #virtual-draft-summary{margin:0;min-height:1.4em;color:#b8cbe2;font-size:12px}
 #virtual-trip-controls{display:grid;gap:7px}
 #virtual-trip-controls button{padding:7px 9px}
+#virtual-speed{width:100%;padding:0;accent-color:#20a4f3}
+#virtual-speed-value{color:#b8cbe2;font-variant-numeric:tabular-nums}
 #virtual-status[data-level=error]{color:#ff9c9c}
 body.virtual-mode #operator-sidebar{padding-top:12px}
 @media(max-width:700px){#workspace-nav{order:3;width:100%;margin:4px 0 0}header{height:auto;min-height:64px;flex-wrap:wrap;padding:8px 12px}}

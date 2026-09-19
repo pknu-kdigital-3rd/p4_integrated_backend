@@ -37,6 +37,72 @@ let restrictionGeometry = null;
 let pollTimer = null;
 let lastEventId = '';
 let pointContextPopup = null;
+const SPEED_PRESETS_KMH = [25, 50, 100, 200];
+const virtualVehicleMarkers = new Map();
+const virtualVehicleAnimationFrames = new Map();
+
+function speedPresetIndex(speedKmh) {
+  const numeric = Number(speedKmh);
+  if (!Number.isFinite(numeric)) return 1;
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  SPEED_PRESETS_KMH.forEach((preset, index) => {
+    const distance = Math.abs(preset - numeric);
+    if (distance < bestDistance) { bestDistance = distance; bestIndex = index; }
+  });
+  return bestIndex;
+}
+
+function selectedSpeedKmh() {
+  const slider = document.querySelector('#virtual-speed');
+  const index = Number(slider?.value);
+  return SPEED_PRESETS_KMH[Number.isInteger(index) && index >= 0 && index < SPEED_PRESETS_KMH.length ? index : 1];
+}
+
+function renderSpeedControl(speedKmh) {
+  const slider = document.querySelector('#virtual-speed');
+  const output = document.querySelector('#virtual-speed-value');
+  if (!slider || !output) return;
+  if (speedKmh !== undefined && speedKmh !== null) slider.value = String(speedPresetIndex(speedKmh));
+  output.textContent = `${selectedSpeedKmh()} km/h`;
+}
+
+function stopVehicleMarkerAnimation(vehicleId) {
+  const frame = virtualVehicleAnimationFrames.get(vehicleId);
+  if (frame !== undefined) cancelAnimationFrame(frame);
+  virtualVehicleAnimationFrames.delete(vehicleId);
+}
+
+function clearVirtualVehicleMarkers() {
+  for (const vehicleId of virtualVehicleMarkers.keys()) stopVehicleMarkerAnimation(vehicleId);
+  virtualVehicleMarkers.clear();
+  markerLayerGroup.clearLayers();
+}
+
+function animateVehicleMarker(vehicleId, marker, target) {
+  const current = marker.getLatLng();
+  const from = { lat: Number(current.lat), lon: Number(current.lng) };
+  const to = { lat: Number(target.lat), lon: Number(target.lon) };
+  if (![from.lat, from.lon, to.lat, to.lon].every(Number.isFinite)) return;
+  stopVehicleMarkerAnimation(vehicleId);
+  if (Math.abs(from.lat - to.lat) < 0.00000001 && Math.abs(from.lon - to.lon) < 0.00000001) {
+    marker.setLatLng([to.lat, to.lon]);
+    return;
+  }
+  const startedAt = performance.now();
+  const durationMs = 900;
+  const tick = (now) => {
+    const fraction = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
+    const eased = fraction * fraction * (3 - 2 * fraction);
+    marker.setLatLng([
+      from.lat + (to.lat - from.lat) * eased,
+      from.lon + (to.lon - from.lon) * eased,
+    ]);
+    if (fraction < 1) virtualVehicleAnimationFrames.set(vehicleId, requestAnimationFrame(tick));
+    else virtualVehicleAnimationFrames.delete(vehicleId);
+  };
+  virtualVehicleAnimationFrames.set(vehicleId, requestAnimationFrame(tick));
+}
 
 function token() { return sessionStorage.getItem('itsToken'); }
 async function api(path, options = {}) {
@@ -456,14 +522,30 @@ function renderVehicles() {
       renderDraft();
     }
   }
-  markerLayerGroup.clearLayers();
+  const visibleVehicleIds = new Set();
   for (const vehicle of vehicles) {
     const position = vehicle.state?.lastPosition;
     if (!position || !Number.isFinite(Number(position.lat)) || !Number.isFinite(Number(position.lon))) continue;
-    const marker = L.circleMarker([Number(position.lat), Number(position.lon)], { radius: String(vehicle.vehicleId) === selected ? 11 : 8, color: '#6a4c93', fillColor: '#b185db', fillOpacity: 0.9 });
-    marker.bindTooltip(`Virtual · ${vehicle.vehicleCode}`);
-    marker.on('click', () => { selectedVehicleId = String(vehicle.vehicleId); vehicleSelect.value = selectedVehicleId; renderSelectedVehicle(vehicle); });
-    markerLayerGroup.addLayer(marker);
+    const vehicleId = String(vehicle.vehicleId);
+    visibleVehicleIds.add(vehicleId);
+    let marker = virtualVehicleMarkers.get(vehicleId);
+    if (!marker) {
+      marker = L.circleMarker([Number(position.lat), Number(position.lon)], { radius: vehicleId === selected ? 11 : 8, color: '#6a4c93', fillColor: '#b185db', fillOpacity: 0.9 });
+      marker.bindTooltip(`Virtual · ${vehicle.vehicleCode}`);
+      marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); });
+      virtualVehicleMarkers.set(vehicleId, marker);
+      markerLayerGroup.addLayer(marker);
+    } else {
+      animateVehicleMarker(vehicleId, marker, { lat: Number(position.lat), lon: Number(position.lon) });
+      marker.setStyle({ radius: vehicleId === selected ? 11 : 8 });
+      marker.setTooltipContent(`Virtual · ${vehicle.vehicleCode}`);
+    }
+  }
+  for (const [vehicleId, marker] of virtualVehicleMarkers) {
+    if (visibleVehicleIds.has(vehicleId)) continue;
+    stopVehicleMarkerAnimation(vehicleId);
+    markerLayerGroup.removeLayer(marker);
+    virtualVehicleMarkers.delete(vehicleId);
   }
   renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId));
   removeVehicleButton.disabled = !selectedVehicleId;
@@ -473,9 +555,10 @@ function renderSelectedVehicle(vehicle) {
   const trip = vehicle?.state?.trip;
   renderActiveTripRoute(vehicle);
   controls.hidden = !trip;
-  if (!trip) return;
+  if (!trip) { renderSpeedControl(); return; }
   const settings = vehicle.following || { autoFollowEnabled: true };
   document.querySelector('#virtual-following').checked = Boolean(settings.autoFollowEnabled);
+  renderSpeedControl(vehicle.state?.speedKmh);
 }
 function noViablePathMessage() {
   const noRouteVehicles = vehicles.filter((vehicle) => vehicle.state?.simStatus === 'NO_ROUTE'
@@ -738,7 +821,7 @@ async function switchMode(next) {
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
-    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
+    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
     draftRouteSignature = '';
     activeRouteSignature = '';
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -770,6 +853,7 @@ document.querySelector('#virtual-preview').addEventListener('click', () => void 
 document.querySelector('#virtual-dispatch').addEventListener('click', () => void generateRequest());
 document.querySelector('#virtual-following').addEventListener('change', (event) => void setFollowing(event.target.checked));
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
-document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_FACTOR', { speedFactor: Number(document.querySelector('#virtual-speed').value) }));
+document.querySelector('#virtual-speed').addEventListener('input', () => renderSpeedControl());
+document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
 document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; setStatus('Click two opposite corners on the map.'); });
 document.querySelector('#virtual-restriction-commit').addEventListener('click', () => void commitRestriction());
