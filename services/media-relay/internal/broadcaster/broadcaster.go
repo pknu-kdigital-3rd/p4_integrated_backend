@@ -66,6 +66,19 @@ func StreamIdentity(recordingContext *recording.Context) *telemetry.StreamIdenti
 // SetPublisher installs the single active publisher. A later publisher wins.
 func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.TrackRemote, recordingContext *recording.Context) {
 	b.lifecycleMu.Lock()
+	// Pion normally delivers one OnTrack event per negotiated media track, but
+	// a renegotiation or duplicate remote track must not replace and close the
+	// publisher that belongs to this same PeerConnection. Closing old.pc below
+	// in that case would tear down the SCTP DataChannels immediately after they
+	// open, which looks like a telemetry transport failure on Android.
+	b.mu.RLock()
+	current := b.publisher
+	b.mu.RUnlock()
+	if current != nil && current.pc == pc {
+		log.Printf("Android publisher track already active for this PeerConnection (SSRC %d)", track.SSRC())
+		b.lifecycleMu.Unlock()
+		return
+	}
 	identity := StreamIdentity(recordingContext)
 	publisher := &Publisher{pc: pc, track: track, done: make(chan struct{}), identity: identity}
 	old := b.replacePublisher(publisher)
