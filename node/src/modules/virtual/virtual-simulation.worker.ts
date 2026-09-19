@@ -30,9 +30,9 @@ function distanceM(a: Point, b: Point): number {
     return 6_371_000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-function sample(points: Point[], fraction: number): { position: Point; offsetM: number; edgeIndex: number } {
-    if (points.length === 0) return { position: { lat: 0, lon: 0 }, offsetM: 0, edgeIndex: 0 };
-    if (points.length === 1) return { position: points[0]!, offsetM: 0, edgeIndex: 0 };
+function sample(points: Point[], fraction: number): { position: Point; offsetM: number } {
+    if (points.length === 0) return { position: { lat: 0, lon: 0 }, offsetM: 0 };
+    if (points.length === 1) return { position: points[0]!, offsetM: 0 };
     const lengths = points.slice(1).map((point, index) => distanceM(points[index]!, point));
     const total = lengths.reduce((sum, value) => sum + value, 0);
     const target = Math.max(0, Math.min(1, fraction)) * total;
@@ -46,24 +46,30 @@ function sample(points: Point[], fraction: number): { position: Point; offsetM: 
             return {
                 position: { lat: from.lat + (to.lat - from.lat) * ratio, lon: from.lon + (to.lon - from.lon) * ratio },
                 offsetM: target,
-                edgeIndex: index,
             };
         }
         traversed += segment;
     }
-    return { position: points.at(-1)!, offsetM: total, edgeIndex: lengths.length - 1 };
+    return { position: points.at(-1)!, offsetM: total };
 }
 
-function edgeIdAt(itinerary: unknown, index: number): string | null {
+function itineraryEdgeAt(itinerary: unknown, offsetM: number, key: "edgeId" | "physicalSegmentId"): string | null {
     if (!Array.isArray(itinerary)) return null;
-    const edge = itinerary[index] as { edgeId?: unknown } | undefined;
-    return typeof edge?.edgeId === "string" ? edge.edgeId : null;
-}
-
-function physicalSegmentIdAt(itinerary: unknown, index: number): string | null {
-    if (!Array.isArray(itinerary)) return null;
-    const edge = itinerary[index] as { physicalSegmentId?: unknown } | undefined;
-    return typeof edge?.physicalSegmentId === "string" ? edge.physicalSegmentId : null;
+    const edges = itinerary as Array<{ cumulativeStartM?: unknown; lengthM?: unknown; [name: string]: unknown }>;
+    let fallback: string | null = null;
+    for (const edge of edges) {
+        const value = edge[key];
+        if (typeof value !== "string") continue;
+        fallback = value;
+        const start = Number(edge.cumulativeStartM);
+        const length = Number(edge.lengthM);
+        if (!Number.isFinite(start) || !Number.isFinite(length)) continue;
+        // Edge intervals are half-open except for the final edge.  This
+        // keeps a point exactly at a junction associated with the edge it is
+        // entering, while still returning the final edge at route end.
+        if (offsetM >= start && offsetM < start + Math.max(0, length)) return value;
+    }
+    return fallback;
 }
 
 async function acceptDueRequests() {
@@ -109,8 +115,8 @@ async function advanceVehicles() {
         const fraction = Math.min(1, totalElapsedMs / durationMs);
         const position = sample(points, fraction);
         const itinerary = jsonValue(route.directedItinerary);
-        const currentEdgeId = edgeIdAt(itinerary, position.edgeIndex);
-        const currentPhysicalSegmentId = physicalSegmentIdAt(itinerary, position.edgeIndex);
+        const currentEdgeId = itineraryEdgeAt(itinerary, position.offsetM, "edgeId");
+        const currentPhysicalSegmentId = itineraryEdgeAt(itinerary, position.offsetM, "physicalSegmentId");
         if (currentEdgeId && blockedByScenario.get(state.scenarioId.toString())?.has(currentEdgeId)) {
             await prisma.$transaction([
                 prisma.virtualVehicleState.update({ where: { vehicleId: state.vehicleId }, data: { simStatus: "BLOCKED_AWAITING_OPERATOR", currentEdgeId, currentPhysicalSegmentId, blockedReason: "Blocked road ahead", lastCheckpointAt: new Date(now), updatedAt: new Date(now) } }),

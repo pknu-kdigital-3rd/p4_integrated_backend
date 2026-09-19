@@ -1,7 +1,7 @@
 import unittest
 from collections import defaultdict
 
-from graph_backend import PurePythonGraph
+from graph_backend import OsmnxGraph, PurePythonGraph
 import main
 from main import _edge_intersects_polygon
 
@@ -89,6 +89,64 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
 
         self.assertEqual(unrestricted.edge_ids, ["2:1:10", "1:4:11"])
         self.assertEqual(smoothed.edge_ids, ["2:3:20", "3:4:21"])
+
+    def test_reversed_edge_curve_is_normalised_to_directed_travel(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {
+            1: (0.0, 0.0),
+            2: (1.0, 1.0),
+        }
+        graph.turn_restrictions = set()
+        graph.adjacency = defaultdict(list)
+        # Some OSM graph adapters expose a curve opposite to the directed
+        # arc.  Appending it as-is makes a route leave node 1 toward node 2,
+        # then immediately draw back toward node 1.  The route contract must
+        # orient every curve from its from-node to its to-node.
+        graph.adjacency[1].append((
+            2,
+            157_000.0,
+            40.0,
+            [[1.0, 1.0], [0.5, 0.5], [0.0, 0.0]],
+            empty_restrictions(),
+            10,
+        ))
+
+        result = graph.route(1, 2)
+
+        self.assertEqual(result.edge_ids, ["1:2:10"])
+        self.assertEqual(result.coords, [[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]])
+
+    def test_osmnx_reversed_linestring_does_not_backtrack_at_junction(self):
+        class FakeGeometry:
+            # Shapely exposes (lon, lat) pairs through ``.coords``.
+            coords = [(1.0, 1.0), (0.5, 0.5), (0.0, 0.0)]
+
+        class FakeGraph:
+            nodes = {
+                1: {"y": 0.0, "x": 0.0},
+                2: {"y": 1.0, "x": 1.0},
+            }
+            adj = {
+                1: {
+                    2: {
+                        0: {
+                            "length": 157_000.0,
+                            "highway": "primary",
+                            "osmid": 10,
+                            "geometry": FakeGeometry(),
+                        },
+                    },
+                },
+            }
+
+        graph = object.__new__(OsmnxGraph)
+        graph.G = FakeGraph()
+        graph.turn_restrictions = set()
+
+        result = graph.route(1, 2)
+
+        self.assertEqual(result.edge_ids, ["1:2:0"])
+        self.assertEqual(result.coords, [[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]])
 
     def test_internal_route_re_resolves_active_blocked_geometry(self):
         graph = object.__new__(PurePythonGraph)

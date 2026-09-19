@@ -20,6 +20,73 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
+# Road-edge geometry comes from two different adapters.  OSMnx/pyrosm may
+# return a LineString whose coordinate order is opposite to the directed
+# graph arc, while the pure-Python parser already reverses geometry for a
+# reverse arc.  Keep the stitching rule in one place so a backend-specific
+# orientation never creates a visible backtrack or loop at a junction.
+EDGE_GEOMETRY_MATCH_TOLERANCE_M = 2.0
+EDGE_GEOMETRY_POINT_TOLERANCE_M = 0.01
+
+
+def _normalise_edge_geometry(points, start, end):
+    """Return edge shape points oriented from ``start`` to ``end``.
+
+    ``points``, ``start`` and ``end`` use the internal ``[lat, lon]`` form.
+    OSM geometry endpoints can differ from graph-node coordinates by a few
+    centimetres due to parser rounding, so orientation is chosen by endpoint
+    distance rather than exact list equality.  The graph endpoints are then
+    made explicit and consecutive duplicates are removed; this guarantees
+    that the next directed edge starts exactly where the previous one ended.
+    """
+    try:
+        raw_points = [
+            [float(point[0]), float(point[1])]
+            for point in points
+            if isinstance(point, (list, tuple)) and len(point) >= 2
+        ]
+    except (TypeError, ValueError):
+        raw_points = []
+    if len(raw_points) < 2:
+        return [[float(start[0]), float(start[1])], [float(end[0]), float(end[1])]]
+
+    forward_error = haversine_m(raw_points[0][0], raw_points[0][1], start[0], start[1]) \
+        + haversine_m(raw_points[-1][0], raw_points[-1][1], end[0], end[1])
+    reverse_error = haversine_m(raw_points[-1][0], raw_points[-1][1], start[0], start[1]) \
+        + haversine_m(raw_points[0][0], raw_points[0][1], end[0], end[1])
+    if reverse_error + EDGE_GEOMETRY_MATCH_TOLERANCE_M < forward_error:
+        raw_points.reverse()
+
+    normalised = []
+
+    def append(point):
+        candidate = [float(point[0]), float(point[1])]
+        if not normalised or haversine_m(
+            normalised[-1][0], normalised[-1][1], candidate[0], candidate[1]
+        ) > EDGE_GEOMETRY_POINT_TOLERANCE_M:
+            normalised.append(candidate)
+
+    append(start)
+    for point in raw_points:
+        append(point)
+    append(end)
+    return normalised
+
+
+def _append_edge_geometry(route_points, points, start, end):
+    """Append one directed edge shape to a route without a seam duplicate."""
+    normalised = _normalise_edge_geometry(points, start, end)
+    if route_points and haversine_m(
+        route_points[-1][0], route_points[-1][1], normalised[0][0], normalised[0][1]
+    ) <= EDGE_GEOMETRY_POINT_TOLERANCE_M:
+        route_points.extend(normalised[1:])
+    else:
+        # A malformed/stale graph edge should not silently create a diagonal
+        # jump.  Preserve the directed endpoints and let the caller see a
+        # short connector instead of a geometry that runs backwards.
+        route_points.extend(normalised)
+
+
 def load_manual_overrides(path="manual_restrictions.json"):
     """Loads hand-investigated restriction data keyed by OSM way id, to fill
     gaps in sparse/missing OSM tags. Real-world clearance/weight limits at
@@ -599,11 +666,11 @@ class OsmnxGraph:
         distance_m = 0.0
         time_s = 0.0
         edge_ids, edge_lengths, edge_times, physical_ids = [], [], [], []
-        for dist_m, edge_data, v, u, edge_key, penalty in edges:
+        for dist_m, edge_data, to_node, from_node, edge_key, penalty in edges:
             distance_m += dist_m
             edge_time = _edge_time_from_data(edge_data) * penalty
             time_s += edge_time
-            edge_ids.append(f"{u}:{v}:{edge_key}")
+            edge_ids.append(f"{from_node}:{to_node}:{edge_key}")
             osmids = edge_data.get("osmid", edge_key)
             physical_ids.append(str(osmids[0] if isinstance(osmids, list) and osmids else osmids))
             edge_lengths.append(dist_m)
@@ -612,10 +679,19 @@ class OsmnxGraph:
             if geom is not None:
                 # shapely LineString coords are (x, y) i.e. (lon, lat) - flip to [lat, lon]
                 pts = [[lat, lon] for lon, lat in geom.coords]
-                # first point duplicates the previous edge's endpoint
-                coords.extend(pts[1:] if pts[0] == coords[-1] else pts)
+                _append_edge_geometry(
+                    coords,
+                    pts,
+                    [G.nodes[from_node]["y"], G.nodes[from_node]["x"]],
+                    [G.nodes[to_node]["y"], G.nodes[to_node]["x"]],
+                )
             else:
-                coords.append([G.nodes[v]["y"], G.nodes[v]["x"]])
+                _append_edge_geometry(
+                    coords,
+                    [],
+                    [G.nodes[from_node]["y"], G.nodes[from_node]["x"]],
+                    [G.nodes[to_node]["y"], G.nodes[to_node]["x"]],
+                )
         return RouteResult(coords, distance_m, time_s, edge_ids, edge_lengths, edge_times, physical_ids)
 
 
@@ -826,8 +902,7 @@ class PurePythonGraph:
             physical_ids.append(str(wid))
             edge_lengths.append(dist_m)
             edge_times.append(edge_time_s(dist_m, self.adjacency[prev][0][2]) * penalty if self.adjacency.get(prev) else 0.0)
-            # geom[0] duplicates the previous edge's endpoint - skip it to avoid a repeated point
-            coords_out.extend(geom[1:])
+            _append_edge_geometry(coords_out, geom, coords[prev], coords[current])
 
         return RouteResult(coords_out, distance_m, g_score[goal_id], edge_ids, edge_lengths, edge_times, physical_ids)
 
