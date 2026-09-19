@@ -56,15 +56,21 @@ function pointIcon(kind, index) {
   const label = kind === 'origin' ? 'O' : kind === 'destination' ? 'D' : String(index + 1);
   return L.divIcon({
     className: 'virtual-point-icon',
-    html: `<span class="virtual-flag virtual-flag-${variant}"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${label}</span></span>`,
-    iconSize: [32, 38],
-    iconAnchor: [10, 36],
+    html: `<span class="virtual-flag virtual-flag-${variant}"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${label}</span><span class="virtual-flag-base"></span></span>`,
+    iconSize: [40, 48],
+    iconAnchor: [12, 46],
   });
 }
 function markPointsChanged(message) {
   draft = null;
   renderDraft();
   setStatus(message);
+}
+async function refreshPreviewAfterPointChange(message) {
+  markPointsChanged(`${message} Recalculating optimal path…`);
+  const selected = vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId);
+  if (!scenarioId || !selectedVehicleId || !points.origin || !points.destination || selected?.vehicleStatus !== 'READY') return;
+  await previewRoute();
 }
 function drawPoint(kind, point, index = 0) {
   if (!point) return;
@@ -82,7 +88,7 @@ function drawPoint(kind, point, index = 0) {
     else if (kind === 'destination') points.destination = moved;
     else if (points.waypoints[index]) points.waypoints[index] = moved;
     renderPoints();
-    markPointsChanged(`${kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1)} moved. Preview the route again.`);
+    void refreshPreviewAfterPointChange(`${kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1)} moved.`);
   });
   pointLayerGroup.addLayer(marker);
 }
