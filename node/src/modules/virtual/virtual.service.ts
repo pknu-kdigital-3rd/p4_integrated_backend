@@ -50,6 +50,62 @@ function point(value: unknown): Coordinate {
     return { lat: Number(candidate.lat), lon: Number(candidate.lon) };
 }
 
+function distanceMeters(first: Coordinate, second: Coordinate): number {
+    const radians = Math.PI / 180;
+    const lat1 = first.lat * radians;
+    const lat2 = second.lat * radians;
+    const dLat = lat2 - lat1;
+    const dLon = (second.lon - first.lon) * radians;
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+}
+
+function anchorRerouteAtPosition(route: Awaited<ReturnType<typeof routingInternalClient.route>>, position: Coordinate) {
+    const coordinates = route.routeGeojson?.coordinates;
+    const first = coordinates?.[0];
+    if (!Array.isArray(first) || first.length < 2
+        || !Number.isFinite(position.lat) || !Number.isFinite(position.lon)
+        || !Number.isFinite(Number(first[0])) || !Number.isFinite(Number(first[1]))) return route;
+
+    const snappedOrigin = { lat: Number(first[1]), lon: Number(first[0]) };
+    const connectorDistanceM = distanceMeters(position, snappedOrigin);
+    // The routing graph snaps the request to a node.  For a live reroute the
+    // first simulation tick must still begin at the vehicle's authoritative
+    // position, otherwise resetting elapsed time makes the worker teleport to
+    // that snapped node.  A tiny connector is unnecessary and would only add
+    // duplicate geometry.
+    if (!Number.isFinite(connectorDistanceM) || connectorDistanceM < 1) return route;
+
+    const averageSpeedMps = Number.isFinite(route.distanceM) && Number.isFinite(route.durationSec)
+        && route.durationSec > 0 && route.distanceM > 0
+        ? Math.max(1, route.distanceM / route.durationSec)
+        : 8;
+    const anchoredItinerary = Array.isArray(route.directedItinerary)
+        ? route.directedItinerary.map((rawEdge, index) => {
+            const edge = { ...rawEdge };
+            const cumulativeStartM = Number(edge.cumulativeStartM);
+            if (Number.isFinite(cumulativeStartM)) edge.cumulativeStartM = cumulativeStartM + connectorDistanceM;
+            if (index === 0) {
+                const lengthM = Number(edge.lengthM);
+                if (Number.isFinite(lengthM)) edge.lengthM = lengthM + connectorDistanceM;
+            }
+            return edge;
+        })
+        : route.directedItinerary;
+
+    return {
+        ...route,
+        routeGeojson: {
+            ...route.routeGeojson,
+            coordinates: [[position.lon, position.lat], ...coordinates],
+        },
+        directedItinerary: anchoredItinerary,
+        distanceM: route.distanceM + connectorDistanceM,
+        durationSec: route.durationSec + connectorDistanceM / averageSpeedMps,
+    };
+}
+
 function itineraryEdge(value: unknown, key: "edgeId" | "physicalSegmentId"): string | null {
     if (!Array.isArray(value)) return null;
     const first = value[0] as Record<string, unknown> | undefined;
@@ -507,8 +563,9 @@ export const virtualService = {
         const remainingWaypoints = current.trip.waypoints
             .filter((waypoint) => waypoint.status !== "REACHED")
             .map((waypoint) => point(waypoint.originalPoint));
+        const currentPosition = point(current.lastPosition);
         const routeInput = {
-            origin: point(current.lastPosition),
+            origin: currentPosition,
             destination: options.destination ?? point(current.trip.destination),
             waypoints: remainingWaypoints,
             vehicleProfile: profileForVehicle(vehicle),
@@ -527,6 +584,7 @@ export const virtualService = {
             if (!(error instanceof AppError) || error.code !== "ROUTE_NOT_FOUND" || !current.currentEdgeId) throw error;
             route = await routingInternalClient.route(routeInput);
         }
+        route = anchorRerouteAtPosition(route, currentPosition);
         const scenario = await getScenario(current.scenarioId);
         return prisma.$transaction(async (tx) => {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
