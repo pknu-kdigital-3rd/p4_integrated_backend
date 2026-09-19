@@ -16,6 +16,8 @@ const pointLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
 const routeRenderer = L.canvas({ padding: 0.5 });
 const routeVisuals = new Set();
+let draftRouteSignature = '';
+let activeRouteSignature = '';
 const requestList = document.querySelector('#virtual-requests');
 const eventList = document.querySelector('#virtual-events');
 const normalSections = ['#login', '#details', '#trip-panel', '#recordings-panel', '#error'];
@@ -85,14 +87,21 @@ function applyRouteStrokeWidths(visual) {
   visual.outline.setStyle({ weight: Math.max(3, visual.style.outlineWeight * scale) });
   visual.line.setStyle({ weight: Math.max(2, visual.style.lineWeight * scale) });
 }
+function removeArrowheadsDeep(layer) {
+  if (!layer) return;
+  layer.deleteArrowheads?.();
+  layer.eachLayer?.((child) => removeArrowheadsDeep(child));
+}
 function clearRouteGroup(group) {
   // leaflet-arrowheads keeps its generated polygons on the child polyline.
   // Remove those explicitly before clearing the GeoJSON group so a refresh
   // cannot leave an old set of arrows behind for the next zoom/update.
   for (const visual of routeVisuals) {
     if (visual.group !== group) continue;
-    visual.line.eachLayer?.((layer) => layer.deleteArrowheads?.());
-    visual.outline.eachLayer?.((layer) => layer.deleteArrowheads?.());
+    removeArrowheadsDeep(visual.line);
+    removeArrowheadsDeep(visual.outline);
+    visual.line.remove?.();
+    visual.outline.remove?.();
     routeVisuals.delete(visual);
   }
   group.clearLayers();
@@ -130,8 +139,8 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
       fillColor: style.arrowColor || '#ffffff',
       fill: true,
       weight: 0.8,
-      opacity: 0.98,
-      fillOpacity: 1,
+      opacity: style.arrowOpacity ?? 0.98,
+      fillOpacity: style.arrowFillOpacity ?? style.arrowOpacity ?? 1,
       // A smaller yawn makes a narrower, sharper chevron that stays inside
       // the inner route stroke instead of spilling over its edges.
       yawn: style.arrowYawn ?? 36,
@@ -145,13 +154,24 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
   routeVisuals.add(visual);
   applyRouteStrokeWidths(visual);
 }
+function routeIdentity(route) {
+  if (!route) return '';
+  // Route rows are immutable snapshots.  Prefer their database id and keep
+  // the version as a fallback for responses that omit the id.
+  return String(route.routeId ?? `v${route.routeVersion ?? ''}`);
+}
 function renderDraft() {
-  clearRouteGroup(routeLayerGroup);
   if (!draft) {
+    if (draftRouteSignature) clearRouteGroup(routeLayerGroup);
+    draftRouteSignature = '';
     document.querySelector('#virtual-draft-summary').textContent = 'No route draft.';
     document.querySelector('#virtual-dispatch').disabled = true;
     return;
   }
+  const signature = String(draft.draftId ?? JSON.stringify(draft.routeGeojson ?? draft.route ?? ''));
+  if (signature === draftRouteSignature) return;
+  draftRouteSignature = signature;
+  clearRouteGroup(routeLayerGroup);
   addRouteVisual(routeLayerGroup, draft.routeGeojson, {
     outlineColor: '#493b5d', outlineWeight: 14, outlineOpacity: 0.78,
     lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true,
@@ -160,19 +180,34 @@ function renderDraft() {
   document.querySelector('#virtual-dispatch').disabled = false;
 }
 function renderActiveTripRoute(vehicle) {
-  clearRouteGroup(activeRouteLayerGroup);
   const trip = vehicle?.state?.trip;
   const routes = Array.isArray(trip?.routes) ? trip.routes.filter((route) => route?.routeGeojson) : [];
-  if (!routes.length) return;
+  if (!routes.length) {
+    if (activeRouteSignature) clearRouteGroup(activeRouteLayerGroup);
+    activeRouteSignature = '';
+    return;
+  }
   const currentRoute = routes.find((route) => route.isCurrent) || routes.at(-1);
   const previousRoute = routes
     .filter((route) => route !== currentRoute)
     .sort((a, b) => Number(b.routeVersion || 0) - Number(a.routeVersion || 0))[0];
+  const signature = [
+    vehicle?.vehicleId ?? '',
+    trip?.virtualTripId ?? vehicle?.state?.virtualTripId ?? '',
+    routeIdentity(previousRoute),
+    routeIdentity(currentRoute),
+  ].join('|');
+  // Scenario polling runs once per second.  Keep the existing Leaflet layers
+  // when the route snapshot is unchanged; rebuilding arrowheads on every poll
+  // is what caused duplicate markers and visible flicker.
+  if (signature === activeRouteSignature) return;
+  activeRouteSignature = signature;
+  clearRouteGroup(activeRouteLayerGroup);
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
-      ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true }
-      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true },
+      ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowOpacity: 0.98, arrowYawn: 36, showArrows: true }
+      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: true },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
@@ -405,6 +440,8 @@ async function switchMode(next) {
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
     clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
+    draftRouteSignature = '';
+    activeRouteSignature = '';
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     window.__virtualMode = false;
   }
