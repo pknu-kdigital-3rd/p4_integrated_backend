@@ -270,7 +270,15 @@ function renderActiveTripRoute(vehicle) {
     activeRouteSignature = '';
     return;
   }
-  const currentRoute = routes.find((route) => route.isCurrent) || routes.at(-1);
+  // The state row is the authoritative active-route pointer.  Prefer it over
+  // the historical isCurrent flag so a just-completed reroute is displayed
+  // even if a concurrent refresh briefly leaves more than one snapshot marked
+  // current.
+  const activeRouteId = vehicle?.state?.activeRouteId;
+  const currentRoute = routes.find((route) => activeRouteId !== null && activeRouteId !== undefined
+    && String(route.routeId) === String(activeRouteId))
+    || routes.find((route) => route.isCurrent)
+    || routes.at(-1);
   const previousRoute = routes
     .filter((route) => route !== currentRoute)
     .sort((a, b) => Number(b.routeVersion || 0) - Number(a.routeVersion || 0))[0];
@@ -291,7 +299,12 @@ function renderActiveTripRoute(vehicle) {
     ? routeArrowGeometryExcluding(previousRoute.routeGeojson, currentRoute?.routeGeojson)
     : null;
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
-    const current = Boolean(route.isCurrent);
+    // Use the route selected above for both ordering and styling.  During a
+    // reroute the state row can point at the new route before the historical
+    // snapshot's isCurrent flag is visible in the same response; styling from
+    // that stale flag would make the active route look like the dim previous
+    // route and make the new path appear to be missing.
+    const current = route === currentRoute;
     const duplicateGeometry = !current && currentGeometry !== ''
       && routeGeometryIdentity(route.routeGeojson) === currentGeometry;
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current

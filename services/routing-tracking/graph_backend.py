@@ -545,21 +545,19 @@ class OsmnxGraph:
         return [self.G.nodes[nid]["y"], self.G.nodes[nid]["x"]]
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
-        # Hand-rolled A* instead of nx.astar_path - turn-restriction
-        # enforcement needs to know which way produced the edge a node was
-        # reached by (to check (from_way, via_node, to_way) triples), and a
-        # plain nx.astar_path heuristic/weight callable has no path-history
-        # hook to hang that on. This mirrors PurePythonGraph.route()'s own
-        # hand-rolled A* structure/simplifications (see its comments for the
-        # full reasoning - same admissible-heuristic and same "only checks
-        # the single best-known approach to a node, not every way that
-        # could reach it" simplification, not a full edge-based search).
+        # Hand-rolled edge-state A* instead of nx.astar_path. A node-only
+        # search can discard a longer arrival at a junction even though its
+        # incoming way permits a turn that the shorter arrival forbids. Keep
+        # the incoming way(s) in the search state so a dynamic closure cannot
+        # turn an otherwise reachable destination into a false no-route.
         import heapq
+        from itertools import count
 
         G = self.G
         blocked_lookup = _prepare_overlay_ids(blocked_edge_ids)
         penalty_lookup = _prepare_overlay_values(penalty_edge_factors)
         reverse_from, reverse_to = _initial_reverse_nodes(avoid_initial_reverse_of_edge_id) or (None, None)
+        track_turn_state = bool(self.turn_restrictions)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
@@ -599,63 +597,60 @@ class OsmnxGraph:
             y2, x2 = G.nodes[goal_id]["y"], G.nodes[goal_id]["x"]
             return haversine_m(y1, x1, y2, x2) / max_speed_mps
 
-        open_set = [(h(start_id), 0.0, start_id)]
-        # came_from[node] = (prev_node, dist_m, edge_data, osmids_of_this_edge)
+        start_state = (start_id, None)
+        push_order = count()
+        open_set = [(h(start_id), 0.0, next(push_order), start_state)]
+        # came_from[state] = (previous_state, dist_m, edge_data,
+        #                     osmids_of_this_edge, edge_key, penalty)
         came_from = {}
-        g_score = {start_id: 0.0}
-        visited = set()
+        g_score = {start_state: 0.0}
+        goal_state = None
 
         while open_set:
-            f, g, current = heapq.heappop(open_set)
-            if current in visited:
+            _f, g, _order, state = heapq.heappop(open_set)
+            current, incoming_osmids = state
+            if g > g_score.get(state, float("inf")):
                 continue
-            visited.add(current)
             if current == goal_id:
+                goal_state = state
                 break
-            incoming_osmids = came_from[current][3] if current in came_from else None
             for neighbor, parallel in G.adj.get(current, {}).items():
-                # pick the fastest allowed parallel edge - same min-over-
-                # parallel-edges idea the old edge_weight() used, now also
-                # doing the edge_allowed() filtering inline (subgraph_view
-                # isn't used anymore now that this loop is hand-rolled)
-                best_attr, best_time = None, None
+                # Evaluate turn legality per parallel edge. Selecting the
+                # fastest edge before this check can discard a slower edge
+                # whose way is the only legal continuation.
                 for edge_key, attrs in parallel.items():
                     if not edge_allowed(edge_restrictions(attrs), profile):
                         continue
                     raw_edge_id = f"{current}:{neighbor}:{edge_key}"
-                    if current == start_id and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
+                    if state == start_state and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
                         continue
                     if raw_edge_id in blocked_lookup:
                         continue
+                    out_osmids = tuple(_osmids(attrs))
+                    if track_turn_state and incoming_osmids is not None and any(
+                        (fw, current, tw) in self.turn_restrictions
+                        for fw in incoming_osmids for tw in out_osmids
+                    ):
+                        continue  # illegal turn (from incoming way, via current, onto this way)
                     penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
-                    t = _edge_time_from_data(attrs) * penalty
-                    if best_time is None or t < best_time:
-                        best_time, best_attr = t, (edge_key, attrs, penalty)
-                if best_attr is None:
-                    continue
-                edge_key, best_data, penalty = best_attr
-                out_osmids = _osmids(best_data)
-                if incoming_osmids is not None and self.turn_restrictions and any(
-                    (fw, current, tw) in self.turn_restrictions
-                    for fw in incoming_osmids for tw in out_osmids
-                ):
-                    continue  # illegal turn (from incoming way, via current, onto this way)
-                tentative = g + best_time
-                if tentative < g_score.get(neighbor, float("inf")):
-                    g_score[neighbor] = tentative
-                    came_from[neighbor] = (current, best_data.get("length", 0), best_data, out_osmids, edge_key, penalty)
-                    heapq.heappush(open_set, (tentative + h(neighbor), tentative, neighbor))
+                    tentative = g + _edge_time_from_data(attrs) * penalty
+                    next_state = (neighbor, out_osmids if track_turn_state else None)
+                    if tentative < g_score.get(next_state, float("inf")):
+                        g_score[next_state] = tentative
+                        came_from[next_state] = (state, attrs.get("length", 0), attrs, out_osmids, edge_key, penalty)
+                        heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
 
-        if goal_id not in g_score:
+        if goal_state is None:
             return None  # no path exists under this profile's constraints (or at all)
 
-        # walk back through came_from, collecting each edge's (distance, edge_data, arrival_node)
+        # Walk back through state transitions, collecting each edge's
+        # (distance, edge_data, arrival_node, departure_node).
         edges = []
-        n = goal_id
-        while n != start_id:
-            prev, dist_m, edge_data, osmids, edge_key, penalty = came_from[n]
-            edges.append((dist_m, edge_data, n, prev, edge_key, penalty))
-            n = prev
+        state = goal_state
+        while state != start_state:
+            prev_state, dist_m, edge_data, _osmids_value, edge_key, penalty = came_from[state]
+            edges.append((dist_m, edge_data, state[0], prev_state[0], edge_key, penalty))
+            state = prev_state
         edges.reverse()  # now in start -> goal order
 
         # Stitch the real road curve, not straight chords between nodes.
@@ -817,10 +812,12 @@ class PurePythonGraph:
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
         import heapq
+        from itertools import count
         coords = self.coords
         blocked_lookup = _prepare_overlay_ids(blocked_edge_ids)
         penalty_lookup = _prepare_overlay_values(penalty_edge_factors)
         reverse_from, reverse_to = _initial_reverse_nodes(avoid_initial_reverse_of_edge_id) or (None, None)
+        track_turn_state = bool(self.turn_restrictions)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
@@ -839,34 +836,28 @@ class PurePythonGraph:
             effective_kmh = min(base_speed_kmh, max_speed_kmh)
             return dist_m / (effective_kmh * 1000 / 3600)
 
-        open_set = [(h(start_id), 0.0, start_id)]
-        # came_from stores (previous_vertex, dist_m, geometry_of_this_edge,
-        # way_id_of_this_edge) so we can stitch the real road curve + true
-        # distance back together, and know which way we arrived via for
-        # turn-restriction checks on the NEXT hop
+        start_state = (start_id, None)
+        push_order = count()
+        open_set = [(h(start_id), 0.0, next(push_order), start_state)]
+        # came_from[state] stores (previous_state, dist_m,
+        # geometry_of_this_edge, way_id_of_this_edge, penalty) so we can
+        # stitch the real road curve and preserve turn context.
         came_from = {}
-        g_score = {start_id: 0.0}
-        visited = set()
+        g_score = {start_state: 0.0}
+        goal_state = None
 
         while open_set:
-            f, g, current = heapq.heappop(open_set)
-            if current in visited:
+            _f, g, _order, state = heapq.heappop(open_set)
+            current, incoming_way = state
+            if g > g_score.get(state, float("inf")):
                 continue
-            visited.add(current)
             if current == goal_id:
+                goal_state = state
                 break
-            # the way used to reach `current` - None at the start node,
-            # where no turn restriction can apply yet. This is a simplified,
-            # not fully turn-restriction-correct, model: it only checks the
-            # single best-known approach to a node, not every way that could
-            # reach it (that would need an edge-based/line-graph search
-            # state instead of a plain per-node one) - a deliberate
-            # simplification, see the Phase 3 plan notes.
-            incoming_way = came_from[current][3] if current in came_from else None
             for neighbor, dist_m, base_speed, geom, restrictions, wid in self.adjacency.get(current, []):
                 if not edge_allowed(restrictions, profile):
                     continue  # this truck class physically/legally cannot use this road
-                if current == start_id and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
+                if state == start_state and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
                     continue
                 if incoming_way is not None and (incoming_way, current, wid) in self.turn_restrictions:
                     continue  # illegal turn (from incoming_way, via current, onto wid)
@@ -876,21 +867,23 @@ class PurePythonGraph:
                 penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                 w = edge_time_s(dist_m, base_speed) * penalty
                 tentative = g + w
-                if tentative < g_score.get(neighbor, float("inf")):
-                    g_score[neighbor] = tentative
-                    came_from[neighbor] = (current, dist_m, geom, wid, penalty)
-                    heapq.heappush(open_set, (tentative + h(neighbor), tentative, neighbor))
+                next_state = (neighbor, wid if track_turn_state else None)
+                if tentative < g_score.get(next_state, float("inf")):
+                    g_score[next_state] = tentative
+                    came_from[next_state] = (state, dist_m, geom, wid, penalty)
+                    heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
 
-        if goal_id not in g_score:
+        if goal_state is None:
             return None  # no path exists under this profile's constraints (or at all)
 
-        # walk back through came_from, collecting each edge's (distance, real-curve geometry)
+        # Walk back through state transitions, collecting each edge's
+        # (distance, real-curve geometry).
         edges = []
-        n = goal_id
-        while n != start_id:
-            prev, dist_m, geom, wid, penalty = came_from[n]
-            edges.append((dist_m, geom, prev, n, wid, penalty))
-            n = prev
+        state = goal_state
+        while state != start_state:
+            prev_state, dist_m, geom, wid, penalty = came_from[state]
+            edges.append((dist_m, geom, prev_state[0], state[0], wid, penalty))
+            state = prev_state
         edges.reverse()  # now in start -> goal order
 
         coords_out = [list(coords[start_id])]
@@ -904,7 +897,7 @@ class PurePythonGraph:
             edge_times.append(edge_time_s(dist_m, self.adjacency[prev][0][2]) * penalty if self.adjacency.get(prev) else 0.0)
             _append_edge_geometry(coords_out, geom, coords[prev], coords[current])
 
-        return RouteResult(coords_out, distance_m, g_score[goal_id], edge_ids, edge_lengths, edge_times, physical_ids)
+        return RouteResult(coords_out, distance_m, g_score[goal_state], edge_ids, edge_lengths, edge_times, physical_ids)
 
 
 def load_graph(pbf_path):
