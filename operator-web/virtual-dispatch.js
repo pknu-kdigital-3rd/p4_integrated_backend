@@ -76,7 +76,9 @@ function routeStrokeScale() {
   // Existing close-up styling is restored by zoom 14 without recreating the
   // layers (which would cause the route to flicker).
   const zoom = Number(map.getZoom());
-  return Math.max(0.4, Math.min(1, 0.4 + (zoom - 8) * 0.1));
+  // Keep the low-zoom casing restrained; at the default zoom (12) it is
+  // about two-thirds of the close-up width instead of nearly full thickness.
+  return Math.max(0.32, Math.min(1, 0.32 + (zoom - 8) * 0.085));
 }
 function applyRouteStrokeWidths(visual) {
   const scale = routeStrokeScale();
