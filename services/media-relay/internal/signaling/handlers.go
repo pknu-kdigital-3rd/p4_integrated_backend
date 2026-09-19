@@ -118,6 +118,7 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 		h.broadcaster.HandleDataChannel(pc, recordingContext, channel)
 	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		log.Printf("Android PeerConnection state=%s", state)
 		if isGone(state) {
 			h.broadcaster.RemovePublisher(pc)
 			_ = pc.Close()
@@ -190,8 +191,11 @@ func (h *Handler) negotiate(pc *webrtc.PeerConnection, offer OfferModel) (webrtc
 }
 
 func isGone(state webrtc.PeerConnectionState) bool {
+	// Disconnected is a transient ICE state. Closing the peer immediately here
+	// tears down SCTP just as Android's DataChannels open, which loses the
+	// first telemetry batches and prevents the connection from recovering.
+	// Pion will transition to Failed if connectivity does not recover.
 	return state == webrtc.PeerConnectionStateFailed ||
-		state == webrtc.PeerConnectionStateDisconnected ||
 		state == webrtc.PeerConnectionStateClosed
 }
 
