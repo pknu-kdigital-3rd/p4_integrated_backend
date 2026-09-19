@@ -14,6 +14,8 @@ const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
+const routeGlPane = map.getPane('virtual-route-gl') || map.createPane('virtual-route-gl');
+routeGlPane.style.zIndex = '350';
 const requestList = document.querySelector('#virtual-requests');
 const eventList = document.querySelector('#virtual-events');
 const normalSections = ['#login', '#details', '#trip-panel', '#recordings-panel', '#error'];
@@ -29,6 +31,111 @@ let restrictionCorners = [];
 let restrictionGeometry = null;
 let pollTimer = null;
 let lastEventId = '';
+
+function asRouteFeature(routeGeojson) {
+  if (!routeGeojson) return { type: 'FeatureCollection', features: [] };
+  if (routeGeojson.type === 'Feature' || routeGeojson.type === 'FeatureCollection') return routeGeojson;
+  return { type: 'Feature', properties: {}, geometry: routeGeojson };
+}
+function createRouteGlRenderer() {
+  const empty = { type: 'FeatureCollection', features: [] };
+  const slots = new Map();
+  const styles = new Map();
+  let layer = null;
+  let glMap = null;
+  let ready = false;
+  let failed = false;
+  const canLoad = () => typeof L.maplibreGL === 'function' && typeof window.maplibregl?.Map === 'function';
+  const width = (base) => ['interpolate', ['linear'], ['zoom'], 8, base * 0.55, 12, base, 16, base * 1.35, 20, base * 1.8];
+  const styleValue = (style, key, fallback) => style?.[key] ?? fallback;
+  const routeStyle = (slot, style) => ({
+    casingColor: styleValue(style, 'casingColor', '#ffffff'),
+    casingWeight: styleValue(style, 'casingWeight', slot === 'current' ? 13 : 11),
+    casingOpacity: styleValue(style, 'casingOpacity', slot === 'current' ? 0.9 : 0.72),
+    lineColor: styleValue(style, 'lineColor', '#0875f5'),
+    lineWeight: styleValue(style, 'lineWeight', slot === 'current' ? 7 : 6),
+    lineOpacity: styleValue(style, 'lineOpacity', slot === 'current' ? 1 : 0.78),
+  });
+  function installSlot(slot) {
+    if (!ready || glMap.getSource(`virtual-route-${slot}`)) return;
+    const style = routeStyle(slot, styles.get(slot));
+    const sourceId = `virtual-route-${slot}`;
+    glMap.addSource(sourceId, { type: 'geojson', data: slots.get(slot) || empty });
+    glMap.addLayer({
+      id: `${sourceId}-casing`, type: 'line', source: sourceId,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': style.casingColor, 'line-width': width(style.casingWeight), 'line-opacity': style.casingOpacity, 'line-blur': 0.35 },
+    });
+    glMap.addLayer({
+      id: `${sourceId}-line`, type: 'line', source: sourceId,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': style.lineColor, 'line-width': width(style.lineWeight), 'line-opacity': style.lineOpacity, 'line-blur': 0.05 },
+    });
+  }
+  function installStyle() {
+    ['draft', 'previous', 'current'].forEach(installSlot);
+    for (const [slot, data] of slots) {
+      const source = glMap.getSource(`virtual-route-${slot}`);
+      if (source) source.setData(data || empty);
+    }
+  }
+  function ensure() {
+    if (layer || failed) return Boolean(layer);
+    if (!canLoad()) { failed = true; return false; }
+    try {
+      layer = L.maplibreGL({
+        pane: 'virtual-route-gl',
+        padding: 0.08,
+        updateInterval: 16,
+        interactive: false,
+        style: {
+          version: 8,
+          sources: {},
+          layers: [{ id: 'virtual-route-transparent-background', type: 'background', paint: { 'background-color': '#000000', 'background-opacity': 0 } }],
+        },
+      });
+      layer._virtualRouteRenderer = true;
+      map.addLayer(layer);
+      glMap = layer.getMaplibreMap();
+      glMap.once('load', () => { ready = true; installStyle(); });
+      glMap.on('error', (event) => console.warn('Virtual route GL renderer error', event?.error || event));
+      if (glMap.isStyleLoaded?.()) { ready = true; installStyle(); }
+      return true;
+    } catch (error) {
+      console.warn('Virtual route GL renderer unavailable', error);
+      failed = true;
+      layer = null;
+      glMap = null;
+      return false;
+    }
+  }
+  function set(slot, routeGeojson, style) {
+    if (!routeGeojson) { clear(slot); return false; }
+    styles.set(slot, style);
+    const data = asRouteFeature(routeGeojson);
+    slots.set(slot, data);
+    if (!ensure()) return false;
+    if (!ready) return true;
+    installSlot(slot);
+    glMap.getSource(`virtual-route-${slot}`)?.setData(data);
+    return true;
+  }
+  function clear(slot) {
+    slots.set(slot, empty);
+    if (ready) glMap.getSource(`virtual-route-${slot}`)?.setData(empty);
+  }
+  function remove() {
+    if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+    layer = null;
+    glMap = null;
+    ready = false;
+    failed = false;
+    slots.clear();
+    styles.clear();
+  }
+  return { set, clear, clearAll: () => ['draft', 'previous', 'current'].forEach(clear), remove, get layer() { return layer; } };
+}
+const routeGlRenderer = createRouteGlRenderer();
 
 function token() { return sessionStorage.getItem('itsToken'); }
 async function api(path, options = {}) {
@@ -69,9 +176,10 @@ function routeDisplayMetrics() {
     arrowSize: Math.max(10, Math.min(24, 12 + (zoom - 12) * 1.5)),
   };
 }
-function addRouteVisual(group, routeGeojson, style, tooltip) {
+function addRouteVisual(group, routeGeojson, style, tooltip, slot) {
   if (!routeGeojson) return;
-  L.geoJSON(routeGeojson, {
+  const usingGl = slot ? routeGlRenderer.set(slot, routeGeojson, style) : false;
+  if (!usingGl) L.geoJSON(routeGeojson, {
     style: {
       color: style.casingColor,
       weight: style.casingWeight,
@@ -82,9 +190,11 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
   }).addTo(group);
   const lineOptions = {
     style: {
-      color: style.lineColor,
+      color: usingGl ? style.arrowColor : style.lineColor,
       weight: style.lineWeight,
-      opacity: style.lineOpacity,
+      // MapLibre owns the route stroke when available.  Keep a transparent
+      // Leaflet path for tooltip hit testing and arrowhead attachment.
+      opacity: usingGl ? 0 : style.lineOpacity,
       dashArray: style.dashArray,
       lineCap: 'round',
       lineJoin: 'round',
@@ -108,6 +218,7 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
 }
 function renderDraft() {
   routeLayerGroup.clearLayers();
+  routeGlRenderer.clear('draft');
   if (!draft) {
     document.querySelector('#virtual-draft-summary').textContent = 'No route draft.';
     document.querySelector('#virtual-dispatch').disabled = true;
@@ -116,12 +227,14 @@ function renderDraft() {
   addRouteVisual(routeLayerGroup, draft.routeGeojson, {
     casingColor: '#ffffff', casingWeight: 14, casingOpacity: 0.9,
     lineColor: '#7c3aed', lineWeight: 8, lineOpacity: 0.98, arrowColor: '#4c1d95',
-  }, 'Route preview');
+  }, 'Route preview', 'draft');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
   document.querySelector('#virtual-dispatch').disabled = false;
 }
 function renderActiveTripRoute(vehicle) {
   activeRouteLayerGroup.clearLayers();
+  routeGlRenderer.clear('previous');
+  routeGlRenderer.clear('current');
   const trip = vehicle?.state?.trip;
   const routes = Array.isArray(trip?.routes) ? trip.routes.filter((route) => route?.routeGeojson) : [];
   if (!routes.length) return;
@@ -134,7 +247,7 @@ function renderActiveTripRoute(vehicle) {
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
       ? { casingColor: '#ffffff', casingWeight: 14, casingOpacity: 0.95, lineColor: '#0875f5', lineWeight: 8, lineOpacity: 1, arrowColor: '#034a9b' }
       : { casingColor: '#ffffff', casingWeight: 14, casingOpacity: 0.95, lineColor: '#f59e0b', lineWeight: 8, lineOpacity: 1, arrowColor: '#9a5b00' },
-    current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
+    current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`, current ? 'current' : 'previous');
   }
 }
 function renderVehicles() {
@@ -362,12 +475,13 @@ async function switchMode(next) {
   document.querySelector('#live-view-panel').hidden = true;
   if (next === 'virtual') {
     map.eachLayer((layer) => {
-      if (layer !== routeLayerGroup && layer !== activeRouteLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && !layer._url) map.removeLayer(layer);
+      if (layer !== routeLayerGroup && layer !== activeRouteLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && layer !== routeGlRenderer.layer && !layer._url) map.removeLayer(layer);
     });
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
     routeLayerGroup.clearLayers(); activeRouteLayerGroup.clearLayers(); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
+    routeGlRenderer.remove();
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     window.__virtualMode = false;
   }
