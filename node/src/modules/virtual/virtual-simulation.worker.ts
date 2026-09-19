@@ -110,8 +110,23 @@ async function advanceVehicles() {
         const points = coordinates(jsonValue(route.routeGeojson) as RouteGeometry);
         if (points.length < 2) continue;
         const elapsed = Math.max(0, now - state.lastCheckpointAt.getTime());
-        const totalElapsedMs = Number(state.simElapsedMs) + elapsed * state.speedFactor;
         const durationMs = Math.max(1, route.durationSec * 1000);
+        // Route duration is the routing engine's nominal travel time.  The
+        // simulation speed is controlled independently by the vehicle's
+        // speedKmh setting, so a live speed change affects the next tick even
+        // while the trip is already driving.  Keep speedFactor as a legacy
+        // multiplier for older clients that still send SET_SPEED_FACTOR.
+        const routeDistanceM = Number(route.distanceM);
+        const nominalSpeedMps = routeDistanceM > 0 && route.durationSec > 0
+            ? routeDistanceM / route.durationSec
+            : 0;
+        const configuredSpeedKmh = Number(state.speedKmh);
+        const configuredSpeedMps = configuredSpeedKmh > 0 ? configuredSpeedKmh / 3.6 : 0;
+        const legacyFactor = Number.isFinite(state.speedFactor) && state.speedFactor > 0 ? state.speedFactor : 1;
+        const motionFactor = nominalSpeedMps > 0 && configuredSpeedMps > 0
+            ? (configuredSpeedMps * legacyFactor) / nominalSpeedMps
+            : legacyFactor;
+        const totalElapsedMs = Number(state.simElapsedMs) + elapsed * motionFactor;
         const fraction = Math.min(1, totalElapsedMs / durationMs);
         const position = sample(points, fraction);
         const itinerary = jsonValue(route.directedItinerary);

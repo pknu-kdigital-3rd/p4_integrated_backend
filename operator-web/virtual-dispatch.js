@@ -63,8 +63,13 @@ function renderSpeedControl(speedKmh) {
   const slider = document.querySelector('#virtual-speed');
   const output = document.querySelector('#virtual-speed-value');
   if (!slider || !output) return;
-  if (speedKmh !== undefined && speedKmh !== null) slider.value = String(speedPresetIndex(speedKmh));
-  output.textContent = `${selectedSpeedKmh()} km/h`;
+  let displayedSpeed = selectedSpeedKmh();
+  const currentSpeed = Number(speedKmh);
+  if (Number.isFinite(currentSpeed) && currentSpeed > 0) {
+    slider.value = String(speedPresetIndex(currentSpeed));
+    displayedSpeed = currentSpeed;
+  }
+  output.textContent = `${displayedSpeed} km/h`;
 }
 
 function stopVehicleMarkerAnimation(vehicleId) {
