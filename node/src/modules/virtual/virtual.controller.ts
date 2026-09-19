@@ -10,6 +10,7 @@ import type {
     RoutePreviewBody,
     WaypointsBody,
     RestrictionUpdateBody,
+    VirtualVehicleLifecycleBody,
 } from "./virtual.schema.ts";
 
 function actorId(req: Request): bigint | undefined {
@@ -63,6 +64,10 @@ export const virtualController = {
 
     async setFollowing(req: Request<{ vehicleId: string }, {}, FollowingBody>, res: Response) {
         res.json({ data: await virtualService.setFollowing(BigInt(req.params.vehicleId), req.body, actorId(req)) });
+    },
+
+    async setVehicleActive(req: Request<{ vehicleId: string }, {}, VirtualVehicleLifecycleBody>, res: Response) {
+        res.json({ data: await virtualService.setVehicleActive(BigInt(req.params.vehicleId), req.body.isActive) });
     },
 
     async getTrip(req: Request<{ tripId: string }>, res: Response) {

@@ -73,6 +73,10 @@ export const followingSchema = z.object({
     idempotencyKey: z.string().trim().min(8).max(120),
 });
 
+export const virtualVehicleLifecycleSchema = z.object({
+    isActive: z.boolean(),
+});
+
 export const waypointsSchema = z.object({
     waypoints: z.array(waypoint).max(32),
     expectedTripRevision: z.number().int().positive(),
@@ -117,6 +121,7 @@ export type RoutePreviewBody = z.infer<typeof routePreviewSchema>;
 export type DispatchRequestBody = z.infer<typeof dispatchRequestSchema>;
 export type CommandBody = z.infer<typeof commandSchema>;
 export type FollowingBody = z.infer<typeof followingSchema>;
+export type VirtualVehicleLifecycleBody = z.infer<typeof virtualVehicleLifecycleSchema>;
 export type WaypointsBody = z.infer<typeof waypointsSchema>;
 export type RestrictionBody = z.infer<typeof restrictionSchema>;
 export type RestrictionUpdateBody = z.infer<typeof restrictionUpdateSchema>;

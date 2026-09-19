@@ -184,6 +184,49 @@ export const virtualService = {
         return vehicle;
     },
 
+    async setVehicleActive(vehicleId: bigint, isActive: boolean) {
+        return prisma.$transaction(async (tx) => {
+            const vehicle = await tx.vehicle.findUnique({
+                where: { vehicleId },
+                select: { vehicleId: true, vehicleSource: true, isActive: true },
+            });
+            if (!vehicle || vehicle.vehicleSource !== "VIRTUAL") {
+                throw new AppError(404, "Virtual vehicle not found", "VIRTUAL_VEHICLE_NOT_FOUND");
+            }
+
+            if (!isActive) {
+                const activeTrip = await tx.virtualTrip.findFirst({
+                    where: activeTripWhere(vehicleId),
+                    select: { virtualTripId: true },
+                });
+                if (activeTrip) {
+                    throw new AppError(
+                        409,
+                        "Cancel the virtual vehicle's active trip before removing it",
+                        "VIRTUAL_VEHICLE_BUSY",
+                    );
+                }
+
+                const pendingRequest = await tx.virtualDispatchRequest.findFirst({
+                    where: { selectedVehicleId: vehicleId, state: "PENDING" },
+                    select: { requestId: true },
+                });
+                if (pendingRequest) {
+                    throw new AppError(
+                        409,
+                        "Reject the virtual vehicle's pending driver request before removing it",
+                        "VIRTUAL_VEHICLE_PENDING_REQUEST",
+                    );
+                }
+            }
+
+            return tx.vehicle.update({
+                where: { vehicleId },
+                data: { isActive },
+            });
+        });
+    },
+
     async previewRoute(scenarioId: bigint, input: RoutePreviewBody, actorId?: bigint) {
         const scenario = await getScenario(scenarioId);
         const vehicleId = id(input.selectedVehicleId);

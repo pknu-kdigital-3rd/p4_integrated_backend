@@ -18,6 +18,7 @@ import {
     scenarioIdParamSchema,
     virtualTripIdParamSchema,
     virtualVehicleIdParamSchema,
+    virtualVehicleLifecycleSchema,
     waypointsSchema,
 } from "./virtual.schema.ts";
 
@@ -36,6 +37,7 @@ virtualRouter.post("/scenarios/:scenarioId/dispatch-requests", ...write, validat
 virtualRouter.post("/dispatch-requests/:requestId/accept", ...write, validateParams(requestIdParamSchema), virtualController.acceptRequest);
 virtualRouter.post("/dispatch-requests/:requestId/reject", ...write, validateParams(requestIdParamSchema), virtualController.rejectRequest);
 virtualRouter.put("/vehicles/:vehicleId/following", ...write, validateParams(virtualVehicleIdParamSchema), validateBody(followingSchema), virtualController.setFollowing);
+virtualRouter.patch("/vehicles/:vehicleId", ...write, validateParams(virtualVehicleIdParamSchema), validateBody(virtualVehicleLifecycleSchema), virtualController.setVehicleActive);
 virtualRouter.get("/trips/:tripId", ...read, validateParams(virtualTripIdParamSchema), virtualController.getTrip);
 virtualRouter.post("/trips/:tripId/commands", ...write, validateParams(virtualTripIdParamSchema), validateBody(commandSchema), virtualController.command);
 virtualRouter.put("/trips/:tripId/waypoints", ...write, validateParams(virtualTripIdParamSchema), validateBody(waypointsSchema), virtualController.replaceWaypoints);

@@ -12,6 +12,7 @@ import {
     scenarioIdParamSchema,
     virtualTripIdParamSchema,
     virtualVehicleIdParamSchema,
+    virtualVehicleLifecycleSchema,
 } from "./virtual.schema.ts";
 
 const dataResponse = z.object({ data: z.unknown() });
@@ -75,6 +76,20 @@ registry.registerPath({
     security: bearer,
     request: { params: virtualVehicleIdParamSchema, body: { content: { "application/json": { schema: followingSchema } } } },
     responses: { 200: { description: "Updated policy and state", content: { "application/json": { schema: dataResponse } } }, 409: { description: "Stale policy version", content: { "application/json": { schema: apiErrorSchema } } } },
+});
+
+registry.registerPath({
+    method: "patch",
+    path: "/api/v1/virtual/vehicles/{vehicleId}",
+    tags: ["Virtual Dispatch"],
+    summary: "Archive or restore a virtual vehicle",
+    security: bearer,
+    request: { params: virtualVehicleIdParamSchema, body: { content: { "application/json": { schema: virtualVehicleLifecycleSchema } } } },
+    responses: {
+        200: { description: "Virtual vehicle lifecycle updated", content: { "application/json": { schema: dataResponse } } },
+        404: { description: "Virtual vehicle not found", content: { "application/json": { schema: apiErrorSchema } } },
+        409: { description: "Vehicle has an active trip or pending request", content: { "application/json": { schema: apiErrorSchema } } },
+    },
 });
 
 registry.registerPath({

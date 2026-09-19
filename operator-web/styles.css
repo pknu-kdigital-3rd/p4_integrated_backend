@@ -35,6 +35,8 @@ body.resizing-layout{user-select:none}
 #virtual-workspace li button{padding:5px 8px;font-size:11px}
 .virtual-toolbar{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center}
 .virtual-toolbar label{font-size:12px;color:#91a8c5;grid-column:1/-1}
+.virtual-toolbar-actions{display:flex;gap:6px;flex-wrap:wrap}
+.virtual-toolbar-actions button{padding:7px 9px;font-size:11px}
 .virtual-coordinates{display:grid;gap:6px}
 .virtual-coordinates>div{display:grid;grid-template-columns:90px 1fr auto;gap:6px;align-items:center;font-size:12px}
 .virtual-coordinates output{color:#b8cbe2;font-variant-numeric:tabular-nums}

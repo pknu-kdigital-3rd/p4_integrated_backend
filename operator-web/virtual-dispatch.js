@@ -7,6 +7,7 @@ const virtualTab = document.querySelector('#virtual-workspace-tab');
 const status = document.querySelector('#virtual-status');
 const scenarioSelect = document.querySelector('#virtual-scenario');
 const vehicleSelect = document.querySelector('#virtual-vehicle');
+const removeVehicleButton = document.querySelector('#virtual-remove-vehicle');
 const routeLayerGroup = L.layerGroup().addTo(map);
 const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
@@ -83,6 +84,7 @@ function renderVehicles() {
     vehicleSelect.add(new Option(`${vehicle.vehicleCode}${vehicle.vehicleName ? ` · ${vehicle.vehicleName}` : ''} · ${state}`, String(vehicle.vehicleId)));
   }
   if (vehicles.some((vehicle) => String(vehicle.vehicleId) === selected)) vehicleSelect.value = selected;
+  else selectedVehicleId = '';
   markerLayerGroup.clearLayers();
   for (const vehicle of vehicles) {
     const position = vehicle.state?.lastPosition;
@@ -93,6 +95,7 @@ function renderVehicles() {
     markerLayerGroup.addLayer(marker);
   }
   renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId));
+  removeVehicleButton.disabled = !selectedVehicleId;
 }
 function renderSelectedVehicle(vehicle) {
   const controls = document.querySelector('#virtual-trip-controls');
@@ -166,6 +169,24 @@ async function createVehicle() {
   if (!scenarioId) { setStatus('Create or select a scenario first.', true); return; }
   try { const vehicle = await api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`, { method: 'POST', body: JSON.stringify({ vehicleCode: `SIM-${Date.now()}`, vehicleName: 'Virtual vehicle', vehicleProfile: 'small', autoFollowEnabled: true }) }); selectedVehicleId = String(vehicle.vehicleId); await loadScenarioData(); setStatus('Virtual vehicle added.'); }
   catch (error) { setStatus(error.message, true); }
+}
+async function removeVehicle() {
+  const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
+  if (!vehicle) { setStatus('Select a virtual vehicle first.', true); return; }
+  const label = vehicle.vehicleName ? `${vehicle.vehicleCode} · ${vehicle.vehicleName}` : vehicle.vehicleCode;
+  if (!window.confirm(`Remove ${label} from virtual dispatch? Its completed trip history will be preserved.`)) return;
+  removeVehicleButton.disabled = true;
+  try {
+    await api(`/api/v1/virtual/vehicles/${encodeURIComponent(selectedVehicleId)}`, { method: 'PATCH', body: JSON.stringify({ isActive: false }) });
+    selectedVehicleId = '';
+    draft = null;
+    renderDraft();
+    await loadScenarioData();
+    setStatus(`${label} was removed from virtual dispatch.`);
+  } catch (error) {
+    setStatus(error.message, true);
+    removeVehicleButton.disabled = false;
+  }
 }
 async function setFollowing(enabled) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
@@ -252,6 +273,7 @@ scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.va
 vehicleSelect.addEventListener('change', () => { selectedVehicleId = vehicleSelect.value; draft = null; renderDraft(); renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId)); });
 document.querySelector('#virtual-new-scenario').addEventListener('click', () => void createScenario());
 document.querySelector('#virtual-new-vehicle').addEventListener('click', () => void createVehicle());
+removeVehicleButton.addEventListener('click', () => void removeVehicle());
 document.querySelector('#virtual-preview').addEventListener('click', () => void previewRoute());
 document.querySelector('#virtual-dispatch').addEventListener('click', () => void generateRequest());
 document.querySelectorAll('[data-virtual-pick]').forEach((button) => button.addEventListener('click', () => { pickMode = button.dataset.virtualPick; setStatus(`Click the map to set ${pickMode}.`); }));
