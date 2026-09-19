@@ -145,10 +145,24 @@ def get_override_locations(pbf_path):
 
 
 class RouteResult:
-    def __init__(self, coords, distance_m, time_s):
+    def __init__(self, coords, distance_m, time_s, edge_ids=None, edge_lengths=None, edge_times=None, physical_ids=None):
         self.coords = coords          # [[lat, lon], ...]
         self.distance_m = distance_m
         self.time_s = time_s
+        self.edge_ids = edge_ids or []
+        self.edge_lengths = edge_lengths or []
+        self.edge_times = edge_times or []
+        self.physical_ids = physical_ids or []
+
+
+def _overlay_match(raw_id, supplied_ids):
+    """Match raw adapter IDs against graph-version-prefixed public IDs."""
+    if not supplied_ids:
+        return None
+    for supplied in supplied_ids:
+        if supplied == raw_id or supplied.endswith(f":{raw_id}"):
+            return supplied
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +418,7 @@ class OsmnxGraph:
         nid = self.nearest_node(lat, lon)
         return [self.G.nodes[nid]["y"], self.G.nodes[nid]["x"]]
 
-    def route(self, start_id, goal_id, truck_class=None):
+    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None):
         # Hand-rolled A* instead of nx.astar_path - turn-restriction
         # enforcement needs to know which way produced the edge a node was
         # reached by (to check (from_way, via_node, to_way) triples), and a
@@ -473,15 +487,23 @@ class OsmnxGraph:
                 # doing the edge_allowed() filtering inline (subgraph_view
                 # isn't used anymore now that this loop is hand-rolled)
                 best_attr, best_time = None, None
-                for attrs in parallel.values():
+                for edge_key, attrs in parallel.items():
                     if not edge_allowed(edge_restrictions(attrs), profile):
                         continue
-                    t = _edge_time_from_data(attrs)
+                    raw_edge_id = f"{current}:{neighbor}:{edge_key}"
+                    if _overlay_match(raw_edge_id, blocked_edge_ids):
+                        continue
+                    penalty = 1.0
+                    matched_penalty = _overlay_match(raw_edge_id, penalty_edge_factors or {})
+                    if matched_penalty:
+                        penalty = max(1.0, float((penalty_edge_factors or {}).get(matched_penalty, 1.0)))
+                    t = _edge_time_from_data(attrs) * penalty
                     if best_time is None or t < best_time:
-                        best_time, best_attr = t, attrs
+                        best_time, best_attr = t, (edge_key, attrs, penalty)
                 if best_attr is None:
                     continue
-                out_osmids = _osmids(best_attr)
+                edge_key, best_data, penalty = best_attr
+                out_osmids = _osmids(best_data)
                 if incoming_osmids is not None and self.turn_restrictions and any(
                     (fw, current, tw) in self.turn_restrictions
                     for fw in incoming_osmids for tw in out_osmids
@@ -490,7 +512,7 @@ class OsmnxGraph:
                 tentative = g + best_time
                 if tentative < g_score.get(neighbor, float("inf")):
                     g_score[neighbor] = tentative
-                    came_from[neighbor] = (current, best_attr.get("length", 0), best_attr, out_osmids)
+                    came_from[neighbor] = (current, best_data.get("length", 0), best_data, out_osmids, edge_key, penalty)
                     heapq.heappush(open_set, (tentative + h(neighbor), tentative, neighbor))
 
         if goal_id not in g_score:
@@ -500,8 +522,8 @@ class OsmnxGraph:
         edges = []
         n = goal_id
         while n != start_id:
-            prev, dist_m, edge_data, osmids = came_from[n]
-            edges.append((dist_m, edge_data, n))
+            prev, dist_m, edge_data, osmids, edge_key, penalty = came_from[n]
+            edges.append((dist_m, edge_data, n, prev, edge_key, penalty))
             n = prev
         edges.reverse()  # now in start -> goal order
 
@@ -512,9 +534,16 @@ class OsmnxGraph:
         coords = [[G.nodes[start_id]["y"], G.nodes[start_id]["x"]]]
         distance_m = 0.0
         time_s = 0.0
-        for dist_m, edge_data, v in edges:
+        edge_ids, edge_lengths, edge_times, physical_ids = [], [], [], []
+        for dist_m, edge_data, v, u, edge_key, penalty in edges:
             distance_m += dist_m
-            time_s += _edge_time_from_data(edge_data)
+            edge_time = _edge_time_from_data(edge_data) * penalty
+            time_s += edge_time
+            edge_ids.append(f"{u}:{v}:{edge_key}")
+            osmids = edge_data.get("osmid", edge_key)
+            physical_ids.append(str(osmids[0] if isinstance(osmids, list) and osmids else osmids))
+            edge_lengths.append(dist_m)
+            edge_times.append(edge_time)
             geom = edge_data.get("geometry")
             if geom is not None:
                 # shapely LineString coords are (x, y) i.e. (lon, lat) - flip to [lat, lon]
@@ -523,7 +552,7 @@ class OsmnxGraph:
                 coords.extend(pts[1:] if pts[0] == coords[-1] else pts)
             else:
                 coords.append([G.nodes[v]["y"], G.nodes[v]["x"]])
-        return RouteResult(coords, distance_m, time_s)
+        return RouteResult(coords, distance_m, time_s, edge_ids, edge_lengths, edge_times, physical_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -646,7 +675,7 @@ class PurePythonGraph:
             return None
         return list(self.coords[nid])
 
-    def route(self, start_id, goal_id, truck_class=None):
+    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None):
         import heapq
         coords = self.coords
 
@@ -696,11 +725,18 @@ class PurePythonGraph:
                     continue  # this truck class physically/legally cannot use this road
                 if incoming_way is not None and (incoming_way, current, wid) in self.turn_restrictions:
                     continue  # illegal turn (from incoming_way, via current, onto wid)
-                w = edge_time_s(dist_m, base_speed)
+                raw_edge_id = f"{current}:{neighbor}:{wid}"
+                if _overlay_match(raw_edge_id, blocked_edge_ids):
+                    continue
+                penalty = 1.0
+                matched_penalty = _overlay_match(raw_edge_id, penalty_edge_factors or {})
+                if matched_penalty:
+                    penalty = max(1.0, float((penalty_edge_factors or {}).get(matched_penalty, 1.0)))
+                w = edge_time_s(dist_m, base_speed) * penalty
                 tentative = g + w
                 if tentative < g_score.get(neighbor, float("inf")):
                     g_score[neighbor] = tentative
-                    came_from[neighbor] = (current, dist_m, geom, wid)
+                    came_from[neighbor] = (current, dist_m, geom, wid, penalty)
                     heapq.heappush(open_set, (tentative + h(neighbor), tentative, neighbor))
 
         if goal_id not in g_score:
@@ -710,19 +746,24 @@ class PurePythonGraph:
         edges = []
         n = goal_id
         while n != start_id:
-            prev, dist_m, geom, wid = came_from[n]
-            edges.append((dist_m, geom))
+            prev, dist_m, geom, wid, penalty = came_from[n]
+            edges.append((dist_m, geom, prev, n, wid, penalty))
             n = prev
         edges.reverse()  # now in start -> goal order
 
         coords_out = [list(coords[start_id])]
         distance_m = 0.0
-        for dist_m, geom in edges:
+        edge_ids, edge_lengths, edge_times, physical_ids = [], [], [], []
+        for dist_m, geom, prev, current, wid, penalty in edges:
             distance_m += dist_m
+            edge_ids.append(f"{prev}:{current}:{wid}")
+            physical_ids.append(str(wid))
+            edge_lengths.append(dist_m)
+            edge_times.append(edge_time_s(dist_m, self.adjacency[prev][0][2]) * penalty if self.adjacency.get(prev) else 0.0)
             # geom[0] duplicates the previous edge's endpoint - skip it to avoid a repeated point
             coords_out.extend(geom[1:])
 
-        return RouteResult(coords_out, distance_m, g_score[goal_id])
+        return RouteResult(coords_out, distance_m, g_score[goal_id], edge_ids, edge_lengths, edge_times, physical_ids)
 
 
 def load_graph(pbf_path):

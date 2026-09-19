@@ -2,6 +2,7 @@ import { createApp } from "./app.ts"
 import { env } from "./config/env.ts"
 import { prisma } from "./infrastructure/database/prisma.ts"
 import { logger } from "./config/logger.ts";
+import { startVirtualSimulationWorker } from "./modules/virtual/virtual-simulation.worker.ts";
 
 const app = createApp();
 
@@ -19,6 +20,7 @@ async function main() {
             environment: env.NODE_ENV,
         }, "HTTP Server started");
     });
+    const stopVirtualSimulation = startVirtualSimulationWorker();
 
     const dbUrl = new URL(env.DATABASE_URL);
 
@@ -55,6 +57,7 @@ async function main() {
         let hasError = false;
 
         // 1. Http server cleanup
+        stopVirtualSimulation();
         try {
             await closeHttpServer();
             logger.info("HTTP server closed")

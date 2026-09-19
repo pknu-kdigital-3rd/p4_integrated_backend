@@ -7,10 +7,11 @@ Run:
 
 Then open http://127.0.0.1:8000
 """
+import hashlib
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -27,6 +28,7 @@ from telemetry import (
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PBF_PATH = "busan-roads_osm.pbf"  # <-- point this at your .pbf file
+ROUTING_SERVICE_TOKEN = os.environ.get("ROUTING_TRACKING_SERVICE_TOKEN", "").strip()
 
 
 def _first_existing_path(*paths: Path) -> Path:
@@ -136,6 +138,184 @@ class RouteRequest(BaseModel):
 class NearestRequest(BaseModel):
     lat: float
     lon: float
+
+
+class InternalCoordinate(BaseModel):
+    lat: float
+    lon: float
+
+
+class InternalWaypoint(InternalCoordinate):
+    clientId: str | None = None
+
+
+class InternalRouteRequest(BaseModel):
+    origin: InternalCoordinate
+    destination: InternalCoordinate
+    waypoints: list[InternalWaypoint] = []
+    vehicleProfile: str = "car"
+    blockedEdgeIds: list[str] = []
+    penaltyEdgeFactors: dict[str, float] = {}
+
+
+class RestrictionResolveRequest(BaseModel):
+    geometry: dict
+    penaltyFactor: float | None = None
+
+
+class SnapRequest(InternalCoordinate):
+    vehicleProfile: str = "car"
+
+
+def require_internal_token(authorization: str | None = Header(default=None)):
+    """Keep the internal routing facade private when a service token is set.
+
+    Local development intentionally leaves the variable empty, which preserves
+    the existing single-host setup while production deployments can put this
+    endpoint behind the same shared-secret boundary as the Node service.
+    """
+    if ROUTING_SERVICE_TOKEN and authorization != f"Bearer {ROUTING_SERVICE_TOKEN}":
+        raise HTTPException(status_code=401, detail="Invalid routing service token")
+
+
+def _graph_version() -> str:
+    """Return a stable fingerprint for the graph and static restriction files."""
+    candidates = [Path(PBF_PATH), PROJECT_DIR / "gov_restrictions.json", PROJECT_DIR / "manual_restrictions.json", PROJECT_DIR / "turn_restrictions.json"]
+    digest = hashlib.sha256()
+    for path in candidates:
+        try:
+            stat = path.stat()
+            digest.update(str(path.resolve()).encode())
+            digest.update(str(stat.st_size).encode())
+            digest.update(str(stat.st_mtime_ns).encode())
+        except FileNotFoundError:
+            digest.update(str(path).encode())
+    return digest.hexdigest()[:32]
+
+
+def _internal_route(req: InternalRouteRequest):
+    if graph is None:
+        raise HTTPException(status_code=503, detail="Routing graph is not ready")
+    profile = None if req.vehicleProfile in ("", "car", "unrestricted") else req.vehicleProfile
+    if profile is not None and profile not in TRUCK_PROFILES:
+        raise HTTPException(status_code=422, detail=f"Unknown vehicle profile: {profile}")
+    stops = [req.origin, *req.waypoints, req.destination]
+    route_coords: list[list[float]] = []
+    directed_itinerary: list[dict] = []
+    distance_m = 0.0
+    duration_s = 0.0
+    snapped_stops: list[dict] = []
+    graph_version = _graph_version()
+    for index, stop in enumerate(stops):
+        node_id = graph.nearest_node(stop.lat, stop.lon)
+        if node_id is None:
+            raise HTTPException(status_code=422, detail={"code": "POINT_TOO_FAR_FROM_ROAD", "stopIndex": index})
+        snapped = graph.nearest_coords(stop.lat, stop.lon)
+        snapped_stops.append({
+            "clientId": getattr(stop, "clientId", None),
+            "lat": snapped[0] if snapped else stop.lat,
+            "lon": snapped[1] if snapped else stop.lon,
+            "nodeId": str(node_id),
+        })
+        if index == 0:
+            continue
+        previous = stops[index - 1]
+        previous_node = graph.nearest_node(previous.lat, previous.lon)
+        result = graph.route(
+            previous_node,
+            node_id,
+            truck_class=profile,
+            blocked_edge_ids=req.blockedEdgeIds,
+            penalty_edge_factors=req.penaltyEdgeFactors,
+        )
+        if result is None:
+            raise HTTPException(status_code=422, detail={"code": "ROUTE_NOT_FOUND", "stopIndex": index})
+        coords = result.coords
+        if route_coords and coords:
+            route_coords.extend(coords[1:])
+        else:
+            route_coords.extend(coords)
+        distance_m += result.distance_m
+        duration_s += result.time_s
+        # Adapter edge IDs are graph-version scoped at this boundary so a
+        # route snapshot cannot accidentally be applied to a rebuilt graph.
+        for edge_index, raw_edge_id in enumerate(getattr(result, "edge_ids", [])):
+            edge_id = f"{graph_version}:{raw_edge_id}"
+            directed_itinerary.append({
+                "edgeId": edge_id,
+                "physicalSegmentId": f"{graph_version}:{(result.physical_ids[edge_index] if edge_index < len(result.physical_ids) else raw_edge_id.rsplit(':', 1)[-1])}",
+                "fromNodeId": None,
+                "toNodeId": None,
+                "lengthM": (result.edge_lengths[edge_index] if edge_index < len(result.edge_lengths) else 0.0),
+                "cumulativeStartM": distance_m - result.distance_m + sum(result.edge_lengths[:edge_index]),
+            })
+    if not route_coords:
+        route_coords = [[req.origin.lon, req.origin.lat], [req.destination.lon, req.destination.lat]]
+    # GeoJSON is [lon, lat], while the legacy graph adapters return [lat, lon].
+    geojson_coords = [[point[1], point[0]] for point in route_coords]
+    warnings = []
+    if (req.blockedEdgeIds or req.penaltyEdgeFactors) and not directed_itinerary:
+        warnings.append("Dynamic road-state overlay could not match an edge in this graph build")
+    return {
+        "graphVersion": graph_version,
+        "routeGeojson": {"type": "LineString", "coordinates": geojson_coords},
+        "directedItinerary": directed_itinerary,
+        "snappedStops": snapped_stops,
+        "distanceM": distance_m,
+        "durationSec": duration_s,
+        "warnings": warnings,
+    }
+
+
+def _geometry_vertices(geometry: dict) -> list[tuple[float, float]]:
+    coordinates = geometry.get("coordinates", [])
+    if geometry.get("type") == "Polygon":
+        rings = coordinates[:1]
+    elif geometry.get("type") == "MultiPolygon":
+        rings = [ring for polygon in coordinates for ring in polygon[:1]]
+    else:
+        raise HTTPException(status_code=422, detail="Restriction geometry must be Polygon or MultiPolygon")
+    vertices = []
+    for ring in rings:
+        for pair in ring:
+            if isinstance(pair, list) and len(pair) >= 2:
+                vertices.append((float(pair[0]), float(pair[1])))
+    if len(vertices) < 3:
+        raise HTTPException(status_code=422, detail="Restriction polygon is degenerate")
+    return vertices
+
+
+def _graph_edge_records():
+    """Yield (raw directed id, physical id, [(lat, lon), ...]) records."""
+    if graph is None:
+        return
+    if hasattr(graph, "G"):
+        for u, v, key, data in graph.G.edges(keys=True, data=True):
+            geometry = data.get("geometry")
+            if geometry is not None:
+                coords = [(float(lat), float(lon)) for lon, lat in geometry.coords]
+            else:
+                coords = [(float(graph.G.nodes[u]["y"]), float(graph.G.nodes[u]["x"])), (float(graph.G.nodes[v]["y"]), float(graph.G.nodes[v]["x"]))]
+            osmid = data.get("osmid", key)
+            physical = str(osmid[0] if isinstance(osmid, list) and osmid else osmid)
+            yield f"{u}:{v}:{key}", physical, coords
+        return
+    for source, edges in getattr(graph, "adjacency", {}).items():
+        for target, _distance, _speed, geometry, _restrictions, way_id in edges:
+            yield f"{source}:{target}:{way_id}", str(way_id), [(float(point[0]), float(point[1])) for point in geometry]
+
+
+def _edge_intersects_polygon(coords, geometry):
+    try:
+        from shapely.geometry import LineString, shape
+        return LineString([(lon, lat) for lat, lon in coords]).intersects(shape(geometry))
+    except (ImportError, ValueError, TypeError):
+        vertices = _geometry_vertices(geometry)
+        min_lon = min(point[0] for point in vertices)
+        max_lon = max(point[0] for point in vertices)
+        min_lat = min(point[1] for point in vertices)
+        max_lat = max(point[1] for point in vertices)
+        return any(min_lat <= lat <= max_lat and min_lon <= lon <= max_lon for lat, lon in coords)
 
 
 @app.get("/api/buses/info")
@@ -252,6 +432,49 @@ def get_route(req: RouteRequest):
         "time_min": round(result.time_s / 60, 2),
         "num_nodes": len(result.coords),
         "truck_class": truck_class or "car",
+    }
+
+
+@app.get("/internal/routing/graph-version", dependencies=[Depends(require_internal_token)])
+def internal_graph_version():
+    return {"graphVersion": _graph_version()}
+
+
+@app.post("/internal/routing/snap", dependencies=[Depends(require_internal_token)])
+def internal_snap(req: SnapRequest):
+    if graph is None:
+        raise HTTPException(status_code=503, detail="Routing graph is not ready")
+    node_id = graph.nearest_node(req.lat, req.lon)
+    coords = graph.nearest_coords(req.lat, req.lon) if node_id is not None else None
+    if node_id is None or coords is None:
+        raise HTTPException(status_code=422, detail={"code": "POINT_TOO_FAR_FROM_ROAD"})
+    return {"graphVersion": _graph_version(), "nodeId": str(node_id), "lat": coords[0], "lon": coords[1], "distanceM": 0.0}
+
+
+@app.post("/internal/routing/route", dependencies=[Depends(require_internal_token)])
+def internal_route(req: InternalRouteRequest):
+    return _internal_route(req)
+
+
+@app.post("/internal/routing/road-restrictions/resolve", dependencies=[Depends(require_internal_token)])
+def internal_resolve_restriction(req: RestrictionResolveRequest):
+    """Resolve full directed graph arcs touched by a scenario polygon."""
+    _geometry_vertices(req.geometry)
+    graph_version = _graph_version()
+    directed, physical = [], []
+    for raw_id, physical_id, coords in _graph_edge_records():
+        if _edge_intersects_polygon(coords, req.geometry):
+            directed.append(f"{graph_version}:{raw_id}")
+            physical.append(f"{graph_version}:{physical_id}")
+    # Stable de-duplication keeps payloads small for OSM ways containing many
+    # parallel arcs while retaining every directed traversal.
+    directed = list(dict.fromkeys(directed))
+    physical = list(dict.fromkeys(physical))
+    return {
+        "graphVersion": graph_version,
+        "affectedDirectedEdgeIds": directed,
+        "affectedPhysicalSegmentIds": physical,
+        "occupiedCandidateEdges": [],
     }
 
 
