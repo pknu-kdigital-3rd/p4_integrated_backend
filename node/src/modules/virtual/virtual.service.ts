@@ -115,6 +115,18 @@ async function activeVehicleState(vehicleId: bigint) {
     });
 }
 
+function occupiedVehicleIds(
+    states: Array<{ vehicleId: bigint; currentEdgeId: string | null; currentPhysicalSegmentId: string | null }>,
+    resolved: { affectedDirectedEdgeIds: string[]; affectedPhysicalSegmentIds: string[] },
+) {
+    const directed = new Set(resolved.affectedDirectedEdgeIds);
+    const physical = new Set(resolved.affectedPhysicalSegmentIds);
+    return states
+        .filter((state) => (state.currentEdgeId !== null && directed.has(state.currentEdgeId))
+            || (state.currentPhysicalSegmentId !== null && physical.has(state.currentPhysicalSegmentId)))
+        .map((state) => state.vehicleId.toString());
+}
+
 export const virtualService = {
     async createScenario(input: CreateScenarioBody, actorId?: bigint) {
         return prisma.virtualScenario.create({
@@ -491,7 +503,7 @@ export const virtualService = {
         const restrictionInput = input.penaltyFactor === undefined ? { geometry: input.geometry } : { geometry: input.geometry, penaltyFactor: input.penaltyFactor };
         const resolved = await routingInternalClient.resolveRestriction(restrictionInput);
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
-        const occupied = states.filter((state) => (state.currentEdgeId && resolved.affectedDirectedEdgeIds.includes(state.currentEdgeId)) || (state.currentPhysicalSegmentId && resolved.affectedPhysicalSegmentIds.includes(state.currentPhysicalSegmentId))).map((state) => state.vehicleId.toString());
+        const occupied = occupiedVehicleIds(states, resolved);
         return { ...resolved, scenarioId, restrictionRevision: scenario.restrictionRevision, kind: input.kind, canActivate: input.kind !== "BLOCKED" || occupied.length === 0, occupyingVirtualVehicleIds: occupied };
     },
 
@@ -501,7 +513,7 @@ export const virtualService = {
         const restrictionInput = input.penaltyFactor === undefined ? { geometry: input.geometry } : { geometry: input.geometry, penaltyFactor: input.penaltyFactor };
         const resolved = await routingInternalClient.resolveRestriction(restrictionInput);
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
-        const occupied = states.filter((state) => (state.currentEdgeId && resolved.affectedDirectedEdgeIds.includes(state.currentEdgeId)) || (state.currentPhysicalSegmentId && resolved.affectedPhysicalSegmentIds.includes(state.currentPhysicalSegmentId))).map((state) => state.vehicleId.toString());
+        const occupied = occupiedVehicleIds(states, resolved);
         if (input.kind === "BLOCKED" && occupied.length) throw new AppError(409, `Blocked road is occupied by virtual vehicles: ${occupied.join(", ")}`, "ROAD_OCCUPIED");
         const revision = scenario.restrictionRevision + 1;
         const restriction = await prisma.$transaction(async (tx) => {
@@ -536,7 +548,7 @@ export const virtualService = {
         if (kind === "HEAVY_PENALTY" && (penaltyFactor === null || penaltyFactor <= 1)) throw new AppError(400, "Heavy penalty requires a factor greater than one", "INVALID_RESTRICTION");
         const resolved = await routingInternalClient.resolveRestriction(penaltyFactor === null ? { geometry } : { geometry, penaltyFactor });
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId: existing.scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
-        const occupied = states.filter((state) => (state.currentEdgeId && resolved.affectedDirectedEdgeIds.includes(state.currentEdgeId)) || (state.currentPhysicalSegmentId && resolved.affectedPhysicalSegmentIds.includes(state.currentPhysicalSegmentId))).map((state) => state.vehicleId.toString());
+        const occupied = occupiedVehicleIds(states, resolved);
         if (kind === "BLOCKED" && occupied.length) throw new AppError(409, `Blocked road is occupied by virtual vehicles: ${occupied.join(", ")}`, "ROAD_OCCUPIED");
         const revision = scenario.restrictionRevision + 1;
         const updated = await prisma.$transaction(async (tx) => {
@@ -550,20 +562,50 @@ export const virtualService = {
     },
 
     async refreshFollowingTrips(scenarioId: bigint) {
-        const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, include: { trip: { include: { waypoints: { orderBy: { sequence: "asc" } } } } } });
+        const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, include: { trip: { include: { routes: { where: { isCurrent: true } }, waypoints: { orderBy: { sequence: "asc" } } } } } });
         const settings = await prisma.virtualVehicleSettings.findMany({ where: { vehicleId: { in: states.map((state) => state.vehicleId) }, autoFollowEnabled: true } });
         const following = new Set(settings.map((item) => item.vehicleId.toString()));
-        for (const state of states) {
-            if (!following.has(state.vehicleId.toString()) || state.trip.state === "PAUSED") continue;
+        const eligibleStates = states.filter((state) => following.has(state.vehicleId.toString()) && state.trip.state !== "PAUSED");
+        // A road-state change affects vehicles independently. Solving them
+        // serially made the response time grow linearly with fleet size, but
+        // firing an unbounded number of CPU-heavy A* requests would overload
+        // the routing service. Four in-flight solves keep updates close to
+        // real time while preserving a bounded resource footprint.
+        let nextStateIndex = 0;
+        const processState = async (state: typeof states[number]) => {
             try {
-                await this.rerouteFromCurrentPosition(state.vehicleId);
+                let currentState = state;
+                // The 250 ms simulation tick can checkpoint or stop on the
+                // newly blocked edge while the solver is running.  A stale
+                // command-version CAS is expected in that race; resnapshot
+                // once and solve from the newest authoritative position.
+                for (let attempt = 0; attempt < 2; attempt += 1) {
+                    const activated = await this.rerouteFromCurrentPosition(state.vehicleId, currentState);
+                    if (activated) return;
+                    const latest = await activeVehicleState(state.vehicleId);
+                    if (!latest || ["COMPLETED", "CANCELLED"].includes(latest.trip.state)) return;
+                    currentState = latest;
+                }
+                // Another command won the CAS.  Its route/state is already
+                // authoritative, so do not overwrite it with NO_ROUTE.
+                return;
             } catch (error) {
+                const latest = await activeVehicleState(state.vehicleId);
+                if (!latest || ["COMPLETED", "CANCELLED"].includes(latest.trip.state)) return;
                 await prisma.$transaction([
-                    prisma.virtualVehicleState.update({ where: { vehicleId: state.vehicleId }, data: { simStatus: "NO_ROUTE", blockedReason: "Routing failed after road-state change" } }),
-                    prisma.virtualTrip.update({ where: { virtualTripId: state.virtualTripId }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),
+                    prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: "Routing failed after road-state change" } }),
+                    prisma.virtualTrip.updateMany({ where: { virtualTripId: latest.virtualTripId, state: { in: ACTIVE_TRIP_STATES } }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),
                 ]);
             }
-        }
+        };
+        const workerCount = Math.min(4, eligibleStates.length);
+        await Promise.all(Array.from({ length: workerCount }, async () => {
+            while (true) {
+                const index = nextStateIndex++;
+                if (index >= eligibleStates.length) return;
+                await processState(eligibleStates[index]!);
+            }
+        }));
     },
 
     async listEvents(scenarioId: bigint, after?: bigint) {

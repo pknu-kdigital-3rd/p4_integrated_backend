@@ -41,6 +41,12 @@ fallback.
 it. After that, `uv run` always uses that locked environment - no need to
 activate a venv manually.
 
+Dynamic virtual-dispatch road restrictions use an in-memory edge grid index.
+The index is built once with the graph and lets a new blockage resolve only
+nearby edge geometries. `ROUTING_EDGE_INDEX_BUCKET_DEGREES` controls the grid
+cell size (the default `0.01` degree is suitable for the Busan graph); smaller
+cells reduce candidate checks at the cost of a larger startup index.
+
 Then open http://127.0.0.1:8000 in a browser.
 
 ### Without uv (plain pip)

@@ -222,6 +222,7 @@ async function commitRestriction() {
   const kind = document.querySelector('#virtual-restriction-kind').value;
   const body = { kind, geometry: restrictionGeometry, ...(kind === 'HEAVY_PENALTY' ? { penaltyFactor: Number(document.querySelector('#virtual-penalty').value) } : {}) };
   try {
+    setStatus('Checking the road change and recalculating affected virtual routes…');
     const preview = await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions/preview`, { method: 'POST', body: JSON.stringify(body) });
     if (!preview.canActivate) { setStatus(`Blocked region is occupied by vehicle(s): ${preview.occupyingVirtualVehicleIds.join(', ')}`, true); return; }
     await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions`, { method: 'POST', body: JSON.stringify({ ...body, expectedRestrictionRevision: scenarioRevision }) });

@@ -48,6 +48,25 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
         self.assertNotIn("1:2:10", blocked.edge_ids)
         self.assertEqual(blocked.edge_ids, ["1:3:20", "3:4:21", "4:2:22"])
 
+    def test_graph_version_prefixed_blocked_edge_uses_constant_time_lookup(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {
+            1: (0.0, 0.0),
+            2: (1.0, 1.0),
+            3: (0.0, 2.0),
+            4: (1.0, 2.0),
+        }
+        graph.turn_restrictions = set()
+        graph.adjacency = defaultdict(list)
+        graph.adjacency[1].append((2, 157_000.0, 40.0, [[0.0, 0.0], [1.0, 1.0]], empty_restrictions(), 10))
+        graph.adjacency[1].append((3, 222_000.0, 40.0, [[0.0, 0.0], [0.0, 2.0]], empty_restrictions(), 20))
+        graph.adjacency[3].append((4, 111_000.0, 40.0, [[0.0, 2.0], [1.0, 2.0]], empty_restrictions(), 21))
+        graph.adjacency[4].append((2, 111_000.0, 40.0, [[1.0, 2.0], [1.0, 1.0]], empty_restrictions(), 22))
+
+        blocked = graph.route(1, 2, blocked_edge_ids=["0123456789abcdef0123456789abcdef:1:2:10"])
+
+        self.assertEqual(blocked.edge_ids, ["1:3:20", "3:4:21", "4:2:22"])
+
     def test_internal_route_re_resolves_active_blocked_geometry(self):
         graph = object.__new__(PurePythonGraph)
         graph.coords = {

@@ -8,7 +8,10 @@ Run:
 Then open http://127.0.0.1:8000
 """
 import hashlib
+import json
+import math
 import os
+import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -80,6 +83,17 @@ override_locations = []
 hybrid_bus_service: HybridBusService | None = None
 vehicle_tracker: VehicleTracker | None = None
 
+# Dynamic road restrictions are resolved against the immutable graph.  Keep a
+# small uniform spatial index beside the graph so a new polygon only checks
+# nearby edge geometries instead of walking every edge in Busan.  The index is
+# rebuilt lazily when tests or a development reload replace ``graph``.
+EDGE_INDEX_BUCKET_DEGREES = float(os.environ.get("ROUTING_EDGE_INDEX_BUCKET_DEGREES", "0.01"))
+_edge_index_graph = None
+_edge_records_cache = ()
+_edge_spatial_index = {}
+_edge_long_records = ()
+_restriction_resolution_cache = {}
+
 
 @app.get("/health/live")
 def health_live():
@@ -98,6 +112,8 @@ def startup():
     global graph, override_locations, hybrid_bus_service, vehicle_tracker
     print(f"Loading graph from {PBF_PATH} ...")
     graph = load_graph(PBF_PATH)
+    _ensure_edge_spatial_index()
+    print(f"Dynamic restriction edge index ready: {len(_edge_records_cache)} edges across {len(_edge_spatial_index)} cells")
     override_locations = get_override_locations(PBF_PATH)
     route_ids = load_route_ids(BUS_ROUTE_METADATA_PATH)
     hybrid_bus_service = HybridBusService.from_environment(
@@ -214,10 +230,18 @@ def _internal_route(req: InternalRouteRequest):
         # Resolve all active closure polygons against this graph before A*.
         # This also repairs restrictions persisted by a previous resolver
         # implementation whose endpoint-only fallback missed crossed edges.
-        for geometry in req.blockedGeometries:
-            intersects = _make_edge_intersector(geometry)
-            for raw_id, _physical_id, coords in _graph_edge_records():
-                if intersects(coords):
+        # Once all persisted IDs already carry the current graph fingerprint,
+        # the geometry pass is redundant.  Skipping it is important during a
+        # live reroute because every affected vehicle receives the same
+        # restriction overlay.  A graph rebuild or an ID-less legacy overlay
+        # still falls back to exact geometry resolution.
+        current_prefix = f"{graph_version}:"
+        overlay_is_current = bool(blocked_edge_ids) and all(
+            str(edge_id).startswith(current_prefix) for edge_id in blocked_edge_ids
+        )
+        if not overlay_is_current:
+            for geometry in req.blockedGeometries:
+                for raw_id, _physical_id, _coords in _edges_intersecting_geometry(geometry):
                     blocked_edge_ids.append(f"{graph_version}:{raw_id}")
         blocked_edge_ids = list(dict.fromkeys(blocked_edge_ids))
     for index, stop in enumerate(stops):
@@ -448,7 +472,7 @@ def _make_edge_intersector(geometry):
         return intersects
 
 
-def _graph_edge_records():
+def _iter_graph_edge_records():
     """Yield (raw directed id, physical id, [(lat, lon), ...]) records."""
     if graph is None:
         return
@@ -466,6 +490,115 @@ def _graph_edge_records():
     for source, edges in getattr(graph, "adjacency", {}).items():
         for target, _distance, _speed, geometry, _restrictions, way_id in edges:
             yield f"{source}:{target}:{way_id}", str(way_id), [(float(point[0]), float(point[1])) for point in geometry]
+
+
+def _ensure_edge_spatial_index():
+    """Build the cached edge geometry and uniform grid index for ``graph``."""
+    global _edge_index_graph, _edge_records_cache, _edge_spatial_index, _edge_long_records, _restriction_resolution_cache
+    if graph is None:
+        _edge_index_graph = None
+        _edge_records_cache = ()
+        _edge_spatial_index = {}
+        _edge_long_records = ()
+        _restriction_resolution_cache = {}
+        return
+    if _edge_index_graph is graph:
+        return
+
+    bucket_size = max(0.0001, EDGE_INDEX_BUCKET_DEGREES)
+    records = []
+    spatial_index = {}
+    long_records = []
+    for raw_id, physical_id, coords in _iter_graph_edge_records():
+        if len(coords) < 2:
+            continue
+        # Index bounds in GeoJSON order (longitude, latitude).  The exact
+        # intersection predicate below still receives the original lat/lon
+        # geometry so curved edges and polygon crossings remain precise.
+        bounds = _bounds([(point[1], point[0]) for point in coords])
+        record_index = len(records)
+        records.append((raw_id, physical_id, tuple(coords), bounds))
+        min_x = math.floor(bounds[0] / bucket_size)
+        max_x = math.floor(bounds[2] / bucket_size)
+        min_y = math.floor(bounds[1] / bucket_size)
+        max_y = math.floor(bounds[3] / bucket_size)
+        cell_count = (max_x - min_x + 1) * (max_y - min_y + 1)
+        # A very long edge should not explode the index; it remains a cheap
+        # exact-intersection candidate in a small overflow list instead.
+        if cell_count > 4096:
+            long_records.append(record_index)
+            continue
+        for cell_x in range(min_x, max_x + 1):
+            for cell_y in range(min_y, max_y + 1):
+                spatial_index.setdefault((cell_x, cell_y), []).append(record_index)
+
+    _edge_records_cache = tuple(records)
+    _edge_spatial_index = spatial_index
+    _edge_long_records = tuple(long_records)
+    _edge_index_graph = graph
+    _restriction_resolution_cache = {}
+
+
+def _graph_edge_records():
+    """Yield cached (raw directed id, physical id, geometry) records."""
+    _ensure_edge_spatial_index()
+    for raw_id, physical_id, coords, _bounds_value in _edge_records_cache:
+        yield raw_id, physical_id, coords
+
+
+def _indexed_graph_edge_records(geometry):
+    """Yield only edge records whose grid cells touch a restriction geometry."""
+    _ensure_edge_spatial_index()
+    if not _edge_records_cache:
+        return
+    bucket_size = max(0.0001, EDGE_INDEX_BUCKET_DEGREES)
+    candidate_indices = set(_edge_long_records)
+    for polygon in _geometry_polygons(geometry):
+        vertices = [point for ring in polygon for point in ring]
+        polygon_bounds = _bounds(vertices)
+        min_x = math.floor(polygon_bounds[0] / bucket_size)
+        max_x = math.floor(polygon_bounds[2] / bucket_size)
+        min_y = math.floor(polygon_bounds[1] / bucket_size)
+        max_y = math.floor(polygon_bounds[3] / bucket_size)
+        for cell_x in range(min_x, max_x + 1):
+            for cell_y in range(min_y, max_y + 1):
+                candidate_indices.update(_edge_spatial_index.get((cell_x, cell_y), ()))
+    for record_index in candidate_indices:
+        raw_id, physical_id, coords, _bounds_value = _edge_records_cache[record_index]
+        yield raw_id, physical_id, coords
+
+
+def _resolve_geometry_edges(geometry):
+    """Resolve a polygon to directed/physical IDs with a small hot cache."""
+    _ensure_edge_spatial_index()
+    graph_version = _graph_version()
+    try:
+        geometry_key = json.dumps(geometry, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        geometry_key = repr(geometry)
+    cache_key = (graph_version, geometry_key)
+    cached = _restriction_resolution_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    intersects = _make_edge_intersector(geometry)
+    resolved = []
+    for raw_id, physical_id, coords in _indexed_graph_edge_records(geometry):
+        if intersects(coords):
+            resolved.append((raw_id, physical_id))
+    # Preview and commit intentionally resolve the same geometry twice so the
+    # commit can recheck occupancy. Reuse the indexed result while the graph
+    # and version are unchanged, with a bounded cache for arbitrary polygons.
+    _restriction_resolution_cache[cache_key] = resolved
+    if len(_restriction_resolution_cache) > 256:
+        _restriction_resolution_cache.pop(next(iter(_restriction_resolution_cache)))
+    return resolved
+
+
+def _edges_intersecting_geometry(geometry):
+    """Yield cached directed/physical IDs for compatibility with callers."""
+    for raw_id, physical_id in _resolve_geometry_edges(geometry):
+        yield raw_id, physical_id, None
 
 
 def _edge_intersects_polygon(coords, geometry):
@@ -613,22 +746,27 @@ def internal_route(req: InternalRouteRequest):
 @app.post("/internal/routing/road-restrictions/resolve", dependencies=[Depends(require_internal_token)])
 def internal_resolve_restriction(req: RestrictionResolveRequest):
     """Resolve full directed graph arcs touched by a scenario polygon."""
-    intersects = _make_edge_intersector(req.geometry)
+    started = time.perf_counter()
     graph_version = _graph_version()
     directed, physical = [], []
-    for raw_id, physical_id, coords in _graph_edge_records():
-        if intersects(coords):
-            directed.append(f"{graph_version}:{raw_id}")
-            physical.append(f"{graph_version}:{physical_id}")
+    resolved_edge_count = 0
+    for raw_id, physical_id, _coords in _edges_intersecting_geometry(req.geometry):
+        resolved_edge_count += 1
+        directed.append(f"{graph_version}:{raw_id}")
+        physical.append(f"{graph_version}:{physical_id}")
     # Stable de-duplication keeps payloads small for OSM ways containing many
     # parallel arcs while retaining every directed traversal.
     directed = list(dict.fromkeys(directed))
     physical = list(dict.fromkeys(physical))
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    print(f"Dynamic restriction resolved: edges={resolved_edge_count} directed={len(directed)} physical={len(physical)} elapsed_ms={elapsed_ms}")
     return {
         "graphVersion": graph_version,
         "affectedDirectedEdgeIds": directed,
         "affectedPhysicalSegmentIds": physical,
         "occupiedCandidateEdges": [],
+        "resolvedEdgeCount": resolved_edge_count,
+        "elapsedMs": elapsed_ms,
     }
 
 

@@ -166,6 +166,41 @@ def _overlay_match(raw_id, supplied_ids):
     return None
 
 
+def _raw_overlay_id(value):
+    """Return the adapter edge ID from a graph-version-prefixed ID.
+
+    Dynamic restrictions are persisted with the routing graph fingerprint in
+    front of the raw adapter ID.  The old matcher walked the complete list of
+    restriction IDs for every edge visited by A*, which made a large polygon
+    closure turn routing into an O(edges * blocked-ids) operation.  The graph
+    fingerprint is a 32-character SHA-256 prefix, so it can be stripped once
+    while preparing an O(1) lookup table.
+    """
+    value = str(value)
+    prefix, separator, raw = value.partition(":")
+    if separator and len(prefix) == 32 and all(character in "0123456789abcdefABCDEF" for character in prefix):
+        return raw
+    return value
+
+
+def _prepare_overlay_ids(values):
+    lookup = set()
+    for value in values or ():
+        string_value = str(value)
+        lookup.add(string_value)
+        lookup.add(_raw_overlay_id(string_value))
+    return lookup
+
+
+def _prepare_overlay_values(values):
+    lookup = {}
+    for key, value in (values or {}).items():
+        string_key = str(key)
+        lookup[string_key] = value
+        lookup[_raw_overlay_id(string_key)] = value
+    return lookup
+
+
 # ---------------------------------------------------------------------------
 # Truck size classes. These are illustrative typical dimensions, not the
 # official regulatory limits of any specific country - tune to match your
@@ -334,6 +369,7 @@ class OsmnxGraph:
 
         cache_path = pbf_path + self.CACHE_SUFFIX
         if self._load_from_cache(cache_path, pbf_path):
+            self._prepare_edge_metadata()
             return
 
         from pyrosm import OSM
@@ -368,6 +404,7 @@ class OsmnxGraph:
                         break
             print(f"Applied to {applied} edge(s)")
 
+        self._prepare_edge_metadata()
         self._save_to_cache(cache_path)
 
     def _cache_dependency_paths(self, pbf_path):
@@ -410,6 +447,18 @@ class OsmnxGraph:
         with open(cache_path, "wb") as f:
             pickle.dump(self.G, f, protocol=pickle.HIGHEST_PROTOCOL)
 
+    def _prepare_edge_metadata(self):
+        """Cache parsed static restrictions on each edge before live routing."""
+        for _u, _v, _key, data in self.G.edges(keys=True, data=True):
+            data["_p4_edge_restrictions"] = {
+                "max_height_m": _parse_float_tag(data.get("maxheight")),
+                "max_weight_t": _parse_float_tag(data.get("maxweight")),
+                "max_width_m": _parse_float_tag(data.get("maxwidth")),
+                "max_length_m": _parse_float_tag(data.get("maxlength")),
+                "hgv": data.get("hgv"),
+                "access": data.get("access"),
+            }
+
     def nearest_node(self, lat, lon):
         return self.ox.distance.nearest_nodes(self.G, X=lon, Y=lat)
 
@@ -431,13 +480,18 @@ class OsmnxGraph:
         # could reach it" simplification, not a full edge-based search).
         import heapq
 
-        G, ox = self.G, self.ox
+        G = self.G
+        blocked_lookup = _prepare_overlay_ids(blocked_edge_ids)
+        penalty_lookup = _prepare_overlay_values(penalty_edge_factors)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
         max_speed_mps = max_speed_kmh * 1000 / 3600
 
         def edge_restrictions(data):
+            cached = data.get("_p4_edge_restrictions")
+            if cached is not None:
+                return cached
             return {
                 "max_height_m": _parse_float_tag(data.get("maxheight")),
                 "max_weight_t": _parse_float_tag(data.get("maxweight")),
@@ -466,7 +520,7 @@ class OsmnxGraph:
         def h(n):
             y1, x1 = G.nodes[n]["y"], G.nodes[n]["x"]
             y2, x2 = G.nodes[goal_id]["y"], G.nodes[goal_id]["x"]
-            return ox.distance.great_circle(y1, x1, y2, x2) / max_speed_mps
+            return haversine_m(y1, x1, y2, x2) / max_speed_mps
 
         open_set = [(h(start_id), 0.0, start_id)]
         # came_from[node] = (prev_node, dist_m, edge_data, osmids_of_this_edge)
@@ -492,12 +546,9 @@ class OsmnxGraph:
                     if not edge_allowed(edge_restrictions(attrs), profile):
                         continue
                     raw_edge_id = f"{current}:{neighbor}:{edge_key}"
-                    if _overlay_match(raw_edge_id, blocked_edge_ids):
+                    if raw_edge_id in blocked_lookup:
                         continue
-                    penalty = 1.0
-                    matched_penalty = _overlay_match(raw_edge_id, penalty_edge_factors or {})
-                    if matched_penalty:
-                        penalty = max(1.0, float((penalty_edge_factors or {}).get(matched_penalty, 1.0)))
+                    penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                     t = _edge_time_from_data(attrs) * penalty
                     if best_time is None or t < best_time:
                         best_time, best_attr = t, (edge_key, attrs, penalty)
@@ -679,6 +730,8 @@ class PurePythonGraph:
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None):
         import heapq
         coords = self.coords
+        blocked_lookup = _prepare_overlay_ids(blocked_edge_ids)
+        penalty_lookup = _prepare_overlay_values(penalty_edge_factors)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
@@ -727,12 +780,9 @@ class PurePythonGraph:
                 if incoming_way is not None and (incoming_way, current, wid) in self.turn_restrictions:
                     continue  # illegal turn (from incoming_way, via current, onto wid)
                 raw_edge_id = f"{current}:{neighbor}:{wid}"
-                if _overlay_match(raw_edge_id, blocked_edge_ids):
+                if raw_edge_id in blocked_lookup:
                     continue
-                penalty = 1.0
-                matched_penalty = _overlay_match(raw_edge_id, penalty_edge_factors or {})
-                if matched_penalty:
-                    penalty = max(1.0, float((penalty_edge_factors or {}).get(matched_penalty, 1.0)))
+                penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                 w = edge_time_s(dist_m, base_speed) * penalty
                 tentative = g + w
                 if tentative < g_score.get(neighbor, float("inf")):
