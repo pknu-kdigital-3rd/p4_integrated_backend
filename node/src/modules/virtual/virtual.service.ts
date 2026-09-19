@@ -592,8 +592,9 @@ export const virtualService = {
             } catch (error) {
                 const latest = await activeVehicleState(state.vehicleId);
                 if (!latest || ["COMPLETED", "CANCELLED"].includes(latest.trip.state)) return;
+                const noViablePath = error instanceof AppError && error.code === "ROUTE_NOT_FOUND";
                 await prisma.$transaction([
-                    prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: "Routing failed after road-state change" } }),
+                    prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: noViablePath ? "No viable path after road restriction" : "Routing failed after road-state change" } }),
                     prisma.virtualTrip.updateMany({ where: { virtualTripId: latest.virtualTripId, state: { in: ACTIVE_TRIP_STATES } }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),
                 ]);
             }

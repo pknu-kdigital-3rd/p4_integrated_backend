@@ -106,6 +106,13 @@ function renderSelectedVehicle(vehicle) {
   const settings = vehicle.following || { autoFollowEnabled: true };
   document.querySelector('#virtual-following').checked = Boolean(settings.autoFollowEnabled);
 }
+function noViablePathMessage() {
+  const noRouteVehicles = vehicles.filter((vehicle) => vehicle.state?.simStatus === 'NO_ROUTE'
+    && vehicle.state?.blockedReason === 'No viable path after road restriction');
+  if (!noRouteVehicles.length) return '';
+  const labels = noRouteVehicles.map((vehicle) => vehicle.vehicleCode).join(', ');
+  return `No viable path after applying this blockage${labels ? ` for ${labels}` : ''}.`;
+}
 function renderRequests(requests) {
   requestList.replaceChildren();
   if (!requests.length) { requestList.append(Object.assign(document.createElement('li'), { textContent: 'No pending requests.' })); return; }
@@ -238,7 +245,9 @@ async function commitRestriction() {
     await loadScenarios();
     await loadScenarioData();
     const selected = vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId);
-    if (points.origin && points.destination && selected?.vehicleStatus === 'READY') await previewRoute();
+    const noRouteMessage = noViablePathMessage();
+    if (noRouteMessage) setStatus(noRouteMessage, true);
+    else if (points.origin && points.destination && selected?.vehicleStatus === 'READY') await previewRoute();
     else setStatus('Road state activated.');
   }
   catch (error) { setStatus(error.message, true); }
