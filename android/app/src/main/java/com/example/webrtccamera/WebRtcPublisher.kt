@@ -310,13 +310,17 @@ class WebRtcPublisher(
      */
     fun sendTelemetryBatch(batch: TelemetryBatch) {
         if (batch.isEmpty) return
-        val pending = PendingTelemetry(batch.toJsonBytes(), hasGps = batch.gps.isNotEmpty())
+        // Never hand the relay a message it cannot read: an oversized message closes the
+        // whole telemetry-events channel on the server side.
+        val pending = batch.toJsonMessages().map { PendingTelemetry(it, hasGps = batch.gps.isNotEmpty()) }
         postRtc {
-            if (pendingTelemetry.size >= MAX_PENDING_TELEMETRY_BATCHES) {
-                val dropIndex = pendingTelemetry.indexOfFirst { !it.hasGps }
-                if (dropIndex >= 0) pendingTelemetry.removeAt(dropIndex) else pendingTelemetry.removeFirst()
+            for (message in pending) {
+                if (pendingTelemetry.size >= MAX_PENDING_TELEMETRY_BATCHES) {
+                    val dropIndex = pendingTelemetry.indexOfFirst { !it.hasGps }
+                    if (dropIndex >= 0) pendingTelemetry.removeAt(dropIndex) else pendingTelemetry.removeFirst()
+                }
+                pendingTelemetry.addLast(message)
             }
-            pendingTelemetry.addLast(pending)
             flushTelemetry()
         }
     }

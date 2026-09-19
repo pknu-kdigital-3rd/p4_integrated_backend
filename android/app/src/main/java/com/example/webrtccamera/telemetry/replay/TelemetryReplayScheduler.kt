@@ -46,6 +46,11 @@ class TelemetryReplayScheduler(
     @Volatile private var running = false
     private var lastReportedQrClockState: SourceClockState? = null
     private var endOfDatasetLogged = false
+    // False until the cursors have been positioned at a known source time. Replay usually
+    // starts before the first QR decode, and that first anchor can land anywhere in the
+    // footage; without this, every sample from the start of the dataset would be released
+    // at once as one oversized backlog message.
+    private var cursorsSynced = false
 
     val gpsSentCount = AtomicLong(0)
     val imuSentCount = AtomicLong(0)
@@ -75,6 +80,7 @@ class TelemetryReplayScheduler(
             } else {
                 nextGpsIndex = 0
                 nextImuIndex = 0
+                cursorsSynced = false
             }
             tickFuture = executor.scheduleWithFixedDelay(::tick, 0, TICK_INTERVAL_MS, TimeUnit.MILLISECONDS)
         }
@@ -110,6 +116,7 @@ class TelemetryReplayScheduler(
         pendingGps.clear()
         pendingImu.clear()
         endOfDatasetLogged = false
+        cursorsSynced = true
     }
 
     private fun tick() {
@@ -126,6 +133,10 @@ class TelemetryReplayScheduler(
             )
         }
         val sourceNow = sourceClock.currentSourceTimestampNs() ?: return
+        if (!cursorsSynced) {
+            resyncCursors(sourceNow)
+            onStatus("Telemetry: first QR anchor; replay positioned at ${sourceNow}ns")
+        }
         val nowMs = elapsedMillis()
         advanceCursors(sourceNow, nowMs)
         if (clockState == SourceClockState.RUNNING && nowMs - lastProgressStatusElapsedMs >= PROGRESS_STATUS_INTERVAL_MS) {
@@ -143,6 +154,7 @@ class TelemetryReplayScheduler(
         while (nextGpsIndex < dataset.gps.size && dataset.gps[nextGpsIndex].timestampNs <= sourceNow) {
             pendingGps.add(dataset.gps[nextGpsIndex])
             nextGpsIndex++
+            if (pendingGps.size >= MAX_GPS_PER_BATCH) flush(sourceNow, nowMs)
         }
         while (nextImuIndex < dataset.imu.size && dataset.imu[nextImuIndex].timestampNs <= sourceNow) {
             pendingImu.add(dataset.imu[nextImuIndex])
@@ -199,6 +211,8 @@ class TelemetryReplayScheduler(
         const val FLUSH_INTERVAL_MS = 40L
         const val PROGRESS_STATUS_INTERVAL_MS = 1_000L
         const val MAX_IMU_PER_BATCH = 16
+        // The relay rejects batches with more than 16 GPS fixes.
+        const val MAX_GPS_PER_BATCH = 16
 
         internal fun <T> firstIndexAtOrAfter(list: List<T>, target: Long, selector: (T) -> Long): Int {
             var lo = 0

@@ -56,4 +56,43 @@ class TelemetryBatchTest {
         val batch = TelemetryBatch(TelemetryMode.REPLAY, 1L, 1L, "s", 0L)
         assertTrue(batch.isEmpty)
     }
+
+    @Test
+    fun `batch declares protocol version 1`() {
+        val batch = TelemetryBatch(TelemetryMode.REPLAY, 1L, 1L, "s", 0L, gps = listOf(gpsSample))
+        assertEquals(1, JSONObject(String(batch.toJsonBytes())).getInt("version"))
+    }
+
+    @Test
+    fun `small batch is sent as a single unchanged message`() {
+        val batch = TelemetryBatch(TelemetryMode.REPLAY, 1L, 1L, "s", 0L, gps = listOf(gpsSample), imu = listOf(imuSample))
+        val messages = batch.toJsonMessages()
+        assertEquals(1, messages.size)
+        assertTrue(messages[0].contentEquals(batch.toJsonBytes()))
+    }
+
+    @Test
+    fun `oversized batch is split into messages within relay limits without losing samples`() {
+        val gps = (1L..430L).map { gpsSample.copy(timestampNs = it) }
+        val imu = (1L..200L).map { imuSample.copy(timestampNs = it) }
+        val batch = TelemetryBatch(TelemetryMode.REPLAY, 1L, 1L, "s", 0L, gps = gps, imu = imu)
+        assertTrue("fixture must exceed the limit", batch.toJsonBytes().size > TelemetryBatch.MAX_MESSAGE_BYTES)
+
+        val messages = batch.toJsonMessages().map { JSONObject(String(it, Charsets.UTF_8)) }
+        assertTrue(messages.size > 1)
+        val sentGps = mutableListOf<Long>()
+        val sentImu = mutableListOf<Long>()
+        for (message in messages) {
+            val gpsArray = message.getJSONArray("gps")
+            val imuArray = message.getJSONArray("imu")
+            assertTrue(message.toString().toByteArray().size <= TelemetryBatch.MAX_MESSAGE_BYTES)
+            assertTrue(gpsArray.length() <= TelemetryBatch.MAX_GPS_PER_MESSAGE)
+            assertTrue(imuArray.length() <= TelemetryBatch.MAX_IMU_PER_MESSAGE)
+            assertTrue(gpsArray.length() + imuArray.length() > 0)
+            for (i in 0 until gpsArray.length()) sentGps += gpsArray.getJSONObject(i).getLong("timestamp_ns")
+            for (i in 0 until imuArray.length()) sentImu += imuArray.getJSONObject(i).getLong("timestamp_ns")
+        }
+        assertEquals(gps.map { it.timestampNs }, sentGps)
+        assertEquals(imu.map { it.timestampNs }, sentImu)
+    }
 }

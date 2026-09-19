@@ -135,4 +135,49 @@ class TelemetryReplaySchedulerTest {
         assertEquals(12345L, batches.flatMap { it.gps }.single().timestampNs)
         assertEquals(6789L, batches.flatMap { it.imu }.single().timestampNs)
     }
+
+    @Test
+    fun `gps backlog is split into batches of at most 16 fixes`() {
+        val dataset = TelemetryDataset("d", gps = (0L..300L).map { gps(it) }, imu = emptyList())
+        val batches = mutableListOf<TelemetryBatch>()
+        val scheduler = newScheduler(dataset, batches)
+        scheduler.testResync(0L)
+
+        scheduler.advanceCursors(sourceNow = 300L, nowMs = 100L)
+
+        assertTrue(batches.all { it.gps.size <= TelemetryReplayScheduler.MAX_GPS_PER_BATCH })
+        assertEquals((0L..300L).toList(), batches.flatMap { it.gps }.map { it.timestampNs })
+    }
+
+    @Test
+    fun `first qr anchor mid-footage positions replay instead of releasing the backlog`() {
+        val second = 1_000_000_000L
+        val dataset = TelemetryDataset(
+            "d",
+            gps = (0L..300L).map { gps(it * second) },
+            imu = (0L..3000L).map { imu(it * second / 10) },
+        )
+        val batches = java.util.Collections.synchronizedList(mutableListOf<TelemetryBatch>())
+        val flushClockMs = java.util.concurrent.atomic.AtomicLong(0L)
+        // A frozen QR clock keeps the source time exactly at the anchor; the flush clock
+        // advances so pending samples are still flushed.
+        val scheduler = TelemetryReplayScheduler(
+            dataset = dataset,
+            sourceClock = QrSourceClock(nowNs = { 0L }),
+            sessionContext = SESSION,
+            onBatchReady = { batches.add(it) },
+            elapsedMillis = { flushClockMs.addAndGet(50L) },
+        )
+        scheduler.start() // before any QR: the source position is unknown
+        scheduler.onQrTimestamp(sourceTimestampNs = 250 * second, captureTimestampNs = 0L, decodeLatencyMs = 0L)
+        val deadline = System.currentTimeMillis() + 2_000
+        while (batches.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        Thread.sleep(100)
+        scheduler.stop()
+
+        val gpsSent = batches.flatMap { it.gps }.map { it.timestampNs / second }
+        val imuSent = batches.flatMap { it.imu }.map { it.timestampNs }
+        assertEquals("only the fix at the anchor restores the position", listOf(250L), gpsSent)
+        assertEquals(listOf(250 * second), imuSent)
+    }
 }
