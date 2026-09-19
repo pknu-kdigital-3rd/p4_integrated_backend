@@ -75,7 +75,11 @@ function renderActiveTripRoute(vehicle) {
   const trip = vehicle?.state?.trip;
   const routes = Array.isArray(trip?.routes) ? trip.routes.filter((route) => route?.routeGeojson) : [];
   if (!routes.length) return;
-  for (const route of routes) {
+  const currentRoute = routes.find((route) => route.isCurrent) || routes.at(-1);
+  const previousRoute = routes
+    .filter((route) => route !== currentRoute)
+    .sort((a, b) => Number(b.routeVersion || 0) - Number(a.routeVersion || 0))[0];
+  for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
     const layer = L.geoJSON(route.routeGeojson, {
       style: current
