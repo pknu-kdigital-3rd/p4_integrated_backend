@@ -99,12 +99,31 @@ function clearRouteGroup(group) {
   for (const visual of routeVisuals) {
     if (visual.group !== group) continue;
     removeArrowheadsDeep(visual.line);
+    removeArrowheadsDeep(visual.arrowLine);
     removeArrowheadsDeep(visual.outline);
     visual.line.remove?.();
+    visual.arrowLine?.remove?.();
     visual.outline.remove?.();
     routeVisuals.delete(visual);
   }
   group.clearLayers();
+}
+function arrowheadOptions(style) {
+  if (style.showArrows === false || typeof L.Polyline?.prototype.arrowheads !== 'function') return null;
+  const metrics = routeDisplayMetrics(style);
+  return {
+    color: style.arrowColor || '#ffffff',
+    fillColor: style.arrowColor || '#ffffff',
+    fill: true,
+    weight: style.arrowWeight ?? 0.8,
+    opacity: style.arrowOpacity ?? 0.98,
+    fillOpacity: style.arrowFillOpacity ?? style.arrowOpacity ?? 1,
+    // A smaller yawn makes a narrower, sharper chevron that stays inside
+    // the inner route stroke instead of spilling over its edges.
+    yawn: style.arrowYawn ?? 36,
+    size: `${metrics.arrowSize.toFixed(1)}px`,
+    frequency: `${metrics.arrowFrequency.toFixed(1)}px`,
+  };
 }
 function addRouteVisual(group, routeGeojson, style, tooltip) {
   if (!routeGeojson) return;
@@ -132,25 +151,28 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
       renderer: routeRenderer,
     },
   };
-  if (style.showArrows !== false && typeof L.Polyline?.prototype.arrowheads === 'function') {
-    const metrics = routeDisplayMetrics(style);
-    lineOptions.arrowheads = {
-      color: style.arrowColor || '#ffffff',
-      fillColor: style.arrowColor || '#ffffff',
-      fill: true,
-      weight: 0.8,
-      opacity: style.arrowOpacity ?? 0.98,
-      fillOpacity: style.arrowFillOpacity ?? style.arrowOpacity ?? 1,
-      // A smaller yawn makes a narrower, sharper chevron that stays inside
-      // the inner route stroke instead of spilling over its edges.
-      yawn: style.arrowYawn ?? 36,
-      size: `${metrics.arrowSize.toFixed(1)}px`,
-      frequency: `${metrics.arrowFrequency.toFixed(1)}px`,
-    };
-  }
+  const arrows = arrowheadOptions(style);
+  if (arrows && !style.arrowGeometry) lineOptions.arrowheads = arrows;
   const line = L.geoJSON(routeGeojson, lineOptions).addTo(group);
+  let arrowLine = null;
+  if (arrows && style.arrowGeometry) {
+    // Keep the complete previous route visible, but put its chevrons on a
+    // filtered geometry so shared road segments do not receive a second set
+    // of arrows from the current route.
+    arrowLine = L.geoJSON(style.arrowGeometry, {
+      style: {
+        color: style.arrowColor || '#ffffff',
+        weight: 0,
+        opacity: 0,
+        lineCap: 'round',
+        lineJoin: 'round',
+        renderer: routeRenderer,
+      },
+      arrowheads: arrows,
+    }).addTo(group);
+  }
   if (tooltip) line.bindTooltip(tooltip);
-  const visual = { group, outline, line, style };
+  const visual = { group, outline, line, arrowLine, style };
   routeVisuals.add(visual);
   applyRouteStrokeWidths(visual);
 }
@@ -163,6 +185,63 @@ function routeIdentity(route) {
 function routeGeometryIdentity(routeGeojson) {
   if (!routeGeojson) return '';
   try { return JSON.stringify(routeGeojson); } catch { return ''; }
+}
+function routeLineCoordinates(routeGeojson) {
+  const geometry = routeGeojson?.type === 'Feature' ? routeGeojson.geometry : routeGeojson;
+  if (geometry?.type === 'LineString' && Array.isArray(geometry.coordinates)) return [geometry.coordinates];
+  if (geometry?.type === 'MultiLineString' && Array.isArray(geometry.coordinates)) return geometry.coordinates;
+  if (routeGeojson?.type === 'FeatureCollection' && Array.isArray(routeGeojson.features)) {
+    return routeGeojson.features.flatMap((feature) => routeLineCoordinates(feature));
+  }
+  return [];
+}
+function coordinateIdentity(coordinate) {
+  if (!Array.isArray(coordinate) || coordinate.length < 2) return '';
+  const lon = Number(coordinate[0]);
+  const lat = Number(coordinate[1]);
+  return Number.isFinite(lon) && Number.isFinite(lat) ? `${lon.toFixed(6)},${lat.toFixed(6)}` : '';
+}
+function segmentIdentity(a, b) {
+  const first = coordinateIdentity(a);
+  const second = coordinateIdentity(b);
+  if (!first || !second) return '';
+  return first < second ? `${first}|${second}` : `${second}|${first}`;
+}
+function routeArrowGeometryExcluding(routeGeojson, excludedGeojson) {
+  const sourceLines = routeLineCoordinates(routeGeojson);
+  const excludedSegments = new Set();
+  for (const line of routeLineCoordinates(excludedGeojson)) {
+    for (let index = 1; index < line.length; index += 1) {
+      const identity = segmentIdentity(line[index - 1], line[index]);
+      if (identity) excludedSegments.add(identity);
+    }
+  }
+  if (!sourceLines.length || !excludedSegments.size) return routeGeojson;
+  const remainingLines = [];
+  for (const line of sourceLines) {
+    let run = [];
+    const flush = () => {
+      if (run.length >= 2) remainingLines.push(run);
+      run = [];
+    };
+    for (let index = 1; index < line.length; index += 1) {
+      const start = line[index - 1];
+      const end = line[index];
+      if (excludedSegments.has(segmentIdentity(start, end))) {
+        flush();
+        continue;
+      }
+      if (!run.length) run.push(start);
+      run.push(end);
+    }
+    flush();
+  }
+  if (!remainingLines.length) return null;
+  if (remainingLines.length === 1) return { type: 'LineString', coordinates: remainingLines[0] };
+  return {
+    type: 'FeatureCollection',
+    features: remainingLines.map((coordinates) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } })),
+  };
 }
 function renderDraft() {
   if (!draft) {
@@ -208,13 +287,16 @@ function renderActiveTripRoute(vehicle) {
   activeRouteSignature = signature;
   clearRouteGroup(activeRouteLayerGroup);
   const currentGeometry = routeGeometryIdentity(currentRoute?.routeGeojson);
+  const previousArrowGeometry = previousRoute
+    ? routeArrowGeometryExcluding(previousRoute.routeGeojson, currentRoute?.routeGeojson)
+    : null;
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
     const duplicateGeometry = !current && currentGeometry !== ''
       && routeGeometryIdentity(route.routeGeojson) === currentGeometry;
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
       ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowOpacity: 0.98, arrowYawn: 36, showArrows: true }
-      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: !duplicateGeometry },
+      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: !duplicateGeometry && Boolean(previousArrowGeometry), arrowGeometry: previousArrowGeometry },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
