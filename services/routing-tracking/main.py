@@ -363,6 +363,77 @@ def _point_in_polygon(point, rings):
     return not any(_point_in_ring(point, hole) for hole in rings[1:])
 
 
+def _bounds(points):
+    return (
+        min(point[0] for point in points),
+        min(point[1] for point in points),
+        max(point[0] for point in points),
+        max(point[1] for point in points),
+    )
+
+
+def _bounds_overlap(first, second):
+    return not (
+        first[2] < second[0]
+        or first[0] > second[2]
+        or first[3] < second[1]
+        or first[1] > second[3]
+    )
+
+
+def _prepare_fallback_intersector(polygons):
+    prepared = []
+    for rings in polygons:
+        polygon_points = [point for ring in rings for point in ring]
+        boundary_segments = []
+        for ring in rings:
+            boundary_segments.extend(zip(ring, ring[1:] + ring[:1]))
+        prepared.append((rings, _bounds(polygon_points), boundary_segments))
+    return prepared
+
+
+def _fallback_edge_intersects(edge_points, prepared):
+    if len(edge_points) < 2:
+        return False
+    edge_bounds = _bounds(edge_points)
+    edge_segments = zip(edge_points, edge_points[1:])
+    # A road edge can be a long curve, so first use its complete bounding box
+    # as a cheap candidate filter.  Exact segment/ring checks below handle
+    # crossings where neither endpoint is inside the restriction.
+    edge_segments = list(edge_segments)
+    for rings, polygon_bounds, boundary_segments in prepared:
+        if not _bounds_overlap(edge_bounds, polygon_bounds):
+            continue
+        if any(_point_in_polygon(point, rings) for point in edge_points):
+            return True
+        if any(_segments_intersect(start, end, boundary_start, boundary_end)
+               for start, end in edge_segments
+               for boundary_start, boundary_end in boundary_segments):
+            return True
+    return False
+
+
+def _make_edge_intersector(geometry):
+    """Build one reusable edge predicate for a restriction polygon."""
+    polygons = _geometry_polygons(geometry)
+    try:
+        from shapely.geometry import LineString, shape
+        restriction_shape = shape(geometry)
+
+        def intersects(coords):
+            return LineString([(lon, lat) for lat, lon in coords]).intersects(restriction_shape)
+
+        return intersects
+    except (ImportError, ValueError, TypeError):
+        prepared = _prepare_fallback_intersector(polygons)
+
+        def intersects(coords):
+            points = [(float(lon), float(lat)) for lat, lon in coords]
+            return _fallback_edge_intersects(points, prepared)
+
+        return intersects
+
+
 def _graph_edge_records():
     """Yield (raw directed id, physical id, [(lat, lon), ...]) records."""
     if graph is None:
@@ -384,27 +455,7 @@ def _graph_edge_records():
 
 
 def _edge_intersects_polygon(coords, geometry):
-    try:
-        from shapely.geometry import LineString, shape
-        return LineString([(lon, lat) for lat, lon in coords]).intersects(shape(geometry))
-    except (ImportError, ValueError, TypeError):
-        polygons = _geometry_polygons(geometry)
-        edge_points = [(float(lon), float(lat)) for lat, lon in coords]
-        if len(edge_points) < 2:
-            return False
-        edge_segments = list(zip(edge_points, edge_points[1:]))
-        for polygon in polygons:
-            if any(_point_in_polygon(point, polygon) for point in edge_points):
-                return True
-            boundary_segments = []
-            for ring in polygon:
-                ring_points = list(zip(ring, ring[1:] + ring[:1]))
-                boundary_segments.extend(ring_points)
-            if any(_segments_intersect(start, end, boundary_start, boundary_end)
-                   for start, end in edge_segments
-                   for boundary_start, boundary_end in boundary_segments):
-                return True
-        return False
+    return _make_edge_intersector(geometry)(coords)
 
 
 @app.get("/api/buses/info")
@@ -548,11 +599,11 @@ def internal_route(req: InternalRouteRequest):
 @app.post("/internal/routing/road-restrictions/resolve", dependencies=[Depends(require_internal_token)])
 def internal_resolve_restriction(req: RestrictionResolveRequest):
     """Resolve full directed graph arcs touched by a scenario polygon."""
-    _geometry_vertices(req.geometry)
+    intersects = _make_edge_intersector(req.geometry)
     graph_version = _graph_version()
     directed, physical = [], []
     for raw_id, physical_id, coords in _graph_edge_records():
-        if _edge_intersects_polygon(coords, req.geometry):
+        if intersects(coords):
             directed.append(f"{graph_version}:{raw_id}")
             physical.append(f"{graph_version}:{physical_id}")
     # Stable de-duplication keeps payloads small for OSM ways containing many
