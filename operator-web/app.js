@@ -3,6 +3,7 @@ import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTeleme
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
+window.__operatorMap=map;
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
@@ -119,6 +120,7 @@ function selectVehicle(item){
   retargetLiveView(item);
 }
 function render(snapshot){
+  if(window.__virtualMode)return;
   for(const item of snapshot.vehicles){
     const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
     let entry=markers.get(key);

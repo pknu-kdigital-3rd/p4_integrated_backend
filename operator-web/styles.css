@@ -24,6 +24,28 @@
 #layout-splitter:hover,#layout-splitter:focus-visible{background:#203b59}
 #layout-splitter:focus-visible{box-shadow:0 0 0 2px #20a4f3 inset}
 body.resizing-layout{user-select:none}
+#workspace-nav{display:flex;gap:6px;margin-left:auto;margin-right:18px}
+#workspace-nav button{padding:7px 10px;font-size:12px;background:#203b59}
+#workspace-nav button[aria-pressed=true]{background:#20a4f3}
+#virtual-workspace{display:grid;gap:10px;margin-top:0}
+#virtual-workspace h2,#virtual-workspace h3{margin:0}
+#virtual-workspace h3{font-size:14px;color:#b8cbe2;border-top:1px solid #35506e;padding-top:10px}
+#virtual-workspace ul{list-style:none;padding:0;margin:0;display:grid;gap:6px;max-height:170px;overflow:auto}
+#virtual-workspace li{padding:8px;background:#18283d;border-radius:6px;font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#virtual-workspace li button{padding:5px 8px;font-size:11px}
+.virtual-toolbar{display:grid;grid-template-columns:auto 1fr auto;gap:6px;align-items:center}
+.virtual-toolbar label{font-size:12px;color:#91a8c5;grid-column:1/-1}
+.virtual-coordinates{display:grid;gap:6px}
+.virtual-coordinates>div{display:grid;grid-template-columns:90px 1fr auto;gap:6px;align-items:center;font-size:12px}
+.virtual-coordinates output{color:#b8cbe2;font-variant-numeric:tabular-nums}
+.virtual-coordinates button{padding:6px 8px;font-size:11px}
+.virtual-actions{display:flex;gap:6px;flex-wrap:wrap}
+#virtual-draft-summary{margin:0;min-height:1.4em;color:#b8cbe2;font-size:12px}
+#virtual-trip-controls{display:grid;gap:7px}
+#virtual-trip-controls button{padding:7px 9px}
+#virtual-status[data-level=error]{color:#ff9c9c}
+body.virtual-mode #operator-sidebar{padding-top:12px}
+@media(max-width:700px){#workspace-nav{order:3;width:100%;margin:4px 0 0}header{height:auto;min-height:64px;flex-wrap:wrap;padding:8px 12px}}
 @media(min-width:1001px){body.resizing-layout{cursor:col-resize}}
 @media(max-width:1000px){body.resizing-layout{cursor:row-resize}}
 #recording-player-panel:fullscreen{width:100vw;height:100vh;margin:0;padding:16px;background:#0d1726;grid-template-rows:minmax(0,1fr) auto auto auto;gap:12px}
