@@ -67,7 +67,7 @@ function routeDisplayMetrics(style = {}) {
     // positions after every map transform, while the small fixed size keeps
     // each chevron inside the colored route stroke.
     arrowFrequency: style.arrowFrequency || 42,
-    arrowSize: style.arrowSize || 5.5,
+    arrowSize: style.arrowSize || 6.2,
   };
 }
 function routeStrokeScale() {
@@ -172,7 +172,7 @@ function renderActiveTripRoute(vehicle) {
     const current = Boolean(route.isCurrent);
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
       ? { outlineColor: '#063b70', outlineWeight: 19, outlineOpacity: 0.98, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true }
-      : { outlineColor: '#6a3800', outlineWeight: 17, outlineOpacity: 0.86, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36, showArrows: false },
+      : { outlineColor: '#6a3800', outlineWeight: 17, outlineOpacity: 0.86, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
