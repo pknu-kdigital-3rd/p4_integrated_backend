@@ -160,6 +160,10 @@ function routeIdentity(route) {
   // the version as a fallback for responses that omit the id.
   return String(route.routeId ?? `v${route.routeVersion ?? ''}`);
 }
+function routeGeometryIdentity(routeGeojson) {
+  if (!routeGeojson) return '';
+  try { return JSON.stringify(routeGeojson); } catch { return ''; }
+}
 function renderDraft() {
   if (!draft) {
     if (draftRouteSignature) clearRouteGroup(routeLayerGroup);
@@ -203,11 +207,14 @@ function renderActiveTripRoute(vehicle) {
   if (signature === activeRouteSignature) return;
   activeRouteSignature = signature;
   clearRouteGroup(activeRouteLayerGroup);
+  const currentGeometry = routeGeometryIdentity(currentRoute?.routeGeojson);
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
+    const duplicateGeometry = !current && currentGeometry !== ''
+      && routeGeometryIdentity(route.routeGeojson) === currentGeometry;
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
       ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowOpacity: 0.98, arrowYawn: 36, showArrows: true }
-      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: true },
+      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: !duplicateGeometry },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
@@ -223,6 +230,18 @@ function renderVehicles() {
   }
   if (vehicles.some((vehicle) => String(vehicle.vehicleId) === selected)) vehicleSelect.value = selected;
   else selectedVehicleId = '';
+  if (draft) {
+    const draftVehicleId = String(draft.selectedVehicleId ?? selectedVehicleId);
+    const draftVehicle = vehicles.find((vehicle) => String(vehicle.vehicleId) === draftVehicleId);
+    const hasActiveTrip = Boolean(draftVehicle?.state?.virtualTripId || draftVehicle?.state?.trip?.virtualTripId);
+    if (hasActiveTrip) {
+      // Once a preview has become an active trip, its route is rendered by
+      // the active-trip layer. Keeping the draft layer would draw a second
+      // set of arrowheads on the same geometry.
+      draft = null;
+      renderDraft();
+    }
+  }
   markerLayerGroup.clearLayers();
   for (const vehicle of vehicles) {
     const position = vehicle.state?.lastPosition;
