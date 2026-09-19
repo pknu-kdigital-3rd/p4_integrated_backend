@@ -605,7 +605,13 @@ export const virtualService = {
                 await createEvent(tx, { scenarioId: existing.scenarioId, actorId: actorId ?? null, eventType: "ROAD_RESTRICTION_DEACTIVATED", payload: { restrictionId: restrictionId.toString() } });
                 return result;
             });
-            await this.refreshFollowingTrips(existing.scenarioId);
+            // Reopening a region must never turn an already moving trip into
+            // NO_ROUTE just because the optional refresh solve timed out or
+            // temporarily failed.  The simulation worker still guards every
+            // step against the remaining active BLOCKED edges, so retaining
+            // the last valid route is safe while a later road-state change or
+            // operator action retries the calculation.
+            await this.refreshFollowingTrips(existing.scenarioId, { preserveMotionOnFailure: true });
             return deactivated;
         }
         const kind = input.kind ?? existing.kind;
@@ -628,7 +634,7 @@ export const virtualService = {
         return updated;
     },
 
-    async refreshFollowingTrips(scenarioId: bigint) {
+    async refreshFollowingTrips(scenarioId: bigint, options: { preserveMotionOnFailure?: boolean } = {}) {
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, include: { trip: { include: { routes: { where: { isCurrent: true } }, waypoints: { orderBy: { sequence: "asc" } } } } } });
         const settings = await prisma.virtualVehicleSettings.findMany({ where: { vehicleId: { in: states.map((state) => state.vehicleId) }, autoFollowEnabled: true } });
         const following = new Set(settings.map((item) => item.vehicleId.toString()));
@@ -659,6 +665,14 @@ export const virtualService = {
             } catch (error) {
                 const latest = await activeVehicleState(state.vehicleId);
                 if (!latest || ["COMPLETED", "CANCELLED"].includes(latest.trip.state)) return;
+                if (options.preserveMotionOnFailure) {
+                    // Deactivation can only make the road overlay less
+                    // restrictive. Keep the current motion/hold state if the
+                    // best-effort refresh cannot complete; the worker's
+                    // closure guard continues to prevent entry into any
+                    // other active blocked region.
+                    return;
+                }
                 const noViablePath = error instanceof AppError && error.code === "ROUTE_NOT_FOUND";
                 await prisma.$transaction([
                     prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: noViablePath ? "No viable path after road restriction" : "Routing failed after road-state change" } }),
