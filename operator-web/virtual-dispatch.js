@@ -59,64 +59,15 @@ function renderPoints() {
   document.querySelector('#virtual-destination').textContent = formatPoint(points.destination);
   document.querySelector('#virtual-waypoints').textContent = points.waypoints.length ? points.waypoints.map(formatPoint).join(' · ') : 'none';
 }
-function routePoints(routeGeojson) {
-  if (routeGeojson?.type !== 'LineString' || !Array.isArray(routeGeojson.coordinates)) return [];
-  return routeGeojson.coordinates.flatMap((coordinate) => {
-    if (!Array.isArray(coordinate) || coordinate.length < 2) return [];
-    const lon = Number(coordinate[0]);
-    const lat = Number(coordinate[1]);
-    return Number.isFinite(lat) && Number.isFinite(lon) ? [{ lat, lon }] : [];
-  });
-}
-function routeDistanceM(a, b) {
-  const lat1 = a.lat * Math.PI / 180;
-  const lat2 = b.lat * Math.PI / 180;
-  const dLat = lat2 - lat1;
-  const dLon = (b.lon - a.lon) * Math.PI / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
 function routeDisplayMetrics() {
   const zoom = Number(map.getZoom?.() ?? 12);
-  const zoomScale = 2 ** (zoom - 12);
   return {
-    spacingM: Math.max(100, Math.min(900, 380 / zoomScale)),
-    maxArrows: Math.max(8, Math.min(48, Math.round(8 + (zoom - 8) * 4))),
+    // leaflet-arrowheads measures both values in screen pixels.  The plugin
+    // recomputes their geographic positions after every map transform, so
+    // arrows do not drift away from the route while zooming.
+    arrowFrequency: Math.max(42, Math.min(120, 88 - (zoom - 12) * 7)),
     arrowSize: Math.max(10, Math.min(24, 12 + (zoom - 12) * 1.5)),
   };
-}
-function routeArrowPoints(routeGeojson) {
-  const points = routePoints(routeGeojson);
-  if (points.length < 2) return [];
-  const lengths = points.slice(1).map((point, index) => routeDistanceM(points[index], point));
-  const total = lengths.reduce((sum, length) => sum + length, 0);
-  if (total < 20) return [];
-  const metrics = routeDisplayMetrics();
-  let spacing = total <= 160 ? total / 2 : metrics.spacingM;
-  if (total / spacing > metrics.maxArrows) spacing = total / metrics.maxArrows;
-  const targets = [];
-  for (let target = spacing / 2; target < total; target += spacing) targets.push(target);
-  if (!targets.length) targets.push(total / 2);
-  const arrows = [];
-  let traversed = 0;
-  let targetIndex = 0;
-  for (let index = 0; index < lengths.length && targetIndex < targets.length; index += 1) {
-    const length = lengths[index];
-    if (length <= 0) continue;
-    while (targetIndex < targets.length && targets[targetIndex] <= traversed + length) {
-      const from = points[index];
-      const to = points[index + 1];
-      const ratio = (targets[targetIndex] - traversed) / length;
-      const latitude = from.lat + (to.lat - from.lat) * ratio;
-      const longitude = from.lon + (to.lon - from.lon) * ratio;
-      const latitudeScale = Math.cos(((from.lat + to.lat) / 2) * Math.PI / 180);
-      const angle = Math.atan2(-(to.lat - from.lat), (to.lon - from.lon) * latitudeScale) * 180 / Math.PI;
-      arrows.push({ lat: latitude, lon: longitude, angle });
-      targetIndex += 1;
-    }
-    traversed += length;
-  }
-  return arrows;
 }
 function addRouteVisual(group, routeGeojson, style, tooltip) {
   if (!routeGeojson) return;
@@ -129,7 +80,7 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
       lineJoin: 'round',
     },
   }).addTo(group);
-  const line = L.geoJSON(routeGeojson, {
+  const lineOptions = {
     style: {
       color: style.lineColor,
       weight: style.lineWeight,
@@ -138,18 +89,22 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
       lineCap: 'round',
       lineJoin: 'round',
     },
-  }).addTo(group);
-  if (tooltip) line.bindTooltip(tooltip);
-  const arrowSize = routeDisplayMetrics().arrowSize;
-  for (const arrow of routeArrowPoints(routeGeojson)) {
-    const icon = L.divIcon({
-      className: 'virtual-route-arrow',
-      html: `<span style="color:${style.arrowColor};font-size:${arrowSize.toFixed(1)}px;line-height:${arrowSize.toFixed(1)}px;transform:rotate(${arrow.angle.toFixed(1)}deg)">➤</span>`,
-      iconSize: [arrowSize, arrowSize],
-      iconAnchor: [arrowSize / 2, arrowSize / 2],
-    });
-    L.marker([arrow.lat, arrow.lon], { icon, interactive: false, keyboard: false }).addTo(group);
+  };
+  if (typeof L.Polyline?.prototype.arrowheads === 'function') {
+    const metrics = routeDisplayMetrics();
+    lineOptions.arrowheads = {
+      color: style.arrowColor,
+      fillColor: style.arrowColor,
+      fill: true,
+      opacity: style.lineOpacity,
+      fillOpacity: 1,
+      yawn: 42,
+      size: `${metrics.arrowSize.toFixed(1)}px`,
+      frequency: `${metrics.arrowFrequency.toFixed(1)}px`,
+    };
   }
+  const line = L.geoJSON(routeGeojson, lineOptions).addTo(group);
+  if (tooltip) line.bindTooltip(tooltip);
 }
 function renderDraft() {
   routeLayerGroup.clearLayers();
