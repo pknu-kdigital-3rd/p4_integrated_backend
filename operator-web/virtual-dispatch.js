@@ -76,13 +76,24 @@ function routeDistanceM(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
   return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
+function routeDisplayMetrics() {
+  const zoom = Number(map.getZoom?.() ?? 12);
+  const zoomScale = 2 ** (zoom - 12);
+  return {
+    spacingM: Math.max(100, Math.min(900, 380 / zoomScale)),
+    maxArrows: Math.max(8, Math.min(48, Math.round(8 + (zoom - 8) * 4))),
+    arrowSize: Math.max(10, Math.min(24, 12 + (zoom - 12) * 1.5)),
+  };
+}
 function routeArrowPoints(routeGeojson) {
   const points = routePoints(routeGeojson);
   if (points.length < 2) return [];
   const lengths = points.slice(1).map((point, index) => routeDistanceM(points[index], point));
   const total = lengths.reduce((sum, length) => sum + length, 0);
   if (total < 20) return [];
-  const spacing = total <= 160 ? total / 2 : Math.max(180, total / 45);
+  const metrics = routeDisplayMetrics();
+  let spacing = total <= 160 ? total / 2 : metrics.spacingM;
+  if (total / spacing > metrics.maxArrows) spacing = total / metrics.maxArrows;
   const targets = [];
   for (let target = spacing / 2; target < total; target += spacing) targets.push(target);
   if (!targets.length) targets.push(total / 2);
@@ -129,12 +140,13 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
     },
   }).addTo(group);
   if (tooltip) line.bindTooltip(tooltip);
+  const arrowSize = routeDisplayMetrics().arrowSize;
   for (const arrow of routeArrowPoints(routeGeojson)) {
     const icon = L.divIcon({
       className: 'virtual-route-arrow',
-      html: `<span style="color:${style.arrowColor};transform:rotate(${arrow.angle.toFixed(1)}deg)">➤</span>`,
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
+      html: `<span style="color:${style.arrowColor};font-size:${arrowSize.toFixed(1)}px;line-height:${arrowSize.toFixed(1)}px;transform:rotate(${arrow.angle.toFixed(1)}deg)">➤</span>`,
+      iconSize: [arrowSize, arrowSize],
+      iconAnchor: [arrowSize / 2, arrowSize / 2],
     });
     L.marker([arrow.lat, arrow.lon], { icon, interactive: false, keyboard: false }).addTo(group);
   }
@@ -199,6 +211,11 @@ function renderSelectedVehicle(vehicle) {
   if (!trip) return;
   const settings = vehicle.following || { autoFollowEnabled: true };
   document.querySelector('#virtual-following').checked = Boolean(settings.autoFollowEnabled);
+}
+function rerenderVirtualRoutesForZoom() {
+  if (mode !== 'virtual') return;
+  renderDraft();
+  renderActiveTripRoute(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId));
 }
 function noViablePathMessage() {
   const noRouteVehicles = vehicles.filter((vehicle) => vehicle.state?.simStatus === 'NO_ROUTE'
@@ -406,6 +423,7 @@ map.on('click', (event) => {
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
   if (pickMode === 'restriction') selectRestrictionPoint(point); else selectPoint(point);
 });
+map.on('zoomend', rerenderVirtualRoutesForZoom);
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
 scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
