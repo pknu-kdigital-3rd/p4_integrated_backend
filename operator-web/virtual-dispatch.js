@@ -15,6 +15,7 @@ const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
 const routeRenderer = L.canvas({ padding: 0.5 });
+const routeVisuals = new Set();
 const requestList = document.querySelector('#virtual-requests');
 const eventList = document.querySelector('#virtual-events');
 const normalSections = ['#login', '#details', '#trip-panel', '#recordings-panel', '#error'];
@@ -69,9 +70,28 @@ function routeDisplayMetrics() {
     arrowSize: 5.5,
   };
 }
+function routeStrokeScale() {
+  // Leaflet weights are screen pixels.  A fixed 19px casing dominates the
+  // map when zoomed out, so ease both strokes down below the close-up range.
+  // Existing close-up styling is restored by zoom 14 without recreating the
+  // layers (which would cause the route to flicker).
+  const zoom = Number(map.getZoom());
+  return Math.max(0.4, Math.min(1, 0.4 + (zoom - 8) * 0.1));
+}
+function applyRouteStrokeWidths(visual) {
+  const scale = routeStrokeScale();
+  visual.outline.setStyle({ weight: Math.max(3, visual.style.outlineWeight * scale) });
+  visual.line.setStyle({ weight: Math.max(2, visual.style.lineWeight * scale) });
+}
+function clearRouteGroup(group) {
+  group.clearLayers();
+  for (const visual of routeVisuals) {
+    if (visual.group === group) routeVisuals.delete(visual);
+  }
+}
 function addRouteVisual(group, routeGeojson, style, tooltip) {
   if (!routeGeojson) return;
-  L.geoJSON(routeGeojson, {
+  const outline = L.geoJSON(routeGeojson, {
     style: {
       // Draw a dark casing first so the road remains legible over both the
       // pale base map and dense map labels.  The colored route is drawn above
@@ -113,9 +133,12 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
   }
   const line = L.geoJSON(routeGeojson, lineOptions).addTo(group);
   if (tooltip) line.bindTooltip(tooltip);
+  const visual = { group, outline, line, style };
+  routeVisuals.add(visual);
+  applyRouteStrokeWidths(visual);
 }
 function renderDraft() {
-  routeLayerGroup.clearLayers();
+  clearRouteGroup(routeLayerGroup);
   if (!draft) {
     document.querySelector('#virtual-draft-summary').textContent = 'No route draft.';
     document.querySelector('#virtual-dispatch').disabled = true;
@@ -129,7 +152,7 @@ function renderDraft() {
   document.querySelector('#virtual-dispatch').disabled = false;
 }
 function renderActiveTripRoute(vehicle) {
-  activeRouteLayerGroup.clearLayers();
+  clearRouteGroup(activeRouteLayerGroup);
   const trip = vehicle?.state?.trip;
   const routes = Array.isArray(trip?.routes) ? trip.routes.filter((route) => route?.routeGeojson) : [];
   if (!routes.length) return;
@@ -145,6 +168,9 @@ function renderActiveTripRoute(vehicle) {
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
+map.on?.('zoomend', () => {
+  for (const visual of routeVisuals) applyRouteStrokeWidths(visual);
+});
 function renderVehicles() {
   const selected = selectedVehicleId;
   vehicleSelect.replaceChildren(new Option('Select a virtual vehicle', ''));
@@ -370,7 +396,7 @@ async function switchMode(next) {
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
-    routeLayerGroup.clearLayers(); activeRouteLayerGroup.clearLayers(); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
+    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     window.__virtualMode = false;
   }
