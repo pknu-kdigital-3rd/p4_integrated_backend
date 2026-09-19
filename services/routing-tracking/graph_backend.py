@@ -8,6 +8,7 @@ pure-Python parser (pbf_parser.py) if osmnx isn't available, so this
 also works in network-restricted environments.
 """
 import math
+import os
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
@@ -767,11 +768,22 @@ class PurePythonGraph:
 
 
 def load_graph(pbf_path):
+    requested_backend = os.environ.get("ROUTING_GRAPH_BACKEND", "auto").strip().lower()
+    if requested_backend not in {"auto", "osmnx", "pure", "fallback"}:
+        raise ValueError("ROUTING_GRAPH_BACKEND must be one of: auto, osmnx, pure")
+    if requested_backend in {"pure", "fallback"}:
+        print("Using explicitly selected pure-Python routing backend")
+        return PurePythonGraph(pbf_path)
     try:
         import osmnx  # noqa: F401
         import pyrosm  # noqa: F401 - actually reads the .pbf; osmnx alone can't
         print("Using osmnx (via pyrosm) backend")
         return OsmnxGraph(pbf_path)
     except ImportError as e:
+        if requested_backend == "osmnx":
+            raise RuntimeError(
+                "ROUTING_GRAPH_BACKEND=osmnx requires the routing extra; "
+                "run 'uv sync --extra osmnx'"
+            ) from e
         print(f"{e.name} not found - using bundled pure-Python fallback")
         return PurePythonGraph(pbf_path)

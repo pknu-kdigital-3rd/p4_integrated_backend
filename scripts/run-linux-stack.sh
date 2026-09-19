@@ -148,6 +148,11 @@ load_environment() {
 
   HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-300}"
   [[ "$HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "HEALTH_TIMEOUT_SECONDS must be a positive integer"
+
+  ROUTING_GRAPH_BACKEND="${ROUTING_GRAPH_BACKEND:-auto}"
+  [[ "$ROUTING_GRAPH_BACKEND" == "auto" || "$ROUTING_GRAPH_BACKEND" == "osmnx" || "$ROUTING_GRAPH_BACKEND" == "pure" || "$ROUTING_GRAPH_BACKEND" == "fallback" ]] \
+    || die "ROUTING_GRAPH_BACKEND must be auto, osmnx, or pure"
+  export ROUTING_GRAPH_BACKEND
 }
 
 preflight() {
@@ -294,7 +299,11 @@ setup_stack() {
   )
 
   log "Installing route/tracking dependencies"
-  (cd "${PROJECT_ROOT}/services/routing-tracking" && uv sync)
+  if [[ "$ROUTING_GRAPH_BACKEND" == "osmnx" ]]; then
+    (cd "${PROJECT_ROOT}/services/routing-tracking" && uv sync --extra osmnx)
+  else
+    (cd "${PROJECT_ROOT}/services/routing-tracking" && uv sync)
+  fi
 
   log "Building the Go media relay"
   (

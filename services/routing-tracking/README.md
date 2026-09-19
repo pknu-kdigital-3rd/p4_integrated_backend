@@ -19,6 +19,24 @@ uv sync --extra osmnx
 uv run uvicorn main:app --reload
 ```
 
+The integrated Linux stack selects the backend with `ROUTING_GRAPH_BACKEND` in
+`deploy/env.local`. Use `osmnx` to require the full `osmnx`/`pyrosm` graph and
+make setup install its optional dependencies; use `pure` to require the
+bundled parser; `auto` prefers `osmnx` when it is installed and otherwise
+falls back.
+
+```bash
+# In deploy/env.local:
+# export ROUTING_GRAPH_BACKEND="osmnx"
+./scripts/run-linux-stack.sh setup
+./scripts/run-linux-stack.sh restart routing
+```
+
+The routing log must contain `Using osmnx (via pyrosm) backend`. If the
+required compiled package cannot be imported, the explicit `osmnx` setting
+stops startup with an actionable error instead of silently selecting the
+fallback.
+
 `uv sync` creates a `.venv/` and a `uv.lock` lockfile the first time you run
 it. After that, `uv run` always uses that locked environment - no need to
 activate a venv manually.
