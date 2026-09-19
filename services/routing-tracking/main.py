@@ -175,6 +175,10 @@ class InternalRouteRequest(BaseModel):
     # created by an older graph build can be re-resolved on the next route.
     blockedGeometries: list[dict] = []
     penaltyEdgeFactors: dict[str, float] = {}
+    # Virtual reroutes use this to avoid an immediate U-turn at the current
+    # edge. If the forward-only solve has no legal result, Node retries without
+    # this preference so a reverse route remains a safe last resort.
+    avoidInitialReverseOfEdgeId: str | None = None
 
 
 class RestrictionResolveRequest(BaseModel):
@@ -265,6 +269,7 @@ def _internal_route(req: InternalRouteRequest):
             truck_class=profile,
             blocked_edge_ids=blocked_edge_ids,
             penalty_edge_factors=req.penaltyEdgeFactors,
+            avoid_initial_reverse_of_edge_id=req.avoidInitialReverseOfEdgeId if index == 1 else None,
         )
         if result is None:
             raise HTTPException(status_code=422, detail={"code": "ROUTE_NOT_FOUND", "stopIndex": index})

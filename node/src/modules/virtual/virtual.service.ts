@@ -446,13 +446,26 @@ export const virtualService = {
         const remainingWaypoints = current.trip.waypoints
             .filter((waypoint) => waypoint.status !== "REACHED")
             .map((waypoint) => point(waypoint.originalPoint));
-        const route = await routingInternalClient.route({
+        const routeInput = {
             origin: point(current.lastPosition),
             destination: point(current.trip.destination),
             waypoints: remainingWaypoints,
             vehicleProfile: profileForVehicle(vehicle),
             ...await restrictionOverlay(current.scenarioId),
-        });
+        };
+        let route;
+        try {
+            route = await routingInternalClient.route({
+                ...routeInput,
+                ...(current.currentEdgeId ? { avoidInitialReverseOfEdgeId: current.currentEdgeId } : {}),
+            });
+        } catch (error) {
+            // A closure can leave only a U-turn route. Prefer a forward
+            // continuation, but retain a legal fallback when reversing is the
+            // only way to reach the destination.
+            if (!(error instanceof AppError) || error.code !== "ROUTE_NOT_FOUND" || !current.currentEdgeId) throw error;
+            route = await routingInternalClient.route(routeInput);
+        }
         const scenario = await getScenario(current.scenarioId);
         return prisma.$transaction(async (tx) => {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });

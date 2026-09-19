@@ -67,6 +67,29 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
 
         self.assertEqual(blocked.edge_ids, ["1:3:20", "3:4:21", "4:2:22"])
 
+    def test_initial_reverse_is_avoided_when_forward_route_exists(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {
+            1: (0.0, 0.0),
+            2: (0.0, 1.0),
+            3: (1.0, 1.0),
+            4: (1.0, 0.0),
+        }
+        graph.turn_restrictions = set()
+        graph.adjacency = defaultdict(list)
+        # The shortest route starts by reversing the previous 1 -> 2 edge.
+        graph.adjacency[2].append((1, 1.0, 40.0, [[0.0, 1.0], [0.0, 0.0]], empty_restrictions(), 10))
+        graph.adjacency[1].append((4, 1.0, 40.0, [[0.0, 0.0], [1.0, 0.0]], empty_restrictions(), 11))
+        # A longer forward continuation remains available.
+        graph.adjacency[2].append((3, 10.0, 40.0, [[0.0, 1.0], [1.0, 1.0]], empty_restrictions(), 20))
+        graph.adjacency[3].append((4, 10.0, 40.0, [[1.0, 1.0], [1.0, 0.0]], empty_restrictions(), 21))
+
+        unrestricted = graph.route(2, 4)
+        smoothed = graph.route(2, 4, avoid_initial_reverse_of_edge_id="0123456789abcdef0123456789abcdef:1:2:10")
+
+        self.assertEqual(unrestricted.edge_ids, ["2:1:10", "1:4:11"])
+        self.assertEqual(smoothed.edge_ids, ["2:3:20", "3:4:21"])
+
     def test_internal_route_re_resolves_active_blocked_geometry(self):
         graph = object.__new__(PurePythonGraph)
         graph.coords = {

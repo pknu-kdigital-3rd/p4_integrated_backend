@@ -20,6 +20,8 @@ type RouteInput = {
     blockedEdgeIds?: string[];
     blockedGeometries?: unknown[];
     penaltyEdgeFactors?: Record<string, number>;
+    /** Keep a reroute from immediately taking the opposite direction. */
+    avoidInitialReverseOfEdgeId?: string;
 };
 
 async function request<T>(path: string, body?: unknown): Promise<T> {

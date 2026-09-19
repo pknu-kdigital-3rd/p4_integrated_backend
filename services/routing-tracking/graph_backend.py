@@ -183,6 +183,15 @@ def _raw_overlay_id(value):
     return value
 
 
+def _initial_reverse_nodes(value):
+    """Return the (from, to) nodes of the opposite direction of an edge."""
+    raw = _raw_overlay_id(value)
+    parts = str(raw).split(":")
+    if len(parts) < 3:
+        return None
+    return parts[1], parts[0]
+
+
 def _prepare_overlay_ids(values):
     lookup = set()
     for value in values or ():
@@ -468,7 +477,7 @@ class OsmnxGraph:
         nid = self.nearest_node(lat, lon)
         return [self.G.nodes[nid]["y"], self.G.nodes[nid]["x"]]
 
-    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None):
+    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
         # Hand-rolled A* instead of nx.astar_path - turn-restriction
         # enforcement needs to know which way produced the edge a node was
         # reached by (to check (from_way, via_node, to_way) triples), and a
@@ -483,6 +492,7 @@ class OsmnxGraph:
         G = self.G
         blocked_lookup = _prepare_overlay_ids(blocked_edge_ids)
         penalty_lookup = _prepare_overlay_values(penalty_edge_factors)
+        reverse_from, reverse_to = _initial_reverse_nodes(avoid_initial_reverse_of_edge_id) or (None, None)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
@@ -546,6 +556,8 @@ class OsmnxGraph:
                     if not edge_allowed(edge_restrictions(attrs), profile):
                         continue
                     raw_edge_id = f"{current}:{neighbor}:{edge_key}"
+                    if current == start_id and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
+                        continue
                     if raw_edge_id in blocked_lookup:
                         continue
                     penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
@@ -727,11 +739,12 @@ class PurePythonGraph:
             return None
         return list(self.coords[nid])
 
-    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None):
+    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
         import heapq
         coords = self.coords
         blocked_lookup = _prepare_overlay_ids(blocked_edge_ids)
         penalty_lookup = _prepare_overlay_values(penalty_edge_factors)
+        reverse_from, reverse_to = _initial_reverse_nodes(avoid_initial_reverse_of_edge_id) or (None, None)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
@@ -777,6 +790,8 @@ class PurePythonGraph:
             for neighbor, dist_m, base_speed, geom, restrictions, wid in self.adjacency.get(current, []):
                 if not edge_allowed(restrictions, profile):
                     continue  # this truck class physically/legally cannot use this road
+                if current == start_id and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
+                    continue
                 if incoming_way is not None and (incoming_way, current, wid) in self.turn_restrictions:
                     continue  # illegal turn (from incoming_way, via current, onto wid)
                 raw_edge_id = f"{current}:{neighbor}:{wid}"
