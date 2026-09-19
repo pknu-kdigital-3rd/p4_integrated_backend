@@ -61,13 +61,13 @@ function renderPoints() {
   document.querySelector('#virtual-destination').textContent = formatPoint(points.destination);
   document.querySelector('#virtual-waypoints').textContent = points.waypoints.length ? points.waypoints.map(formatPoint).join(' · ') : 'none';
 }
-function routeDisplayMetrics() {
+function routeDisplayMetrics(style = {}) {
   return {
     // Keep these in screen pixels.  The plugin recomputes their geographic
     // positions after every map transform, while the small fixed size keeps
     // each chevron inside the colored route stroke.
-    arrowFrequency: 60,
-    arrowSize: 5.5,
+    arrowFrequency: style.arrowFrequency || 42,
+    arrowSize: style.arrowSize || 5.5,
   };
 }
 function routeStrokeScale() {
@@ -86,10 +86,16 @@ function applyRouteStrokeWidths(visual) {
   visual.line.setStyle({ weight: Math.max(2, visual.style.lineWeight * scale) });
 }
 function clearRouteGroup(group) {
-  group.clearLayers();
+  // leaflet-arrowheads keeps its generated polygons on the child polyline.
+  // Remove those explicitly before clearing the GeoJSON group so a refresh
+  // cannot leave an old set of arrows behind for the next zoom/update.
   for (const visual of routeVisuals) {
-    if (visual.group === group) routeVisuals.delete(visual);
+    if (visual.group !== group) continue;
+    visual.line.eachLayer?.((layer) => layer.deleteArrowheads?.());
+    visual.outline.eachLayer?.((layer) => layer.deleteArrowheads?.());
+    routeVisuals.delete(visual);
   }
+  group.clearLayers();
 }
 function addRouteVisual(group, routeGeojson, style, tooltip) {
   if (!routeGeojson) return;
@@ -117,8 +123,8 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
       renderer: routeRenderer,
     },
   };
-  if (typeof L.Polyline?.prototype.arrowheads === 'function') {
-    const metrics = routeDisplayMetrics();
+  if (style.showArrows !== false && typeof L.Polyline?.prototype.arrowheads === 'function') {
+    const metrics = routeDisplayMetrics(style);
     lineOptions.arrowheads = {
       color: style.arrowColor || '#ffffff',
       fillColor: style.arrowColor || '#ffffff',
@@ -148,7 +154,7 @@ function renderDraft() {
   }
   addRouteVisual(routeLayerGroup, draft.routeGeojson, {
     outlineColor: '#3b225c', outlineWeight: 19, outlineOpacity: 0.96,
-    lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36,
+    lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true,
   }, 'Route preview');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
   document.querySelector('#virtual-dispatch').disabled = false;
@@ -165,8 +171,8 @@ function renderActiveTripRoute(vehicle) {
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
-      ? { outlineColor: '#063b70', outlineWeight: 19, outlineOpacity: 0.98, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowYawn: 36 }
-      : { outlineColor: '#6a3800', outlineWeight: 17, outlineOpacity: 0.86, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36 },
+      ? { outlineColor: '#063b70', outlineWeight: 19, outlineOpacity: 0.98, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true }
+      : { outlineColor: '#6a3800', outlineWeight: 17, outlineOpacity: 0.86, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36, showArrows: false },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
