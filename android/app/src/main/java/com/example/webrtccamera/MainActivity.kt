@@ -73,7 +73,7 @@ import java.util.concurrent.atomic.AtomicReference
 private data class ResolutionOption(val label: String, val size: Size)
 private data class QrInput(val data: ByteArray, val width: Int, val height: Int)
 private data class QrCrop(val left: Int, val top: Int, val width: Int, val height: Int)
-private class QrScanAttempt(val startedAtNs: Long)
+private class QrScanAttempt(val startedAtNs: Long, val fastRetry: Boolean)
 
 private val RESOLUTION_OPTIONS = listOf(
     ResolutionOption("720p (1280x720)", Size(1280, 720)),
@@ -92,6 +92,12 @@ private const val TARGET_CAPTURE_FPS = 30
 // workload on the camera analyzer.
 private const val QR_SCAN_INTERVAL_NS = 1_000_000_000L
 private const val QR_SCAN_TIMEOUT_NS = 1_500_000_000L
+// The on-screen QR changes every two camera frames, so a fixed ~1 s (30-frame)
+// cadence keeps sampling the same phase of that change. As the display and camera
+// clocks drift, that phase slides onto the QR transition and every scan sees a
+// torn code for tens of seconds. After a miss, retry immediately on alternating
+// frame parity: of any two consecutive frames, one is off the transition.
+private const val QR_FAST_RETRY_ATTEMPTS = 3
 private const val QR_SCANNER_RESTART_FAILURE_THRESHOLD = 3
 // Use the smaller input for the normal path so QR analysis does not steal
 // CameraX throughput from the video publisher. A larger retry is enabled only
@@ -102,7 +108,7 @@ private const val QR_HIGH_MAX_WIDTH = 1280
 private const val QR_HIGH_MAX_HEIGHT = 720
 private const val QR_HIGH_RESOLUTION_MISS_THRESHOLD = 3
 private const val QR_NO_DECODE_RECOVERY_NS = 4_000_000_000L
-private const val QR_FAILURE_LOG_INTERVAL_NS = 1_000_000_000L
+private const val QR_FAILURE_LOG_INTERVAL_NS = 250_000_000L
 private const val QR_LOG_TAG = "MainActivity"
 
 // The rig points at a screen a fixed distance away. Autofocus hunts badly on a
@@ -159,6 +165,11 @@ class MainActivity : AppCompatActivity() {
     private val activeQrScanAttempt = AtomicReference<QrScanAttempt?>(null)
     private val qrScannerResetRequested = AtomicBoolean(false)
     private var lastQrAttemptElapsedNs = 0L
+    // Camera-analyzer-thread only: counts every analyzed frame so retries can pick
+    // the opposite frame parity to the attempt that missed.
+    private var qrAnalyzedFrames = 0L
+    private var lastQrAttemptFrameIndex = 0L
+    private val qrFastRetriesRemaining = AtomicInteger(0)
     private val qrConsecutiveFailures = AtomicInteger(0)
     private var lastQrFailureLogNs = 0L
     @Volatile
@@ -383,6 +394,7 @@ class MainActivity : AppCompatActivity() {
         activeQrScanAttempt.set(null)
         cameraExecutor.execute { if (streaming.get()) resetQrScanner() }
         lastQrAttemptElapsedNs = 0L
+        qrFastRetriesRemaining.set(0)
         qrConsecutiveFailures.set(0)
         lastQrFailureLogNs = 0L
         lastQrSuccessElapsedNs = 0L
@@ -628,6 +640,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         recordCaptureFrame()
+        qrAnalyzedFrames++
         val timestamp = image.imageInfo.timestamp.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos()
         // scanQrFrame takes over closing `image` once handed off, since ML
         // Kit reads it asynchronously. Only one sampled frame may be held by
@@ -681,12 +694,26 @@ class MainActivity : AppCompatActivity() {
             setQrStatus("QR: scan timed out; restarting scanner")
         }
 
-        if (lastQrAttemptElapsedNs > 0L && now - lastQrAttemptElapsedNs < QR_SCAN_INTERVAL_NS) return null
-        val attempt = QrScanAttempt(startedAtNs = now)
+        val fastRetry = qrFastRetriesRemaining.get() > 0
+        if (fastRetry) {
+            // Only frames an odd distance from the missed attempt sit on the other
+            // side of the QR's two-frame change cycle.
+            if ((qrAnalyzedFrames - lastQrAttemptFrameIndex) % 2L == 0L) return null
+        } else if (lastQrAttemptElapsedNs > 0L && now - lastQrAttemptElapsedNs < QR_SCAN_INTERVAL_NS) {
+            return null
+        }
+        val attempt = QrScanAttempt(startedAtNs = now, fastRetry = fastRetry)
         return if (activeQrScanAttempt.compareAndSet(null, attempt)) {
             lastQrAttemptElapsedNs = now
+            lastQrAttemptFrameIndex = qrAnalyzedFrames
+            if (fastRetry) qrFastRetriesRemaining.decrementAndGet()
             attempt
         } else null
+    }
+
+    /** A regular 1 s attempt that misses starts a short burst of parity-alternating retries. */
+    private fun onQrMiss(attempt: QrScanAttempt) {
+        if (!attempt.fastRetry) qrFastRetriesRemaining.compareAndSet(0, QR_FAST_RETRY_ATTEMPTS)
     }
 
     /** Measures frames delivered to CameraX before WebRTC encoding or server processing. */
@@ -715,6 +742,7 @@ class MainActivity : AppCompatActivity() {
         } catch (error: Exception) {
             activeQrScanAttempt.compareAndSet(attempt, null)
             image.close()
+            onQrMiss(attempt)
             reportQrFailure("image conversion", error)
             publisher?.sendQrEvent(
                 timestamp,
@@ -747,6 +775,7 @@ class MainActivity : AppCompatActivity() {
                     publisher?.sendQrEvent(timestamp, decoded, decoded != null, captureIndex, latencyMs)
                     // A failed/absent/malformed decode must not touch the replay clock.
                     if (decoded != null) {
+                        qrFastRetriesRemaining.set(0)
                         qrMissedResults = 0
                         qrHighResolution = false
                         lastQrSuccessElapsedNs = SystemClock.elapsedRealtimeNanos()
@@ -757,6 +786,7 @@ class MainActivity : AppCompatActivity() {
                             decodeLatencyMs = latencyMs,
                         )
                     } else {
+                        onQrMiss(attempt)
                         qrMissedResults++
                         if (qrMissedResults >= QR_HIGH_RESOLUTION_MISS_THRESHOLD) {
                             qrHighResolution = true
@@ -765,6 +795,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 .addOnFailureListener { error ->
                     if (activeQrScanAttempt.get() !== attempt) return@addOnFailureListener
+                    onQrMiss(attempt)
                     reportQrFailure("ML Kit", error)
                     publisher?.sendQrEvent(
                         timestamp,
