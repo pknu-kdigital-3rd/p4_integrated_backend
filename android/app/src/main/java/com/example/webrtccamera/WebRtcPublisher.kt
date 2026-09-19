@@ -51,6 +51,7 @@ class WebRtcPublisher(
     private val offerEndpoint: String,
     private val sessionContext: StreamSessionContext? = null,
     private val onStatus: (String) -> Unit,
+    private val onTelemetryStatus: (String) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val stopped = AtomicBoolean(true)
@@ -73,6 +74,7 @@ class WebRtcPublisher(
     private val pendingQrEvents = ArrayDeque<ByteArray>()
     private var telemetryChannel: DataChannel? = null
     private val pendingTelemetry = ArrayDeque<PendingTelemetry>()
+    private var lastTelemetryStatus: String? = null
     private val bitrateCapApplied = AtomicBoolean(false)
     // Reused by the CameraX analyzer thread to avoid allocating conversion
     // buffers for every frame.
@@ -168,15 +170,25 @@ class WebRtcPublisher(
         }
         telemetryChannel = connection.createDataChannel("telemetry-events", DataChannel.Init()).also { channel ->
             channel.registerObserver(object : DataChannel.Observer {
-                override fun onBufferedAmountChange(previousAmount: Long) = Unit
+                override fun onBufferedAmountChange(previousAmount: Long) {
+                    // A send can return false while the SCTP buffer is full. The
+                    // replay scheduler may not enqueue another batch immediately,
+                    // so use the drain callback to flush the queued batch again.
+                    postRtc { flushTelemetry() }
+                }
 
                 override fun onStateChange() {
-                    if (channel.state() == DataChannel.State.OPEN) postRtc { flushTelemetry() }
+                    val state = channel.state()
+                    postRtc {
+                        reportTelemetryStatus("Telemetry transport: ${state.name.lowercase()} (queued=${pendingTelemetry.size})")
+                        if (state == DataChannel.State.OPEN) flushTelemetry()
+                    }
                 }
 
                 override fun onMessage(buffer: DataChannel.Buffer) = Unit
             })
         }
+        reportTelemetryStatus("Telemetry transport: ${telemetryChannel?.state()?.name?.lowercase() ?: "unavailable"}")
         videoTrack.setEnabled(true)
         val sender = connection.addTrack(videoTrack, listOf("camera-stream"))
         // Do not force a 16:9 output here. Some CameraX devices provide a 4:3
@@ -569,12 +581,26 @@ class WebRtcPublisher(
 
     private fun flushTelemetry() {
         val channel = telemetryChannel ?: return
-        if (channel.state() != DataChannel.State.OPEN) return
+        if (channel.state() != DataChannel.State.OPEN) {
+            reportTelemetryStatus("Telemetry transport: ${channel.state().name.lowercase()} (queued=${pendingTelemetry.size})")
+            return
+        }
         while (pendingTelemetry.isNotEmpty()) {
             val event = pendingTelemetry.first()
-            if (!channel.send(DataChannel.Buffer(ByteBuffer.wrap(event.bytes), false))) return
+            if (!channel.send(DataChannel.Buffer(ByteBuffer.wrap(event.bytes), false))) {
+                reportTelemetryStatus("Telemetry transport: backpressure (queued=${pendingTelemetry.size})")
+                return
+            }
             pendingTelemetry.removeFirst()
         }
+        reportTelemetryStatus("Telemetry transport: sent (queued=0)")
+    }
+
+    private fun reportTelemetryStatus(status: String) {
+        if (lastTelemetryStatus == status) return
+        lastTelemetryStatus = status
+        Log.i(TAG, status)
+        onTelemetryStatus(status)
     }
 
     private fun captureTimestampToRtp(timestampNs: Long): Long {

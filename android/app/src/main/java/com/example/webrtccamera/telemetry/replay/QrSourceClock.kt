@@ -117,9 +117,10 @@ class QrSourceClock(
     }
 
     companion object {
-        // Plan section 8.7: initial proposal is 1..2s; kept as a named constant rather than
-        // buried in logic.
-        const val QR_STALE_TIMEOUT_NS = 1_500_000_000L
+        // Short scanner gaps are normal when ML Kit is processing a larger
+        // frame. Keep extrapolating briefly instead of stopping telemetry at
+        // the first missed QR result.
+        const val QR_STALE_TIMEOUT_NS = 3_000_000_000L
         const val MIN_PLAYBACK_RATE = 0.0
         const val MAX_PLAYBACK_RATE = 4.0
         // Beyond this, a jump is treated as a seek/restart rather than fast/slow playback.

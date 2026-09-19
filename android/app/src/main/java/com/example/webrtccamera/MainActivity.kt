@@ -72,6 +72,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 private data class ResolutionOption(val label: String, val size: Size)
 private data class QrInput(val data: ByteArray, val width: Int, val height: Int)
+private data class QrCrop(val left: Int, val top: Int, val width: Int, val height: Int)
 private class QrScanAttempt(val startedAtNs: Long)
 
 private val RESOLUTION_OPTIONS = listOf(
@@ -86,14 +87,21 @@ private const val DEFAULT_RESOLUTION_INDEX = 0 // 720p, matches the previous har
 // raise gain rather than hold the shutter open and smear motion into the pixels.
 private const val TARGET_CAPTURE_FPS = 30
 
-// The QR payload changes every two video frames. Scan every second frame to
-// preserve those updates while the one-in-flight guard prevents ML Kit tasks
-// from accumulating behind the camera analyzer.
+// The source QR is redrawn as its timestamp changes. Sampling every second
+// camera frame avoids catching the redraw transition while the one-in-flight
+// guard prevents ML Kit tasks from accumulating behind the analyzer.
 private const val QR_SCAN_EVERY_N_FRAMES = 2L
-private const val QR_SCAN_TIMEOUT_NS = 1_000_000_000L
+private const val QR_SCAN_TIMEOUT_NS = 1_500_000_000L
 private const val QR_SCANNER_RESTART_FAILURE_THRESHOLD = 3
-private const val QR_MAX_WIDTH = 640
-private const val QR_MAX_HEIGHT = 360
+// Use the smaller input for the normal path so QR analysis does not steal
+// CameraX throughput from the video publisher. A larger retry is enabled only
+// after repeated misses when the QR is too small for the fast path.
+private const val QR_FAST_MAX_WIDTH = 640
+private const val QR_FAST_MAX_HEIGHT = 360
+private const val QR_HIGH_MAX_WIDTH = 1280
+private const val QR_HIGH_MAX_HEIGHT = 720
+private const val QR_HIGH_RESOLUTION_MISS_THRESHOLD = 3
+private const val QR_NO_DECODE_RECOVERY_NS = 4_000_000_000L
 private const val QR_FAILURE_LOG_INTERVAL_NS = 1_000_000_000L
 private const val QR_LOG_TAG = "MainActivity"
 
@@ -153,6 +161,14 @@ class MainActivity : AppCompatActivity() {
     private var qrFrameCounter = 0L
     private val qrConsecutiveFailures = AtomicInteger(0)
     private var lastQrFailureLogNs = 0L
+    @Volatile
+    private var lastQrSuccessElapsedNs = 0L
+    @Volatile
+    private var lastQrRecoveryElapsedNs = 0L
+    @Volatile
+    private var qrHighResolution = false
+    @Volatile
+    private var qrMissedResults = 0
     // Reused because only one QR task is allowed to reference this buffer at a
     // time. The camera frame itself can therefore be closed immediately after
     // this reduced-resolution copy is complete.
@@ -369,6 +385,10 @@ class MainActivity : AppCompatActivity() {
         qrFrameCounter = 0L
         qrConsecutiveFailures.set(0)
         lastQrFailureLogNs = 0L
+        lastQrSuccessElapsedNs = 0L
+        lastQrRecoveryElapsedNs = 0L
+        qrHighResolution = false
+        qrMissedResults = 0
         captureFps = 0f
         captureWindowStartedNs = 0L
         captureWindowFrames = 0
@@ -388,9 +408,17 @@ class MainActivity : AppCompatActivity() {
             null
         }
         activeSessionContext = sessionContext
-        publisher = WebRtcPublisher(this, endpoint, sessionContext) { message ->
-            runOnUiThread { if (streaming.get()) setStatus(message) }
-        }
+        publisher = WebRtcPublisher(
+            context = this,
+            offerEndpoint = endpoint,
+            sessionContext = sessionContext,
+            onStatus = { message ->
+                runOnUiThread { if (streaming.get()) setStatus(message) }
+            },
+            onTelemetryStatus = { message ->
+                runOnUiThread { if (streaming.get()) setTelemetryStatus(message) }
+            },
+        )
         recordingTripIdInput.isEnabled = false
         recordingVehicleIdInput.isEnabled = false
         publisher?.start()
@@ -625,6 +653,19 @@ class MainActivity : AppCompatActivity() {
             resetQrScanner()
             setQrStatus("QR: restarting scanner after repeated errors")
         }
+        // ML Kit can keep returning successful empty results while its native
+        // scanner has lost the small on-screen QR. Recreate it occasionally
+        // after a real decode has gone stale, without resetting on every frame
+        // when the QR is simply out of view.
+        if (activeQrScanAttempt.get() == null &&
+            lastQrSuccessElapsedNs > 0L &&
+            now - lastQrSuccessElapsedNs >= QR_NO_DECODE_RECOVERY_NS &&
+            now - lastQrRecoveryElapsedNs >= QR_NO_DECODE_RECOVERY_NS
+        ) {
+            resetQrScanner()
+            lastQrRecoveryElapsedNs = now
+            setQrStatus("QR: refreshing scanner after missed decodes")
+        }
         val activeAttempt = activeQrScanAttempt.get()
         if (activeAttempt != null) {
             if (now - activeAttempt.startedAtNs <= QR_SCAN_TIMEOUT_NS) return null
@@ -664,7 +705,11 @@ class MainActivity : AppCompatActivity() {
         val start = System.nanoTime()
         val rotation = image.imageInfo.rotationDegrees
         val qrInput = try {
-            createQrInput(image)
+            createQrInput(
+                image,
+                if (qrHighResolution) QR_HIGH_MAX_WIDTH else QR_FAST_MAX_WIDTH,
+                if (qrHighResolution) QR_HIGH_MAX_HEIGHT else QR_FAST_MAX_HEIGHT,
+            )
         } catch (error: Exception) {
             activeQrScanAttempt.compareAndSet(attempt, null)
             image.close()
@@ -696,22 +741,24 @@ class MainActivity : AppCompatActivity() {
                     val raw = barcodes.firstOrNull()?.rawValue
                     val decoded = raw?.toLongOrNull()
                     qrConsecutiveFailures.set(0)
-                    setQrStatus(
-                        when {
-                            raw == null -> "QR: none visible"
-                            decoded == null -> "QR: unreadable content \"$raw\""
-                            else -> "QR: ts=$decoded"
-                        }
-                    )
                     val latencyMs = (System.nanoTime() - start) / 1_000_000
                     publisher?.sendQrEvent(timestamp, decoded, decoded != null, captureIndex, latencyMs)
                     // A failed/absent/malformed decode must not touch the replay clock.
                     if (decoded != null) {
+                        qrMissedResults = 0
+                        qrHighResolution = false
+                        lastQrSuccessElapsedNs = SystemClock.elapsedRealtimeNanos()
+                        setQrStatus("QR: ts=$decoded")
                         telemetryReplaySource?.onQrTimestamp(
                             sourceTimestampNs = decoded,
                             captureTimestampNs = timestamp,
                             decodeLatencyMs = latencyMs,
                         )
+                    } else {
+                        qrMissedResults++
+                        if (qrMissedResults >= QR_HIGH_RESOLUTION_MISS_THRESHOLD) {
+                            qrHighResolution = true
+                        }
                     }
                 }
                 .addOnFailureListener { error ->
@@ -724,6 +771,10 @@ class MainActivity : AppCompatActivity() {
                         captureIndex,
                         (System.nanoTime() - start) / 1_000_000,
                     )
+                    qrMissedResults++
+                    if (qrMissedResults >= QR_HIGH_RESOLUTION_MISS_THRESHOLD) {
+                        qrHighResolution = true
+                    }
                 }
                 .addOnCompleteListener {
                     activeQrScanAttempt.compareAndSet(attempt, null)
@@ -757,7 +808,15 @@ class MainActivity : AppCompatActivity() {
         ) {
             qrScannerResetRequested.set(true)
         }
-        setQrStatus("QR: $stage error; retrying")
+        // Keep the last valid timestamp visible during short scanner misses.
+        // The source clock is already frozen after its stale timeout, so this
+        // avoids making the UI flicker between success and failure for normal
+        // QR redraw transitions.
+        if (lastQrSuccessElapsedNs == 0L ||
+            SystemClock.elapsedRealtimeNanos() - lastQrSuccessElapsedNs >= QR_NO_DECODE_RECOVERY_NS
+        ) {
+            setQrStatus("QR: $stage error; retrying")
+        }
         val now = SystemClock.elapsedRealtimeNanos()
         if (now - lastQrFailureLogNs < QR_FAILURE_LOG_INTERVAL_NS) return
         lastQrFailureLogNs = now
@@ -773,16 +832,17 @@ class MainActivity : AppCompatActivity() {
      * buffer for QR detection. Video still uses the original full-resolution
      * ImageProxy in WebRtcPublisher; this reduced copy is QR-only.
      */
-    private fun createQrInput(image: ImageProxy): QrInput {
+    private fun createQrInput(image: ImageProxy, maxWidth: Int, maxHeight: Int): QrInput {
         val sourceWidth = image.width
         val sourceHeight = image.height
+        val crop = qrCrop(sourceWidth, sourceHeight, image.imageInfo.rotationDegrees)
         val scale = maxOf(
             1,
-            (sourceWidth + QR_MAX_WIDTH - 1) / QR_MAX_WIDTH,
-            (sourceHeight + QR_MAX_HEIGHT - 1) / QR_MAX_HEIGHT,
+            (crop.width + maxWidth - 1) / maxWidth,
+            (crop.height + maxHeight - 1) / maxHeight,
         )
-        val width = (sourceWidth / scale).and(-2).coerceAtLeast(2)
-        val height = (sourceHeight / scale).and(-2).coerceAtLeast(2)
+        val width = (crop.width / scale).and(-2).coerceAtLeast(2)
+        val height = (crop.height / scale).and(-2).coerceAtLeast(2)
         val chromaWidth = width / 2
         val chromaHeight = height / 2
         val required = width * height + width * height / 2
@@ -797,25 +857,55 @@ class MainActivity : AppCompatActivity() {
 
         var destination = 0
         for (row in 0 until height) {
-            val sourceRow = (row * scale).coerceAtMost(sourceHeight - 1)
+            val sourceRow = (crop.top + row * scale).coerceAtMost(sourceHeight - 1)
             val rowOffset = sourceRow * yPlane.rowStride
             for (column in 0 until width) {
-                val sourceColumn = (column * scale).coerceAtMost(sourceWidth - 1)
+                val sourceColumn = (crop.left + column * scale).coerceAtMost(sourceWidth - 1)
                 qrImageBuffer[destination++] = y.get(rowOffset + sourceColumn * yPlane.pixelStride)
             }
         }
         for (row in 0 until chromaHeight) {
-            val sourceRow = (row * scale).coerceAtMost(sourceHeight / 2 - 1)
-            val uRowOffset = sourceRow * uPlane.rowStride
-            val vRowOffset = sourceRow * vPlane.rowStride
+            val sourceChromaRow = (crop.top / 2 + row * scale).coerceAtMost(sourceHeight / 2 - 1)
             for (column in 0 until chromaWidth) {
-                val sourceColumn = (column * scale).coerceAtMost(sourceWidth / 2 - 1)
+                val sourceChromaColumn = (crop.left / 2 + column * scale).coerceAtMost(sourceWidth / 2 - 1)
                 // NV21 stores chroma as VU pairs.
-                qrImageBuffer[destination++] = v.get(vRowOffset + sourceColumn * vPlane.pixelStride)
-                qrImageBuffer[destination++] = u.get(uRowOffset + sourceColumn * uPlane.pixelStride)
+                qrImageBuffer[destination++] = v.get(sourceChromaRow * vPlane.rowStride + sourceChromaColumn * vPlane.pixelStride)
+                qrImageBuffer[destination++] = u.get(sourceChromaRow * uPlane.rowStride + sourceChromaColumn * uPlane.pixelStride)
             }
         }
         return QrInput(qrImageBuffer, width, height)
+    }
+
+    /**
+     * Returns a generous bottom-center crop in the displayed orientation,
+     * mapped back into the camera sensor's unrotated YUV coordinates.
+     */
+    private fun qrCrop(sourceWidth: Int, sourceHeight: Int, rotationDegrees: Int): QrCrop {
+        val rotation = ((rotationDegrees % 360) + 360) % 360
+        val displayedWidth = if (rotation == 90 || rotation == 270) sourceHeight else sourceWidth
+        val displayedHeight = if (rotation == 90 || rotation == 270) sourceWidth else sourceHeight
+        val displayLeft = (displayedWidth * 10 / 100).and(-2)
+        val displayRight = (displayedWidth * 90 / 100).and(-2).coerceAtMost(displayedWidth)
+        val displayTop = (displayedHeight * 40 / 100).and(-2)
+        val displayBottom = displayedHeight.and(-2)
+        val points = arrayOf(
+            displayLeft to displayTop,
+            displayRight to displayTop,
+            displayLeft to displayBottom,
+            displayRight to displayBottom,
+        ).map { (x, y) ->
+            when (rotation) {
+                90 -> y to (sourceHeight - x)
+                180 -> (sourceWidth - x) to (sourceHeight - y)
+                270 -> (sourceWidth - y) to x
+                else -> x to y
+            }
+        }
+        val left = points.minOf { it.first }.coerceIn(0, sourceWidth - 2).and(-2)
+        val top = points.minOf { it.second }.coerceIn(0, sourceHeight - 2).and(-2)
+        val right = points.maxOf { it.first }.coerceIn(left + 2, sourceWidth).and(-2)
+        val bottom = points.maxOf { it.second }.coerceIn(top + 2, sourceHeight).and(-2)
+        return QrCrop(left, top, (right - left).coerceAtLeast(2), (bottom - top).coerceAtLeast(2))
     }
 
     private fun setQrStatus(text: String) {

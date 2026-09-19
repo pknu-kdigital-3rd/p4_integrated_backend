@@ -100,6 +100,8 @@ func main() {
 		telemetryService.Run(telemetryContext)
 		relay.SetTelemetry(telemetryService)
 		log.Printf("android telemetry enabled: vision=%s node=%s", cfg.PythonTelemetryURL, cfg.NodeInternalBaseURL)
+	} else {
+		log.Printf("android telemetry disabled: set ANDROID_TELEMETRY_ENABLED=true to accept telemetry-events")
 	}
 
 	// Wired up before Run() starts accepting, so every Python feed reconnect

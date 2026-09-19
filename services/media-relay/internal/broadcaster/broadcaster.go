@@ -2,8 +2,10 @@ package broadcaster
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
@@ -178,13 +180,32 @@ func (b *Broadcaster) HandleDataChannel(pc *webrtc.PeerConnection, recordingCont
 		b.handleQRChannel(channel)
 	case telemetryChannelLabel:
 		if b.telemetry == nil {
+			log.Printf("Android telemetry DataChannel received while telemetry is disabled")
 			return
 		}
 		identity := StreamIdentity(recordingContext)
+		log.Printf("Android telemetry DataChannel registered (identity=%s)", telemetryIdentityLabel(identity))
+		channel.OnOpen(func() {
+			log.Printf("Android telemetry DataChannel opened (identity=%s)", telemetryIdentityLabel(identity))
+		})
+		channel.OnClose(func() {
+			log.Printf("Android telemetry DataChannel closed (identity=%s)", telemetryIdentityLabel(identity))
+		})
+		var messages atomic.Uint64
 		channel.OnMessage(func(message webrtc.DataChannelMessage) {
+			if messages.Add(1) == 1 {
+				log.Printf("Android telemetry DataChannel received first batch (bytes=%d, identity=%s)", len(message.Data), telemetryIdentityLabel(identity))
+			}
 			_ = b.HandleTelemetryMessage(pc, identity, message.Data)
 		})
 	}
+}
+
+func telemetryIdentityLabel(identity *telemetry.StreamIdentity) string {
+	if identity == nil {
+		return "none"
+	}
+	return fmt.Sprintf("trip=%d vehicle=%d session=%s", identity.TripID, identity.VehicleID, identity.RecordingSessionID)
 }
 
 // HandleTelemetryMessage ingests one telemetry-events message. It returns
