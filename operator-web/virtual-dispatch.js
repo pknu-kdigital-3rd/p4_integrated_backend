@@ -117,8 +117,8 @@ function renderDraft() {
     return;
   }
   addRouteVisual(routeLayerGroup, draft.routeGeojson, {
-    casingColor: '#ffffff', casingWeight: 14, casingOpacity: 0.9,
-    lineColor: '#7c3aed', lineWeight: 8, lineOpacity: 0.98, arrowColor: '#ffffff',
+    casingColor: '#ffffff', casingWeight: 18, casingOpacity: 0.92,
+    lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff',
   }, 'Route preview');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
   document.querySelector('#virtual-dispatch').disabled = false;
@@ -135,8 +135,8 @@ function renderActiveTripRoute(vehicle) {
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
-      ? { casingColor: '#ffffff', casingWeight: 12, casingOpacity: 0.95, lineColor: '#0875f5', lineWeight: 7, lineOpacity: 1, arrowColor: '#ffffff' }
-      : { casingColor: '#ffffff', casingWeight: 11, casingOpacity: 0.82, lineColor: '#f59e0b', lineWeight: 6, lineOpacity: 0.78, arrowColor: '#ffffff' },
+      ? { casingColor: '#ffffff', casingWeight: 18, casingOpacity: 0.96, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff' }
+      : { casingColor: '#ffffff', casingWeight: 16, casingOpacity: 0.78, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff' },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
