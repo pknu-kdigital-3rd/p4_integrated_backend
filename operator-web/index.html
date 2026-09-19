@@ -95,10 +95,11 @@
           <label for="virtual-vehicle">Virtual vehicle</label><select id="virtual-vehicle"></select><span class="virtual-toolbar-actions"><button id="virtual-new-vehicle" type="button">Add</button><button id="virtual-remove-vehicle" type="button" disabled>Remove</button></span>
         </div>
         <div class="virtual-coordinates">
-          <div><strong>Origin</strong><output id="virtual-origin">not set</output><button type="button" data-virtual-pick="origin">Pick</button></div>
-          <div><strong>Destination</strong><output id="virtual-destination">not set</output><button type="button" data-virtual-pick="destination">Pick</button></div>
-          <div><strong>Waypoints</strong><output id="virtual-waypoints">none</output><button type="button" data-virtual-pick="waypoint">Add</button></div>
+          <div><strong>Origin</strong><output id="virtual-origin">not set</output></div>
+          <div><strong>Destination</strong><output id="virtual-destination">not set</output></div>
+          <div><strong>Waypoints</strong><output id="virtual-waypoints">none</output></div>
         </div>
+        <p class="virtual-map-hint">Right-click the map to set an origin, destination, or waypoint. Drag a flag to adjust its position.</p>
         <div class="virtual-actions"><button id="virtual-preview" type="button">Preview optimal path</button><button id="virtual-dispatch" type="button" disabled>Generate driver request</button></div>
         <p id="virtual-draft-summary" role="status">No route draft.</p>
         <h3>Assignment inbox</h3><ul id="virtual-requests"></ul>

@@ -38,9 +38,21 @@ body.resizing-layout{user-select:none}
 .virtual-toolbar-actions{display:flex;gap:6px;flex-wrap:wrap}
 .virtual-toolbar-actions button{padding:7px 9px;font-size:11px}
 .virtual-coordinates{display:grid;gap:6px}
-.virtual-coordinates>div{display:grid;grid-template-columns:90px 1fr auto;gap:6px;align-items:center;font-size:12px}
+.virtual-coordinates>div{display:grid;grid-template-columns:90px 1fr;gap:6px;align-items:center;font-size:12px}
 .virtual-coordinates output{color:#b8cbe2;font-variant-numeric:tabular-nums}
-.virtual-coordinates button{padding:6px 8px;font-size:11px}
+.virtual-map-hint{margin:0;color:#91a8c5;font-size:12px}
+.virtual-point-icon{background:transparent;border:0}
+.virtual-flag{--flag-color:#f59e0b;position:relative;display:block;width:32px;height:38px;filter:drop-shadow(0 1px 2px #07111f)}
+.virtual-flag-origin{--flag-color:#16a34a}
+.virtual-flag-destination{--flag-color:#dc2626}
+.virtual-flag-waypoint{--flag-color:#f59e0b}
+.virtual-flag-pole{position:absolute;left:9px;top:4px;width:3px;height:30px;border-radius:2px;background:var(--flag-color);border:1px solid #fff8}
+.virtual-flag-cloth{position:absolute;left:11px;top:2px;display:flex;width:19px;height:15px;align-items:center;justify-content:center;clip-path:polygon(0 0,100% 0,82% 50%,100% 100%,0 100%);background:var(--flag-color);color:#fff;font:700 10px/1 ui-sans-serif,system-ui,sans-serif;text-shadow:0 1px 1px #0008}
+.virtual-flag-waypoint .virtual-flag-cloth{color:#1b2430;text-shadow:none}
+.virtual-map-context-menu{display:grid;min-width:170px;gap:5px}
+.virtual-map-context-menu strong{font-size:12px;color:#243b53}
+.virtual-map-context-menu button{padding:6px 8px;text-align:left;font-size:12px}
+.virtual-map-context-popup .leaflet-popup-content{margin:10px}
 .virtual-actions{display:flex;gap:6px;flex-wrap:wrap}
 #virtual-draft-summary{margin:0;min-height:1.4em;color:#b8cbe2;font-size:12px}
 #virtual-trip-controls{display:grid;gap:7px}

@@ -36,6 +36,7 @@ let restrictionCorners = [];
 let restrictionGeometry = null;
 let pollTimer = null;
 let lastEventId = '';
+let pointContextPopup = null;
 
 function token() { return sessionStorage.getItem('itsToken'); }
 async function api(path, options = {}) {
@@ -50,18 +51,46 @@ function setStatus(message, isError = false) {
 }
 function idempotency(prefix) { return `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`; }
 function formatPoint(point) { return point ? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` : 'not set'; }
-function drawPoint(kind, point) {
+function pointIcon(kind, index) {
+  const variant = kind === 'origin' ? 'origin' : kind === 'destination' ? 'destination' : 'waypoint';
+  const label = kind === 'origin' ? 'O' : kind === 'destination' ? 'D' : String(index + 1);
+  return L.divIcon({
+    className: 'virtual-point-icon',
+    html: `<span class="virtual-flag virtual-flag-${variant}"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${label}</span></span>`,
+    iconSize: [32, 38],
+    iconAnchor: [10, 36],
+  });
+}
+function markPointsChanged(message) {
+  draft = null;
+  renderDraft();
+  setStatus(message);
+}
+function drawPoint(kind, point, index = 0) {
   if (!point) return;
-  const color = kind === 'origin' ? '#2a9d8f' : kind === 'destination' ? '#e63946' : '#f4a261';
-  const marker = L.circleMarker([point.lat, point.lon], { radius: 8, color, fillColor: color, fillOpacity: 0.9 });
-  marker.bindTooltip(kind === 'waypoint' ? 'Waypoint' : kind[0].toUpperCase() + kind.slice(1));
+  const marker = L.marker([point.lat, point.lon], {
+    icon: pointIcon(kind, index),
+    draggable: true,
+    riseOnHover: true,
+    autoPan: true,
+  });
+  marker.bindTooltip(kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1));
+  marker.on('dragend', () => {
+    const position = marker.getLatLng();
+    const moved = { lat: position.lat, lon: position.lng };
+    if (kind === 'origin') points.origin = moved;
+    else if (kind === 'destination') points.destination = moved;
+    else if (points.waypoints[index]) points.waypoints[index] = moved;
+    renderPoints();
+    markPointsChanged(`${kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1)} moved. Preview the route again.`);
+  });
   pointLayerGroup.addLayer(marker);
 }
 function renderPoints() {
   pointLayerGroup.clearLayers();
   drawPoint('origin', points.origin);
   drawPoint('destination', points.destination);
-  points.waypoints.forEach((point) => drawPoint('waypoint', point));
+  points.waypoints.forEach((point, index) => drawPoint('waypoint', point, index));
   document.querySelector('#virtual-origin').textContent = formatPoint(points.origin);
   document.querySelector('#virtual-destination').textContent = formatPoint(points.destination);
   document.querySelector('#virtual-waypoints').textContent = points.waypoints.length ? points.waypoints.map(formatPoint).join(' · ') : 'none';
@@ -543,11 +572,49 @@ async function command(command, extra = {}) {
   try { await api(`/api/v1/virtual/trips/${tripId}/commands`, { method: 'POST', body: JSON.stringify({ command, ...extra }) }); await loadScenarioData(); }
   catch (error) { setStatus(error.message, true); }
 }
-function selectPoint(point) {
-  if (pickMode === 'origin') points.origin = point;
-  else if (pickMode === 'destination') points.destination = point;
-  else if (pickMode === 'waypoint') points.waypoints.push(point);
-  renderPoints(); pickMode = null; setStatus('Map point recorded.');
+function closePointContextMenu() {
+  if (!pointContextPopup) return;
+  map.closePopup(pointContextPopup);
+  pointContextPopup = null;
+}
+function setPointFromContext(action, point) {
+  if (action === 'origin') points.origin = point;
+  else if (action === 'destination') points.destination = point;
+  else if (action === 'waypoint') points.waypoints.push(point);
+  renderPoints();
+  closePointContextMenu();
+  markPointsChanged(action === 'waypoint' ? `Waypoint ${points.waypoints.length} added.` : `${action[0].toUpperCase() + action.slice(1)} set.`);
+}
+function showPointContextMenu(event) {
+  if (mode !== 'virtual') return;
+  event.originalEvent?.preventDefault();
+  if (pickMode === 'restriction') {
+    setStatus('Finish the restriction region first.');
+    return;
+  }
+  const point = { lat: event.latlng.lat, lon: event.latlng.lng };
+  const content = document.createElement('div');
+  content.className = 'virtual-map-context-menu';
+  const title = document.createElement('strong');
+  title.textContent = 'Set route point';
+  content.append(title);
+  const actions = [
+    ['origin', 'Set origin here'],
+    ['destination', 'Set destination here'],
+    ['waypoint', `Add waypoint ${points.waypoints.length + 1} here`],
+  ];
+  for (const [action, label] of actions) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.addEventListener('click', () => setPointFromContext(action, point));
+    content.append(button);
+  }
+  closePointContextMenu();
+  pointContextPopup = L.popup({ closeButton: true, closeOnClick: true, autoClose: true, className: 'virtual-map-context-popup', offset: [0, -8] })
+    .setLatLng(event.latlng)
+    .setContent(content)
+    .openOn(map);
 }
 function selectRestrictionPoint(point) {
   restrictionCorners.push(point);
@@ -630,8 +697,9 @@ async function switchMode(next) {
 map.on('click', (event) => {
   if (mode !== 'virtual' || !pickMode) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
-  if (pickMode === 'restriction') selectRestrictionPoint(point); else selectPoint(point);
+  if (pickMode === 'restriction') selectRestrictionPoint(point);
 });
+map.on('contextmenu', (event) => showPointContextMenu(event));
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
 scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
@@ -642,7 +710,6 @@ document.querySelector('#virtual-new-vehicle').addEventListener('click', () => v
 removeVehicleButton.addEventListener('click', () => void removeVehicle());
 document.querySelector('#virtual-preview').addEventListener('click', () => void previewRoute());
 document.querySelector('#virtual-dispatch').addEventListener('click', () => void generateRequest());
-document.querySelectorAll('[data-virtual-pick]').forEach((button) => button.addEventListener('click', () => { pickMode = button.dataset.virtualPick; setStatus(`Click the map to set ${pickMode}.`); }));
 document.querySelector('#virtual-following').addEventListener('change', (event) => void setFollowing(event.target.checked));
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_FACTOR', { speedFactor: Number(document.querySelector('#virtual-speed').value) }));
