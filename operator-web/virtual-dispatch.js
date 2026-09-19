@@ -14,11 +14,13 @@ const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
+const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
 const routeRenderer = L.canvas({ padding: 0.5 });
 const routeVisuals = new Set();
 let draftRouteSignature = '';
 let activeRouteSignature = '';
 const requestList = document.querySelector('#virtual-requests');
+const restrictionList = document.querySelector('#virtual-restrictions');
 const eventList = document.querySelector('#virtual-events');
 const normalSections = ['#login', '#details', '#trip-panel', '#recordings-panel', '#error'];
 let mode = 'normal';
@@ -26,6 +28,7 @@ let scenarioId = '';
 let scenarioRevision = 0;
 let selectedVehicleId = '';
 let vehicles = [];
+let restrictions = [];
 let draft = null;
 let points = { origin: null, destination: null, waypoints: [] };
 let pickMode = null;
@@ -62,6 +65,42 @@ function renderPoints() {
   document.querySelector('#virtual-origin').textContent = formatPoint(points.origin);
   document.querySelector('#virtual-destination').textContent = formatPoint(points.destination);
   document.querySelector('#virtual-waypoints').textContent = points.waypoints.length ? points.waypoints.map(formatPoint).join(' · ') : 'none';
+}
+function restrictionLabel(restriction) {
+  const kind = restriction?.kind === 'HEAVY_PENALTY' ? 'Heavy penalty' : 'Blocked';
+  const factor = restriction?.kind === 'HEAVY_PENALTY' && restriction?.penaltyFactor !== null && restriction?.penaltyFactor !== undefined
+    ? ` · ×${Number(restriction.penaltyFactor).toFixed(1)}` : '';
+  return `${kind}${factor} · revision ${restriction?.revision ?? '?'}`;
+}
+function renderRestrictions(items) {
+  restrictions = Array.isArray(items) ? items.filter((restriction) => restriction?.isActive !== false) : [];
+  restrictionLayerGroup.clearLayers();
+  restrictionList.replaceChildren();
+  if (!restrictions.length) {
+    const empty = document.createElement('li');
+    empty.textContent = 'No active regions.';
+    restrictionList.append(empty);
+    return;
+  }
+  for (const restriction of restrictions) {
+    const color = restriction.kind === 'HEAVY_PENALTY' ? '#f4a261' : '#e76f51';
+    if (restriction.geometry) {
+      const layer = L.geoJSON(restriction.geometry, {
+        style: { color, weight: 2, fillColor: color, fillOpacity: 0.16 },
+      });
+      layer.bindTooltip(restrictionLabel(restriction));
+      restrictionLayerGroup.addLayer(layer);
+    }
+    const row = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = restrictionLabel(restriction);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => void removeRestriction(restriction));
+    row.append(label, remove);
+    restrictionList.append(row);
+  }
 }
 function routeDisplayMetrics(style = {}) {
   return {
@@ -401,16 +440,24 @@ async function loadScenarioData() {
   if (!scenarioId) {
     vehicles = [];
     selectedVehicleId = '';
+    renderRestrictions([]);
     renderVehicles();
     renderRequests([]);
     eventList.replaceChildren();
     return;
   }
-  vehicles = await api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`);
+  const [scenario, scenarioVehicles, requests, events] = await Promise.all([
+    api(`/api/v1/virtual/scenarios/${scenarioId}`),
+    api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`),
+    api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`),
+    api(`/api/v1/virtual/scenarios/${scenarioId}/events${lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : ''}`),
+  ]);
+  scenarioRevision = Number(scenario?.restrictionRevision || 0);
+  renderRestrictions(scenario?.restrictions);
+  vehicles = scenarioVehicles;
   renderVehicles();
-  renderRequests(await api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`));
-  const after = lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : '';
-  renderEvents(await api(`/api/v1/virtual/scenarios/${scenarioId}/events${after}`));
+  renderRequests(requests);
+  renderEvents(events);
 }
 async function decideRequest(requestId, action) {
   try { await api(`/api/v1/virtual/dispatch-requests/${requestId}/${action}`, { method: 'POST', body: '{}' }); await loadScenarioData(); setStatus(`Request ${requestId} ${action}ed.`); }
@@ -449,6 +496,8 @@ async function removeScenario() {
     restrictionGeometry = null;
     pickMode = null;
     restrictionLayerGroup.clearLayers();
+    restrictionDraftLayerGroup.clearLayers();
+    renderRestrictions([]);
     renderPoints();
     renderDraft();
     await loadScenarios();
@@ -506,10 +555,21 @@ function selectRestrictionPoint(point) {
   const [a, b] = restrictionCorners;
   const west = Math.min(a.lon, b.lon), east = Math.max(a.lon, b.lon), south = Math.min(a.lat, b.lat), north = Math.max(a.lat, b.lat);
   restrictionGeometry = { type: 'Polygon', coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]] };
-  restrictionLayerGroup.clearLayers();
-  L.rectangle([[south, west], [north, east]], { color: '#e76f51', weight: 2, fillOpacity: 0.15 }).addTo(restrictionLayerGroup);
+  restrictionDraftLayerGroup.clearLayers();
+  L.rectangle([[south, west], [north, east]], { color: '#e76f51', weight: 2, fillOpacity: 0.15 }).addTo(restrictionDraftLayerGroup);
   document.querySelector('#virtual-restriction-commit').disabled = false;
   restrictionCorners = []; pickMode = null; setStatus('Restriction region ready to activate.');
+}
+async function refreshAfterRestrictionChange(message) {
+  draft = null;
+  renderDraft();
+  await loadScenarios();
+  await loadScenarioData();
+  const selected = vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId);
+  const noRouteMessage = noViablePathMessage();
+  if (noRouteMessage) setStatus(noRouteMessage, true);
+  else if (points.origin && points.destination && selected?.vehicleStatus === 'READY') await previewRoute();
+  else setStatus(message);
 }
 async function commitRestriction() {
   if (!restrictionGeometry || !scenarioId) return;
@@ -521,23 +581,29 @@ async function commitRestriction() {
     if (!preview.canActivate) { setStatus(`Blocked region is occupied by vehicle(s): ${preview.occupyingVirtualVehicleIds.join(', ')}`, true); return; }
     await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions`, { method: 'POST', body: JSON.stringify({ ...body, expectedRestrictionRevision: scenarioRevision }) });
     restrictionGeometry = null;
+    restrictionDraftLayerGroup.clearLayers();
     document.querySelector('#virtual-restriction-commit').disabled = true;
     // The existing draft was calculated against the previous restriction
     // revision.  Remove it before refreshing so the map cannot keep showing
     // a route that still crosses the newly blocked region.  Re-preview an
     // idle selected vehicle automatically when the two endpoints are still
     // present; active trips are rerouted by the backend instead.
-    draft = null;
-    renderDraft();
-    await loadScenarios();
-    await loadScenarioData();
-    const selected = vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId);
-    const noRouteMessage = noViablePathMessage();
-    if (noRouteMessage) setStatus(noRouteMessage, true);
-    else if (points.origin && points.destination && selected?.vehicleStatus === 'READY') await previewRoute();
-    else setStatus('Road state activated.');
+    await refreshAfterRestrictionChange('Road state activated.');
   }
   catch (error) { setStatus(error.message, true); }
+}
+async function removeRestriction(restriction) {
+  if (!scenarioId || !restriction?.restrictionId) return;
+  const label = restrictionLabel(restriction);
+  if (!window.confirm(`Remove ${label}? Routes will be recalculated.`)) return;
+  try {
+    setStatus(`Removing ${label} and recalculating affected virtual routes…`);
+    await api(`/api/v1/virtual/road-restrictions/${encodeURIComponent(restriction.restrictionId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive: false, expectedRestrictionRevision: scenarioRevision }),
+    });
+    await refreshAfterRestrictionChange('Road region removed.');
+  } catch (error) { setStatus(error.message, true); }
 }
 async function switchMode(next) {
   mode = next; window.__virtualMode = next === 'virtual';
@@ -548,12 +614,12 @@ async function switchMode(next) {
   document.querySelector('#live-view-panel').hidden = true;
   if (next === 'virtual') {
     map.eachLayer((layer) => {
-      if (layer !== routeLayerGroup && layer !== activeRouteLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && !layer._url) map.removeLayer(layer);
+      if (layer !== routeLayerGroup && layer !== activeRouteLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && layer !== restrictionDraftLayerGroup && !layer._url) map.removeLayer(layer);
     });
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
-    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
+    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); markerLayerGroup.clearLayers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
     draftRouteSignature = '';
     activeRouteSignature = '';
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }

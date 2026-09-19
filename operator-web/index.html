@@ -111,6 +111,7 @@
         <h3>Road state</h3>
         <p>Pick two corners on the map to mark a region.</p>
         <select id="virtual-restriction-kind"><option value="BLOCKED">Blocked</option><option value="HEAVY_PENALTY">Heavy penalty</option></select><input id="virtual-penalty" type="number" min="1.01" max="100" step="0.1" value="5" placeholder="Penalty factor"><button id="virtual-restriction-pick" type="button">Pick region</button><button id="virtual-restriction-commit" type="button" disabled>Activate region</button>
+        <h4 id="virtual-restrictions-title">Active regions</h4><ul id="virtual-restrictions"></ul>
         <h3>Events</h3><ul id="virtual-events"></ul>
       </section>
       <p id="error" role="alert"></p>
