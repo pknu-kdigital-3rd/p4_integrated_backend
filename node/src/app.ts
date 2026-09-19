@@ -18,6 +18,7 @@ import { tripRouter } from "./modules/trip/trip.router.ts";
 import { demoRouter } from "./modules/demo/demo.router.ts";
 import { internalRecordingRouter, recordingRouter } from "./modules/recording/recording.router.ts";
 import { internalTelemetryRouter } from "./modules/telemetry/telemetry.router.ts";
+import { virtualRouter } from "./modules/virtual/virtual.router.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { env } from "./config/env.ts";
@@ -63,6 +64,7 @@ export function createApp() {
 	app.use("/internal/recordings", internalRecordingRouter);
 	app.use("/internal/telemetry", internalTelemetryRouter);
 	app.use("/api/v1", recordingRouter);
+	app.use("/api/v1/virtual", virtualRouter);
 
 	const operatorWeb = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../operator-web");
 	app.use("/operator", express.static(operatorWeb));

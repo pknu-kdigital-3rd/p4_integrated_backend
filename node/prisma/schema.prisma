@@ -58,7 +58,7 @@ model Vehicle {
     vehicleCode    String   @unique @map("vehicle_code") @db.VarChar(50)
     plateNumber    String?  @unique @map("plate_number") @db.VarChar(30)
     vehicleName    String?  @map("vehicle_name") @db.VarChar(100)
-    vehicleSource  String   @default("CUSTOM") @map("vehicle_source") @db.VarChar(20) // CHECK: CUSTOM|BIMS
+    vehicleSource  String   @default("CUSTOM") @map("vehicle_source") @db.VarChar(20) // CHECK: CUSTOM|BIMS|VIRTUAL
     externalId     String?  @map("external_id") @db.VarChar(100)
     maxLoadKg      Decimal? @map("max_load_kg") @db.Decimal(10, 2)
     heightM        Decimal? @map("height_m") @db.Decimal(5, 2)
@@ -82,6 +82,11 @@ model Vehicle {
     routeDeviations RouteDeviation[]
     alerts          Alert[]
     transportGoals  TransportGoal[]
+    virtualSettings VirtualVehicleSettings?
+    virtualState    VirtualVehicleState?
+    virtualDrafts   VirtualRouteDraft[]
+    virtualRequests VirtualDispatchRequest[]
+    virtualTrips    VirtualTrip[]
 
     @@unique([vehicleSource, externalId])
     @@map("vehicle")
@@ -407,6 +412,238 @@ model TransportGoal {
     @@index([assignedVehicleId], map: "idx_transport_goal_vehicle")
     @@index([destinationLocation], type: Gist, map: "idx_transport_goal_location")
     @@map("transport_goal")
+}
+
+model VirtualScenario {
+  scenarioId             BigInt   @id @default(autoincrement()) @map("scenario_id")
+  name                   String   @db.VarChar(120)
+  state                  String   @default("ACTIVE") @db.VarChar(20)
+  autoAcceptAfterSeconds Int?     @map("auto_accept_after_seconds")
+  restrictionRevision    Int      @default(0) @map("restriction_revision")
+  createdBy              BigInt?  @map("created_by")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  drafts           VirtualRouteDraft[]
+  dispatchRequests VirtualDispatchRequest[]
+  trips            VirtualTrip[]
+  restrictions     VirtualRoadRestriction[]
+  vehicleStates    VirtualVehicleState[]
+  events           VirtualOperatorEvent[]
+
+  @@index([state, updatedAt], map: "idx_virtual_scenario_state")
+  @@map("virtual_scenario")
+}
+
+model VirtualVehicleSettings {
+  vehicleId         BigInt   @id @map("vehicle_id")
+  autoFollowEnabled Boolean  @default(true) @map("auto_follow_enabled")
+  policyVersion     Int      @default(1) @map("policy_version")
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [vehicleId], onDelete: Cascade)
+
+  @@map("virtual_vehicle_settings")
+}
+
+model VirtualRouteDraft {
+  draftId             BigInt   @id @default(autoincrement()) @map("draft_id")
+  scenarioId          BigInt   @map("scenario_id")
+  selectedVehicleId   BigInt   @map("selected_vehicle_id")
+  origin              Json
+  destination         Json
+  waypoints           Json
+  requestedProfile    Json     @map("requested_profile")
+  routeGeojson        Json     @map("route_geojson")
+  directedItinerary   Json     @map("directed_itinerary")
+  snappedStops        Json     @map("snapped_stops")
+  graphVersion        String   @map("graph_version") @db.VarChar(160)
+  restrictionRevision Int      @map("restriction_revision")
+  distanceM           Float    @map("distance_m")
+  durationSec         Float    @map("duration_sec")
+  expiresAt           DateTime @map("expires_at") @db.Timestamptz(6)
+  createdBy           BigInt?  @map("created_by")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scenario         VirtualScenario          @relation(fields: [scenarioId], references: [scenarioId], onDelete: Cascade)
+  selectedVehicle  Vehicle                  @relation(fields: [selectedVehicleId], references: [vehicleId])
+  dispatchRequests VirtualDispatchRequest[]
+
+  @@index([scenarioId, createdAt], map: "idx_virtual_route_draft_scenario")
+  @@index([selectedVehicleId, expiresAt], map: "idx_virtual_route_draft_vehicle")
+  @@map("virtual_route_draft")
+}
+
+model VirtualDispatchRequest {
+  requestId           BigInt    @id @default(autoincrement()) @map("request_id")
+  scenarioId          BigInt    @map("scenario_id")
+  draftId             BigInt    @map("draft_id")
+  selectedVehicleId   BigInt    @map("selected_vehicle_id")
+  simulatedDriverName String    @map("simulated_driver_name") @db.VarChar(120)
+  state               String    @default("PENDING") @db.VarChar(20)
+  acceptAt            DateTime? @map("accept_at") @db.Timestamptz(6)
+  expiresAt           DateTime? @map("expires_at") @db.Timestamptz(6)
+  acceptedTripId      BigInt?   @unique @map("accepted_trip_id")
+  idempotencyKey      String    @unique @map("idempotency_key") @db.VarChar(120)
+  requestedBy         BigInt?   @map("requested_by")
+  decidedBy           BigInt?   @map("decided_by")
+  decidedAt           DateTime? @map("decided_at") @db.Timestamptz(6)
+  revision            Int       @default(1)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  scenario        VirtualScenario   @relation(fields: [scenarioId], references: [scenarioId], onDelete: Cascade)
+  draft           VirtualRouteDraft @relation(fields: [draftId], references: [draftId])
+  selectedVehicle Vehicle           @relation(fields: [selectedVehicleId], references: [vehicleId])
+  acceptedTrip    VirtualTrip?      @relation("AcceptedDispatch")
+
+  @@index([scenarioId, state, acceptAt], map: "idx_virtual_dispatch_due")
+  @@index([selectedVehicleId, state], map: "idx_virtual_dispatch_vehicle_state")
+  @@map("virtual_dispatch_request")
+}
+
+model VirtualTrip {
+  virtualTripId     BigInt    @id @default(autoincrement()) @map("virtual_trip_id")
+  scenarioId        BigInt    @map("scenario_id")
+  vehicleId         BigInt    @map("vehicle_id")
+  dispatchRequestId BigInt    @unique @map("dispatch_request_id")
+  origin            Json
+  destination       Json
+  state             String    @default("DRIVING") @db.VarChar(32)
+  startedAt         DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt           DateTime? @map("ended_at") @db.Timestamptz(6)
+  activeRouteId     BigInt?   @map("active_route_id")
+  routeVersion      Int       @default(1) @map("route_version")
+  commandVersion    Int       @default(1) @map("command_version")
+  tripRevision      Int       @default(1) @map("trip_revision")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  scenario        VirtualScenario        @relation(fields: [scenarioId], references: [scenarioId], onDelete: Cascade)
+  vehicle         Vehicle                @relation(fields: [vehicleId], references: [vehicleId])
+  dispatchRequest VirtualDispatchRequest @relation("AcceptedDispatch", fields: [dispatchRequestId], references: [requestId])
+  routes          VirtualRoute[]
+  waypoints       VirtualTripWaypoint[]
+  stateRecord     VirtualVehicleState?
+  events          VirtualOperatorEvent[]
+
+  @@index([scenarioId, state], map: "idx_virtual_trip_scenario_state")
+  @@index([vehicleId, state], map: "idx_virtual_trip_vehicle_state")
+  @@map("virtual_trip")
+}
+
+model VirtualRoute {
+  routeId             BigInt    @id @default(autoincrement()) @map("route_id")
+  virtualTripId       BigInt    @map("virtual_trip_id")
+  routeVersion        Int       @map("route_version")
+  routeType           String    @map("route_type") @db.VarChar(30)
+  routeGeojson        Json      @map("route_geojson")
+  directedItinerary   Json      @map("directed_itinerary")
+  distanceM           Float     @map("distance_m")
+  durationSec         Float     @map("duration_sec")
+  restrictionRevision Int       @map("restriction_revision")
+  graphVersion        String    @map("graph_version") @db.VarChar(160)
+  reason              String?   @db.VarChar(40)
+  isCurrent           Boolean   @default(true) @map("is_current")
+  activatedAt         DateTime? @map("activated_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip  VirtualTrip          @relation(fields: [virtualTripId], references: [virtualTripId], onDelete: Cascade)
+  state VirtualVehicleState?
+
+  @@unique([virtualTripId, routeVersion])
+  @@index([virtualTripId, isCurrent], map: "idx_virtual_route_current")
+  @@map("virtual_route")
+}
+
+model VirtualTripWaypoint {
+  waypointId     BigInt    @id @default(autoincrement()) @map("waypoint_id")
+  virtualTripId  BigInt    @map("virtual_trip_id")
+  sequence       Int
+  originalPoint  Json      @map("original_point")
+  snappedPoint   Json?     @map("snapped_point")
+  snappedEdgeId  String?   @map("snapped_edge_id") @db.VarChar(180)
+  snappedOffsetM Float?    @map("snapped_offset_m")
+  status         String    @default("PENDING") @db.VarChar(20)
+  clientId       String?   @map("client_id") @db.VarChar(80)
+  reachedAt      DateTime? @map("reached_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip VirtualTrip @relation(fields: [virtualTripId], references: [virtualTripId], onDelete: Cascade)
+
+  @@unique([virtualTripId, sequence])
+  @@index([virtualTripId, status], map: "idx_virtual_waypoint_status")
+  @@map("virtual_trip_waypoint")
+}
+
+model VirtualVehicleState {
+  vehicleId                BigInt   @id @map("vehicle_id")
+  scenarioId               BigInt   @map("scenario_id")
+  virtualTripId            BigInt   @unique @map("virtual_trip_id")
+  activeRouteId            BigInt?  @unique @map("active_route_id")
+  simStatus                String   @default("DRIVING") @map("sim_status") @db.VarChar(32)
+  routeVersion             Int      @default(1) @map("route_version")
+  commandVersion           Int      @default(1) @map("command_version")
+  eventSequence            BigInt   @default(0) @map("event_sequence")
+  graphVersion             String?  @map("graph_version") @db.VarChar(160)
+  currentEdgeId            String?  @map("current_edge_id") @db.VarChar(180)
+  currentPhysicalSegmentId String?  @map("current_physical_segment_id") @db.VarChar(180)
+  offsetM                  Float?   @map("offset_m")
+  speedKmh                 Float?   @map("speed_kmh")
+  speedFactor              Float    @default(1) @map("speed_factor")
+  simElapsedMs             BigInt   @default(0) @map("sim_elapsed_ms")
+  lastPosition             Json     @map("last_position")
+  blockedReason            String?  @map("blocked_reason") @db.VarChar(160)
+  lastCheckpointAt         DateTime @default(now()) @map("last_checkpoint_at") @db.Timestamptz(6)
+  updatedAt                DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  vehicle     Vehicle         @relation(fields: [vehicleId], references: [vehicleId], onDelete: Cascade)
+  scenario    VirtualScenario @relation(fields: [scenarioId], references: [scenarioId], onDelete: Cascade)
+  trip        VirtualTrip     @relation(fields: [virtualTripId], references: [virtualTripId], onDelete: Cascade)
+  activeRoute VirtualRoute?   @relation(fields: [activeRouteId], references: [routeId])
+
+  @@index([scenarioId, simStatus], map: "idx_virtual_state_scenario_status")
+  @@map("virtual_vehicle_state")
+}
+
+model VirtualRoadRestriction {
+  restrictionId              BigInt    @id @default(autoincrement()) @map("restriction_id")
+  scenarioId                 BigInt    @map("scenario_id")
+  kind                       String    @db.VarChar(20)
+  geometry                   Json
+  affectedDirectedEdgeIds    Json      @map("affected_directed_edge_ids")
+  affectedPhysicalSegmentIds Json      @map("affected_physical_segment_ids")
+  graphVersion               String    @map("graph_version") @db.VarChar(160)
+  penaltyFactor              Float?    @map("penalty_factor")
+  revision                   Int
+  isActive                   Boolean   @default(true) @map("is_active")
+  expiresAt                  DateTime? @map("expires_at") @db.Timestamptz(6)
+  reason                     String?   @db.VarChar(240)
+  createdBy                  BigInt?   @map("created_by")
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  scenario VirtualScenario @relation(fields: [scenarioId], references: [scenarioId], onDelete: Cascade)
+
+  @@index([scenarioId, isActive], map: "idx_virtual_restriction_active")
+  @@map("virtual_road_restriction")
+}
+
+model VirtualOperatorEvent {
+  eventId       BigInt   @id @default(autoincrement()) @map("event_id")
+  scenarioId    BigInt   @map("scenario_id")
+  virtualTripId BigInt?  @map("virtual_trip_id")
+  requestId     BigInt?  @map("request_id")
+  actorId       BigInt?  @map("actor_id")
+  eventType     String   @map("event_type") @db.VarChar(60)
+  payload       Json
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scenario VirtualScenario @relation(fields: [scenarioId], references: [scenarioId], onDelete: Cascade)
+  trip     VirtualTrip?    @relation(fields: [virtualTripId], references: [virtualTripId], onDelete: SetNull)
+
+  @@index([scenarioId, eventId], map: "idx_virtual_event_replay")
+  @@map("virtual_operator_event")
 }
 
 // ============================================================================
