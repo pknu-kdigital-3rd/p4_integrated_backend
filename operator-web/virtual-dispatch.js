@@ -73,9 +73,12 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
   if (!routeGeojson) return;
   L.geoJSON(routeGeojson, {
     style: {
-      color: style.casingColor,
-      weight: style.casingWeight,
-      opacity: style.casingOpacity,
+      // Draw a dark casing first so the road remains legible over both the
+      // pale base map and dense map labels.  The colored route is drawn above
+      // it as the smaller inner stroke.
+      color: style.outlineColor || style.casingColor,
+      weight: style.outlineWeight || style.casingWeight,
+      opacity: style.outlineOpacity ?? style.casingOpacity,
       lineCap: 'round',
       lineJoin: 'round',
       renderer: routeRenderer,
@@ -101,7 +104,9 @@ function addRouteVisual(group, routeGeojson, style, tooltip) {
       weight: 0.8,
       opacity: 0.98,
       fillOpacity: 1,
-      yawn: 58,
+      // A smaller yawn makes a narrower, sharper chevron that stays inside
+      // the inner route stroke instead of spilling over its edges.
+      yawn: style.arrowYawn ?? 36,
       size: `${metrics.arrowSize.toFixed(1)}px`,
       frequency: `${metrics.arrowFrequency.toFixed(1)}px`,
     };
@@ -117,8 +122,8 @@ function renderDraft() {
     return;
   }
   addRouteVisual(routeLayerGroup, draft.routeGeojson, {
-    casingColor: '#ffffff', casingWeight: 18, casingOpacity: 0.92,
-    lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff',
+    outlineColor: '#3b225c', outlineWeight: 19, outlineOpacity: 0.96,
+    lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36,
   }, 'Route preview');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
   document.querySelector('#virtual-dispatch').disabled = false;
@@ -135,8 +140,8 @@ function renderActiveTripRoute(vehicle) {
   for (const route of [previousRoute, currentRoute].filter(Boolean)) {
     const current = Boolean(route.isCurrent);
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
-      ? { casingColor: '#ffffff', casingWeight: 18, casingOpacity: 0.96, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff' }
-      : { casingColor: '#ffffff', casingWeight: 16, casingOpacity: 0.78, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff' },
+      ? { outlineColor: '#063b70', outlineWeight: 19, outlineOpacity: 0.98, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowYawn: 36 }
+      : { outlineColor: '#6a3800', outlineWeight: 17, outlineOpacity: 0.86, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowYawn: 36 },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
