@@ -195,7 +195,20 @@ async function commitRestriction() {
     const preview = await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions/preview`, { method: 'POST', body: JSON.stringify(body) });
     if (!preview.canActivate) { setStatus(`Blocked region is occupied by vehicle(s): ${preview.occupyingVirtualVehicleIds.join(', ')}`, true); return; }
     await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions`, { method: 'POST', body: JSON.stringify({ ...body, expectedRestrictionRevision: scenarioRevision }) });
-    restrictionGeometry = null; document.querySelector('#virtual-restriction-commit').disabled = true; setStatus('Road state activated.'); await loadScenarios(); await loadScenarioData();
+    restrictionGeometry = null;
+    document.querySelector('#virtual-restriction-commit').disabled = true;
+    // The existing draft was calculated against the previous restriction
+    // revision.  Remove it before refreshing so the map cannot keep showing
+    // a route that still crosses the newly blocked region.  Re-preview an
+    // idle selected vehicle automatically when the two endpoints are still
+    // present; active trips are rerouted by the backend instead.
+    draft = null;
+    renderDraft();
+    await loadScenarios();
+    await loadScenarioData();
+    const selected = vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId);
+    if (points.origin && points.destination && selected?.vehicleStatus === 'READY') await previewRoute();
+    else setStatus('Road state activated.');
   }
   catch (error) { setStatus(error.message, true); }
 }

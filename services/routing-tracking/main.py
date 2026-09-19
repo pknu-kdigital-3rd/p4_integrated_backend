@@ -267,22 +267,100 @@ def _internal_route(req: InternalRouteRequest):
     }
 
 
-def _geometry_vertices(geometry: dict) -> list[tuple[float, float]]:
+def _geometry_polygons(geometry: dict) -> list[list[list[tuple[float, float]]]]:
+    """Normalize a GeoJSON Polygon/MultiPolygon into lon/lat rings.
+
+    The routing service normally uses Shapely for the spatial intersection,
+    but the bundled pure-Python graph is deliberately usable without optional
+    geometry packages.  Keeping the ring structure here lets that fallback
+    handle holes and multiple polygons instead of reducing a region to a
+    bounding box.
+    """
+    geometry_type = geometry.get("type")
     coordinates = geometry.get("coordinates", [])
-    if geometry.get("type") == "Polygon":
-        rings = coordinates[:1]
-    elif geometry.get("type") == "MultiPolygon":
-        rings = [ring for polygon in coordinates for ring in polygon[:1]]
+    if geometry_type == "Polygon":
+        raw_polygons = [coordinates]
+    elif geometry_type == "MultiPolygon":
+        raw_polygons = coordinates
     else:
         raise HTTPException(status_code=422, detail="Restriction geometry must be Polygon or MultiPolygon")
-    vertices = []
-    for ring in rings:
-        for pair in ring:
-            if isinstance(pair, list) and len(pair) >= 2:
-                vertices.append((float(pair[0]), float(pair[1])))
-    if len(vertices) < 3:
+
+    polygons: list[list[list[tuple[float, float]]]] = []
+    for raw_polygon in raw_polygons:
+        if not isinstance(raw_polygon, list) or not raw_polygon:
+            continue
+        rings: list[list[tuple[float, float]]] = []
+        for raw_ring in raw_polygon:
+            if not isinstance(raw_ring, list):
+                continue
+            ring: list[tuple[float, float]] = []
+            for pair in raw_ring:
+                if isinstance(pair, (list, tuple)) and len(pair) >= 2:
+                    try:
+                        ring.append((float(pair[0]), float(pair[1])))
+                    except (TypeError, ValueError):
+                        continue
+            if len(ring) >= 3:
+                rings.append(ring)
+        if rings:
+            polygons.append(rings)
+    if not polygons:
         raise HTTPException(status_code=422, detail="Restriction polygon is degenerate")
-    return vertices
+    return polygons
+
+
+def _geometry_vertices(geometry: dict) -> list[tuple[float, float]]:
+    return [vertex for polygon in _geometry_polygons(geometry) for ring in polygon for vertex in ring]
+
+
+def _point_on_segment(point, start, end, epsilon=1e-12):
+    cross = ((point[1] - start[1]) * (end[0] - start[0])
+             - (point[0] - start[0]) * (end[1] - start[1]))
+    if abs(cross) > epsilon:
+        return False
+    return (min(start[0], end[0]) - epsilon <= point[0] <= max(start[0], end[0]) + epsilon
+            and min(start[1], end[1]) - epsilon <= point[1] <= max(start[1], end[1]) + epsilon)
+
+
+def _segments_intersect(first_start, first_end, second_start, second_end):
+    def orientation(a, b, c):
+        value = ((b[0] - a[0]) * (c[1] - a[1])
+                 - (b[1] - a[1]) * (c[0] - a[0]))
+        if abs(value) <= 1e-12:
+            return 0
+        return 1 if value > 0 else -1
+
+    first = orientation(first_start, first_end, second_start)
+    second = orientation(first_start, first_end, second_end)
+    third = orientation(second_start, second_end, first_start)
+    fourth = orientation(second_start, second_end, first_end)
+    if first != second and third != fourth:
+        return True
+    return ((_point_on_segment(second_start, first_start, first_end)
+             or _point_on_segment(second_end, first_start, first_end)
+             or _point_on_segment(first_start, second_start, second_end)
+             or _point_on_segment(first_end, second_start, second_end)))
+
+
+def _point_in_ring(point, ring):
+    """Return true for points inside or on the boundary of a lon/lat ring."""
+    inside = False
+    for index, current in enumerate(ring):
+        previous = ring[index - 1]
+        if _point_on_segment(point, previous, current):
+            return True
+        if (current[1] > point[1]) != (previous[1] > point[1]):
+            crossing_lon = ((previous[0] - current[0]) * (point[1] - current[1])
+                            / (previous[1] - current[1]) + current[0])
+            if point[0] < crossing_lon:
+                inside = not inside
+    return inside
+
+
+def _point_in_polygon(point, rings):
+    if not _point_in_ring(point, rings[0]):
+        return False
+    return not any(_point_in_ring(point, hole) for hole in rings[1:])
 
 
 def _graph_edge_records():
@@ -310,12 +388,23 @@ def _edge_intersects_polygon(coords, geometry):
         from shapely.geometry import LineString, shape
         return LineString([(lon, lat) for lat, lon in coords]).intersects(shape(geometry))
     except (ImportError, ValueError, TypeError):
-        vertices = _geometry_vertices(geometry)
-        min_lon = min(point[0] for point in vertices)
-        max_lon = max(point[0] for point in vertices)
-        min_lat = min(point[1] for point in vertices)
-        max_lat = max(point[1] for point in vertices)
-        return any(min_lat <= lat <= max_lat and min_lon <= lon <= max_lon for lat, lon in coords)
+        polygons = _geometry_polygons(geometry)
+        edge_points = [(float(lon), float(lat)) for lat, lon in coords]
+        if len(edge_points) < 2:
+            return False
+        edge_segments = list(zip(edge_points, edge_points[1:]))
+        for polygon in polygons:
+            if any(_point_in_polygon(point, polygon) for point in edge_points):
+                return True
+            boundary_segments = []
+            for ring in polygon:
+                ring_points = list(zip(ring, ring[1:] + ring[:1]))
+                boundary_segments.extend(ring_points)
+            if any(_segments_intersect(start, end, boundary_start, boundary_end)
+                   for start, end in edge_segments
+                   for boundary_start, boundary_end in boundary_segments):
+                return True
+        return False
 
 
 @app.get("/api/buses/info")
@@ -479,4 +568,4 @@ def internal_resolve_restriction(req: RestrictionResolveRequest):
 
 
 # Serve the frontend (index.html + any static assets)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", StaticFiles(directory=str(PROJECT_DIR / "static"), html=True), name="static")
