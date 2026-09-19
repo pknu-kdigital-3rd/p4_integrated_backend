@@ -52,6 +52,7 @@ function itineraryEdge(value: unknown, key: "edgeId" | "physicalSegmentId"): str
 async function restrictionOverlay(scenarioId: bigint) {
     const restrictions = await prisma.virtualRoadRestriction.findMany({ where: { scenarioId, isActive: true } });
     const blocked = new Set<string>();
+    const blockedGeometries: unknown[] = [];
     const penalties: Record<string, number> = {};
     for (const restriction of restrictions) {
         const directed = Array.isArray(restriction.affectedDirectedEdgeIds) ? restriction.affectedDirectedEdgeIds : [];
@@ -60,8 +61,9 @@ async function restrictionOverlay(scenarioId: bigint) {
             if (restriction.kind === "BLOCKED") blocked.add(edge);
             else if (restriction.penaltyFactor !== null) penalties[edge] = Math.max(penalties[edge] ?? 1, restriction.penaltyFactor);
         }
+        if (restriction.kind === "BLOCKED") blockedGeometries.push(restriction.geometry);
     }
-    return { blockedEdgeIds: [...blocked], penaltyEdgeFactors: penalties };
+    return { blockedEdgeIds: [...blocked], blockedGeometries, penaltyEdgeFactors: penalties };
 }
 
 function activeTripWhere(vehicleId: bigint) {

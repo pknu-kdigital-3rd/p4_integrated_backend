@@ -18,6 +18,7 @@ type RouteInput = {
     waypoints: WaypointInput[];
     vehicleProfile: string;
     blockedEdgeIds?: string[];
+    blockedGeometries?: unknown[];
     penaltyEdgeFactors?: Record<string, number>;
 };
 

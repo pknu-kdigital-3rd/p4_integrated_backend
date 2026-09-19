@@ -2,6 +2,7 @@ import unittest
 from collections import defaultdict
 
 from graph_backend import PurePythonGraph
+import main
 from main import _edge_intersects_polygon
 
 
@@ -46,6 +47,38 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
         self.assertEqual(unrestricted.edge_ids, ["1:2:10"])
         self.assertNotIn("1:2:10", blocked.edge_ids)
         self.assertEqual(blocked.edge_ids, ["1:3:20", "3:4:21", "4:2:22"])
+
+    def test_internal_route_re_resolves_active_blocked_geometry(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {
+            1: (0.0, 0.0),
+            2: (1.0, 1.0),
+            3: (0.0, 2.0),
+            4: (1.0, 2.0),
+        }
+        graph.turn_restrictions = set()
+        graph.adjacency = defaultdict(list)
+        graph.grid_size = 10.0
+        graph.grid = defaultdict(list)
+        graph.grid[(0, 0)].extend(graph.coords)
+        graph.adjacency[1].append((2, 157_000.0, 40.0, [[0.0, 0.0], [1.0, 1.0]], empty_restrictions(), 10))
+        graph.adjacency[1].append((3, 222_000.0, 40.0, [[0.0, 0.0], [0.0, 2.0]], empty_restrictions(), 20))
+        graph.adjacency[3].append((4, 111_000.0, 40.0, [[0.0, 2.0], [1.0, 2.0]], empty_restrictions(), 21))
+        graph.adjacency[4].append((2, 111_000.0, 40.0, [[1.0, 2.0], [1.0, 1.0]], empty_restrictions(), 22))
+        main.graph = graph
+        polygon = {
+            "type": "Polygon",
+            "coordinates": [[[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6], [0.4, 0.4]]],
+        }
+
+        result = main._internal_route(main.InternalRouteRequest(
+            origin=main.InternalCoordinate(lat=0.0, lon=0.0),
+            destination=main.InternalCoordinate(lat=1.0, lon=1.0),
+            blockedGeometries=[polygon],
+        ))
+
+        self.assertTrue(result["directedItinerary"])
+        self.assertTrue(all(not item["edgeId"].endswith(":1:2:10") for item in result["directedItinerary"]))
 
 
 if __name__ == "__main__":

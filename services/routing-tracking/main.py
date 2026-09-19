@@ -155,6 +155,9 @@ class InternalRouteRequest(BaseModel):
     waypoints: list[InternalWaypoint] = []
     vehicleProfile: str = "car"
     blockedEdgeIds: list[str] = []
+    # Geometry is sent alongside persisted edge IDs so an existing restriction
+    # created by an older graph build can be re-resolved on the next route.
+    blockedGeometries: list[dict] = []
     penaltyEdgeFactors: dict[str, float] = {}
 
 
@@ -206,6 +209,17 @@ def _internal_route(req: InternalRouteRequest):
     duration_s = 0.0
     snapped_stops: list[dict] = []
     graph_version = _graph_version()
+    blocked_edge_ids = list(req.blockedEdgeIds)
+    if req.blockedGeometries:
+        # Resolve all active closure polygons against this graph before A*.
+        # This also repairs restrictions persisted by a previous resolver
+        # implementation whose endpoint-only fallback missed crossed edges.
+        for geometry in req.blockedGeometries:
+            intersects = _make_edge_intersector(geometry)
+            for raw_id, _physical_id, coords in _graph_edge_records():
+                if intersects(coords):
+                    blocked_edge_ids.append(f"{graph_version}:{raw_id}")
+        blocked_edge_ids = list(dict.fromkeys(blocked_edge_ids))
     for index, stop in enumerate(stops):
         node_id = graph.nearest_node(stop.lat, stop.lon)
         if node_id is None:
@@ -225,7 +239,7 @@ def _internal_route(req: InternalRouteRequest):
             previous_node,
             node_id,
             truck_class=profile,
-            blocked_edge_ids=req.blockedEdgeIds,
+            blocked_edge_ids=blocked_edge_ids,
             penalty_edge_factors=req.penaltyEdgeFactors,
         )
         if result is None:
@@ -254,7 +268,7 @@ def _internal_route(req: InternalRouteRequest):
     # GeoJSON is [lon, lat], while the legacy graph adapters return [lat, lon].
     geojson_coords = [[point[1], point[0]] for point in route_coords]
     warnings = []
-    if (req.blockedEdgeIds or req.penaltyEdgeFactors) and not directed_itinerary:
+    if (blocked_edge_ids or req.penaltyEdgeFactors) and not directed_itinerary:
         warnings.append("Dynamic road-state overlay could not match an edge in this graph build")
     return {
         "graphVersion": graph_version,
