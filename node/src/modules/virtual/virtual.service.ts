@@ -7,6 +7,7 @@ import type {
     Coordinate,
     CreateScenarioBody,
     CreateVirtualVehicleBody,
+    DestinationBody,
     DispatchRequestBody,
     FollowingBody,
     RestrictionBody,
@@ -17,6 +18,12 @@ import type {
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 const ACTIVE_TRIP_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
+type RerouteOptions = {
+    destination?: Coordinate;
+    expectedTripRevision?: number;
+    reason?: string;
+    actorId?: bigint;
+};
 
 function id(value: string): bigint {
     return BigInt(value);
@@ -493,7 +500,7 @@ export const virtualService = {
         return { settings, state: await activeVehicleState(vehicleId) };
     },
 
-    async rerouteFromCurrentPosition(vehicleId: bigint, state?: Awaited<ReturnType<typeof activeVehicleState>>) {
+    async rerouteFromCurrentPosition(vehicleId: bigint, state?: Awaited<ReturnType<typeof activeVehicleState>>, options: RerouteOptions = {}) {
         const current = state ?? await activeVehicleState(vehicleId);
         if (!current) return null;
         const vehicle = await getVirtualVehicle(vehicleId);
@@ -502,7 +509,7 @@ export const virtualService = {
             .map((waypoint) => point(waypoint.originalPoint));
         const routeInput = {
             origin: point(current.lastPosition),
-            destination: point(current.trip.destination),
+            destination: options.destination ?? point(current.trip.destination),
             waypoints: remainingWaypoints,
             vehicleProfile: profileForVehicle(vehicle),
             ...await restrictionOverlay(current.scenarioId),
@@ -523,7 +530,8 @@ export const virtualService = {
         const scenario = await getScenario(current.scenarioId);
         return prisma.$transaction(async (tx) => {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
-            if (!latestTrip || !latestTrip.stateRecord || latestTrip.stateRecord.commandVersion !== current.commandVersion) return null;
+            if (!latestTrip || !latestTrip.stateRecord || latestTrip.stateRecord.commandVersion !== current.commandVersion
+                || (options.expectedTripRevision !== undefined && latestTrip.tripRevision !== options.expectedTripRevision)) return null;
             await tx.virtualRoute.updateMany({ where: { virtualTripId: current.virtualTripId, isCurrent: true }, data: { isCurrent: false } });
             const nextVersion = latestTrip.routeVersion + 1;
             const nextRoute = await tx.virtualRoute.create({
@@ -542,9 +550,18 @@ export const virtualService = {
                 },
             });
             const motionState = latestTrip.stateRecord.simStatus === "PAUSED" ? "PAUSED" : "DRIVING";
-            await tx.virtualTrip.update({ where: { virtualTripId: current.virtualTripId }, data: { activeRouteId: nextRoute.routeId, routeVersion: nextVersion, state: motionState, commandVersion: { increment: 1 } } });
+            await tx.virtualTrip.update({
+                where: { virtualTripId: current.virtualTripId },
+                data: {
+                    activeRouteId: nextRoute.routeId,
+                    routeVersion: nextVersion,
+                    state: motionState,
+                    commandVersion: { increment: 1 },
+                    ...(options.destination ? { destination: json(options.destination), tripRevision: { increment: 1 } } : {}),
+                },
+            });
             await tx.virtualVehicleState.update({ where: { vehicleId }, data: { activeRouteId: nextRoute.routeId, routeVersion: nextVersion, graphVersion: route.graphVersion, simStatus: motionState, simElapsedMs: 0, lastCheckpointAt: new Date(), blockedReason: null, commandVersion: { increment: 1 } } });
-            await createEvent(tx, { scenarioId: current.scenarioId, virtualTripId: current.virtualTripId, actorId: null, eventType: "ROUTE_RECALCULATED", payload: { reason: "FOLLOWING_ENABLED", routeVersion: nextVersion } });
+            await createEvent(tx, { scenarioId: current.scenarioId, virtualTripId: current.virtualTripId, actorId: options.actorId ?? null, eventType: "ROUTE_RECALCULATED", payload: { reason: options.reason ?? "FOLLOWING_ENABLED", routeVersion: nextVersion } });
             return nextRoute;
         }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 15000 });
     },
@@ -562,6 +579,25 @@ export const virtualService = {
         });
         const settings = await ensureSettings(trip.vehicleId);
         if (settings.autoFollowEnabled && trip.state === "DRIVING") await this.rerouteFromCurrentPosition(trip.vehicleId);
+        return this.getTrip(tripId);
+    },
+
+    async replaceDestination(tripId: bigint, input: DestinationBody, actorId?: bigint) {
+        const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { stateRecord: true } });
+        if (!trip || !trip.stateRecord) throw new AppError(404, "Virtual trip not found", "VIRTUAL_TRIP_NOT_FOUND");
+        if (!["COMPLETED", "CANCELLED"].includes(trip.state) && trip.tripRevision !== input.expectedTripRevision) {
+            throw new AppError(409, "Trip changed; refresh the destination", "STALE_TRIP_REVISION");
+        }
+        if (["COMPLETED", "CANCELLED"].includes(trip.state)) throw new AppError(409, "Virtual trip is terminal", "TRIP_TERMINAL");
+        const state = await activeVehicleState(trip.vehicleId);
+        if (!state || state.virtualTripId !== tripId) throw new AppError(409, "Virtual trip is no longer active", "TRIP_NOT_ACTIVE");
+        const route = await this.rerouteFromCurrentPosition(trip.vehicleId, state, {
+            destination: input.destination,
+            expectedTripRevision: input.expectedTripRevision,
+            reason: "DESTINATION_CHANGED",
+            ...(actorId === undefined ? {} : { actorId }),
+        });
+        if (!route) throw new AppError(409, "Trip changed while recalculating the destination", "STALE_TRIP_REVISION");
         return this.getTrip(tripId);
     },
 

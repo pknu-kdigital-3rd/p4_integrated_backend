@@ -5,6 +5,7 @@ import {
     commandSchema,
     createScenarioSchema,
     createVirtualVehicleSchema,
+    destinationSchema,
     dispatchRequestSchema,
     followingSchema,
     requestIdParamSchema,
@@ -114,6 +115,16 @@ registry.registerPath({
     security: bearer,
     request: { params: virtualTripIdParamSchema, body: { content: { "application/json": { schema: commandSchema } } } },
     responses: { 200: { description: "Command result", content: { "application/json": { schema: dataResponse } } }, 409: { description: "Invalid trip transition", content: { "application/json": { schema: apiErrorSchema } } } },
+});
+
+registry.registerPath({
+    method: "put",
+    path: "/api/v1/virtual/trips/{tripId}/destination",
+    tags: ["Virtual Dispatch"],
+    summary: "Move a trip destination and recalculate from the vehicle position",
+    security: bearer,
+    request: { params: virtualTripIdParamSchema, body: { content: { "application/json": { schema: destinationSchema } } } },
+    responses: { 200: { description: "Updated trip and active route", content: { "application/json": { schema: dataResponse } } }, 409: { description: "Stale trip or unavailable route", content: { "application/json": { schema: apiErrorSchema } } } },
 });
 
 registry.registerPath({

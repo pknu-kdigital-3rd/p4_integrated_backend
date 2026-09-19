@@ -66,10 +66,55 @@ function markPointsChanged(message) {
   renderDraft();
   setStatus(message);
 }
-async function refreshPreviewAfterPointChange(message) {
+function selectedActiveTrip() {
+  const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
+  const trip = vehicle?.state?.trip;
+  if (!vehicle || !trip || !vehicle.state?.virtualTripId || ['COMPLETED', 'CANCELLED'].includes(trip.state)) return null;
+  return { vehicle, trip, tripId: vehicle.state.virtualTripId };
+}
+async function replaceActiveDestination(activeTrip, destination, previousDestination) {
+  const expectedTripRevision = Number(activeTrip.trip.tripRevision);
+  if (!Number.isInteger(expectedTripRevision) || expectedTripRevision < 1) {
+    setStatus('The active trip revision is unavailable; refresh the virtual workspace.', true);
+    return;
+  }
+  try {
+    setStatus('Recalculating from the vehicle position to the new destination…');
+    await api(`/api/v1/virtual/trips/${encodeURIComponent(activeTrip.tripId)}/destination`, {
+      method: 'PUT',
+      body: JSON.stringify({ destination, expectedTripRevision }),
+    });
+    await loadScenarioData();
+    setStatus('Destination updated and optimal path recalculated.');
+  } catch (error) {
+    if (previousDestination) {
+      points.destination = previousDestination;
+      renderPoints();
+    }
+    setStatus(error.message, true);
+  }
+}
+async function refreshPreviewAfterPointChange(message, kind = null, previousPoint = null) {
   markPointsChanged(`${message} Recalculating optimal path…`);
+  const activeTrip = selectedActiveTrip();
+  if (kind === 'destination' && activeTrip && points.destination) {
+    await replaceActiveDestination(activeTrip, points.destination, previousPoint);
+    return;
+  }
+  if (activeTrip) return;
   const selected = vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId);
-  if (!scenarioId || !selectedVehicleId || !points.origin || !points.destination || selected?.vehicleStatus !== 'READY') return;
+  if (!points.origin || !points.destination) {
+    setStatus(`${message} Set both origin and destination to calculate the path.`);
+    return;
+  }
+  if (!scenarioId || !selectedVehicleId) {
+    setStatus(`${message} Select a virtual vehicle to calculate the path.`);
+    return;
+  }
+  if (selected?.vehicleStatus !== 'READY') {
+    setStatus(`${message} The selected vehicle is not available for a new route.`, true);
+    return;
+  }
   await previewRoute();
 }
 function drawPoint(kind, point, index = 0) {
@@ -88,7 +133,7 @@ function drawPoint(kind, point, index = 0) {
     else if (kind === 'destination') points.destination = moved;
     else if (points.waypoints[index]) points.waypoints[index] = moved;
     renderPoints();
-    void refreshPreviewAfterPointChange(`${kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1)} moved.`);
+    void refreshPreviewAfterPointChange(`${kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1)} moved.`, kind, kind === 'destination' ? point : null);
   });
   pointLayerGroup.addLayer(marker);
 }
@@ -545,7 +590,7 @@ async function removeScenario() {
 }
 async function createVehicle() {
   if (!scenarioId) { setStatus('Create or select a scenario first.', true); return; }
-  try { const vehicle = await api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`, { method: 'POST', body: JSON.stringify({ vehicleCode: `SIM-${Date.now()}`, vehicleName: 'Virtual vehicle', vehicleProfile: 'small', autoFollowEnabled: true }) }); selectedVehicleId = String(vehicle.vehicleId); await loadScenarioData(); setStatus('Virtual vehicle added.'); }
+  try { const vehicle = await api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`, { method: 'POST', body: JSON.stringify({ vehicleCode: `SIM-${Date.now()}`, vehicleName: 'Virtual vehicle', vehicleProfile: 'small', autoFollowEnabled: true }) }); selectedVehicleId = String(vehicle.vehicleId); await loadScenarioData(); setStatus('Virtual vehicle added.'); if (points.origin && points.destination) await refreshPreviewAfterPointChange('Vehicle added.'); }
   catch (error) { setStatus(error.message, true); }
 }
 async function removeVehicle() {
@@ -584,12 +629,13 @@ function closePointContextMenu() {
   pointContextPopup = null;
 }
 function setPointFromContext(action, point) {
+  const previousDestination = action === 'destination' ? points.destination : null;
   if (action === 'origin') points.origin = point;
   else if (action === 'destination') points.destination = point;
   else if (action === 'waypoint') points.waypoints.push(point);
   renderPoints();
   closePointContextMenu();
-  markPointsChanged(action === 'waypoint' ? `Waypoint ${points.waypoints.length} added.` : `${action[0].toUpperCase() + action.slice(1)} set.`);
+  void refreshPreviewAfterPointChange(action === 'waypoint' ? `Waypoint ${points.waypoints.length} added.` : `${action[0].toUpperCase() + action.slice(1)} set.`, action, previousDestination);
 }
 function showPointContextMenu(event) {
   if (mode !== 'virtual') return;
@@ -709,7 +755,13 @@ map.on('contextmenu', (event) => showPointContextMenu(event));
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
 scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
-vehicleSelect.addEventListener('change', () => { selectedVehicleId = vehicleSelect.value; draft = null; renderDraft(); renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId)); });
+vehicleSelect.addEventListener('change', () => {
+  selectedVehicleId = vehicleSelect.value;
+  draft = null;
+  renderDraft();
+  renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId));
+  if (points.origin && points.destination) void refreshPreviewAfterPointChange('Vehicle selected.');
+});
 document.querySelector('#virtual-new-scenario').addEventListener('click', () => void createScenario());
 removeScenarioButton.addEventListener('click', () => void removeScenario());
 document.querySelector('#virtual-new-vehicle').addEventListener('click', () => void createVehicle());

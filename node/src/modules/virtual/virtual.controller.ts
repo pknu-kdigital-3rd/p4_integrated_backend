@@ -4,6 +4,7 @@ import type {
     CommandBody,
     CreateScenarioBody,
     CreateVirtualVehicleBody,
+    DestinationBody,
     DispatchRequestBody,
     FollowingBody,
     RestrictionBody,
@@ -84,6 +85,10 @@ export const virtualController = {
 
     async replaceWaypoints(req: Request<{ tripId: string }, {}, WaypointsBody>, res: Response) {
         res.json({ data: await virtualService.replaceWaypoints(BigInt(req.params.tripId), req.body, actorId(req)) });
+    },
+
+    async replaceDestination(req: Request<{ tripId: string }, {}, DestinationBody>, res: Response) {
+        res.json({ data: await virtualService.replaceDestination(BigInt(req.params.tripId), req.body, actorId(req)) });
     },
 
     async previewRestriction(req: Request<{ scenarioId: string }, {}, RestrictionBody>, res: Response) {

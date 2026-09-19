@@ -8,6 +8,7 @@ import {
     commandSchema,
     createScenarioSchema,
     createVirtualVehicleSchema,
+    destinationSchema,
     dispatchRequestSchema,
     followingSchema,
     requestIdParamSchema,
@@ -42,6 +43,7 @@ virtualRouter.patch("/vehicles/:vehicleId", ...write, validateParams(virtualVehi
 virtualRouter.get("/trips/:tripId", ...read, validateParams(virtualTripIdParamSchema), virtualController.getTrip);
 virtualRouter.post("/trips/:tripId/commands", ...write, validateParams(virtualTripIdParamSchema), validateBody(commandSchema), virtualController.command);
 virtualRouter.put("/trips/:tripId/waypoints", ...write, validateParams(virtualTripIdParamSchema), validateBody(waypointsSchema), virtualController.replaceWaypoints);
+virtualRouter.put("/trips/:tripId/destination", ...write, validateParams(virtualTripIdParamSchema), validateBody(destinationSchema), virtualController.replaceDestination);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions/preview", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionSchema), virtualController.previewRestriction);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionSchema), virtualController.createRestriction);
 virtualRouter.patch("/road-restrictions/:restrictionId", ...write, validateParams(restrictionIdParamSchema), validateBody(restrictionUpdateSchema), virtualController.updateRestriction);

@@ -82,6 +82,11 @@ export const waypointsSchema = z.object({
     expectedTripRevision: z.number().int().positive(),
 });
 
+export const destinationSchema = z.object({
+    destination: coordinate,
+    expectedTripRevision: z.number().int().positive(),
+});
+
 const polygonCoordinates = z.array(z.array(z.array(z.number().finite()))).min(1).max(1000);
 export const restrictionSchema = z.object({
     kind: z.enum(["BLOCKED", "HEAVY_PENALTY"]),
@@ -123,5 +128,6 @@ export type CommandBody = z.infer<typeof commandSchema>;
 export type FollowingBody = z.infer<typeof followingSchema>;
 export type VirtualVehicleLifecycleBody = z.infer<typeof virtualVehicleLifecycleSchema>;
 export type WaypointsBody = z.infer<typeof waypointsSchema>;
+export type DestinationBody = z.infer<typeof destinationSchema>;
 export type RestrictionBody = z.infer<typeof restrictionSchema>;
 export type RestrictionUpdateBody = z.infer<typeof restrictionUpdateSchema>;
