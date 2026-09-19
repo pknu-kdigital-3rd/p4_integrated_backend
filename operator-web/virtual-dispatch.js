@@ -6,6 +6,7 @@ const normalTab = document.querySelector('#normal-workspace');
 const virtualTab = document.querySelector('#virtual-workspace-tab');
 const status = document.querySelector('#virtual-status');
 const scenarioSelect = document.querySelector('#virtual-scenario');
+const removeScenarioButton = document.querySelector('#virtual-remove-scenario');
 const vehicleSelect = document.querySelector('#virtual-vehicle');
 const removeVehicleButton = document.querySelector('#virtual-remove-vehicle');
 const routeLayerGroup = L.layerGroup().addTo(map);
@@ -138,14 +139,22 @@ async function loadScenarios() {
   const scenarios = await api('/api/v1/virtual/scenarios');
   scenarioSelect.replaceChildren(new Option('Select scenario', ''));
   scenarios.forEach((scenario) => scenarioSelect.add(new Option(`${scenario.name} · rev ${scenario.restrictionRevision}`, String(scenario.scenarioId))));
-  if (!scenarioId && scenarios[0]) scenarioId = String(scenarios[0].scenarioId);
+  if (!scenarios.some((scenario) => String(scenario.scenarioId) === scenarioId)) scenarioId = scenarios[0] ? String(scenarios[0].scenarioId) : '';
   const selectedScenario = scenarios.find((scenario) => String(scenario.scenarioId) === scenarioId);
   scenarioRevision = Number(selectedScenario?.restrictionRevision || 0);
   scenarioSelect.value = scenarioId;
+  removeScenarioButton.disabled = !scenarioId;
   if (!scenarioId) setStatus('Create a scenario to begin.');
 }
 async function loadScenarioData() {
-  if (!scenarioId) return;
+  if (!scenarioId) {
+    vehicles = [];
+    selectedVehicleId = '';
+    renderVehicles();
+    renderRequests([]);
+    eventList.replaceChildren();
+    return;
+  }
   vehicles = await api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`);
   renderVehicles();
   renderRequests(await api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`));
@@ -171,6 +180,33 @@ async function generateRequest() {
 async function createScenario() {
   try { const scenario = await api('/api/v1/virtual/scenarios', { method: 'POST', body: JSON.stringify({ name: `Scenario ${new Date().toLocaleString()}`, autoAcceptAfterSeconds: 30 }) }); scenarioId = String(scenario.scenarioId); await loadScenarios(); await loadScenarioData(); setStatus('Scenario created.'); }
   catch (error) { setStatus(error.message, true); }
+}
+async function removeScenario() {
+  if (!scenarioId) { setStatus('Select a scenario first.', true); return; }
+  const label = scenarioSelect.selectedOptions[0]?.textContent || `Scenario ${scenarioId}`;
+  if (!window.confirm(`Remove ${label}? Active trips must be cancelled first.`)) return;
+  removeScenarioButton.disabled = true;
+  try {
+    await api(`/api/v1/virtual/scenarios/${encodeURIComponent(scenarioId)}`, { method: 'DELETE' });
+    scenarioId = '';
+    scenarioRevision = 0;
+    selectedVehicleId = '';
+    vehicles = [];
+    draft = null;
+    points = { origin: null, destination: null, waypoints: [] };
+    restrictionCorners = [];
+    restrictionGeometry = null;
+    pickMode = null;
+    restrictionLayerGroup.clearLayers();
+    renderPoints();
+    renderDraft();
+    await loadScenarios();
+    await loadScenarioData();
+    setStatus(`${label} was removed.`);
+  } catch (error) {
+    removeScenarioButton.disabled = !scenarioId;
+    setStatus(error.message, true);
+  }
 }
 async function createVehicle() {
   if (!scenarioId) { setStatus('Create or select a scenario first.', true); return; }
@@ -282,6 +318,7 @@ virtualTab.addEventListener('click', () => void switchMode('virtual'));
 scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
 vehicleSelect.addEventListener('change', () => { selectedVehicleId = vehicleSelect.value; draft = null; renderDraft(); renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId)); });
 document.querySelector('#virtual-new-scenario').addEventListener('click', () => void createScenario());
+removeScenarioButton.addEventListener('click', () => void removeScenario());
 document.querySelector('#virtual-new-vehicle').addEventListener('click', () => void createVehicle());
 removeVehicleButton.addEventListener('click', () => void removeVehicle());
 document.querySelector('#virtual-preview').addEventListener('click', () => void previewRoute());

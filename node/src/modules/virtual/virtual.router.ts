@@ -28,6 +28,7 @@ const write = [authenticate, requireRole("ADMIN", "OPERATOR")];
 
 virtualRouter.post("/scenarios", ...write, validateBody(createScenarioSchema), virtualController.createScenario);
 virtualRouter.get("/scenarios", ...read, virtualController.listScenarios);
+virtualRouter.delete("/scenarios/:scenarioId", ...write, validateParams(scenarioIdParamSchema), virtualController.removeScenario);
 virtualRouter.get("/scenarios/:scenarioId", ...read, validateParams(scenarioIdParamSchema), virtualController.getScenario);
 virtualRouter.get("/scenarios/:scenarioId/vehicles", ...read, validateParams(scenarioIdParamSchema), virtualController.listVehicles);
 virtualRouter.post("/scenarios/:scenarioId/vehicles", ...write, validateParams(scenarioIdParamSchema), validateBody(createVirtualVehicleSchema), virtualController.createVehicle);

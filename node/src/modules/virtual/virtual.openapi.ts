@@ -39,6 +39,20 @@ registry.registerPath({
 });
 
 registry.registerPath({
+    method: "delete",
+    path: "/api/v1/virtual/scenarios/{scenarioId}",
+    tags: ["Virtual Dispatch"],
+    summary: "Archive a virtual routing scenario",
+    security: bearer,
+    request: { params: scenarioIdParamSchema },
+    responses: {
+        200: { description: "Scenario archived", content: { "application/json": { schema: dataResponse } } },
+        404: { description: "Scenario not found", content: { "application/json": { schema: apiErrorSchema } } },
+        409: { description: "Scenario has an active virtual trip", content: { "application/json": { schema: apiErrorSchema } } },
+    },
+});
+
+registry.registerPath({
     method: "post",
     path: "/api/v1/virtual/scenarios/{scenarioId}/routes/preview",
     tags: ["Virtual Dispatch"],

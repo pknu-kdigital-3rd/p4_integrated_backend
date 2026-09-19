@@ -27,6 +27,10 @@ export const virtualController = {
         res.json({ data: await virtualService.listScenarios() });
     },
 
+    async removeScenario(req: Request<{ scenarioId: string }>, res: Response) {
+        res.json({ data: await virtualService.removeScenario(BigInt(req.params.scenarioId), actorId(req)) });
+    },
+
     async getScenario(req: Request<{ scenarioId: string }>, res: Response) {
         res.json({ data: await virtualService.getScenario(BigInt(req.params.scenarioId)) });
     },

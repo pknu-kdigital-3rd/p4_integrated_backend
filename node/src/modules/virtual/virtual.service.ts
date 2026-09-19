@@ -140,9 +140,46 @@ export const virtualService = {
 
     async listScenarios() {
         return prisma.virtualScenario.findMany({
+            where: { state: { not: "ARCHIVED" } },
             orderBy: { updatedAt: "desc" },
             include: { _count: { select: { dispatchRequests: true, trips: true, restrictions: true } } },
         });
+    },
+
+    async removeScenario(scenarioId: bigint, actorId?: bigint) {
+        return prisma.$transaction(async (tx) => {
+            const scenario = await tx.virtualScenario.findUnique({ where: { scenarioId } });
+            if (!scenario) throw new AppError(404, "Virtual scenario not found", "SCENARIO_NOT_FOUND");
+            if (scenario.state === "ARCHIVED") return scenario;
+
+            const activeTrip = await tx.virtualTrip.findFirst({
+                where: { scenarioId, state: { in: ACTIVE_TRIP_STATES } },
+                select: { virtualTripId: true },
+            });
+            if (activeTrip) {
+                throw new AppError(
+                    409,
+                    "Cancel all active virtual trips before removing this scenario",
+                    "SCENARIO_BUSY",
+                );
+            }
+
+            const rejected = await tx.virtualDispatchRequest.updateMany({
+                where: { scenarioId, state: "PENDING" },
+                data: { state: "REJECTED", decidedAt: new Date(), decidedBy: actorId ?? null },
+            });
+            const archived = await tx.virtualScenario.update({
+                where: { scenarioId },
+                data: { state: "ARCHIVED", updatedAt: new Date() },
+            });
+            await createEvent(tx, {
+                scenarioId,
+                actorId: actorId ?? null,
+                eventType: "SCENARIO_ARCHIVED",
+                payload: { rejectedPendingRequests: rejected.count },
+            });
+            return archived;
+        }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 15000 });
     },
 
     async getScenario(scenarioId: bigint) {
