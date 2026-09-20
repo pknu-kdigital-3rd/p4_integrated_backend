@@ -524,7 +524,7 @@ class OsmnxGraph:
             pickle.dump(self.G, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _prepare_edge_metadata(self):
-        """Cache parsed static restrictions on each edge and node coords before live routing."""
+        """Cache parsed static restrictions, per-profile edge times, and node coords."""
         for _u, _v, _key, data in self.G.edges(keys=True, data=True):
             data["_p4_edge_restrictions"] = {
                 "max_height_m": _parse_float_tag(data.get("maxheight")),
@@ -534,6 +534,18 @@ class OsmnxGraph:
                 "hgv": data.get("hgv"),
                 "access": data.get("access"),
             }
+            highway = data.get("highway", "residential")
+            if isinstance(highway, list):
+                highway = highway[0]
+            base_speed = ROAD_SPEED_KMH.get(highway, 30)
+            length = data.get("length", 0)
+            # Precompute traversal time (seconds) for every known profile + None (car).
+            # Keyed by truck_class string (or None for unrestricted) so route() can do a
+            # single dict lookup instead of recomputing highway/speed/division per hop.
+            edge_times: dict = {None: length / (min(base_speed, GLOBAL_MAX_SPEED_KMH) * 1000 / 3600)}
+            for pname, p in TRUCK_PROFILES.items():
+                edge_times[pname] = length / (min(base_speed, p["max_speed_kmh"]) * 1000 / 3600)
+            data["_p4_edge_times"] = edge_times
         self._node_coords = {n: (float(data["y"]), float(data["x"])) for n, data in self.G.nodes(data=True)}
 
     def nearest_node(self, lat, lon):
@@ -586,6 +598,9 @@ class OsmnxGraph:
             return oid if isinstance(oid, list) else [oid]
 
         def _edge_time_from_data(data):
+            cached_times = data.get("_p4_edge_times")
+            if cached_times is not None:
+                return cached_times[truck_class]
             highway = data.get("highway", "residential")
             if isinstance(highway, list):
                 highway = highway[0]
@@ -593,7 +608,9 @@ class OsmnxGraph:
             effective_speed = min(base_speed, max_speed_kmh)
             return data.get("length", 0) / (effective_speed * 1000 / 3600)
 
-        _node_coords = self._node_coords
+        _node_coords = getattr(self, '_node_coords', None)
+        if _node_coords is None:
+            _node_coords = {n: (float(d["y"]), float(d["x"])) for n, d in G.nodes.items()}
         goal_lat, goal_lon = _node_coords[goal_id]
 
         def h(n):
@@ -633,12 +650,15 @@ class OsmnxGraph:
                         penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                     else:
                         penalty = 1.0
-                    out_osmids = tuple(_osmids(attrs))
-                    if track_turn_state and incoming_osmids is not None and any(
-                        (fw, current, tw) in self.turn_restrictions
-                        for fw in incoming_osmids for tw in out_osmids
-                    ):
-                        continue  # illegal turn (from incoming way, via current, onto this way)
+                    if track_turn_state:
+                        out_osmids = tuple(_osmids(attrs))
+                        if incoming_osmids is not None and any(
+                            (fw, current, tw) in self.turn_restrictions
+                            for fw in incoming_osmids for tw in out_osmids
+                        ):
+                            continue  # illegal turn (from incoming way, via current, onto this way)
+                    else:
+                        out_osmids = ()
                     tentative = g + _edge_time_from_data(attrs) * penalty
                     next_state = (neighbor, out_osmids if track_turn_state else None)
                     if tentative < g_score.get(next_state, float("inf")):

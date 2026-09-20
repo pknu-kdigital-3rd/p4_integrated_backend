@@ -93,6 +93,7 @@ _edge_records_cache = ()
 _edge_spatial_index = {}
 _edge_long_records = ()
 _restriction_resolution_cache = {}
+_graph_version_cache: tuple[str, float] | None = None
 
 
 @app.get("/health/live")
@@ -202,7 +203,20 @@ def require_internal_token(authorization: str | None = Header(default=None)):
 
 
 def _graph_version() -> str:
-    """Return a stable fingerprint for the graph and static restriction files."""
+    """Return a stable fingerprint for the graph and static restriction files.
+
+    Cached for 10 seconds to avoid 4 filesystem stat() calls per request.
+    The restriction files are only written by offline tooling (never during
+    a live routing session), so a 10-second TTL is effectively instant
+    relative to the actual change cadence.
+    """
+    import time as _time
+    global _graph_version_cache
+    now = _time.monotonic()
+    if _graph_version_cache is not None:
+        cached_version, cached_at = _graph_version_cache
+        if now - cached_at < 10.0:
+            return cached_version
     candidates = [Path(PBF_PATH), PROJECT_DIR / "gov_restrictions.json", PROJECT_DIR / "manual_restrictions.json", PROJECT_DIR / "turn_restrictions.json"]
     digest = hashlib.sha256()
     for path in candidates:
@@ -213,7 +227,9 @@ def _graph_version() -> str:
             digest.update(str(stat.st_mtime_ns).encode())
         except FileNotFoundError:
             digest.update(str(path).encode())
-    return digest.hexdigest()[:32]
+    version = digest.hexdigest()[:32]
+    _graph_version_cache = (version, now)
+    return version
 
 
 def _internal_route(req: InternalRouteRequest):
