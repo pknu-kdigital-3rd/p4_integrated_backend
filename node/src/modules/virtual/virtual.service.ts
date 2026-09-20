@@ -18,11 +18,18 @@ import type {
 
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 const ACTIVE_TRIP_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
+type RestrictionOverlay = {
+    blockedEdgeIds: string[];
+    blockedGeometries: unknown[];
+    penaltyEdgeFactors: Record<string, number>;
+};
+
 type RerouteOptions = {
     destination?: Coordinate;
     expectedTripRevision?: number;
     reason?: string;
     actorId?: bigint;
+    preloadedOverlay?: RestrictionOverlay;
 };
 
 function id(value: string): bigint {
@@ -735,7 +742,7 @@ export const virtualService = {
             destination: options.destination ?? point(current.trip.destination),
             waypoints: remainingWaypoints,
             vehicleProfile: profileForVehicle(vehicle),
-            ...await restrictionOverlay(current.scenarioId),
+            ...(options.preloadedOverlay ?? await restrictionOverlay(current.scenarioId)),
         };
         let route;
         try {
@@ -901,11 +908,21 @@ export const virtualService = {
         const settings = await prisma.virtualVehicleSettings.findMany({ where: { vehicleId: { in: states.map((state) => state.vehicleId) }, autoFollowEnabled: true } });
         const following = new Set(settings.map((item) => item.vehicleId.toString()));
         const eligibleStates = states.filter((state) => following.has(state.vehicleId.toString()) && state.trip.state !== "PAUSED");
+        if (eligibleStates.length === 0) return;
+        // Fetch the restriction overlay once and share it across all vehicle
+        // reroutes - all vehicles in the same scenario see the same restrictions,
+        // so N per-vehicle DB queries for identical data is pure waste.
+        const preloadedOverlay = await restrictionOverlay(scenarioId);
         // A road-state change affects vehicles independently. Solving them
         // serially made the response time grow linearly with fleet size, but
         // firing an unbounded number of CPU-heavy A* requests would overload
         // the routing service. Four in-flight solves keep updates close to
         // real time while preserving a bounded resource footprint.
+        // VIRTUAL_REROUTE_CONCURRENCY overrides the default for larger fleets.
+        const concurrency = Math.min(
+            Math.max(1, parseInt(process.env["VIRTUAL_REROUTE_CONCURRENCY"] ?? "4", 10) || 4),
+            16,
+        );
         let nextStateIndex = 0;
         const processState = async (state: typeof states[number]) => {
             try {
@@ -915,7 +932,7 @@ export const virtualService = {
                 // command-version CAS is expected in that race; resnapshot
                 // once and solve from the newest authoritative position.
                 for (let attempt = 0; attempt < 2; attempt += 1) {
-                    const activated = await this.rerouteFromCurrentPosition(state.vehicleId, currentState);
+                    const activated = await this.rerouteFromCurrentPosition(state.vehicleId, currentState, { preloadedOverlay });
                     if (activated) return;
                     const latest = await activeVehicleState(state.vehicleId);
                     if (!latest || ["COMPLETED", "CANCELLED"].includes(latest.trip.state)) return;
@@ -942,7 +959,7 @@ export const virtualService = {
                 ]);
             }
         };
-        const workerCount = Math.min(4, eligibleStates.length);
+        const workerCount = Math.min(concurrency, eligibleStates.length);
         await Promise.all(Array.from({ length: workerCount }, async () => {
             while (true) {
                 const index = nextStateIndex++;

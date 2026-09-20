@@ -524,7 +524,7 @@ class OsmnxGraph:
             pickle.dump(self.G, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _prepare_edge_metadata(self):
-        """Cache parsed static restrictions on each edge before live routing."""
+        """Cache parsed static restrictions on each edge and node coords before live routing."""
         for _u, _v, _key, data in self.G.edges(keys=True, data=True):
             data["_p4_edge_restrictions"] = {
                 "max_height_m": _parse_float_tag(data.get("maxheight")),
@@ -534,6 +534,7 @@ class OsmnxGraph:
                 "hgv": data.get("hgv"),
                 "access": data.get("access"),
             }
+        self._node_coords = {n: (float(data["y"]), float(data["x"])) for n, data in self.G.nodes(data=True)}
 
     def nearest_node(self, lat, lon):
         return self.ox.distance.nearest_nodes(self.G, X=lon, Y=lat)
@@ -592,10 +593,12 @@ class OsmnxGraph:
             effective_speed = min(base_speed, max_speed_kmh)
             return data.get("length", 0) / (effective_speed * 1000 / 3600)
 
+        _node_coords = self._node_coords
+        goal_lat, goal_lon = _node_coords[goal_id]
+
         def h(n):
-            y1, x1 = G.nodes[n]["y"], G.nodes[n]["x"]
-            y2, x2 = G.nodes[goal_id]["y"], G.nodes[goal_id]["x"]
-            return haversine_m(y1, x1, y2, x2) / max_speed_mps
+            y1, x1 = _node_coords[n]
+            return haversine_m(y1, x1, goal_lat, goal_lon) / max_speed_mps
 
         start_state = (start_id, None)
         push_order = count()
@@ -621,18 +624,21 @@ class OsmnxGraph:
                 for edge_key, attrs in parallel.items():
                     if not edge_allowed(edge_restrictions(attrs), profile):
                         continue
-                    raw_edge_id = f"{current}:{neighbor}:{edge_key}"
                     if state == start_state and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
                         continue
-                    if raw_edge_id in blocked_lookup:
-                        continue
+                    if blocked_lookup or penalty_lookup:
+                        raw_edge_id = f"{current}:{neighbor}:{edge_key}"
+                        if raw_edge_id in blocked_lookup:
+                            continue
+                        penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
+                    else:
+                        penalty = 1.0
                     out_osmids = tuple(_osmids(attrs))
                     if track_turn_state and incoming_osmids is not None and any(
                         (fw, current, tw) in self.turn_restrictions
                         for fw in incoming_osmids for tw in out_osmids
                     ):
                         continue  # illegal turn (from incoming way, via current, onto this way)
-                    penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                     tentative = g + _edge_time_from_data(attrs) * penalty
                     next_state = (neighbor, out_osmids if track_turn_state else None)
                     if tentative < g_score.get(next_state, float("inf")):
@@ -657,7 +663,7 @@ class OsmnxGraph:
         # osmnx keeps the original shape points as a shapely `geometry` on
         # each edge when simplify=True collapsed intermediate nodes; use it
         # when present, otherwise fall back to a straight line for that edge.
-        coords = [[G.nodes[start_id]["y"], G.nodes[start_id]["x"]]]
+        coords = [list(_node_coords[start_id])]
         distance_m = 0.0
         time_s = 0.0
         edge_ids, edge_lengths, edge_times, physical_ids = [], [], [], []
@@ -677,15 +683,15 @@ class OsmnxGraph:
                 _append_edge_geometry(
                     coords,
                     pts,
-                    [G.nodes[from_node]["y"], G.nodes[from_node]["x"]],
-                    [G.nodes[to_node]["y"], G.nodes[to_node]["x"]],
+                    list(_node_coords[from_node]),
+                    list(_node_coords[to_node]),
                 )
             else:
                 _append_edge_geometry(
                     coords,
                     [],
-                    [G.nodes[from_node]["y"], G.nodes[from_node]["x"]],
-                    [G.nodes[to_node]["y"], G.nodes[to_node]["x"]],
+                    list(_node_coords[from_node]),
+                    list(_node_coords[to_node]),
                 )
         return RouteResult(coords, distance_m, time_s, edge_ids, edge_lengths, edge_times, physical_ids)
 
@@ -861,10 +867,13 @@ class PurePythonGraph:
                     continue
                 if incoming_way is not None and (incoming_way, current, wid) in self.turn_restrictions:
                     continue  # illegal turn (from incoming_way, via current, onto wid)
-                raw_edge_id = f"{current}:{neighbor}:{wid}"
-                if raw_edge_id in blocked_lookup:
-                    continue
-                penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
+                if blocked_lookup or penalty_lookup:
+                    raw_edge_id = f"{current}:{neighbor}:{wid}"
+                    if raw_edge_id in blocked_lookup:
+                        continue
+                    penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
+                else:
+                    penalty = 1.0
                 w = edge_time_s(dist_m, base_speed) * penalty
                 tentative = g + w
                 next_state = (neighbor, wid if track_turn_state else None)
