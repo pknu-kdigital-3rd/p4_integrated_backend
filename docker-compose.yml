@@ -84,7 +84,7 @@ services:
       MINIO_RECORDING_BUCKET: p4-trip-recordings
       MINIO_NODE_ACCESS_KEY: p4-node
       MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:?set MINIO_NODE_SECRET_KEY}
-      MINIO_PUBLIC_ENDPOINT: https://10.174.96.119:39003
+      MINIO_PUBLIC_ENDPOINT: https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39003
       RECORDING_PLAYBACK_URL_TTL_SECONDS: 300
       RECORDING_ENABLED: "true"
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
@@ -298,8 +298,8 @@ services:
       - --min-port=39006
       - --max-port=39007
       - --listening-ip=${TURN_LISTENING_IP:-0.0.0.0}
-      - --relay-ip=${TURN_RELAY_IP:-10.174.96.119}
-      - --external-ip=${TURN_EXTERNAL_IP:-10.174.96.119}
+      - --relay-ip=${TLS_PUBLIC_ADDRESS:-10.174.96.119}
+      - --external-ip=${TLS_PUBLIC_ADDRESS:-10.174.96.119}
 
 networks:
   p4:
