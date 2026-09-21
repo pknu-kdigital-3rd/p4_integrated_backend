@@ -32,10 +32,10 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/private.pem
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
-      JWT_ISSUER: ${JWT_ISSUER:-project4-node}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-project4-api}
-      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
-      JWT_KEY_ID: ${JWT_KEY_ID:-project4-2026-01}
+      JWT_ISSUER: project4-node
+      JWT_AUDIENCE: project4-api
+      JWT_ACCESS_TOKEN_TTL: 15m
+      JWT_KEY_ID: project4-2026-01
     command:
       - /bin/sh
       - -c
@@ -72,10 +72,10 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/private.pem
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
-      JWT_ISSUER: ${JWT_ISSUER:-project4-node}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-project4-api}
-      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
-      JWT_KEY_ID: ${JWT_KEY_ID:-project4-2026-01}
+      JWT_ISSUER: project4-node
+      JWT_AUDIENCE: project4-api
+      JWT_ACCESS_TOKEN_TTL: 15m
+      JWT_KEY_ID: project4-2026-01
       PUBLIC_OPERATOR_URL: ${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
       ROUTING_TRACKING_BASE_URL: http://routing:8000
       VISION_PUBLIC_BASE_URL: ${VISION_PUBLIC_BASE_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002}
@@ -84,14 +84,14 @@ services:
       OPERATOR_DEMO_PUBLIC: ${OPERATOR_DEMO_PUBLIC:-true}
       TRUST_PROXY: ${TRUST_PROXY:-true}
       RECORDING_VALIDATE_TRIP_CONTEXT: ${RECORDING_VALIDATE_TRIP_CONTEXT:-true}
-      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:-replace-with-a-random-token-at-least-32-characters}
+      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:?set NODE_INTERNAL_SERVICE_TOKEN}
       MINIO_ENDPOINT: minio:9000
       MINIO_USE_SSL: "false"
-      MINIO_RECORDING_BUCKET: ${MINIO_RECORDING_BUCKET:-p4-trip-recordings}
-      MINIO_NODE_ACCESS_KEY: ${MINIO_NODE_ACCESS_KEY:-p4-node}
-      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:-replace-node-secret}
-      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39003}
-      RECORDING_PLAYBACK_URL_TTL_SECONDS: ${RECORDING_PLAYBACK_URL_TTL_SECONDS:-300}
+      MINIO_RECORDING_BUCKET: p4-trip-recordings
+      MINIO_NODE_ACCESS_KEY: p4-node
+      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:?set MINIO_NODE_SECRET_KEY}
+      MINIO_PUBLIC_ENDPOINT: https://10.174.96.119:39003
+      RECORDING_PLAYBACK_URL_TTL_SECONDS: 300
       RECORDING_ENABLED: "true"
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
     command: ["./node_modules/.bin/tsx", "watch", "src/server.ts"]
@@ -147,13 +147,13 @@ services:
       PY_ANDROID_LIVE_URL: http://vision:39011/internal/android-live
       PY_TELEMETRY_URL: http://vision:39011/internal/telemetry
       NODE_INTERNAL_BASE_URL: http://node:3000
-      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:-replace-with-a-random-token-at-least-32-characters}
+      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:?set NODE_INTERNAL_SERVICE_TOKEN}
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
       MINIO_ENDPOINT: minio:9000
       MINIO_USE_SSL: "false"
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-p4-relay}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-replace-relay-secret}
-      MINIO_RECORDING_BUCKET: ${MINIO_RECORDING_BUCKET:-p4-trip-recordings}
+      MINIO_ACCESS_KEY: p4-relay
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_RECORDING_BUCKET: p4-trip-recordings
       RECORDING_ENABLED: "true"
       RECORDING_SEGMENT_SECONDS: ${RECORDING_SEGMENT_SECONDS:-60}
       RECORDING_QUEUE_FRAMES: ${RECORDING_QUEUE_FRAMES:-180}
@@ -199,7 +199,7 @@ services:
       RELAY_KEYFRAME_URL: http://relay:39012/internal/request-keyframe
       RELAY_STATUS_URL: http://relay:39012/internal/status
       NODE_INTERNAL_BASE_URL: http://node:3000
-      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:-replace-with-a-random-token-at-least-32-characters}
+      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:?set NODE_INTERNAL_SERVICE_TOKEN}
       TURN_URL: ${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39004?transport=udp}
       TURN_USERNAME: ${TURN_USERNAME:-user}
       TURN_PASSWORD: ${TURN_PASSWORD:-replace-with-strong-turn-password}
@@ -265,8 +265,8 @@ services:
     restart: unless-stopped
     command: [ "server", "/data", "--console-address", ":9001" ]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-p4-minio-local}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-development-password-change-me}
+      MINIO_ROOT_USER: p4-minio-root
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
     expose: [ "9000", "9001" ]
     volumes:
       - type: bind
@@ -282,13 +282,13 @@ services:
       - minio
     entrypoint: [ "/bin/sh", "/bootstrap.sh" ]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-p4-minio-local}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-development-password-change-me}
-      MINIO_RECORDING_BUCKET: ${MINIO_RECORDING_BUCKET:-p4-trip-recordings}
-      MINIO_RELAY_ACCESS_KEY: ${MINIO_ACCESS_KEY:-p4-relay}
-      MINIO_RELAY_SECRET_KEY: ${MINIO_SECRET_KEY:-replace-relay-secret}
-      MINIO_NODE_ACCESS_KEY: ${MINIO_NODE_ACCESS_KEY:-p4-node}
-      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:-replace-node-secret}
+      MINIO_ROOT_USER: p4-minio-root
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_RECORDING_BUCKET: p4-trip-recordings
+      MINIO_RELAY_ACCESS_KEY: p4-relay
+      MINIO_RELAY_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_NODE_ACCESS_KEY: p4-node
+      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:?set MINIO_NODE_SECRET_KEY}
     volumes:
       - ./deploy/minio/bootstrap.sh:/bootstrap.sh:ro
       - ./deploy/minio/policies:/policies:ro

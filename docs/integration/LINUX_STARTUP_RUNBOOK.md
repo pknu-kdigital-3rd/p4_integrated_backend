@@ -120,24 +120,26 @@ image-built Go binary.
 
 ## Recording and replay
 
-Recording is always enabled. Configure independent MinIO root, relay, and Node
-credentials in the Compose invocation when deploying beyond local defaults; no
-repository-local env file is needed:
+Recording is always enabled. Non-secret JWT and MinIO settings are hardcoded in
+both standalone Compose files using the old `deploy/env.local.example` names.
+Only the internal token and three MinIO passwords remain command-scoped so
+credentials are not committed:
 
 ```bash
-NODE_INTERNAL_SERVICE_TOKEN="$(openssl rand -hex 32)" \
-MINIO_ROOT_USER=p4-minio-root \
+NODE_INTERNAL_SERVICE_TOKEN="replace-with-a-random-token-at-least-32-characters" \
 MINIO_ROOT_PASSWORD="replace-with-a-random-secret" \
-MINIO_ACCESS_KEY=p4-relay \
 MINIO_SECRET_KEY="replace-with-an-independent-random-secret" \
-MINIO_NODE_ACCESS_KEY=p4-node \
 MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret" \
 docker compose up -d --build
 ```
 
 The production file starts MinIO and runs the one-shot `minio-bootstrap`
 service after MinIO is ready. If bootstrap must be repeated, run
-`docker compose run --rm --no-deps minio-bootstrap` with the same credentials.
+`docker compose run --rm --no-deps minio-bootstrap`.
+
+If a non-secret setting needs to change, edit the matching JWT or MinIO entry
+in both Compose files. Existing MinIO data retains the root credentials with
+which it was initialized.
 
 Replay uses Node-issued presigned MinIO URLs with HTTP range requests. MinIO API
 port `9000`, Console port `9001`, and PostgreSQL `5432` remain private.

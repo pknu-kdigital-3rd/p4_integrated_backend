@@ -383,25 +383,22 @@ Create the recording bucket during deployment/bootstrap and keep it private.
 
 ## 9. Environment variables
 
-Recording is always enabled. Configure the credentials with Compose variables;
-no `env.local` file is required. The same variables are passed to MinIO, the
-Go relay, and the Node backend:
+Recording is always enabled. Non-secret JWT and MinIO settings are hardcoded in
+both standalone Compose files using the old `deploy/env.local.example` names.
+Only the internal token and three MinIO passwords remain command-scoped so
+credentials are not committed:
 
 ```bash
-NODE_INTERNAL_SERVICE_TOKEN="$(openssl rand -hex 32)" \
-MINIO_ROOT_USER=p4-minio-root \
+NODE_INTERNAL_SERVICE_TOKEN="replace-with-a-random-token-at-least-32-characters" \
 MINIO_ROOT_PASSWORD="replace-with-a-random-secret" \
-MINIO_ACCESS_KEY=p4-relay \
 MINIO_SECRET_KEY="replace-with-an-independent-random-secret" \
-MINIO_NODE_ACCESS_KEY=p4-node \
 MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret" \
 docker compose up -d --build
 ```
 
 The production file starts `minio` and runs the one-shot `minio-bootstrap`
-service after MinIO is ready. For a long-lived deployment, put these variables
-in the service manager's environment rather than committing a repository-local
-file. The application defaults below show the recording settings:
+service after MinIO is ready. Existing MinIO data retains its original root
+credentials. The application defaults below show the recording settings:
 
 ```dotenv
 RECORDING_SEGMENT_SECONDS=60

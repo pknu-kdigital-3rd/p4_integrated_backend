@@ -28,10 +28,10 @@ Use the standalone development Compose file when editing source files:
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-Optional shell variables can override Compose defaults for a different public
-address, credentials, or GPU policy. The default persistent-data directory is
-`./data`; each `source:` entry in Compose names its
-subdirectory explicitly, so you can change one mapping without adding path
+Optional shell variables can override public ports, routing, TURN, or GPU
+policy. JWT and MinIO settings are fixed in each Compose file. The default
+persistent-data directory is `./data`; each `source:` entry in Compose names
+its subdirectory explicitly, so you can change one mapping without adding path
 variables. Recording is always enabled, so Nginx ports `39001-39003` and
 Coturn ports `39004-39007` are exposed on the host. Node, Vision, routing,
 relay, PostgreSQL, and MinIO use the private Compose network. See the [Docker
