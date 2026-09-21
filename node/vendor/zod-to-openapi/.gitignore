@@ -1,0 +1,7 @@
+/dist
+/node_modules
+.node-version
+.nvm
+.vscode
+.idea
+/spec/type-definitions/temp
