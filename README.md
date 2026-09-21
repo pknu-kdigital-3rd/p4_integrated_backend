@@ -38,6 +38,9 @@ relay, PostgreSQL, and MinIO use the private Compose network. See the [Docker
 Linux runbook](docs/integration/LINUX_STARTUP_RUNBOOK.md) and [Nginx ingress
 guide](deploy/nginx/README.md) for the complete procedure.
 
+For the complete Windows-first test procedure, required variables, reload
+commands, and deployment gotchas, see the [Docker operations guide](docs/integration/DOCKER_OPERATIONS.md).
+
 The operator dashboard's **Bus telemetry source** control switches between the
 live BIMS feed and the replay dataset without restarting Compose. The selected
 source is persisted in `data/routing_state/`; the routing container only needs

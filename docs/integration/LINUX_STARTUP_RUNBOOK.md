@@ -4,6 +4,10 @@ This is the deployment procedure for the integrated stack on a Linux host with
 NVIDIA Container Toolkit. Every application service runs in Docker. Nginx and
 Coturn are the only services that use public host ports.
 
+For the Windows-first test workflow, the exact required variables, service
+reload matrix, and platform gotchas, see
+[Docker operations](DOCKER_OPERATIONS.md).
+
 ## Services and ports
 
 | Service | Compose address | Host exposure |
