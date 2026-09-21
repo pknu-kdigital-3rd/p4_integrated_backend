@@ -328,6 +328,10 @@ function stopLiveView(){
   document.querySelector('#live-view').focus({preventScroll:true});
   renderLiveTelemetryStatus();
 }
+// The virtual workspace takes over the map and the sidebar, so it closes Live
+// View on the way in. Hiding the panel alone would leave the live-view-open
+// layout class - and with it a display:none sidebar - behind.
+window.__operatorStopLiveView=stopLiveView;
 window.addEventListener('message',event=>{
   const message=acceptLiveTelemetry(liveView,event,liveFrame.contentWindow);
   if(!message)return;

@@ -1,5 +1,7 @@
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
+import { createSectionVisibility } from './workspace-sections.js';
+
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
 const normalTab = document.querySelector('#normal-workspace');
@@ -23,6 +25,9 @@ const requestList = document.querySelector('#virtual-requests');
 const restrictionList = document.querySelector('#virtual-restrictions');
 const eventList = document.querySelector('#virtual-events');
 const normalSections = ['#login', '#details', '#telemetry-settings', '#trip-panel', '#recordings-panel', '#error'];
+const normalSectionVisibility = createSectionVisibility(
+  normalSections.map((selector) => document.querySelector(selector)).filter(Boolean),
+);
 let mode = 'normal';
 let scenarioId = '';
 let scenarioRevision = 0;
@@ -817,15 +822,20 @@ async function switchMode(next) {
   document.body.classList.toggle('virtual-mode', next === 'virtual');
   virtualPanel.hidden = next !== 'virtual';
   normalTab.setAttribute('aria-pressed', String(next === 'normal')); virtualTab.setAttribute('aria-pressed', String(next === 'virtual'));
-  for (const selector of normalSections) { const element = document.querySelector(selector); if (!element) continue; if (next === 'virtual') element.hidden = true; else if (selector === '#login') element.hidden = Boolean(token()); else if (selector === '#error') element.hidden = false; }
-  document.querySelector('#live-view-panel').hidden = true;
   if (next === 'virtual') {
+    // Close Live View rather than hiding its panel: the open state also carries
+    // the live-view-open layout class, which sets #operator-sidebar to
+    // display:none. Left behind, it keeps the whole sidebar invisible after the
+    // switch back, however the individual sections are set.
+    window.__operatorStopLiveView?.();
+    normalSectionVisibility.hide();
     map.eachLayer((layer) => {
       if (layer !== routeLayerGroup && layer !== activeRouteLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && layer !== restrictionDraftLayerGroup && !layer._url) map.removeLayer(layer);
     });
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
+    normalSectionVisibility.restore();
     clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
     draftRouteSignature = '';
     activeRouteSignature = '';
