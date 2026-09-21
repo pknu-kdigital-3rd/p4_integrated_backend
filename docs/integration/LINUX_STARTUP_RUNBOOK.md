@@ -54,10 +54,38 @@ without creating an env file:
 TLS_PUBLIC_ADDRESS=192.0.2.10 docker compose up -d
 ```
 
-JWT keys and the self-signed Nginx certificate are generated into named
-volumes (`p4_jwt` and `p4_tls`) on first startup. Keep those volumes when
-upgrading the stack. `docker compose down -v` removes them and causes new
-credentials/certificates to be generated on the next start.
+Persistent data defaults to the sibling directory
+`../p4_integrated_backend_data`. Each Compose `source:` entry maps one volume
+to a visible subdirectory there: `pgdata`, `minio_data`, `jwt`, `tls`,
+`relay_feed`, `recording_spool`, and `nginx_logs`. Development dependencies use
+`node_modules` in the same root. To use a different disk, edit the relevant
+`source:` entry in `docker-compose.yml` or `docker-compose.dev.yml`:
+
+| Host directory | Service(s) | Container path |
+|---|---|---|
+| `../p4_integrated_backend_data/pgdata` | PostgreSQL | `/var/lib/postgresql/data` |
+| `../p4_integrated_backend_data/minio_data` | MinIO | `/data` |
+| `../p4_integrated_backend_data/jwt` | Node and migrations | `/run/secrets/jwt` |
+| `../p4_integrated_backend_data/tls` | Nginx | `/etc/nginx/tls` |
+| `../p4_integrated_backend_data/relay_feed` | Relay and Vision | `/run/p4/relay` |
+| `../p4_integrated_backend_data/recording_spool` | Relay | `/var/tmp/p4-recordings` |
+| `../p4_integrated_backend_data/nginx_logs` | Nginx | `/var/log/nginx` |
+| `../p4_integrated_backend_data/node_modules` (dev only) | Node | `/workspace/node/node_modules` |
+
+```yaml
+services:
+  db:
+    volumes:
+      - type: bind
+        source: /fast/postgres
+        target: /var/lib/postgresql/data
+```
+
+Compose creates missing bind-mount directories. A host symlink can be used as
+the `source:` path when the target storage is on another disk. JWT keys and
+the self-signed Nginx certificate are stored in the `jwt` and `tls` directories
+and persist across `docker compose down`; remove those directories manually
+when rotating them.
 
 ## Start the production image stack
 
@@ -147,5 +175,5 @@ docker compose down
 
 The optional `scripts/run-linux-stack.sh` wrapper delegates to Compose and
 accepts the same optional shell overrides. Use `docker compose ps` and
-`docker compose logs <service>` for direct diagnostics. `down` preserves named
-volumes unless the volumes are explicitly removed.
+`docker compose logs <service>` for direct diagnostics. `down` preserves the
+host data directories.

@@ -1,5 +1,7 @@
 name: p4-integrated-backend
 
+# Persistent data lives outside the checkout. Edit each `source` path below
+# when a volume should live somewhere else; Compose creates missing directories.
 services:
   db:
     image: postgis/postgis:17-3.5
@@ -10,7 +12,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       POSTGRES_DB: ${POSTGRES_DB:-vehicle_platform}
     volumes:
-      - p4_pgdata:/var/lib/postgresql/data
+      - type: bind
+        source: ../p4_integrated_backend_data/pgdata
+        target: /var/lib/postgresql/data
     networks: [ p4 ]
 
   node-migrate:
@@ -40,7 +44,9 @@ services:
           echo 'Waiting for PostgreSQL/migrations...'; sleep 2;
         done && npx tsx prisma/seed.ts
     volumes:
-      - p4_jwt:/run/secrets/jwt
+      - type: bind
+        source: ../p4_integrated_backend_data/jwt
+        target: /run/secrets/jwt
     networks: [ p4 ]
 
   node:
@@ -84,7 +90,9 @@ services:
       RECORDING_ENABLED: ${RECORDING_ENABLED:-false}
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
     volumes:
-      - p4_jwt:/run/secrets/jwt
+      - type: bind
+        source: ../p4_integrated_backend_data/jwt
+        target: /run/secrets/jwt
     expose: [ "3000" ]
     networks: [ p4 ]
 
@@ -143,8 +151,12 @@ services:
       TELEMETRY_VISION_QUEUE: ${TELEMETRY_VISION_QUEUE:-64}
       TELEMETRY_CURRENT_MAX_AGE_SECONDS: ${TELEMETRY_CURRENT_MAX_AGE_SECONDS:-30}
     volumes:
-      - p4_relay_feed:/run/p4/relay
-      - p4_recording_spool:/var/tmp/p4-recordings
+      - type: bind
+        source: ../p4_integrated_backend_data/relay_feed
+        target: /run/p4/relay
+      - type: bind
+        source: ../p4_integrated_backend_data/recording_spool
+        target: /var/tmp/p4-recordings
     expose: [ "39012" ]
     networks: [ p4 ]
 
@@ -192,8 +204,13 @@ services:
               count: all
               capabilities: [ gpu ]
     volumes:
-      - p4_relay_feed:/run/p4/relay
-      - ./services/vision/models:/workspace/services/vision/models:ro
+      - type: bind
+        source: ../p4_integrated_backend_data/relay_feed
+        target: /run/p4/relay
+      - type: bind
+        source: ./services/vision/models
+        target: /workspace/services/vision/models
+        read_only: true
     expose: [ "39011" ]
     networks: [ p4 ]
 
@@ -217,8 +234,12 @@ services:
     expose: [ "39001", "39002", "39003" ]
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - p4_tls:/etc/nginx/tls
-      - p4_nginx_logs:/var/log/nginx
+      - type: bind
+        source: ../p4_integrated_backend_data/tls
+        target: /etc/nginx/tls
+      - type: bind
+        source: ../p4_integrated_backend_data/nginx_logs
+        target: /var/log/nginx
     networks: [ p4 ]
 
   minio:
@@ -232,7 +253,9 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-development-password-change-me}
     expose: [ "9000", "9001" ]
     volumes:
-      - p4_minio_data:/data
+      - type: bind
+        source: ../p4_integrated_backend_data/minio_data
+        target: /data
     networks: [ p4 ]
 
   minio-bootstrap:
@@ -280,12 +303,3 @@ services:
 networks:
   p4:
     name: p4-internal
-
-volumes:
-  p4_pgdata:
-  p4_minio_data:
-  p4_jwt:
-  p4_tls:
-  p4_relay_feed:
-  p4_recording_spool:
-  p4_nginx_logs:

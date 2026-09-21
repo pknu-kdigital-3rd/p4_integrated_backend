@@ -6,13 +6,17 @@ services:
     working_dir: /workspace/node
     volumes:
       - ./node:/workspace/node
-      - p4_node_modules:/workspace/node/node_modules
+      - type: bind
+        source: ../p4_integrated_backend_data/node_modules
+        target: /workspace/node/node_modules
       - ./operator-web:/workspace/operator-web
 
   node-migrate:
     volumes:
       - ./node:/workspace/node
-      - p4_node_modules:/workspace/node/node_modules
+      - type: bind
+        source: ../p4_integrated_backend_data/node_modules
+        target: /workspace/node/node_modules
 
   routing:
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/workspace/services/routing-tracking"]
@@ -25,6 +29,3 @@ services:
       - ./services/vision:/workspace/services/vision
       - ./services/vision/.ultralytics-custom:/workspace/services/vision/.ultralytics-custom:ro
       - ./services/vision/models:/workspace/services/vision/models:ro
-
-volumes:
-  p4_node_modules:
