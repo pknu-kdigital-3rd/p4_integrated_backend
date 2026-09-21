@@ -1,4 +1,5 @@
 #!/bin/sh
+# This script is mounted into a Linux container; keep its line endings LF.
 set -eu
 
 if [ "${#MINIO_RECORDING_BUCKET}" -lt 3 ] || [ "${#MINIO_RECORDING_BUCKET}" -gt 63 ]; then
