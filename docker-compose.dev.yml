@@ -83,12 +83,13 @@ services:
       OPERATOR_DEMO_PUBLIC: ${OPERATOR_DEMO_PUBLIC:-true}
       TRUST_PROXY: ${TRUST_PROXY:-true}
       RECORDING_VALIDATE_TRIP_CONTEXT: ${RECORDING_VALIDATE_TRIP_CONTEXT:-true}
-      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:?set NODE_INTERNAL_SERVICE_TOKEN}
+      # Development-only fixed credentials. Production keeps these host-supplied.
+      NODE_INTERNAL_SERVICE_TOKEN: dev-only-node-internal-service-token-2026
       MINIO_ENDPOINT: minio:9000
       MINIO_USE_SSL: "false"
       MINIO_RECORDING_BUCKET: p4-trip-recordings
       MINIO_NODE_ACCESS_KEY: p4-node
-      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:?set MINIO_NODE_SECRET_KEY}
+      MINIO_NODE_SECRET_KEY: dev-only-node-minio-secret-2026
       MINIO_PUBLIC_ENDPOINT: https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39003
       RECORDING_PLAYBACK_URL_TTL_SECONDS: 300
       RECORDING_ENABLED: "true"
@@ -149,12 +150,12 @@ services:
       PY_ANDROID_LIVE_URL: http://vision:39011/internal/android-live
       PY_TELEMETRY_URL: http://vision:39011/internal/telemetry
       NODE_INTERNAL_BASE_URL: http://node:3000
-      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:?set NODE_INTERNAL_SERVICE_TOKEN}
+      NODE_INTERNAL_SERVICE_TOKEN: dev-only-node-internal-service-token-2026
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
       MINIO_ENDPOINT: minio:9000
       MINIO_USE_SSL: "false"
       MINIO_ACCESS_KEY: p4-relay
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_SECRET_KEY: dev-only-relay-minio-secret-2026
       MINIO_RECORDING_BUCKET: p4-trip-recordings
       RECORDING_ENABLED: "true"
       RECORDING_SEGMENT_SECONDS: ${RECORDING_SEGMENT_SECONDS:-60}
@@ -201,7 +202,7 @@ services:
       RELAY_KEYFRAME_URL: http://relay:39012/internal/request-keyframe
       RELAY_STATUS_URL: http://relay:39012/internal/status
       NODE_INTERNAL_BASE_URL: http://node:3000
-      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:?set NODE_INTERNAL_SERVICE_TOKEN}
+      NODE_INTERNAL_SERVICE_TOKEN: dev-only-node-internal-service-token-2026
       TURN_URL: ${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39004?transport=udp}
       TURN_USERNAME: ${TURN_USERNAME:-user}
       TURN_PASSWORD: ${TURN_PASSWORD:-replace-with-strong-turn-password}
@@ -268,7 +269,7 @@ services:
     command: [ "server", "/data", "--console-address", ":9001" ]
     environment:
       MINIO_ROOT_USER: p4-minio-root
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_PASSWORD: dev-only-minio-root-password-2026
     expose: [ "9000", "9001" ]
     volumes:
       - type: bind
@@ -285,12 +286,12 @@ services:
     entrypoint: [ "/bin/sh", "/bootstrap.sh" ]
     environment:
       MINIO_ROOT_USER: p4-minio-root
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_PASSWORD: dev-only-minio-root-password-2026
       MINIO_RECORDING_BUCKET: p4-trip-recordings
       MINIO_RELAY_ACCESS_KEY: p4-relay
-      MINIO_RELAY_SECRET_KEY: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY}
+      MINIO_RELAY_SECRET_KEY: dev-only-relay-minio-secret-2026
       MINIO_NODE_ACCESS_KEY: p4-node
-      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:?set MINIO_NODE_SECRET_KEY}
+      MINIO_NODE_SECRET_KEY: dev-only-node-minio-secret-2026
     volumes:
       - ./deploy/minio/bootstrap.sh:/bootstrap.sh:ro
       - ./deploy/minio/policies:/policies:ro

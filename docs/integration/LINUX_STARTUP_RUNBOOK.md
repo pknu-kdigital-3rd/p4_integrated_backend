@@ -143,8 +143,10 @@ variable or Compose restart is needed for a normal switch.
 
 Recording is always enabled. Non-secret JWT and MinIO settings are hardcoded in
 both standalone Compose files using the old `deploy/env.local.example` names.
-Only the internal token and three MinIO passwords remain command-scoped so
-credentials are not committed:
+The development Compose file also contains fixed development-only values for
+the internal token and three MinIO passwords, so it starts without these
+environment variables. Production keeps them command-scoped so credentials are
+not committed:
 
 ```bash
 NODE_INTERNAL_SERVICE_TOKEN="replace-with-a-random-token-at-least-32-characters" \

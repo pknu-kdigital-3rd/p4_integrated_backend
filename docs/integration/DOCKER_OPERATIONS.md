@@ -41,12 +41,14 @@ With one visible GPU, the Vision entrypoint selects that device and exposes it
 to the application as `cuda:0`. With multiple visible GPUs it selects the last
 one. Check the Vision log for the selected device.
 
-## Absolute Compose variables
+## Compose credentials
 
-Compose refuses to render either Compose file unless these four variables are
-provided. They are intentionally not committed to the repository:
+The production Compose file requires these four variables from the host. The
+development Compose file uses fixed development-only values so a local stack
+can start without a shell environment or an env file. Do not reuse the
+development values outside a local development stack.
 
-| Variable | Used by | Requirement |
+| Variable | Used by | Production requirement |
 |---|---|---|
 | `NODE_INTERNAL_SERVICE_TOKEN` | Node, relay, Vision | One identical random value everywhere; at least 32 characters and must not start with `replace-`. |
 | `MINIO_ROOT_PASSWORD` | MinIO and MinIO bootstrap | The MinIO root password used when the data directory is first initialized. Keep it stable for existing `data/minio_data`. |
@@ -54,7 +56,9 @@ provided. They are intentionally not committed to the repository:
 | `MINIO_NODE_SECRET_KEY` | Node and MinIO bootstrap | Node bucket-account secret; at least 12 characters and must not start with `replace-`. |
 
 The MinIO access-key names are fixed in Compose (`p4-minio-root`, `p4-relay`,
-and `p4-node`); only the secrets above are required from the host.
+and `p4-node`). In development, the corresponding fixed secrets are shared by
+the services automatically. In production, only the secrets above are
+required from the host.
 
 The host address and BIMS key are not absolute requirements:
 
@@ -68,7 +72,7 @@ Other commonly changed values are optional: `YOLO_MODEL`, `YOLO_DEVICE`,
 `TURN_USERNAME`, `TURN_PASSWORD`, and the recording queue/sample settings.
 The Compose defaults are used when they are omitted.
 
-### Supplying secrets without shell residue
+### Supplying production secrets without shell residue
 
 Use an ignored file outside the repository and pass it explicitly on each
 Compose command. Do not commit it:
@@ -82,10 +86,10 @@ TLS_PUBLIC_ADDRESS=10.174.96.119
 BUSAN_BIMS_SERVICE_KEY=<live-bims-key-if-needed>
 ```
 
-Windows example:
+Windows production example:
 
 ```powershell
-docker compose --env-file C:\secure\p4-compose.env -f docker-compose.dev.yml up -d --build
+docker compose --env-file C:\secure\p4-compose.env -f docker-compose.prod.yml up -d --build
 ```
 
 Linux example:
@@ -94,7 +98,11 @@ Linux example:
 docker compose --env-file /etc/p4/compose.env up -d --build
 ```
 
-For playback-only testing, omit `BUSAN_BIMS_SERVICE_KEY`. `TLS_PUBLIC_ADDRESS`
+For development testing, use `docker-compose.dev.yml` without the four secret
+variables above. Existing `data/minio_data` must have been initialized with the
+fixed development root password, or MinIO will continue to require its old
+root password. For playback-only testing, omit `BUSAN_BIMS_SERVICE_KEY`.
+`TLS_PUBLIC_ADDRESS`
 may also be omitted when `10.174.96.119` is the correct host address.
 
 ## Required repository artifacts and first startup
