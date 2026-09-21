@@ -32,5 +32,5 @@
 - Added production HTTPS URL validation, proxy-aware Node/Vision settings, secure Android network policy, and a development CA generator.
 - Added `scripts/run-linux-stack.sh` for one-command Linux dependency setup, RTX 3090/CUDA validation, service startup, Nginx startup, and end-to-end health gating.
 - The Linux runner discovers and loads `nvm.sh` in non-interactive shells—even when NVM is absent from the launching terminal—and selects or installs `NODE_VERSION` before invoking npm/Node.
-- Generated development certificate verified against its CA with SAN `IP:10.174.96.95`.
+- Generated development certificate verified against its CA with SAN `IP:10.174.96.119`.
 - Nginx binary is not installed on this Windows host, so ingress startup and browser/device trust remain deployment prerequisites.

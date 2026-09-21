@@ -20,7 +20,7 @@ The debug APK can also be built with:
 .\gradlew.bat :app:assembleDebug
 ```
 
-The default URL is `https://10.174.96.95:39002`. Override it with the Gradle property
+The default URL is `https://10.174.96.119:39002`. Override it with the Gradle property
 `relay.url=https://its.example.internal:39002` when using DNS. Install the deployment
 CA certificate on the development device before connecting. Debug builds trust
 user-installed CAs; release builds trust system CAs only. Cleartext HTTP is disabled.

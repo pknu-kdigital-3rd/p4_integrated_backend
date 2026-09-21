@@ -4,7 +4,7 @@
 
 - Document type: architecture decision and implementation plan
 - Scope: browser-facing pages and externally reachable service endpoints
-- Current LAN address used during development: `10.174.96.95`
+- Current LAN address used during development: `10.174.96.119`
 - Primary affected ports: Node/dashboard `39005`, Vision `39001`, media relay `39002`, routing/tracking `8000`
 
 ## Executive summary
@@ -13,8 +13,8 @@ The platform must move its browser-facing pages from HTTP to HTTPS because the o
 
 This explains the current behavior:
 
-- Opening `https://10.174.96.95:39001/` directly works after the browser trusts the certificate.
-- Opening the same page inside the modal iframe of `http://10.174.96.95:39005/operator/` fails with `WebCodecs requires HTTPS (secure context)`.
+- Opening `https://10.174.96.119:39001/` directly works after the browser trusts the certificate.
+- Opening the same page inside the modal iframe of `http://10.174.96.119:39005/operator/` fails with `WebCodecs requires HTTPS (secure context)`.
 - Changing only `LIVE_VIEW_URL` from HTTP to HTTPS cannot fix the iframe case. The containing dashboard must also be HTTPS.
 
 The recommended target is HTTPS for every browser-facing endpoint, terminated at a reverse proxy. Application processes may continue to use HTTP on loopback or an isolated private network where there is an explicit trust boundary. This avoids adding separate TLS implementations to Node, FastAPI, Uvicorn, and Go while providing one consistent certificate and redirect policy.
@@ -25,7 +25,7 @@ The recommended target is HTTPS for every browser-facing endpoint, terminated at
 
 The Vision page uses `VideoDecoder` and `EncodedVideoChunk` to decode H.264. These WebCodecs interfaces are available only in secure contexts in supporting browsers.
 
-HTTPS is therefore a functional requirement for remote browser playback, not only a security improvement. Loopback development URLs such as `http://localhost` and `http://127.0.0.1` may be treated as trustworthy by browsers, but a LAN address such as `http://10.174.96.95` is not equivalent to loopback.
+HTTPS is therefore a functional requirement for remote browser playback, not only a security improvement. Loopback development URLs such as `http://localhost` and `http://127.0.0.1` may be treated as trustworthy by browsers, but a LAN address such as `http://10.174.96.119` is not equivalent to loopback.
 
 References:
 
@@ -119,7 +119,7 @@ For the LAN deployment, use one of the following:
 2. Development only: a private development CA, with its root certificate explicitly installed on each client device.
 3. Temporary diagnosis only: individually accepted self-signed leaf certificates.
 
-The certificate must contain the exact hostname or IP used by clients in its Subject Alternative Name. Trusting `localhost` or `127.0.0.1` does not automatically trust `10.174.96.95`.
+The certificate must contain the exact hostname or IP used by clients in its Subject Alternative Name. Trusting `localhost` or `127.0.0.1` does not automatically trust `10.174.96.119`.
 
 ## Migration plan
 
@@ -162,8 +162,8 @@ Acceptance criteria:
 Node configuration must expose an HTTPS browser URL:
 
 ```env
-VISION_PUBLIC_BASE_URL="https://10.174.96.95:39001"
-LIVE_VIEW_URL="https://10.174.96.95:39001/"
+VISION_PUBLIC_BASE_URL="https://10.174.96.119:39001"
+LIVE_VIEW_URL="https://10.174.96.119:39001/"
 ```
 
 If a DNS name or standard port is selected, replace these temporary IP URLs with the final public URLs.
@@ -188,7 +188,7 @@ This phase distinguishes public HTTPS from internal service transport. The brows
 ### Phase 5: Secure Go relay signaling and Android configuration
 
 - Put the Go signaling endpoint behind HTTPS, or add direct TLS support to the Go server.
-- Change the Android server URL from `http://10.174.96.95:39002` to the final `https://` relay URL.
+- Change the Android server URL from `http://10.174.96.119:39002` to the final `https://` relay URL.
 - Configure Android to trust the deployment CA.
 - Remove `android:usesCleartextTraffic="true"` after every required Android endpoint is HTTPS.
 - Confirm that SDP offer/answer exchange, ICE negotiation, QR data-channel behavior, and H.264 publishing still work.
@@ -317,10 +317,10 @@ Replace certificate and URL values with the final deployment values.
 
 ```bash
 # Confirm the HTTPS endpoint and certificate chain.
-curl --cacert /path/to/ca.crt https://10.174.96.95:39001/
+curl --cacert /path/to/ca.crt https://10.174.96.119:39001/
 
 # Confirm the operator endpoint after HTTPS ingress is enabled.
-curl --cacert /path/to/ca.crt https://10.174.96.95:39005/health/live
+curl --cacert /path/to/ca.crt https://10.174.96.119:39005/health/live
 
 # Confirm internal routing remains reachable from the Node host.
 curl http://127.0.0.1:8000/internal/telemetry/status

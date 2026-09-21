@@ -419,12 +419,12 @@ MINIO_SECRET_KEY="replace-with-an-independent-random-secret"
 # Node backend's bucket-scoped MinIO account and public playback origin
 MINIO_NODE_ACCESS_KEY=p4-node
 MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret"
-MINIO_PUBLIC_ENDPOINT=https://10.174.96.95:39003
+MINIO_PUBLIC_ENDPOINT=https://10.174.96.119:39003
 
 # MinIO server/bootstrap administrator credentials and Console URL
 MINIO_ROOT_USER=p4-minio-root
 MINIO_ROOT_PASSWORD="replace-with-an-independent-random-secret"
-MINIO_BROWSER_REDIRECT_URL=https://10.174.96.95:39004
+MINIO_BROWSER_REDIRECT_URL=https://10.174.96.119:39004
 ```
 
 Replace every example secret before setting `RECORDING_ENABLED=true`. Use
@@ -441,7 +441,7 @@ playback URLs, and must be reachable by clients at port `39003`. Set
 `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` are for MinIO bootstrap and
 administration only; application services use their dedicated accounts.
 
-The public URLs above use `10.174.96.95`; change them to match
+The public URLs above use `10.174.96.119`; change them to match
 `TLS_PUBLIC_ADDRESS` if the host address changes.
 
 ---

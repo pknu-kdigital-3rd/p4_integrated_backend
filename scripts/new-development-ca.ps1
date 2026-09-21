@@ -1,5 +1,5 @@
 param(
-    [string]$PublicAddress = "10.174.96.95",
+    [string]$PublicAddress = "10.174.96.119",
     [string]$DnsName = ""
 )
 

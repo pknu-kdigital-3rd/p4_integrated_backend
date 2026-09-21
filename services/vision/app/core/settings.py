@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     )
 
     # --- TURN / ICE ---
-    TURN_URL: str = "turn:10.174.96.95:3478?transport=udp"
+    TURN_URL: str = "turn:10.174.96.119:39006?transport=udp"
     TURN_USERNAME: str = "user"
     TURN_PASSWORD: str = "pass"
     YOLO_FEED_SOCKET: str = "/tmp/poc-relay-yolo.sock"

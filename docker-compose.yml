@@ -26,7 +26,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-p4-minio-local}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-development-password-change-me}
-      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-https://10.174.96.95:39004}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-https://10.174.96.119:39004}
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"

@@ -8,9 +8,9 @@ This project uses:
 | HTTPS ingress for Vision/WSS and Android signaling | TCP `39002` |
 | Internal Go relay signaling | loopback TCP `39012` |
 | Internal FastAPI playback | loopback TCP `39011` |
-| Coturn listener | UDP/TCP `3478` |
-| Coturn TLS listener (optional) | TCP `5349` |
-| Coturn relay allocations | UDP `40000-40255` |
+| Coturn listener | UDP/TCP `39006` |
+| Coturn TLS listener (optional) | TCP `39007` |
+| Coturn relay allocations | UDP `39008-39009` |
 
 The relay range is controlled by coturn. When TURN is selected, media is
 relayed through coturn instead of requiring the Android device to reach an
@@ -52,8 +52,8 @@ restore the TURN URL and credentials.
 Edit `/etc/turnserver.conf`:
 
 ```ini
-listening-port=3478
-tls-listening-port=5349
+listening-port=39006
+tls-listening-port=39007
 
 # Private address of this Linux host.
 listening-ip=<PRIVATE_SERVER_IP>
@@ -69,8 +69,8 @@ fingerprint
 lt-cred-mech
 user=user:pass
 
-min-port=40000
-max-port=40255
+min-port=39008
+max-port=39009
 
 no-multicast-peers
 no-loopback-peers
@@ -102,10 +102,10 @@ systemctl cat coturn
 ```bash
 sudo ufw allow 39001/tcp
 sudo ufw allow 39002/tcp
-sudo ufw allow 3478/udp
-sudo ufw allow 3478/tcp
-sudo ufw allow 5349/tcp
-sudo ufw allow 40000:40255/udp
+sudo ufw allow 39006/udp
+sudo ufw allow 39006/tcp
+sudo ufw allow 39007/tcp
+sudo ufw allow 39008:39009/udp
 sudo ufw reload
 sudo ufw status verbose
 ```
@@ -117,16 +117,16 @@ The NAT router and any cloud security group must forward/allow the same ports:
 
 - TCP `39001` to the operator HTTPS ingress
 - TCP `39002` to the Vision/signaling HTTPS ingress
-- UDP/TCP `3478` to coturn
-- TCP `5349` to coturn when TLS is used
-- UDP `40000-40255` to coturn
+- UDP/TCP `39006` to coturn
+- TCP `39007` to coturn when TLS is used
+- UDP `39008-39009` to coturn
 
 ## 3. FastAPI TURN environment
 
 The Python server reads these environment variables:
 
 ```bash
-export TURN_URL='turn:10.174.96.95:3478?transport=udp'
+export TURN_URL='turn:10.174.96.119:39006?transport=udp'
 export TURN_USERNAME='user'
 export TURN_PASSWORD='pass'
 ```
@@ -162,10 +162,10 @@ committed file; put these in the developer's user Gradle properties or pass
 them on the Gradle command line:
 
 ```text
-turn.url=turn:10.174.96.95:3478?transport=udp
+turn.url=turn:10.174.96.119:39006?transport=udp
 turn.username=user
 turn.password=pass
-relay.url=https://10.174.96.95:39002
+relay.url=https://10.174.96.119:39002
 ```
 
 Build the APK:
@@ -175,7 +175,7 @@ cd E:\project4\poc-server-webrtc\android
 .\gradlew.bat :app:assembleDebug
 ```
 
-The app uses the HTTPS ingress URL, defaulting to `https://10.174.96.95:39002`.
+The app uses the HTTPS ingress URL, defaulting to `https://10.174.96.119:39002`.
 The ingress forwards `/offer/android` to the loopback Go relay.
 
 ## 5. Verify TURN is being used
@@ -183,7 +183,7 @@ The ingress forwards `/offer/android` to the loopback Go relay.
 Check that coturn is listening:
 
 ```bash
-sudo ss -lntup | grep -E '3478|5349|40000|40001'
+sudo ss -lntup | grep -E '39006|39007|39008|39009'
 ```
 
 The SDP exchanged by the clients should contain candidates with `typ relay`.

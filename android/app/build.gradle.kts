@@ -6,11 +6,11 @@ fun buildConfigString(value: String): String =
     "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 val turnUrl = providers.gradleProperty("turn.url").orNull
-    ?: "turn:10.174.96.95:3478?transport=udp"
+    ?: "turn:10.174.96.119:39006?transport=udp"
 val turnUsername = providers.gradleProperty("turn.username").orNull ?: "user"
 val turnPassword = providers.gradleProperty("turn.password").orNull ?: "pass"
 val relayUrl = providers.gradleProperty("relay.url").orNull
-    ?: "https://10.174.96.95:39002"
+    ?: "https://10.174.96.119:39002"
 
 android {
     namespace = "com.example.webrtccamera"

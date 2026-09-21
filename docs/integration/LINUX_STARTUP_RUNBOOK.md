@@ -122,7 +122,7 @@ set +a
 
 Set `P4_ROOT` to the real checkout path. Set `NVM_DIR` only if NVM is not under
 the current user's `~/.nvm`. If the server address is not
-`10.174.96.95`, change `PUBLIC_OPERATOR_URL`, `VISION_PUBLIC_BASE_URL`,
+`10.174.96.119`, change `PUBLIC_OPERATOR_URL`, `VISION_PUBLIC_BASE_URL`,
 `LIVE_VIEW_URL`, `MINIO_PUBLIC_ENDPOINT`, `MINIO_BROWSER_REDIRECT_URL`, the
 `server_name` in `deploy/nginx/nginx.conf`, `TURN_URL`, and the certificate SAN
 together. For a local smoke test without BIMS, leave
@@ -225,7 +225,7 @@ fi
 The bucket is private. Port `9000` is loopback-only for the relay; Nginx
 provides signed object GETs and byte-range requests through HTTPS port `39003`.
 Port `9001` remains loopback-only. The MinIO Console is available through Nginx
-at `https://10.174.96.95:39004/`; sign in with the MinIO root credentials from
+at `https://10.174.96.119:39004/`; sign in with the MinIO root credentials from
 `deploy/env.local`. Verify the public S3 endpoint only after a segment has been
 recorded and Node has registered it.
 
@@ -355,7 +355,7 @@ organization certificate) with a SAN matching the public address:
 ```bash
 cd "$P4_ROOT"
 mkdir -p secrets/tls
-export ITS_TLS_SAN="IP:10.174.96.95"
+export ITS_TLS_SAN="IP:10.174.96.119"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out secrets/tls/development-ca.key
 openssl req -x509 -new -sha256 -days 825 \
   -key secrets/tls/development-ca.key \
@@ -381,14 +381,14 @@ configuration:
 nginx -p "$P4_ROOT/deploy/nginx/" -t -c nginx.conf
 nginx -p "$P4_ROOT/deploy/nginx/" -c nginx.conf
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
-  https://10.174.96.95:39001/health/live
+  https://10.174.96.119:39001/health/live
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
-  https://10.174.96.95:39002/
+  https://10.174.96.119:39002/
 curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" \
-  https://10.174.96.95:39001/operator/
+  https://10.174.96.119:39001/operator/
 ```
 
-The expected browser URL is `https://10.174.96.95:39001/operator/`. Live View is
+The expected browser URL is `https://10.174.96.119:39001/operator/`. Live View is
 embedded in the dashboard in the same tab from the HTTPS Vision origin on port
 `39002`. A video stream will remain empty
 until an Android publisher is connected to the relay; the backend health checks
@@ -410,11 +410,11 @@ inactive. Do not put TURN, BIMS, or recording secrets in Git.
 The stack is up only when all of these succeed from a separate shell:
 
 ```bash
-curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39001/health/live
-curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39002/
-curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39001/operator/
+curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.119:39001/health/live
+curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.119:39002/
+curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.119:39001/operator/
 if [[ "${RECORDING_ENABLED:-false}" == true ]]; then
-  curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.95:39004/
+  curl --fail --cacert "$P4_ROOT/secrets/tls/development-ca.crt" https://10.174.96.119:39004/
 fi
 curl --fail http://127.0.0.1:"$ROUTING_PORT"/health/ready
 curl --fail http://127.0.0.1:39012/healthz

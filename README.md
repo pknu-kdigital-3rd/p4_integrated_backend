@@ -19,7 +19,7 @@ This repository integrates the existing control backend, BIMS routing/tracking, 
 4. In `services/routing-tracking/`, run `uv sync` then `uv run uvicorn main:app --host 127.0.0.1 --port 8000`. Set `TELEMETRY_MODE=playback` for CSV-only operation; playback makes no BIMS position calls.
 5. Start Vision internally with `uv run python run.py --no-tls` (`127.0.0.1:39011`) and start the Go relay on `127.0.0.1:39012`.
 6. Issue a trusted LAN development certificate with `scripts/new-development-ca.ps1`, install its CA certificate on every client, then start the Nginx configuration in `deploy/nginx/`.
-7. Open `https://10.174.96.95:39001/operator/`. Development sets `OPERATOR_DEMO_PUBLIC=true`, allowing read-only dashboard access without an interactive login; all normal auth/JWT/RBAC routes remain available and unchanged. Live View appears inline from the secure Vision origin at `https://10.174.96.95:39002/`.
+7. Open `https://10.174.96.119:39001/operator/`. Development sets `OPERATOR_DEMO_PUBLIC=true`, allowing read-only dashboard access without an interactive login; all normal auth/JWT/RBAC routes remain available and unchanged. Live View appears inline from the secure Vision origin at `https://10.174.96.119:39002/`.
 
 Public HTTP redirects to HTTPS. Node, Vision, routing/tracking, and relay HTTP listeners are internal-only. See [deploy/nginx/README.md](deploy/nginx/README.md) for certificate, proxy, WebSocket, and firewall details.
 
