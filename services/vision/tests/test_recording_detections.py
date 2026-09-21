@@ -52,7 +52,7 @@ class NormalizedReplayDetectionTests(unittest.TestCase):
 
 class RecordingDetectionWriterTests(unittest.TestCase):
     def test_default_sample_interval_stores_every_inference_result(self):
-        writer = RecordingDetectionWriter("http://node:3000", "secret")
+        writer = RecordingDetectionWriter("http://p4-node:3000", "secret")
         metrics = SimpleNamespace(
             recording_samples_queued=0,
             recording_samples_dropped=0,
@@ -65,7 +65,7 @@ class RecordingDetectionWriterTests(unittest.TestCase):
         self.assertEqual(metrics.recording_samples_queued, 5)
 
     def test_queue_is_bounded_without_waiting(self):
-        writer = RecordingDetectionWriter("http://node:3000", "secret", queue_size=1)
+        writer = RecordingDetectionWriter("http://p4-node:3000", "secret", queue_size=1)
         metrics = SimpleNamespace(
             recording_samples_queued=0,
             recording_samples_dropped=0,
@@ -82,14 +82,14 @@ class RecordingDetectionWriterTests(unittest.TestCase):
         self.assertEqual(stored["detections"], [])
 
     def test_disabled_writer_does_not_enqueue(self):
-        writer = RecordingDetectionWriter("http://node:3000", None)
+        writer = RecordingDetectionWriter("http://p4-node:3000", None)
         metrics = SimpleNamespace(recording_samples_queued=0, recording_samples_dropped=0)
         writer.offer(_result(0), metrics)
         self.assertTrue(writer.queue.empty())
 
     def test_samples_every_n_completed_inference_results(self):
         writer = RecordingDetectionWriter(
-            "http://node:3000", "secret", sample_every_n_frames=2
+            "http://p4-node:3000", "secret", sample_every_n_frames=2
         )
         metrics = SimpleNamespace(
             recording_samples_queued=0,

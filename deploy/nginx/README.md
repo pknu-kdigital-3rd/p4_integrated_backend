@@ -7,10 +7,10 @@ published.
 
 Internal upstreams use Compose DNS:
 
-- Node: `node:3000`
-- Vision: `vision:39011`
-- Go relay: `relay:39012`
-- MinIO S3 API: `minio:9000`
+- Node: `p4-node:3000`
+- Vision: `p4-vision:39011`
+- Go relay: `p4-relay:39012`
+- MinIO S3 API: `p4-minio:9000`
 
 The Nginx container mounts:
 

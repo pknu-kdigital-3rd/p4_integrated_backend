@@ -46,8 +46,8 @@ compose() {
 }
 
 recording_bootstrap() {
-  compose up -d minio
-  compose run --rm --no-deps minio-bootstrap
+  compose up -d p4-minio
+  compose run --rm --no-deps p4-minio-bootstrap
 }
 
 setup_stack() {
@@ -55,14 +55,14 @@ setup_stack() {
   log "Building Compose images"
   compose build
   log "Starting PostgreSQL and applying migrations"
-  compose up -d db
-  compose run --rm node-migrate
+  compose up -d p4-db
+  compose run --rm p4-node-migrate
   recording_bootstrap
   log "Setup completed"
 }
 
 start_stack() {
-  local services=(node routing relay vision nginx coturn)
+  local services=(p4-node p4-routing p4-relay p4-vision p4-nginx p4-coturn)
   compose up -d --build "${services[@]}"
   recording_bootstrap
   log "Compose stack started"
@@ -71,15 +71,27 @@ start_stack() {
 }
 
 start_component() {
-  local component="${1//route-tracking/routing}"
-  [[ "$component" =~ ^(node|routing|relay|vision|nginx|coturn)$ ]] || die "Unknown component '$component'"
+  local component
+  component="$(normalize_component "$1")"
   compose up -d --build "$component"
 }
 
 stop_component() {
-  local component="${1//route-tracking/routing}"
-  [[ "$component" =~ ^(node|routing|relay|vision|nginx|coturn)$ ]] || die "Unknown component '$component'"
+  local component
+  component="$(normalize_component "$1")"
   compose stop "$component"
+}
+
+normalize_component() {
+  case "$1" in
+    node|p4-node) printf '%s\n' p4-node ;;
+    routing|p4-routing|route-tracking) printf '%s\n' p4-routing ;;
+    relay|p4-relay) printf '%s\n' p4-relay ;;
+    vision|p4-vision) printf '%s\n' p4-vision ;;
+    nginx|p4-nginx) printf '%s\n' p4-nginx ;;
+    coturn|p4-coturn) printf '%s\n' p4-coturn ;;
+    *) die "Unknown component '$1'" ;;
+  esac
 }
 
 usage() {
@@ -87,9 +99,9 @@ usage() {
 Usage: scripts/run-linux-stack.sh [all|setup|start|restart|status|stop|down|logs|recording-bootstrap]
 
 Individual components:
-  scripts/run-linux-stack.sh start <node|routing|relay|vision|nginx|coturn>
-  scripts/run-linux-stack.sh stop <node|routing|relay|vision|nginx|coturn>
-  scripts/run-linux-stack.sh restart <node|routing|relay|vision|nginx|coturn>
+  scripts/run-linux-stack.sh start <p4-node|p4-routing|p4-relay|p4-vision|p4-nginx|p4-coturn>
+  scripts/run-linux-stack.sh stop <p4-node|p4-routing|p4-relay|p4-vision|p4-nginx|p4-coturn>
+  scripts/run-linux-stack.sh restart <p4-node|p4-routing|p4-relay|p4-vision|p4-nginx|p4-coturn>
   scripts/run-linux-stack.sh status [component]
 
 The wrapper is optional. Plain `docker compose up -d` uses the production file
@@ -114,7 +126,7 @@ main() {
       start_component "$2"
       ;;
     status)
-      if [[ -n "${2:-}" ]]; then compose ps "$2"; else compose ps; fi
+      if [[ -n "${2:-}" ]]; then compose ps "$(normalize_component "$2")"; else compose ps; fi
       ;;
     stop)
       if [[ -n "${2:-}" ]]; then stop_component "$2"; else compose stop; fi

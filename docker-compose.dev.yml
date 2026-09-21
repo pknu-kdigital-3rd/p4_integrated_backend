@@ -3,7 +3,7 @@ name: p4-integrated-backend
 # Persistent data lives outside the checkout. Edit each `source` path below
 # when a volume should live somewhere else; Compose creates missing directories.
 services:
-  db:
+  p4-db:
     image: postgis/postgis:17-3.5
     container_name: p4-db
     restart: unless-stopped
@@ -17,7 +17,7 @@ services:
         target: /var/lib/postgresql/data
     networks: [ p4 ]
 
-  node-migrate:
+  p4-node-migrate:
     build:
       context: .
       dockerfile: docker/node.Dockerfile
@@ -25,10 +25,10 @@ services:
     container_name: p4-node-migrate
     restart: "no"
     depends_on:
-      - db
+      - p4-db
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@p4-db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/private.pem
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
       JWT_ISSUER: project4-node
@@ -52,7 +52,7 @@ services:
         target: /run/secrets/jwt
     networks: [ p4 ]
 
-  node:
+  p4-node:
     build:
       context: .
       dockerfile: docker/node.Dockerfile
@@ -60,14 +60,14 @@ services:
     container_name: p4-node
     restart: unless-stopped
     depends_on:
-      node-migrate:
+      p4-node-migrate:
         condition: service_completed_successfully
     working_dir: /workspace/node
     environment:
       NODE_ENV: development
       HOST: 0.0.0.0
       PORT: "3000"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@p4-db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/private.pem
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
       JWT_ISSUER: project4-node
@@ -75,7 +75,7 @@ services:
       JWT_ACCESS_TOKEN_TTL: never
       JWT_KEY_ID: project4-2026-01
       PUBLIC_OPERATOR_URL: ${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
-      ROUTING_TRACKING_BASE_URL: http://routing:8000
+      ROUTING_TRACKING_BASE_URL: http://p4-routing:8000
       VISION_PUBLIC_BASE_URL: ${VISION_PUBLIC_BASE_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002}
       LIVE_VIEW_URL: ${LIVE_VIEW_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002/}
       OPERATOR_DEMO_PUBLIC: ${OPERATOR_DEMO_PUBLIC:-true}
@@ -83,7 +83,7 @@ services:
       RECORDING_VALIDATE_TRIP_CONTEXT: ${RECORDING_VALIDATE_TRIP_CONTEXT:-true}
       # Development-only fixed credentials. Production keeps these host-supplied.
       NODE_INTERNAL_SERVICE_TOKEN: dev-only-node-internal-service-token-2026
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: p4-minio:9000
       MINIO_USE_SSL: "false"
       MINIO_RECORDING_BUCKET: p4-trip-recordings
       MINIO_NODE_ACCESS_KEY: p4-node
@@ -105,7 +105,7 @@ services:
     expose: [ "3000" ]
     networks: [ p4 ]
 
-  routing:
+  p4-routing:
     build:
       context: ./services/routing-tracking
       dockerfile: ../../docker/routing.Dockerfile
@@ -114,7 +114,7 @@ services:
     environment:
       ROUTING_GRAPH_BACKEND: ${ROUTING_GRAPH_BACKEND:-auto}
       TELEMETRY_MODE_STATE_PATH: /var/lib/p4-routing/telemetry-mode.json
-      MEDIA_RELAY_INTERNAL_BASE_URL: http://relay:39012
+      MEDIA_RELAY_INTERNAL_BASE_URL: http://p4-relay:39012
       BUSAN_BIMS_SERVICE_KEY: ${BUSAN_BIMS_SERVICE_KEY:-}
       PBF_PATH: /workspace/services/routing-tracking/busan-roads_osm.pbf
       BUSAN_BUS_HISTORY_PATH: /workspace/services/routing-tracking/data/busan_bus_gps.csv
@@ -133,7 +133,7 @@ services:
     expose: [ "8000" ]
     networks: [ p4 ]
 
-  relay:
+  p4-relay:
     build:
       context: ./services/media-relay
       dockerfile: ../../docker/relay.Dockerfile
@@ -145,12 +145,12 @@ services:
       TURN_USERNAME: ${TURN_USERNAME:-user}
       TURN_PASSWORD: ${TURN_PASSWORD:-replace-with-strong-turn-password}
       YOLO_FEED_SOCKET: /run/p4/relay/yolo.sock
-      PY_ANDROID_LIVE_URL: http://vision:39011/internal/android-live
-      PY_TELEMETRY_URL: http://vision:39011/internal/telemetry
-      NODE_INTERNAL_BASE_URL: http://node:3000
+      PY_ANDROID_LIVE_URL: http://p4-vision:39011/internal/android-live
+      PY_TELEMETRY_URL: http://p4-vision:39011/internal/telemetry
+      NODE_INTERNAL_BASE_URL: http://p4-node:3000
       NODE_INTERNAL_SERVICE_TOKEN: dev-only-node-internal-service-token-2026
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: p4-minio:9000
       MINIO_USE_SSL: "false"
       MINIO_ACCESS_KEY: p4-relay
       MINIO_SECRET_KEY: dev-only-relay-minio-secret-2026
@@ -174,7 +174,7 @@ services:
     expose: [ "39012" ]
     networks: [ p4 ]
 
-  vision:
+  p4-vision:
     build:
       context: ./services/vision
       dockerfile: ../../docker/vision.Dockerfile
@@ -197,9 +197,9 @@ services:
       YOLO_FRAME_DROP_POLICY: ${YOLO_FRAME_DROP_POLICY:-latest}
       YOLO_INFERENCE_QUEUE_SIZE: ${YOLO_INFERENCE_QUEUE_SIZE:-1}
       YOLO_FEED_SOCKET: /run/p4/relay/yolo.sock
-      RELAY_KEYFRAME_URL: http://relay:39012/internal/request-keyframe
-      RELAY_STATUS_URL: http://relay:39012/internal/status
-      NODE_INTERNAL_BASE_URL: http://node:3000
+      RELAY_KEYFRAME_URL: http://p4-relay:39012/internal/request-keyframe
+      RELAY_STATUS_URL: http://p4-relay:39012/internal/status
+      NODE_INTERNAL_BASE_URL: http://p4-node:3000
       NODE_INTERNAL_SERVICE_TOKEN: dev-only-node-internal-service-token-2026
       TURN_URL: ${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39004?transport=udp}
       TURN_USERNAME: ${TURN_USERNAME:-user}
@@ -231,7 +231,7 @@ services:
     expose: [ "39011" ]
     networks: [ p4 ]
 
-  nginx:
+  p4-nginx:
     build:
       context: .
       dockerfile: docker/nginx.Dockerfile
@@ -239,10 +239,10 @@ services:
     container_name: p4-nginx
     restart: unless-stopped
     depends_on:
-      - node
-      - routing
-      - relay
-      - vision
+      - p4-node
+      - p4-routing
+      - p4-relay
+      - p4-vision
     environment:
       TLS_PUBLIC_ADDRESS: ${TLS_PUBLIC_ADDRESS:-10.174.96.119}
     ports:
@@ -260,7 +260,7 @@ services:
         target: /var/log/nginx
     networks: [ p4 ]
 
-  minio:
+  p4-minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: p4-minio
     restart: unless-stopped
@@ -275,12 +275,12 @@ services:
         target: /data
     networks: [ p4 ]
 
-  minio-bootstrap:
+  p4-minio-bootstrap:
     image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     container_name: p4-minio-bootstrap
     restart: "no"
     depends_on:
-      - minio
+      - p4-minio
     entrypoint: [ "/bin/sh", "/bootstrap.sh" ]
     environment:
       MINIO_ROOT_USER: p4-minio-root
@@ -295,7 +295,7 @@ services:
       - ./deploy/minio/policies:/policies:ro
     networks: [ p4 ]
 
-  coturn:
+  p4-coturn:
     image: coturn/coturn:4.6.3
     container_name: p4-coturn
     restart: unless-stopped

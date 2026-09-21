@@ -170,19 +170,19 @@ docker compose --env-file <secrets-file> -f docker-compose.dev.yml up -d --build
 
 The first startup initializes JWT keys and the self-signed TLS certificate in
 `data/jwt` and `data/tls`, runs Prisma migrations/seed, starts MinIO, and runs
-the one-shot `minio-bootstrap` container. The MinIO Console is private and is
+the one-shot `p4-minio-bootstrap` container. The MinIO Console is private and is
 not required for replay.
 
 ### Verify and clean up MinIO bootstrap
 
-`minio-bootstrap` is a one-shot service. A successful run ends with `Exited
+`p4-minio-bootstrap` is a one-shot service. A successful run ends with `Exited
 (0)`; it is not supposed to keep running after it creates the bucket and
 application accounts. Check its status and logs with the Compose file you are
 using (`docker-compose.dev.yml` or `docker-compose.prod.yml`):
 
 ```bash
-docker compose -f docker-compose.dev.yml ps -a minio-bootstrap
-docker compose -f docker-compose.dev.yml logs --no-color minio-bootstrap
+docker compose -f docker-compose.dev.yml ps -a p4-minio-bootstrap
+docker compose -f docker-compose.dev.yml logs --no-color p4-minio-bootstrap
 ```
 
 The logs should end with a message that the `p4-trip-recordings` bucket and
@@ -190,10 +190,10 @@ recording credentials are ready. After recording the logs, remove the completed
 one-shot container without stopping MinIO:
 
 ```bash
-docker compose -f docker-compose.dev.yml rm -f minio-bootstrap
+docker compose -f docker-compose.dev.yml rm -f p4-minio-bootstrap
 ```
 
-Use `docker compose ... up -d minio` when only MinIO should be started. A later
+Use `docker compose ... up -d p4-minio` when only MinIO should be started. A later
 `docker compose ... up -d` for the whole stack recreates and runs the bootstrap
 service again; this is safe because the bootstrap script is idempotent.
 
@@ -216,8 +216,8 @@ service again; this is safe because the bootstrap script is idempotent.
 Relay source update:
 
 ```bash
-docker compose -f docker-compose.dev.yml build relay
-docker compose -f docker-compose.dev.yml up -d --no-deps relay
+docker compose -f docker-compose.dev.yml build p4-relay
+docker compose -f docker-compose.dev.yml up -d --no-deps p4-relay
 ```
 
 Vision model replacement at the configured default path:
@@ -225,7 +225,7 @@ Vision model replacement at the configured default path:
 ```bash
 cp new-model.engine services/vision/models/a4_best.engine
 touch services/vision/app/main.py
-docker compose -f docker-compose.dev.yml logs -f vision
+docker compose -f docker-compose.dev.yml logs -f p4-vision
 ```
 
 The loader supports both segmentation `.engine` and `.pt` files through
@@ -239,18 +239,18 @@ Vision container recreation.
 Production commands do not use source reloaders:
 
 ```bash
-docker compose --env-file <secrets-file> up -d --build node-migrate node
-docker compose --env-file <secrets-file> up -d --build routing
-docker compose --env-file <secrets-file> up -d --build vision
-docker compose --env-file <secrets-file> build relay
-docker compose --env-file <secrets-file> up -d --no-deps relay
+docker compose --env-file <secrets-file> up -d --build p4-node-migrate p4-node
+docker compose --env-file <secrets-file> up -d --build p4-routing
+docker compose --env-file <secrets-file> up -d --build p4-vision
+docker compose --env-file <secrets-file> build p4-relay
+docker compose --env-file <secrets-file> up -d --no-deps p4-relay
 ```
 
 Replacing a mounted Vision model at the same path does not require an image
 build, but it does require a Vision process restart:
 
 ```bash
-docker compose --env-file <secrets-file> restart vision
+docker compose --env-file <secrets-file> restart p4-vision
 ```
 
 Changing an environment value requires `up -d --force-recreate`; `restart`
@@ -289,7 +289,7 @@ or Go code requires rebuilding the relevant production image first.
 - Rerun MinIO bootstrap after changing bucket policies or application secrets:
 
   ```bash
-  docker compose --env-file <secrets-file> run --rm --no-deps minio-bootstrap
+  docker compose --env-file <secrets-file> run --rm --no-deps p4-minio-bootstrap
   ```
 
 - The operator's **Bus telemetry source** menu switches live/replay at runtime;
@@ -305,7 +305,7 @@ or Go code requires rebuilding the relevant production image first.
 
 ```bash
 docker compose --env-file <secrets-file> ps
-docker compose --env-file <secrets-file> logs --tail=100 node routing vision relay
+docker compose --env-file <secrets-file> logs --tail=100 p4-node p4-routing p4-vision p4-relay
 docker compose --env-file <secrets-file> config --quiet
 ```
 

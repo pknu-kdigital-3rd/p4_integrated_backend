@@ -12,13 +12,13 @@ reload matrix, and platform gotchas, see
 
 | Service | Compose address | Host exposure |
 |---|---|---|
-| PostgreSQL/PostGIS | `db:5432` | none |
-| Node API | `node:3000` | through Nginx `39001` |
-| Routing/tracking | `routing:8000` | none |
-| Vision | `vision:39011` | through Nginx `39002` |
-| Go relay | `relay:39012` | through Nginx `39002` |
-| MinIO S3 API | `minio:9000` | through Nginx `39003` |
-| MinIO Console | `minio:9001` | none |
+| PostgreSQL/PostGIS | `p4-db:5432` | none |
+| Node API | `p4-node:3000` | through Nginx `39001` |
+| Routing/tracking | `p4-routing:8000` | none |
+| Vision | `p4-vision:39011` | through Nginx `39002` |
+| Go relay | `p4-relay:39012` | through Nginx `39002` |
+| MinIO S3 API | `p4-minio:9000` | through Nginx `39003` |
+| MinIO Console | `p4-minio:9001` | none |
 | Coturn | host network | `39004` UDP/TCP, `39005` TCP, `39006-39007` UDP |
 
 The container-to-container ports are private to the `p4-internal` network. The
@@ -125,7 +125,7 @@ commands when editing Node or Python code:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d
-docker compose -f docker-compose.dev.yml logs -f node
+docker compose -f docker-compose.dev.yml logs -f p4-node
 ```
 
 The development file mounts source directories individually; it never mounts
@@ -156,9 +156,9 @@ MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret" \
 docker compose up -d --build
 ```
 
-The production file starts MinIO and runs the one-shot `minio-bootstrap`
+The production file starts MinIO and runs the one-shot `p4-minio-bootstrap`
 service after MinIO is ready. If bootstrap must be repeated, run
-`docker compose run --rm --no-deps minio-bootstrap`.
+`docker compose run --rm --no-deps p4-minio-bootstrap`.
 
 If a non-secret setting needs to change, edit the matching JWT or MinIO entry
 in both Compose files. Existing MinIO data retains the root credentials with
@@ -186,8 +186,8 @@ Set `TURN_URL=""` only when Android and the relay host are directly reachable.
 
 ```bash
 docker compose logs -f
-docker compose logs -f relay
-docker compose restart vision
+docker compose logs -f p4-relay
+docker compose restart p4-vision
 docker compose stop
 docker compose down
 ```

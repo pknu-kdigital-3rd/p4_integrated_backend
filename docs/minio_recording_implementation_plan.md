@@ -396,7 +396,7 @@ MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret" \
 docker compose up -d --build
 ```
 
-The production file starts `minio` and runs the one-shot `minio-bootstrap`
+The production file starts `p4-minio` and runs the one-shot `p4-minio-bootstrap`
 service after MinIO is ready. Existing MinIO data retains its original root
 credentials. The application defaults below show the recording settings:
 
@@ -407,11 +407,11 @@ RECORDING_SPOOL_DIR=/var/tmp/p4-recordings
 RECORDING_SPOOL_MAX_BYTES=10737418240
 RECORDING_UPLOAD_QUEUE=8
 
-NODE_INTERNAL_BASE_URL=http://node:3000
+NODE_INTERNAL_BASE_URL=http://p4-node:3000
 NODE_INTERNAL_SERVICE_TOKEN="replace-with-a-random-token-at-least-32-characters"
 
 # Private MinIO API connection used by the Go relay and Node storage operations
-MINIO_ENDPOINT=minio:9000
+MINIO_ENDPOINT=p4-minio:9000
 MINIO_USE_SSL=false
 MINIO_RECORDING_BUCKET=p4-trip-recordings
 MINIO_ACCESS_KEY=p4-relay
@@ -442,7 +442,7 @@ administration only; application services use their dedicated accounts.
 
 The public URLs above use `10.174.96.119`; change them to match
 `TLS_PUBLIC_ADDRESS` if the host address changes. `MINIO_ENDPOINT` is always
-the private Compose address `minio:9000` for containerized services.
+the private Compose address `p4-minio:9000` for containerized services.
 
 ---
 

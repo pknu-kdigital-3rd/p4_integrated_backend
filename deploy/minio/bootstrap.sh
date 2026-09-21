@@ -13,7 +13,7 @@ case "$MINIO_RECORDING_BUCKET" in
 esac
 
 attempt=0
-until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+until mc alias set local http://p4-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 60 ]; then
     echo "MinIO did not become ready after 60 attempts" >&2
