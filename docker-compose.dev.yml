@@ -314,3 +314,6 @@ services:
 networks:
   p4:
     name: p4-internal
+    ipam:
+      config:
+        - subnet: ${P4_DOCKER_SUBNET:-172.30.0.0/16}
