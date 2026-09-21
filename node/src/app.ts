@@ -1,6 +1,7 @@
 import express from "express";
 import { logger } from "./config/logger.ts";
 import { prisma } from "./infrastructure/database/prisma.ts";
+import { openApiDocument } from "./docs/openapi.ts";
 import { vehicleRouter } from "./modules/vehicle/vehicle.router.ts";
 
 import {
@@ -10,7 +11,6 @@ import {
 import { pinoHttp } from "pino-http";
 
 import swaggerUi from "swagger-ui-express";
-import { openApiDocument } from "./docs/openapi.ts";
 import { authRouter } from "./modules/auth/auth.router.ts";
 import { bootstrapRouter } from "./modules/bootstrap/bootstrap.router.ts";
 import { trackingRouter } from "./modules/tracking/tracking.router.ts";

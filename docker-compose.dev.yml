@@ -27,7 +27,7 @@ services:
     depends_on:
       - p4-db
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      NODE_ENV: ${NODE_ENV:-development}
       DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@p4-db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/private.pem
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
@@ -39,14 +39,11 @@ services:
       - /bin/sh
       - -c
       - >-
-        until npx prisma migrate deploy; do
+        until ./node_modules/.bin/prisma migrate deploy; do
           echo 'Waiting for PostgreSQL/migrations...'; sleep 2;
-        done && npx tsx prisma/seed.ts
+        done && ./node_modules/.bin/tsx prisma/seed.ts
     volumes:
-      - ./node:/workspace/node
-      - type: bind
-        source: ./data/node_modules
-        target: /workspace/node/node_modules
+      - ./node/prisma:/workspace/node/prisma:ro
       - type: bind
         source: ./data/jwt
         target: /run/secrets/jwt
@@ -94,10 +91,8 @@ services:
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
     command: [ "./node_modules/.bin/tsx", "watch", "src/server.ts" ]
     volumes:
-      - ./node:/workspace/node
-      - type: bind
-        source: ./data/node_modules
-        target: /workspace/node/node_modules
+      - ./node/src:/workspace/node/src
+      - ./node/tsconfig.json:/workspace/node/tsconfig.json:ro
       - ./operator-web:/workspace/operator-web
       - type: bind
         source: ./data/jwt
