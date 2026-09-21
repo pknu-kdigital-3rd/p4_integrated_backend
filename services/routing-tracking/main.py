@@ -14,7 +14,7 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -31,7 +31,6 @@ from telemetry import (
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PBF_PATH = "busan-roads_osm.pbf"  # <-- point this at your .pbf file
-ROUTING_SERVICE_TOKEN = os.environ.get("ROUTING_TRACKING_SERVICE_TOKEN", "").strip()
 
 
 def _first_existing_path(*paths: Path) -> Path:
@@ -189,17 +188,6 @@ class RestrictionResolveRequest(BaseModel):
 
 class SnapRequest(InternalCoordinate):
     vehicleProfile: str = "car"
-
-
-def require_internal_token(authorization: str | None = Header(default=None)):
-    """Keep the internal routing facade private when a service token is set.
-
-    Local development intentionally leaves the variable empty, which preserves
-    the existing single-host setup while production deployments can put this
-    endpoint behind the same shared-secret boundary as the Node service.
-    """
-    if ROUTING_SERVICE_TOKEN and authorization != f"Bearer {ROUTING_SERVICE_TOKEN}":
-        raise HTTPException(status_code=401, detail="Invalid routing service token")
 
 
 def _graph_version() -> str:
@@ -743,12 +731,12 @@ def get_route(req: RouteRequest):
     }
 
 
-@app.get("/internal/routing/graph-version", dependencies=[Depends(require_internal_token)])
+@app.get("/internal/routing/graph-version")
 def internal_graph_version():
     return {"graphVersion": _graph_version()}
 
 
-@app.post("/internal/routing/snap", dependencies=[Depends(require_internal_token)])
+@app.post("/internal/routing/snap")
 def internal_snap(req: SnapRequest):
     if graph is None:
         raise HTTPException(status_code=503, detail="Routing graph is not ready")
@@ -759,12 +747,12 @@ def internal_snap(req: SnapRequest):
     return {"graphVersion": _graph_version(), "nodeId": str(node_id), "lat": coords[0], "lon": coords[1], "distanceM": 0.0}
 
 
-@app.post("/internal/routing/route", dependencies=[Depends(require_internal_token)])
+@app.post("/internal/routing/route")
 def internal_route(req: InternalRouteRequest):
     return _internal_route(req)
 
 
-@app.post("/internal/routing/road-restrictions/resolve", dependencies=[Depends(require_internal_token)])
+@app.post("/internal/routing/road-restrictions/resolve")
 def internal_resolve_restriction(req: RestrictionResolveRequest):
     """Resolve full directed graph arcs touched by a scenario polygon."""
     started = time.perf_counter()

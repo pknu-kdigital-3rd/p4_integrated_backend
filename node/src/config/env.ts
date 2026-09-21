@@ -38,7 +38,6 @@ const envSchema = z.object({
     VISION_PUBLIC_BASE_URL: z.url().default("https://127.0.0.1:39002"),
     LIVE_VIEW_URL: z.url().optional(),
     ROUTING_TRACKING_BASE_URL: z.url().default("http://127.0.0.1:8000"),
-    ROUTING_TRACKING_SERVICE_TOKEN: z.string().optional(),
     OPERATOR_DEMO_PUBLIC: envBoolean,
     TRUST_PROXY: envBoolean,
     RECORDING_ENABLED: envBoolean,

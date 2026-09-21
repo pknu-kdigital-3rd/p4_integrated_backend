@@ -27,8 +27,6 @@ type RouteInput = {
 async function request<T>(path: string, body?: unknown): Promise<T> {
     try {
         const headers: Record<string, string> = { "content-type": "application/json" };
-        const token = env.ROUTING_TRACKING_SERVICE_TOKEN;
-        if (token) headers.authorization = `Bearer ${token}`;
         const init: RequestInit = {
             method: body === undefined ? "GET" : "POST",
             headers,
