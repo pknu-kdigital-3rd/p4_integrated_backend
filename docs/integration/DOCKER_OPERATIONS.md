@@ -142,8 +142,9 @@ uv sync --locked
 uv run python export_tensorrt.py --model models/a4_best.pt --device 0 --imgsz 640
 ```
 
-The export environment must have CUDA-enabled PyTorch and the TensorRT Python
-bindings installed. The script stops with a diagnostic if either is missing.
+The Vision project declares the CUDA 13 TensorRT Python bindings, so
+`uv sync --locked` installs them for both the exporter and the Docker image.
+The script stops with a diagnostic if the environment was not synchronized.
 Use `--force` to replace an existing engine, `--precision fp32` for an FP32
 engine, or `--keep-onnx` to retain the intermediate ONNX file. TensorRT engines
 are compiled for the GPU and TensorRT runtime used during export; regenerate the

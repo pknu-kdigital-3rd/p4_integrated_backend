@@ -1006,6 +1006,7 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "psutil" },
     { name = "pydantic-settings" },
+    { name = "tensorrt-cu13" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "ultralytics" },
@@ -1020,6 +1021,7 @@ requires-dist = [
     { name = "opencv-python-headless" },
     { name = "psutil" },
     { name = "pydantic-settings" },
+    { name = "tensorrt-cu13" },
     { name = "torch", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/cu130" },
     { name = "ultralytics", editable = ".ultralytics-custom" },
@@ -1407,6 +1409,32 @@ sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
 ]
+
+[[package]]
+name = "tensorrt-cu13"
+version = "11.3.0.99"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tensorrt-cu13-bindings" },
+    { name = "tensorrt-cu13-libs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/35/de/e6de4794bd8f47f675798105eddd8da9977a3a5f2b681d86656d9389ac90/tensorrt_cu13-11.3.0.99.tar.gz", hash = "sha256:6410ec3c25e661faf217620365b0c661024933b8fdb03c5190172690e8070162", size = 17985, upload-time = "2026-09-09T16:30:46.75Z" }
+
+[[package]]
+name = "tensorrt-cu13-bindings"
+version = "11.3.0.99"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/85/6b/fbe3105bea649e1c5a4c1ee27090ce964081b29da715ae4b81e0568dd43b/tensorrt_cu13_bindings-11.3.0.99-cp312-none-manylinux_2_28_x86_64.whl", hash = "sha256:91b4e4cbe385dfd405ad8cfd927c6c22d5cd431895929b74a31f9887761c09b3", size = 1257701, upload-time = "2026-09-09T16:33:57.278Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/38/4507c655d53c37be3d2d78990d63301c261b59d81a6045bf52b36ae7db87/tensorrt_cu13_bindings-11.3.0.99-cp312-none-manylinux_2_35_aarch64.whl", hash = "sha256:bb5b014cdddbc3215815c88a968cf22dd113f325b203937335ec3fdd5b9c8614", size = 1229963, upload-time = "2026-09-09T16:34:21.697Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/80/38707dfd43f0959efdcd53d95516bbf8a0eced6b8a05d44094373cd5eafe/tensorrt_cu13_bindings-11.3.0.99-cp312-none-win_amd64.whl", hash = "sha256:83ce38483b329dec1a1df7ccf5a465319f9d3a16db6686e1e17ed89f8bfee8ab", size = 894169, upload-time = "2026-09-09T16:34:42.395Z" },
+]
+
+[[package]]
+name = "tensorrt-cu13-libs"
+version = "11.3.0.99"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/67/ac0542809deab721244bc3bd478be1a248335585c66ba22a7b44a0fbe75f/tensorrt_cu13_libs-11.3.0.99.tar.gz", hash = "sha256:a87962b8b88221ea97c9fb6d13651affffafbd3af4ecba6dfd3307271c6daf92", size = 15501, upload-time = "2026-09-09T16:32:46.295Z" }
 
 [[package]]
 name = "torch"

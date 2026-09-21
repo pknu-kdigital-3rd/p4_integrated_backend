@@ -11,6 +11,7 @@ dependencies = [
     "opencv-python-headless",
     "psutil",
     "pydantic-settings",
+    "tensorrt-cu13",
     "torch",
     "torchvision",
     "ultralytics",
