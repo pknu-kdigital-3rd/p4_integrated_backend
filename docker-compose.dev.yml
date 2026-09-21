@@ -5,7 +5,7 @@ name: p4-integrated-backend
 services:
   db:
     image: postgis/postgis:17-3.5
-    container_name: vehicle-platform-postgis
+    container_name: p4-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
@@ -22,7 +22,7 @@ services:
       context: .
       dockerfile: docker/node.Dockerfile
       target: runtime
-    container_name: vehicle-platform-node-migrate
+    container_name: p4-node-migrate
     restart: "no"
     depends_on:
       - db
@@ -57,7 +57,7 @@ services:
       context: .
       dockerfile: docker/node.Dockerfile
       target: runtime
-    container_name: vehicle-platform-node
+    container_name: p4-node
     restart: unless-stopped
     depends_on:
       node-migrate:
@@ -92,7 +92,7 @@ services:
       RECORDING_PLAYBACK_URL_TTL_SECONDS: 300
       RECORDING_ENABLED: "true"
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
-    command: ["./node_modules/.bin/tsx", "watch", "src/server.ts"]
+    command: [ "./node_modules/.bin/tsx", "watch", "src/server.ts" ]
     volumes:
       - ./node:/workspace/node
       - type: bind
@@ -109,7 +109,7 @@ services:
     build:
       context: ./services/routing-tracking
       dockerfile: ../../docker/routing.Dockerfile
-    container_name: vehicle-platform-routing
+    container_name: p4-routing
     restart: unless-stopped
     environment:
       ROUTING_GRAPH_BACKEND: ${ROUTING_GRAPH_BACKEND:-auto}
@@ -124,7 +124,7 @@ services:
       BUSAN_BUS_LINE_IDS: ${BUSAN_BUS_LINE_IDS:-}
       DEVICE_TELEMETRY_TIMEOUT_S: ${DEVICE_TELEMETRY_TIMEOUT_S:-1.0}
       ROUTING_EDGE_INDEX_BUCKET_DEGREES: ${ROUTING_EDGE_INDEX_BUCKET_DEGREES:-0.01}
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/workspace/services/routing-tracking"]
+    command: [ "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/workspace/services/routing-tracking" ]
     volumes:
       - ./services/routing-tracking:/workspace/services/routing-tracking
       - type: bind
@@ -137,7 +137,7 @@ services:
     build:
       context: ./services/media-relay
       dockerfile: ../../docker/relay.Dockerfile
-    container_name: vehicle-platform-relay
+    container_name: p4-relay
     restart: unless-stopped
     environment:
       RELAY_LISTEN_ADDR: 0.0.0.0:39012
@@ -180,7 +180,7 @@ services:
       dockerfile: ../../docker/vision.Dockerfile
       additional_contexts:
         ultralytics: ./services/vision/.ultralytics-custom
-    container_name: vehicle-platform-vision
+    container_name: p4-vision
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
@@ -210,7 +210,7 @@ services:
       METRICS_LOG_INTERVAL_SECONDS: ${METRICS_LOG_INTERVAL_SECONDS:-5}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
       LIVE_VIEW_PARENT_ORIGINS: ${LIVE_VIEW_PARENT_ORIGINS:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "39011", "--reload", "--reload-dir", "/workspace/services/vision"]
+    command: [ "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "39011", "--reload", "--reload-dir", "/workspace/services/vision" ]
     deploy:
       resources:
         reservations:
@@ -236,7 +236,7 @@ services:
       context: .
       dockerfile: docker/nginx.Dockerfile
     image: p4-integrated-backend-nginx:dev
-    container_name: vehicle-platform-nginx
+    container_name: p4-nginx
     restart: unless-stopped
     depends_on:
       - node
@@ -262,7 +262,7 @@ services:
 
   minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: vehicle-platform-minio
+    container_name: p4-minio
     restart: unless-stopped
     command: [ "server", "/data", "--console-address", ":9001" ]
     environment:
@@ -277,7 +277,7 @@ services:
 
   minio-bootstrap:
     image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
-    container_name: vehicle-platform-minio-bootstrap
+    container_name: p4-minio-bootstrap
     restart: "no"
     depends_on:
       - minio
@@ -297,7 +297,7 @@ services:
 
   coturn:
     image: coturn/coturn:4.6.3
-    container_name: vehicle-platform-coturn
+    container_name: p4-coturn
     restart: unless-stopped
     network_mode: host
     command:

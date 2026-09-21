@@ -210,7 +210,7 @@ service again; this is safe because the bootstrap script is idempotent.
 | Vision model contents at the same path | Replace the mounted file, then `touch services/vision/app/main.py` to trigger Vision reload | No Docker restart; Vision process reloads |
 | Vision model path or `.pt`/`.engine` selection | Change `YOLO_MODEL`, then force-recreate Vision | Vision container recreated, no image rebuild |
 | Go relay source | Build and recreate only relay; there is no current Go watcher | Relay container recreated |
-| Nginx configuration | Run `docker exec vehicle-platform-nginx nginx -t` then `docker exec vehicle-platform-nginx nginx -s reload` | No |
+| Nginx configuration | Run `docker exec p4-nginx nginx -t` then `docker exec p4-nginx nginx -s reload` | No |
 | Compose environment value | `docker compose ... up -d --force-recreate <service>` | Affected container recreated |
 
 Relay source update:

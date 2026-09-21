@@ -71,7 +71,7 @@ Start and inspect the container:
 
 ```bash
 ./scripts/run-linux-stack.sh start coturn
-docker logs -f vehicle-platform-coturn
+docker logs -f p4-coturn
 ```
 
 ## 2. Linux firewall
