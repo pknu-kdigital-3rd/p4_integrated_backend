@@ -23,6 +23,11 @@ type committedMarker struct {
 	CommittedAt time.Time `json:"committedAt"`
 }
 
+type uploadRetry struct {
+	attempt int
+	after   time.Time
+}
+
 type uploader struct {
 	directory string
 	store     ObjectStore
@@ -35,6 +40,7 @@ type uploader struct {
 	spool    *atomic.Int64
 	counters *uploadCounters
 	pending  map[string]struct{}
+	retries  map[string]uploadRetry
 	mu       sync.Mutex
 }
 
@@ -54,6 +60,7 @@ func newUploader(directory string, capacity int, store ObjectStore, registrar Se
 		spool:     spool,
 		counters:  counters,
 		pending:   make(map[string]struct{}),
+		retries:   make(map[string]uploadRetry),
 	}
 	u.scan()
 	go u.run()
@@ -77,6 +84,10 @@ func (u *uploader) Close() error {
 func (u *uploader) enqueue(filePath string) {
 	filePath = filepath.Clean(filePath)
 	u.mu.Lock()
+	if retry, exists := u.retries[filePath]; exists && time.Now().Before(retry.after) {
+		u.mu.Unlock()
+		return
+	}
 	if _, exists := u.pending[filePath]; exists {
 		u.mu.Unlock()
 		return
@@ -125,6 +136,8 @@ func (u *uploader) run() {
 	defer close(u.done)
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+	retryTicker := time.NewTicker(time.Second)
+	defer retryTicker.Stop()
 	for {
 		select {
 		case <-u.ctx.Done():
@@ -136,31 +149,44 @@ func (u *uploader) run() {
 			u.mu.Unlock()
 		case <-ticker.C:
 			u.scan()
+		case <-retryTicker.C:
+			u.enqueueRetries()
 		}
 	}
 }
 
 func (u *uploader) process(filePath string) {
-	attempt := 0
-	for {
-		if u.ctx.Err() != nil {
-			return
+	if u.ctx.Err() != nil {
+		return
+	}
+	err := u.processOnce(filePath)
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if err == nil {
+		delete(u.retries, filePath)
+		return
+	}
+	u.counters.uploadFailures.Add(1)
+	log.Printf("recording upload/registration will retry for %s: %v", filepath.Base(filePath), err)
+	retry := u.retries[filePath]
+	retry.after = time.Now().Add(time.Second << retry.attempt)
+	retry.attempt = min(retry.attempt+1, 5)
+	u.retries[filePath] = retry
+}
+
+// Back off each failed segment independently so a rejected registration cannot
+// occupy the only worker forever. Durable files stay in the spool for recovery.
+func (u *uploader) enqueueRetries() {
+	u.mu.Lock()
+	var paths []string
+	for path, retry := range u.retries {
+		if !time.Now().Before(retry.after) {
+			paths = append(paths, path)
 		}
-		if err := u.processOnce(filePath); err == nil {
-			return
-		} else {
-			u.counters.uploadFailures.Add(1)
-			log.Printf("recording upload/registration will retry for %s: %v", filepath.Base(filePath), err)
-		}
-		wait := time.Second << min(attempt, 5)
-		attempt++
-		timer := time.NewTimer(wait)
-		select {
-		case <-u.ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
+	}
+	u.mu.Unlock()
+	for _, path := range paths {
+		u.enqueue(path)
 	}
 }
 

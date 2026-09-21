@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -350,6 +351,59 @@ type outageObjectStore struct {
 	mu                sync.Mutex
 	failuresRemaining int
 	calls             int
+}
+
+type rejectingRegistrar struct {
+	registered chan Manifest
+}
+
+func (r *rejectingRegistrar) RegisterSegment(_ context.Context, segment Manifest) error {
+	if segment.SegmentIndex == 0 {
+		return &HTTPStatusError{Status: 409, Message: "Trip does not belong to this vehicle"}
+	}
+	r.registered <- segment
+	return nil
+}
+
+func TestRejectedSegmentDoesNotBlockLaterRecordings(t *testing.T) {
+	directory := t.TempDir()
+	for _, index := range []int{0, 1} {
+		base := filepath.Join(directory, fmt.Sprintf("session-rejected-segment-%06d", index))
+		if err := os.WriteFile(base+".mp4", []byte("recording"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writeJSONAtomic(base+".json", Manifest{
+			TripID: 1, VehicleID: 1, RecordingSessionID: "rejected", SegmentIndex: index,
+			StorageBucket: "recordings", ObjectKey: fmt.Sprintf("segment-%d.mp4", index), ContentType: contentTypeMP4,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var spool atomic.Int64
+	size, err := directorySize(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spool.Store(size)
+	registrar := &rejectingRegistrar{registered: make(chan Manifest, 1)}
+	upload, err := newUploader(directory, 2, &testObjectStore{}, registrar, &spool, &uploadCounters{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upload.Close()
+	select {
+	case segment := <-registrar.registered:
+		if segment.SegmentIndex != 1 {
+			t.Fatalf("unexpected segment registered: %d", segment.SegmentIndex)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a rejected segment blocked a later recording")
+	}
+	for _, suffix := range []string{".mp4", ".json", ".uploaded.json"} {
+		if _, err := os.Stat(filepath.Join(directory, "session-rejected-segment-000000"+suffix)); err != nil {
+			t.Fatalf("failed segment must remain recoverable (%s): %v", suffix, err)
+		}
+	}
 }
 
 func (s *outageObjectStore) Upload(_ context.Context, _, _, filePath, _ string) (ObjectInfo, error) {
