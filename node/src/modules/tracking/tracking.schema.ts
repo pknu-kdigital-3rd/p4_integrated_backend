@@ -9,3 +9,14 @@ export const telemetryObservationSchema = z.object({
 export const trackingResponseSchema = z.object({
     data: z.object({ generated_at_utc: z.string().nullable(), vehicles: z.array(z.object({ telemetry: telemetryObservationSchema }).passthrough()), warnings: z.array(z.unknown()) }),
 });
+
+export const telemetryModeSchema = z.object({
+    mode: z.enum(["live", "playback"]),
+});
+
+export const telemetryModeResponseSchema = z.object({
+    data: z.object({
+        mode: z.enum(["live", "playback"]),
+        available: z.boolean(),
+    }),
+});

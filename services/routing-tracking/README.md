@@ -182,6 +182,16 @@ not itself generate road polylines, record a new GPS stream, or change tracking.
 
 ## Android/device vehicles
 
+### BIMS source selection
+
+The BIMS source is selected at runtime. The integrated operator dashboard
+switches between `live` and `playback` through Node's authenticated tracking
+facade; routing persists the choice in
+`TELEMETRY_MODE_STATE_PATH` (default:
+`services/routing-tracking/data/telemetry-mode.json`). A routing container
+restart restores the saved choice, and Android/device telemetry remains merged
+in either mode.
+
 `GET /internal/vehicles` merges the BIMS source (live or playback) with
 current Android/device GPS read from the media relay's
 `GET /internal/telemetry/vehicles` (`MEDIA_RELAY_INTERNAL_BASE_URL`, default

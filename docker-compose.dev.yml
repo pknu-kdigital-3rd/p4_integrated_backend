@@ -114,7 +114,7 @@ services:
     restart: unless-stopped
     environment:
       ROUTING_GRAPH_BACKEND: ${ROUTING_GRAPH_BACKEND:-auto}
-      TELEMETRY_MODE: ${TELEMETRY_MODE:-playback}
+      TELEMETRY_MODE_STATE_PATH: /var/lib/p4-routing/telemetry-mode.json
       MEDIA_RELAY_INTERNAL_BASE_URL: http://relay:39012
       PBF_PATH: /workspace/services/routing-tracking/busan-roads_osm.pbf
       BUSAN_BUS_HISTORY_PATH: /workspace/services/routing-tracking/data/busan_bus_gps.csv
@@ -127,6 +127,9 @@ services:
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/workspace/services/routing-tracking"]
     volumes:
       - ./services/routing-tracking:/workspace/services/routing-tracking
+      - type: bind
+        source: ./data/routing_state
+        target: /var/lib/p4-routing
     expose: [ "8000" ]
     networks: [ p4 ]
 

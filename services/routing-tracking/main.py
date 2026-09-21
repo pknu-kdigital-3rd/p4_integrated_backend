@@ -11,8 +11,10 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -31,6 +33,12 @@ from telemetry import (
 
 PROJECT_DIR = Path(__file__).resolve().parent
 PBF_PATH = "busan-roads_osm.pbf"  # <-- point this at your .pbf file
+TELEMETRY_MODE_STATE_PATH = Path(os.environ.get(
+    "TELEMETRY_MODE_STATE_PATH",
+    str(PROJECT_DIR / "data" / "telemetry-mode.json"),
+))
+DEFAULT_TELEMETRY_MODE = "playback"
+TELEMETRY_MODES = frozenset({"live", "playback"})
 
 
 def _first_existing_path(*paths: Path) -> Path:
@@ -81,6 +89,8 @@ graph = None
 override_locations = []
 hybrid_bus_service: HybridBusService | None = None
 vehicle_tracker: VehicleTracker | None = None
+telemetry_mode = DEFAULT_TELEMETRY_MODE
+telemetry_lock = threading.RLock()
 
 # Dynamic road restrictions are resolved against the immutable graph.  Keep a
 # small uniform spatial index beside the graph so a new polygon only checks
@@ -93,6 +103,45 @@ _edge_spatial_index = {}
 _edge_long_records = ()
 _restriction_resolution_cache = {}
 _graph_version_cache: tuple[str, float] | None = None
+
+
+def _load_telemetry_mode() -> str:
+    try:
+        payload = json.loads(TELEMETRY_MODE_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return DEFAULT_TELEMETRY_MODE
+    mode = payload.get("mode") if isinstance(payload, dict) else payload
+    return mode if mode in TELEMETRY_MODES else DEFAULT_TELEMETRY_MODE
+
+
+def _persist_telemetry_mode(mode: str) -> None:
+    TELEMETRY_MODE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = TELEMETRY_MODE_STATE_PATH.with_name(f".{TELEMETRY_MODE_STATE_PATH.name}.tmp")
+    temporary.write_text(json.dumps({"mode": mode}, separators=(",", ":")) + "\n", encoding="utf-8")
+    os.replace(temporary, TELEMETRY_MODE_STATE_PATH)
+
+
+def _install_telemetry_mode(mode: str, *, persist: bool = True) -> dict:
+    global telemetry_mode, vehicle_tracker
+    if mode not in TELEMETRY_MODES:
+        raise ValueError(f"Unsupported telemetry mode: {mode}")
+    with telemetry_lock:
+        if hybrid_bus_service is None:
+            raise RuntimeError("Routing telemetry service is not ready")
+        if persist:
+            _persist_telemetry_mode(mode)
+        if mode == "live":
+            hybrid_bus_service.start()
+            bims_source = BimsLiveSource(hybrid_bus_service)
+        else:
+            hybrid_bus_service.stop()
+            bims_source = BimsPlaybackSource(BUS_HISTORY_PATH)
+        vehicle_tracker = VehicleTracker(CompositeTelemetrySource(
+            bims_source,
+            DeviceRelaySource(MEDIA_RELAY_INTERNAL_BASE_URL, timeout=DEVICE_TELEMETRY_TIMEOUT_S),
+        ))
+        telemetry_mode = mode
+        return {"mode": telemetry_mode, "available": vehicle_tracker is not None}
 
 
 @app.get("/health/live")
@@ -109,7 +158,7 @@ def health_ready():
 
 @app.on_event("startup")
 def startup():
-    global graph, override_locations, hybrid_bus_service, vehicle_tracker
+    global graph, override_locations, hybrid_bus_service
     print(f"Loading graph from {PBF_PATH} ...")
     graph = load_graph(PBF_PATH)
     _ensure_edge_spatial_index()
@@ -124,16 +173,7 @@ def startup():
         line_ids=route_ids,
         line_ids_json=os.environ.get("BUSAN_BUS_LINE_IDS", ""),
     )
-    hybrid_bus_service.start()
-    if os.environ.get("TELEMETRY_MODE", "live").lower() == "playback":
-        hybrid_bus_service.stop()
-        bims_source = BimsPlaybackSource(BUS_HISTORY_PATH)
-    else:
-        bims_source = BimsLiveSource(hybrid_bus_service)
-    vehicle_tracker = VehicleTracker(CompositeTelemetrySource(
-        bims_source,
-        DeviceRelaySource(MEDIA_RELAY_INTERNAL_BASE_URL, timeout=DEVICE_TELEMETRY_TIMEOUT_S),
-    ))
+    _install_telemetry_mode(_load_telemetry_mode(), persist=False)
     print(f"Graph loaded and ready. {len(override_locations)} manual override location(s) found.")
 
 
@@ -154,6 +194,10 @@ class RouteRequest(BaseModel):
 class NearestRequest(BaseModel):
     lat: float
     lon: float
+
+
+class TelemetryModeRequest(BaseModel):
+    mode: Literal["live", "playback"]
 
 
 class InternalCoordinate(BaseModel):
@@ -633,9 +677,10 @@ def get_buses():
 @app.get("/internal/vehicles")
 def get_vehicles():
     """Normalized source-neutral snapshot used by the Node control facade."""
-    if vehicle_tracker is None:
-        return {"generated_at_utc": None, "vehicles": [], "warnings": []}
-    return vehicle_tracker.snapshot()
+    with telemetry_lock:
+        if vehicle_tracker is None:
+            return {"generated_at_utc": None, "vehicles": [], "warnings": []}
+        return vehicle_tracker.snapshot()
 
 
 @app.get("/internal/vehicles/{external_id}")
@@ -649,7 +694,16 @@ def get_vehicle(external_id: str):
 
 @app.get("/internal/telemetry/status")
 def telemetry_status():
-    return {"mode": os.environ.get("TELEMETRY_MODE", "live").lower(), "available": vehicle_tracker is not None}
+    with telemetry_lock:
+        return {"mode": telemetry_mode, "available": vehicle_tracker is not None}
+
+
+@app.put("/internal/telemetry/mode")
+def set_telemetry_mode(req: TelemetryModeRequest):
+    try:
+        return _install_telemetry_mode(req.mode)
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/api/truck-classes")

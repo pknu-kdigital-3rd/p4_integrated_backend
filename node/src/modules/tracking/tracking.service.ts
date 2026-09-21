@@ -1,6 +1,6 @@
 import { prisma } from "../../infrastructure/database/prisma.ts";
 import { AppError } from "../../common/errors/app-error.ts";
-import { trackingClient, type TrackingSnapshot } from "./tracking.client.ts";
+import { trackingClient, type TelemetryMode, type TrackingSnapshot } from "./tracking.client.ts";
 import { persistAuthoritativeObservations } from "./tracking.persistence.ts";
 
 type Observation = TrackingSnapshot["vehicles"][number];
@@ -97,6 +97,14 @@ export const trackingService = {
         if (!vehicle) throw new AppError(404, "Vehicle not found", "VEHICLE_NOT_FOUND");
         if (!vehicle.externalId) return { vehicle, telemetry: null };
         return { vehicle, telemetry: await trackingClient.vehicle(vehicle.externalId) };
+    },
+
+    async getTelemetryMode() {
+        return trackingClient.telemetryMode();
+    },
+
+    async setTelemetryMode(mode: TelemetryMode) {
+        return trackingClient.setTelemetryMode(mode);
     },
 
     async getPlannedRoute(tripId: bigint) {

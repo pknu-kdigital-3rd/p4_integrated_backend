@@ -17,9 +17,21 @@ export type TrackingSnapshot = {
     warnings: Array<unknown>;
 };
 
-async function request<T>(path: string): Promise<T> {
+export type TelemetryMode = "live" | "playback";
+
+export type TelemetryModeStatus = {
+    mode: TelemetryMode;
+    available: boolean;
+};
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     try {
         const response = await fetch(new URL(path, env.ROUTING_TRACKING_BASE_URL), {
+            ...init,
+            headers: {
+                "content-type": "application/json",
+                ...(init.headers as Record<string, string> | undefined),
+            },
             signal: AbortSignal.timeout(4000),
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -33,4 +45,9 @@ async function request<T>(path: string): Promise<T> {
 export const trackingClient = {
     snapshot: () => request<TrackingSnapshot>("/internal/vehicles"),
     vehicle: (externalId: string) => request<TrackingSnapshot["vehicles"][number]>(`/internal/vehicles/${encodeURIComponent(externalId)}`),
+    telemetryMode: () => request<TelemetryModeStatus>("/internal/telemetry/status"),
+    setTelemetryMode: (mode: TelemetryMode) => request<TelemetryModeStatus>("/internal/telemetry/mode", {
+        method: "PUT",
+        body: JSON.stringify({ mode }),
+    }),
 };

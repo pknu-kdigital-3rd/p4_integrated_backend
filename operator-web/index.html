@@ -14,6 +14,16 @@
     <aside id="operator-sidebar">
       <form id="login"><h2>Operator login</h2><input name="loginId" placeholder="Login ID" required><input name="password" type="password" placeholder="Password" required><button>Sign in</button></form>
       <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view" type="button">Live View</button><p id="route-label">Planned Route: unavailable</p></section>
+      <section id="telemetry-settings" hidden aria-labelledby="telemetry-settings-title">
+        <h2 id="telemetry-settings-title">Bus telemetry source</h2>
+        <label for="telemetry-mode">Source</label>
+        <select id="telemetry-mode">
+          <option value="playback">Replay dataset</option>
+          <option value="live">Live BIMS</option>
+        </select>
+        <button id="telemetry-mode-apply" type="button">Apply source</button>
+        <p id="telemetry-mode-status" role="status" aria-live="polite">Loading source…</p>
+      </section>
       <section id="trip-panel" hidden aria-labelledby="trip-title">
         <h2 id="trip-title">Make and assign a trip</h2>
         <form id="trip-form">

@@ -31,12 +31,17 @@ docker compose -f docker-compose.dev.yml up -d
 Optional shell variables can override public ports, routing, TURN, or GPU
 policy. JWT and MinIO settings are fixed in each Compose file. The default
 persistent-data directory is `./data`; each `source:` entry in Compose names
-its subdirectory explicitly, so you can change one mapping without adding path
-variables. Recording is always enabled, so Nginx ports `39001-39003` and
+its subdirectory explicitly, including `routing_state` for the selected BIMS
+source. Recording is always enabled, so Nginx ports `39001-39003` and
 Coturn ports `39004-39007` are exposed on the host. Node, Vision, routing,
 relay, PostgreSQL, and MinIO use the private Compose network. See the [Docker
 Linux runbook](docs/integration/LINUX_STARTUP_RUNBOOK.md) and [Nginx ingress
 guide](deploy/nginx/README.md) for the complete procedure.
+
+The operator dashboard's **Bus telemetry source** control switches between the
+live BIMS feed and the replay dataset without restarting Compose. The selected
+source is persisted in `data/routing_state/`; the routing container only needs
+to be restarted after code or container configuration changes.
 
 ## Android GPS/IMU telemetry
 

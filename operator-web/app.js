@@ -5,7 +5,7 @@ import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-re
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout'),layoutSplitter=document.querySelector('#layout-splitter'),stackedLayout=window.matchMedia('(max-width: 1000px)');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
@@ -144,6 +144,32 @@ function render(snapshot){
   }
 }
 async function refresh(){try{render(await api('/api/v1/tracking/vehicles'));error.textContent='';document.querySelector('#connection').textContent='Tracking connected'}catch(e){error.textContent=e.message;document.querySelector('#connection').textContent='Tracking unavailable'}}
+const telemetryModeSelect=document.querySelector('#telemetry-mode'),telemetryModeApply=document.querySelector('#telemetry-mode-apply'),telemetryModeStatus=document.querySelector('#telemetry-mode-status'),telemetrySettings=document.querySelector('#telemetry-settings');
+const telemetryModeLabel=mode=>mode==='live'?'Live BIMS':'Replay dataset';
+function canChangeTelemetryMode(){return !demoMode&&['ADMIN','OPERATOR'].includes(currentRole)}
+function renderTelemetryMode(result){
+  if(!result||!telemetryModeSelect)return;
+  telemetryModeSelect.value=result.mode;
+  telemetryModeStatus.textContent=`Active source: ${telemetryModeLabel(result.mode)}${result.available?'':' · routing is starting'}`;
+  telemetryModeStatus.dataset.level=result.available?'ok':'warn';
+  telemetryModeApply.disabled=!canChangeTelemetryMode();
+  telemetryModeSelect.disabled=!canChangeTelemetryMode();
+}
+async function loadTelemetryMode(){
+  if(!telemetryModeSelect)return;
+  try{renderTelemetryMode(await api('/api/v1/tracking/telemetry-mode'))}
+  catch(ex){telemetryModeStatus.textContent=`Telemetry source unavailable: ${ex.message}`;telemetryModeStatus.dataset.level='error';telemetryModeApply.disabled=true;telemetryModeSelect.disabled=true}
+}
+async function applyTelemetryMode(){
+  if(!canChangeTelemetryMode()){
+    telemetryModeStatus.textContent='Sign in as an operator or admin to change the source.';
+    telemetryModeStatus.dataset.level='error';
+    return;
+  }
+  const mode=telemetryModeSelect.value;telemetryModeApply.disabled=true;telemetryModeSelect.disabled=true;telemetryModeStatus.textContent=`Switching to ${telemetryModeLabel(mode)}…`;telemetryModeStatus.dataset.level='warn';
+  try{renderTelemetryMode(await api('/api/v1/tracking/telemetry-mode',{method:'PUT',body:JSON.stringify({mode})},true));await refresh()}
+  catch(ex){telemetryModeStatus.textContent=`Could not switch telemetry source: ${ex.message}`;telemetryModeStatus.dataset.level='error';await loadTelemetryMode()}
+}
 async function loadTripAssignments(){
   const [vehicles,trips]=await Promise.all([api('/api/v1/vehicles',{},true),api('/api/v1/trips',{},true)]);
   const vehicleSelect=document.querySelector('#trip-vehicle'),previousVehicle=vehicleSelect.value;
@@ -169,6 +195,7 @@ async function start(role){
   currentRole=demoMode?'':(role||'');
   updateRecordingDeleteTools();
   document.querySelector('#login').hidden=!demoMode;
+  telemetrySettings.hidden=false;
   bootstrap=await api('/api/v1/bootstrap');
   document.querySelector('#trip-panel').hidden=demoMode;
   if(!demoMode){
@@ -177,6 +204,8 @@ async function start(role){
     await loadTripAssignments();
   }
   await refresh();
+  await loadTelemetryMode();
+  clearInterval(telemetryModeTimer);telemetryModeTimer=setInterval(()=>void loadTelemetryMode(),5000);
   if(!refreshTimer)refreshTimer=setInterval(refresh,3000);
 }
 async function autoLogin(){
@@ -269,6 +298,7 @@ recordingDeleteRangeElement.addEventListener('pointerup',finishRecordingDeleteRa
 recordingDeleteRangeElement.addEventListener('pointercancel',finishRecordingDeleteRange);
 recordingDeleteRangeElement.addEventListener('keydown',adjustRecordingDeleteRange);
 document.querySelector('#login').addEventListener('submit',async e=>{e.preventDefault();try{const f=new FormData(e.currentTarget),result=await api('/api/v1/auth/login',{method:'POST',body:JSON.stringify(Object.fromEntries(f))},true);token=result.accessToken;sessionStorage.setItem('itsToken',token);demoMode=false;await start(result.user.role)}catch(ex){error.textContent=ex.message}});
+telemetryModeApply.addEventListener('click',()=>void applyTelemetryMode());
 function browserReachableUrl(configuredUrl){
   const url=new URL(configuredUrl,window.location.href);
   if(url.hostname==='127.0.0.1'||url.hostname==='localhost')url.hostname=window.location.hostname;

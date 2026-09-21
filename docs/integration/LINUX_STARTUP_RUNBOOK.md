@@ -57,8 +57,8 @@ TLS_PUBLIC_ADDRESS=192.0.2.10 docker compose up -d
 Persistent data defaults to the sibling directory
 `./data`. Each Compose `source:` entry maps one volume
 to a visible subdirectory there: `pgdata`, `minio_data`, `jwt`, `tls`,
-`relay_feed`, `recording_spool`, and `nginx_logs`. Development dependencies use
-`node_modules` in the same root. To use a different disk, edit the relevant
+`relay_feed`, `recording_spool`, `routing_state`, and `nginx_logs`. Development
+dependencies use `node_modules` in the same root. To use a different disk, edit the relevant
 `source:` entry in `docker-compose.yml` or `docker-compose.dev.yml`:
 
 | Host directory | Service(s) | Container path |
@@ -69,6 +69,7 @@ to a visible subdirectory there: `pgdata`, `minio_data`, `jwt`, `tls`,
 | `./data/tls` | Nginx | `/etc/nginx/tls` |
 | `./data/relay_feed` | Relay and Vision | `/run/p4/relay` |
 | `./data/recording_spool` | Relay | `/var/tmp/p4-recordings` |
+| `./data/routing_state` | Routing/tracking | `/var/lib/p4-routing` |
 | `./data/nginx_logs` | Nginx | `/var/log/nginx` |
 | `./data/node_modules` (dev only) | Node | `/workspace/node/node_modules` |
 
@@ -117,6 +118,12 @@ The development file mounts source directories individually; it never mounts
 the whole repository into a service container. Node uses `tsx watch`, routing
 uses Uvicorn reload, and Vision uses Uvicorn reload. The relay remains an
 image-built Go binary.
+
+The operator dashboard's **Bus telemetry source** menu switches the routing
+source between the live BIMS feed and the replay dataset at runtime. The choice
+is persisted in `./data/routing_state/telemetry-mode.json`, so restarting the
+routing container keeps the selected source. No `TELEMETRY_MODE` environment
+variable or Compose restart is needed for a normal switch.
 
 ## Recording and replay
 

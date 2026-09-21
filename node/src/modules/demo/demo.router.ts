@@ -28,3 +28,7 @@ demoRouter.post("/auth/login", validateBody(loginBodySchema), authController.log
 demoRouter.get("/tracking/vehicles", async (_req, res) => {
     res.json({ data: await trackingService.getVehicles() });
 });
+
+demoRouter.get("/tracking/telemetry-mode", async (_req, res) => {
+    res.json({ data: await trackingService.getTelemetryMode() });
+});
