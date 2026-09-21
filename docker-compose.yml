@@ -17,20 +17,6 @@ services:
       timeout: 5s
       retries: 10
 
-  backup:
-    image: postgres:17-alpine
-    container_name: vehicle-platform-backup
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: app
-    volumes:
-      - ../postgres_backups:/backups
-    entrypoint: >
-      sh -c "echo '0 3 * * * pg_dump -h db -U app vehicle_platform > /backups/backup_$$(date +\%Y\%m\%d).sql find /backups -name \"backup_*.sql\" -mtime +14 -delete' | crontab - && crond -f"
-
   minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: vehicle-platform-minio
