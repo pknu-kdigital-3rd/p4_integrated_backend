@@ -31,5 +31,6 @@ immediately after WebRTC publishing instead of waiting for QR processing.
 The camera panel also reports `capture=... fps`, which measures frames delivered
 by CameraX before WebRTC encoding or Vision inference.
 
-The phone and server must be reachable on the same network. This prototype
-uses host ICE candidates and does not configure a STUN/TURN server.
+The phone and server must be reachable on the same network when TURN is
+disabled. The default debug build includes the configured TURN server as an
+ICE fallback; build with `-Pturn.url=` to use direct host ICE candidates only.

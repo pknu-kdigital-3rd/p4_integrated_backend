@@ -59,9 +59,12 @@ func (c Config) NodeInternalRequired() bool {
 func Load() (Config, error) {
 	cfg := Config{
 		RelayListenAddr: env("RELAY_LISTEN_ADDR", "127.0.0.1:39012"),
-		TurnURL:         env("TURN_URL", "turn:10.174.96.95:3478?transport=udp"),
-		TurnUsername:    env("TURN_USERNAME", "user"),
-		TurnPassword:    env("TURN_PASSWORD", "pass"),
+		// An explicitly empty TURN_URL is meaningful: it disables the TURN
+		// server and leaves ICE to direct host candidates. Keep the default
+		// for deployments that do not set the variable at all.
+		TurnURL:      envAllowEmpty("TURN_URL", "turn:10.174.96.95:3478?transport=udp"),
+		TurnUsername: env("TURN_USERNAME", "user"),
+		TurnPassword: env("TURN_PASSWORD", "pass"),
 		// A filesystem path, not host:port - renamed from the old
 		// YOLO_FEED_ADDR (TCP) so a stale env var fails loudly instead of
 		// being silently misinterpreted as a path.
@@ -279,6 +282,16 @@ func parseInt(name, value string) (int, error) {
 
 func env(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
+
+// envAllowEmpty distinguishes an explicitly empty environment variable from
+// an unset one. This is needed for optional settings such as TURN_URL where an
+// empty value is the documented way to disable the feature.
+func envAllowEmpty(name, fallback string) string {
+	if value, ok := os.LookupEnv(name); ok {
 		return value
 	}
 	return fallback

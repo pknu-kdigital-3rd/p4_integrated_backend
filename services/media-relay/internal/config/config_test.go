@@ -56,3 +56,15 @@ func TestAndroidTelemetryRequiresNodeInternalSettingsWithoutRecording(t *testing
 		t.Fatal("invalid Vision telemetry URL must fail")
 	}
 }
+
+func TestExplicitEmptyTurnURLDisablesTurn(t *testing.T) {
+	t.Setenv("TURN_URL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TurnURL != "" {
+		t.Fatalf("explicitly empty TURN_URL should disable TURN, got %q", cfg.TurnURL)
+	}
+}

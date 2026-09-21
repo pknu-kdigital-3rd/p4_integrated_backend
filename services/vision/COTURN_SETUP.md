@@ -16,6 +16,37 @@ The relay range is controlled by coturn. When TURN is selected, media is
 relayed through coturn instead of requiring the Android device to reach an
 unpredictable `aiortc` host port.
 
+## Disable coturn on a directly reachable network
+
+Coturn is optional when the Android device and the relay host can reach each
+other directly. Stop the external service and remove its firewall/NAT rules
+only after confirming that the direct ICE candidate works:
+
+```bash
+sudo systemctl disable --now coturn
+```
+
+Set an explicitly empty `TURN_URL` for both the Go relay and Vision. The empty
+value is different from an unset value and disables TURN while retaining host
+ICE candidates:
+
+```bash
+export TURN_URL=""
+export TURN_USERNAME=""
+export TURN_PASSWORD=""
+```
+
+Restart the relay and Vision after changing the environment. Rebuild the
+Android app without a TURN server as well:
+
+```powershell
+.\gradlew.bat :app:assembleDebug -Pturn.url=
+```
+
+If the phone or operator later connects from a different network, a symmetric
+NAT or a firewall may prevent direct ICE. In that case keep coturn enabled and
+restore the TURN URL and credentials.
+
 ## 1. Coturn configuration
 
 Edit `/etc/turnserver.conf`:
