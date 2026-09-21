@@ -38,10 +38,9 @@ nvidia-smi
 docker run --rm --gpus all nvidia/cuda:13.0.0-runtime-ubuntu24.04 nvidia-smi
 ```
 
-The Node image uses the local vendored OpenAPI package at
-`node/vendor/zod-to-openapi`. Clone or copy the intended dependency there before
-building. The image builds that package locally, so Docker BuildKit SSH
-forwarding and an SSH agent are not required.
+The Node image uses the vendored OpenAPI package checked into
+`node/vendor/zod-to-openapi`. The image builds that package locally, so Docker
+BuildKit SSH forwarding and an SSH agent are not required.
 
 ## Defaults and optional overrides
 
