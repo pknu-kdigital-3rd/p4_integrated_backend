@@ -370,7 +370,6 @@ minio:
   environment:
     MINIO_ROOT_USER: ${MINIO_ROOT_USER}
     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL}
   expose: ["9000", "9001"]
   volumes:
     - p4_minio_data:/data
@@ -440,10 +439,9 @@ MINIO_NODE_ACCESS_KEY=p4-node
 MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret"
 MINIO_PUBLIC_ENDPOINT=https://10.174.96.119:39003
 
-# MinIO server/bootstrap administrator credentials and Console URL
+# MinIO server/bootstrap administrator credentials
 MINIO_ROOT_USER=p4-minio-root
 MINIO_ROOT_PASSWORD="replace-with-an-independent-random-secret"
-MINIO_BROWSER_REDIRECT_URL=http://127.0.0.1:9001
 ```
 
 Replace every example secret before setting `RECORDING_ENABLED=true`. Use
@@ -456,7 +454,6 @@ must have the same value in the Go relay and Node process environments.
 and Node to delete objects. `MINIO_USE_SSL` controls TLS for this private
 connection. `MINIO_PUBLIC_ENDPOINT` is the HTTPS S3 API origin used to create
 playback URLs, and must be reachable by clients at port `39003`. Set
-`MINIO_BROWSER_REDIRECT_URL` to the private Console address; the Console is not required for replay and is not publicly exposed.
 `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` are for MinIO bootstrap and
 administration only; application services use their dedicated accounts.
 
