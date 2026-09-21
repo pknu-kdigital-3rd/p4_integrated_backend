@@ -385,12 +385,9 @@ func (f *Feed) consumePayloadLocked(payload []byte) {
 		start := header&0x80 != 0
 		end := header&0x40 != 0
 		if start {
-			// Publish assigned the access-unit timestamp before payload parsing;
-			// reuse only the bytes here so FU-A continuation packets still remain
-			// associated with that timestamp.
-			f.reuseAssemblyBufferLocked()
-			f.assemblyKey = false
-			f.assemblyParams = false
+			// FU-A starts a NAL, not a frame. Preserve parameter sets and earlier
+			// slices already assembled for this RTP timestamp; clearing them here
+			// produces incomplete frames in both the live feed and MP4 recordings.
 			f.fuActive = true
 			reconstructed := (indicator & 0xe0) | (header & 0x1f)
 			f.appendNALLocked([]byte{reconstructed})

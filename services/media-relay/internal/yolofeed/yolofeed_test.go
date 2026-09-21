@@ -71,6 +71,38 @@ func TestPublishReturnsTheRetainedImmutableAccessUnit(t *testing.T) {
 	}
 }
 
+func TestFragmentedSlicesPreserveTheWholeAccessUnit(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	// SPS/PPS, then two fragmented IDR slices, all belonging to one frame.
+	payloads := [][]byte{
+		{0x67, 0x42, 0xc0, 0x28},
+		{0x68, 0xce, 0x3c, 0x80},
+		{0x7c, 0x85, 0x11, 0x22},
+		{0x7c, 0x45, 0x33, 0x44},
+		{0x7c, 0x85, 0x55, 0x66},
+		{0x7c, 0x45, 0x77, 0x88},
+	}
+	var item *AccessUnit
+	for i, payload := range payloads {
+		item = feed.Publish(&rtp.Packet{
+			Header:  rtp.Header{SequenceNumber: uint16(i + 1), Timestamp: 90000, Marker: i == len(payloads)-1},
+			Payload: payload,
+		})
+	}
+	want := []byte{
+		0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x28,
+		0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80,
+		0, 0, 0, 1, 0x65, 0x11, 0x22, 0x33, 0x44,
+		0, 0, 0, 1, 0x65, 0x55, 0x66, 0x77, 0x88,
+	}
+	if item == nil || !item.Keyframe {
+		t.Fatal("expected a complete IDR access unit")
+	}
+	if !bytes.Equal(item.Data, want) {
+		t.Fatalf("fragmentation discarded part of the frame: got %x, want %x", item.Data, want)
+	}
+}
+
 func TestQRStatusTracksReceiptAndExactPairing(t *testing.T) {
 	feed := NewWithLimits("", 0, 0)
 	feed.SetQRActive(true)

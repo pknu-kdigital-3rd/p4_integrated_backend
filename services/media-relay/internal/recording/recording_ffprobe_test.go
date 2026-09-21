@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pion/rtp"
+	"github.com/pion/rtp/codecs"
 
 	"poc-server-webrtc/relay-go/internal/yolofeed"
 )
@@ -31,7 +35,7 @@ func TestFFprobeReadsRecorderOutput(t *testing.T) {
 		"-f", "lavfi", "-i", "testsrc2=size=96x64:rate=30",
 		"-frames:v", "6", "-pix_fmt", "yuv420p", "-c:v", "libx264",
 		"-preset", "ultrafast", "-tune", "zerolatency",
-		"-x264-params", "aud=1:keyint=3:min-keyint=3:scenecut=0:repeat-headers=1",
+		"-x264-params", "aud=1:keyint=3:min-keyint=3:scenecut=0:repeat-headers=1:slices=2",
 		"-f", "h264", fixturePath,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -47,6 +51,27 @@ func TestFFprobeReadsRecorderOutput(t *testing.T) {
 	}
 	if len(accessUnits) != 6 || !accessUnits[0].Keyframe || !accessUnits[3].Keyframe {
 		t.Fatalf("unexpected fixture access units: count=%d keyframes=[%t,%t]", len(accessUnits), accessUnits[0].Keyframe, accessUnits[3].Keyframe)
+	}
+	// Exercise the same RTP depacketization boundary used by Android recording.
+	// Small packets force fragmented slices; testing Annex-B directly would
+	// miss frame corruption introduced before the recorder receives the media.
+	feed := yolofeed.NewWithLimits("", 0, 0)
+	payloader := &codecs.H264Payloader{}
+	var sequence uint16
+	for i, original := range accessUnits {
+		payloads := payloader.Payload(128, original.Data)
+		var assembled *yolofeed.AccessUnit
+		for j, payload := range payloads {
+			sequence++
+			assembled = feed.Publish(&rtp.Packet{
+				Header:  rtp.Header{SequenceNumber: sequence, Timestamp: uint32(original.PTS90K), Marker: j == len(payloads)-1},
+				Payload: payload,
+			})
+		}
+		if assembled == nil {
+			t.Fatalf("RTP frame %d did not produce an access unit", i)
+		}
+		accessUnits[i] = assembled
 	}
 
 	context := Context{TripID: 312, VehicleID: 27, RecordingSessionID: "ffprobe-smoke"}
@@ -121,9 +146,9 @@ func TestFFprobeReadsRecorderOutput(t *testing.T) {
 		if duration < 0.09 || duration > 0.11 {
 			t.Fatalf("segment duration should be about 0.1 seconds, got %.6f", duration)
 		}
-		decode := exec.Command(ffmpeg, "-v", "error", "-i", path, "-frames:v", "1", "-f", "null", "-")
-		if output, err := decode.CombinedOutput(); err != nil {
-			t.Fatalf("first IDR frame is not independently decodable in %s: %v (%s)", filepath.Base(path), err, strings.TrimSpace(string(output)))
+		decode := exec.Command(ffmpeg, "-v", "error", "-xerror", "-i", path, "-f", "null", "-")
+		if output, err := decode.CombinedOutput(); err != nil || len(bytes.TrimSpace(output)) != 0 {
+			t.Fatalf("segment is not independently decodable in %s: %v (%s)", filepath.Base(path), err, strings.TrimSpace(string(output)))
 		}
 	}
 }
