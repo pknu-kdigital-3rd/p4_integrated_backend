@@ -358,20 +358,20 @@ If Node is temporarily unavailable after upload, retry metadata registration ide
 
 Extend `docker-compose.yml` with a MinIO service and persistent volume.
 
-Development shape:
+The repository now uses the recording profile in `docker-compose.yml` rather
+than publishing MinIO ports directly:
 
 ```yaml
 minio:
-  image: minio/minio:<PINNED_RELEASE>
-  command: server /data --console-address ":9001"
+  image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+  profiles: [recording]
+  command: ["server", "/data", "--console-address", ":9001"]
   restart: unless-stopped
   environment:
     MINIO_ROOT_USER: ${MINIO_ROOT_USER}
     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL}
-  ports:
-    - "127.0.0.1:9000:9000"
-    - "127.0.0.1:9001:9001"
+  expose: ["9000", "9001"]
   volumes:
     - p4_minio_data:/data
 ```
@@ -384,9 +384,10 @@ volumes:
   p4_minio_data:
 ```
 
-Keep both MinIO ports loopback-bound. When operators need console access, expose
-it through the HTTPS reverse proxy and set `MINIO_BROWSER_REDIRECT_URL` to the
-proxy URL (port `39004` in this deployment).
+Keep both MinIO ports private to the Compose network. Replay objects are
+reached through the Nginx S3 proxy on `39003`; the Console is not published.
+Use an SSH tunnel or a temporary internal-only admin path when console access
+is required.
 
 Create the recording bucket during deployment/bootstrap and keep it private.
 
@@ -406,11 +407,11 @@ RECORDING_SPOOL_DIR=/var/tmp/p4-recordings
 RECORDING_SPOOL_MAX_BYTES=10737418240
 RECORDING_UPLOAD_QUEUE=8
 
-NODE_INTERNAL_BASE_URL=http://127.0.0.1:3000
+NODE_INTERNAL_BASE_URL=http://node:3000
 NODE_INTERNAL_SERVICE_TOKEN="replace-with-a-random-token-at-least-32-characters"
 
 # Private MinIO API connection used by the Go relay and Node storage operations
-MINIO_ENDPOINT=127.0.0.1:9000
+MINIO_ENDPOINT=minio:9000
 MINIO_USE_SSL=false
 MINIO_RECORDING_BUCKET=p4-trip-recordings
 MINIO_ACCESS_KEY=p4-relay
@@ -424,7 +425,7 @@ MINIO_PUBLIC_ENDPOINT=https://10.174.96.119:39003
 # MinIO server/bootstrap administrator credentials and Console URL
 MINIO_ROOT_USER=p4-minio-root
 MINIO_ROOT_PASSWORD="replace-with-an-independent-random-secret"
-MINIO_BROWSER_REDIRECT_URL=https://10.174.96.119:39004
+MINIO_BROWSER_REDIRECT_URL=http://127.0.0.1:9001
 ```
 
 Replace every example secret before setting `RECORDING_ENABLED=true`. Use
@@ -437,7 +438,7 @@ must have the same value in the Go relay and Node process environments.
 and Node to delete objects. `MINIO_USE_SSL` controls TLS for this private
 connection. `MINIO_PUBLIC_ENDPOINT` is the HTTPS S3 API origin used to create
 playback URLs, and must be reachable by clients at port `39003`. Set
-`MINIO_BROWSER_REDIRECT_URL` to the HTTPS Console proxy at port `39004`.
+`MINIO_BROWSER_REDIRECT_URL` to the private Console address; the Console is not required for replay and is not publicly exposed.
 `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` are for MinIO bootstrap and
 administration only; application services use their dedicated accounts.
 

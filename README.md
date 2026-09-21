@@ -13,18 +13,21 @@ This repository integrates the existing control backend, BIMS routing/tracking, 
 
 ## HTTPS startup
 
-1. Copy `node/.env.example` to `node/.env.dev` and configure JWT keys. Browser-visible URLs must use HTTPS in production.
-2. Start PostGIS: `docker compose up -d db`.
-3. In `node/`, run `npm ci`, deploy migrations, seed, then `npm run dev:once`.
-4. In `services/routing-tracking/`, run `uv sync` then `uv run uvicorn main:app --host 127.0.0.1 --port 8000`. Set `TELEMETRY_MODE=playback` for CSV-only operation; playback makes no BIMS position calls.
-5. Start Vision internally with `uv run python run.py --no-tls` (`127.0.0.1:39011`) and start the Go relay on `127.0.0.1:39012`.
-6. Issue a trusted LAN development certificate with `scripts/new-development-ca.ps1`, install its CA certificate on every client, then start the Nginx configuration in `deploy/nginx/`.
-7. Open `https://10.174.96.119:39001/operator/`. Development sets `OPERATOR_DEMO_PUBLIC=true`, allowing read-only dashboard access without an interactive login; all normal auth/JWT/RBAC routes remain available and unchanged. Live View appears inline from the secure Vision origin at `https://10.174.96.119:39002/`.
+Docker Compose runs Node, routing, vision, relay, PostgreSQL, MinIO, Nginx,
+and Coturn. Copy [deploy/env.local.example](deploy/env.local.example) to the
+untracked `deploy/env.local`, configure the public address, credentials, model
+mount, and GPU settings, then run:
 
-Public HTTP redirects to HTTPS. Node, Vision, routing/tracking, and relay HTTP listeners are internal-only. See [deploy/nginx/README.md](deploy/nginx/README.md) for certificate, proxy, WebSocket, and firewall details.
+```bash
+./scripts/run-linux-stack.sh all
+```
 
-For a Linux host, use the single-environment, health-checked startup procedure in [docs/integration/LINUX_STARTUP_RUNBOOK.md](docs/integration/LINUX_STARTUP_RUNBOOK.md) and copy [deploy/env.local.example](deploy/env.local.example) to the untracked `deploy/env.local`.
-After editing that file, `scripts/run-linux-stack.sh all` performs setup, startup, and health verification in one command.
+Use `P4_COMPOSE_DEV=true` to add explicit host source mounts and Node/Python
+reload commands. Only Nginx ports `39001-39003` (the third when recording is
+enabled) and Coturn ports `39004-39007` are exposed on the host. Node, Vision,
+routing, relay, PostgreSQL, and MinIO use the private Compose network. See the
+[Docker Linux runbook](docs/integration/LINUX_STARTUP_RUNBOOK.md) and
+[Nginx ingress guide](deploy/nginx/README.md) for the complete procedure.
 
 ## Android GPS/IMU telemetry
 

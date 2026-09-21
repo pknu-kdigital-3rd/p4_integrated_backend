@@ -1,31 +1,36 @@
 # HTTPS ingress
 
-This configuration makes Nginx the LAN-facing HTTP/TLS ingress. It uses `10.174.96.119`, with operator HTTPS on port `39001`, Vision/WSS/Android signaling HTTPS on port `39002`, MinIO signed playback on port `39003`, and the MinIO Console on port `39004` when recording is enabled. It intentionally does not bind port 80, so the project-local Nginx can run as the current user without `sudo`. Change `server_name` and certificate SANs together if the public address changes. Nginx must be installed separately on the host; this repository intentionally does not vendor a web-server binary.
+Docker Compose runs Nginx as the only HTTP/TLS gateway. It publishes operator
+HTTPS on `39001`, Vision/WebRTC signaling on `39002`, and MinIO signed replay
+traffic on `39003` when the recording override is enabled. MinIO Console is not
+published.
 
-Internal listeners:
+Internal upstreams use Compose DNS:
 
-- Node: `127.0.0.1:3000`
-- Vision: `127.0.0.1:39011`, started with `--no-tls`
-- Routing/tracking: `127.0.0.1:8000`
-- Go relay: `127.0.0.1:39012`
-- MinIO API and Console: `127.0.0.1:9000` and `127.0.0.1:9001` (recording profile)
+- Node: `node:3000`
+- Vision: `vision:39011`
+- Go relay: `relay:39012`
+- MinIO S3 API: `minio:9000`
 
-Place the trusted certificate and private key at `secrets/tls/server.crt` and `secrets/tls/server.key`. When Nginx is started with this directory as its prefix, validate and start with:
+The Nginx container mounts:
 
-```powershell
-nginx -p "$PWD/deploy/nginx/" -t -c nginx.conf
-nginx -p "$PWD/deploy/nginx/" -c nginx.conf
-```
+- `deploy/nginx/nginx.conf` at `/etc/nginx/nginx.conf`;
+- `secrets/tls` at `/etc/nginx/tls`;
+- the named `p4_nginx_logs` volume at `/var/log/nginx`.
 
-The certificate must contain `IP:10.174.96.119` in its Subject Alternative Name and its issuing CA must be trusted by operator browsers and Android. Do not use `curl -k` as an acceptance test.
+The certificate must contain the public server address in its Subject
+Alternative Name and its issuing CA must be trusted by operator browsers and
+Android. Do not use `curl -k` as an acceptance test.
 
-The external routes are:
+## Public routes
 
-- `https://10.174.96.119:39001/operator/` — dashboard
-- `https://10.174.96.119:39001/osm/{z}/{x}/{y}.png` — same-origin OSM tile proxy
-- `https://10.174.96.119:39002/` — existing Live View page
-- `wss://10.174.96.119:39002/ws/playback` — playback WebSocket
-- `https://10.174.96.119:39002/offer/android` — Android SDP signaling
-- `https://10.174.96.119:39004/` — MinIO Console (recording profile)
+- `https://<PUBLIC_ADDRESS>:39001/operator/` — operator dashboard
+- `https://<PUBLIC_ADDRESS>:39001/osm/{z}/{x}/{y}.png` — same-origin OSM tiles
+- `https://<PUBLIC_ADDRESS>:39002/` — Vision live view
+- `wss://<PUBLIC_ADDRESS>:39002/ws/playback` — playback WebSocket
+- `https://<PUBLIC_ADDRESS>:39002/offer/android` — Android SDP signaling
+- `https://<PUBLIC_ADDRESS>:39003/<bucket>/<object>` — signed MinIO replay object
 
-After verification, allow only the required ingress ports: `39001`, `39002`, and, when recording is enabled, `39003` and `39004`, plus required TURN/WebRTC ports. Keep raw MinIO ports `9000` and `9001` loopback-only. Enable HSTS only after certificate renewal and rollback have been tested.
+The `39003` listener is configured in the base Nginx container so it can be
+validated internally, but the host mapping is added only by
+`docker-compose.recording.yml` when recording is enabled.
