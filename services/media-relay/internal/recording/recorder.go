@@ -80,7 +80,11 @@ func New(cfg Config, store ObjectStore, registrar SegmentRegistrar, requestKeyfr
 		return nil, fmt.Errorf("create recording spool directory: %w", err)
 	}
 	if err := os.Chmod(cfg.SpoolDir, 0o700); err != nil {
-		return nil, fmt.Errorf("restrict recording spool directory permissions: %w", err)
+		// Bind mounts backed by Docker Desktop (and some network filesystems)
+		// can be writable without supporting chmod. Keep recording available
+		// when the directory is usable, while making the weaker permission
+		// guarantee visible in the relay log.
+		log.Printf("recording spool: could not restrict directory permissions; continuing: %v", err)
 	}
 	spoolBytes, err := recoverSpool(cfg.SpoolDir)
 	if err != nil {
