@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 from typing import Literal
 
 import torch
@@ -36,6 +37,11 @@ class Settings(BaseSettings):
     # stride-aligned input. Normalized outputs remain source-size invariant;
     # pixel boxes are mapped back by the inference worker.
     YOLO_MAX_IMGSZ: int = 640
+    # Model input dimensions. ``auto`` keeps the existing aspect-preserving
+    # max-side behavior; ``source`` uses decoded frame dimensions; an
+    # explicit value such as ``720x1280`` (height x width) keeps a rectangular
+    # model input matching the camera image.
+    YOLO_INFERENCE_SIZE: str = "auto"
     # FP16 is substantially faster on RTX-class CUDA GPUs. It is enabled by
     # default but is automatically ignored when YOLO_DEVICE is CPU.
     YOLO_HALF: bool = True
@@ -182,6 +188,25 @@ class Settings(BaseSettings):
         if v <= 0 or v % 32 != 0:
             raise ValueError("YOLO_MAX_IMGSZ must be a positive multiple of 32")
         return v
+
+    @field_validator("YOLO_INFERENCE_SIZE", mode="before")
+    @classmethod
+    def _normalize_inference_size(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("YOLO_INFERENCE_SIZE must be auto, source, or HxW")
+        value = v.strip().lower()
+        if value in {"", "auto", "source", "original"}:
+            return "source" if value == "original" else (value or "auto")
+        match = re.fullmatch(r"(\d+)\s*(?:x|,|\s)\s*(\d+)", value)
+        if match is None:
+            raise ValueError(
+                "YOLO_INFERENCE_SIZE must be auto, source, or HxW "
+                "(for example 720x1280)"
+            )
+        height, width = (int(group) for group in match.groups())
+        if not 32 <= height <= 4096 or not 32 <= width <= 4096:
+            raise ValueError("YOLO_INFERENCE_SIZE dimensions must be between 32 and 4096")
+        return f"{height}x{width}"
 
     @model_validator(mode="after")
     def _validate_turn_credentials(self) -> "Settings":

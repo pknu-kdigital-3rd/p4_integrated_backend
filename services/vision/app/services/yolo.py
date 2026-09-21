@@ -92,6 +92,25 @@ def _fit_size(width: int, height: int, max_side: int) -> tuple[int, int]:
     return max(1, round(width * scale)), max(1, round(height * scale))
 
 
+def _configured_inference_size(
+    source_width: int, source_height: int
+) -> tuple[tuple[int, int], int | tuple[int, int]]:
+    """Return (decoded image width/height, Ultralytics imgsz)."""
+
+    configured = settings.YOLO_INFERENCE_SIZE
+    if configured == "source":
+        width, height = source_width, source_height
+        return (width, height), (height, width)
+    if configured != "auto":
+        height_text, width_text = configured.split("x", 1)
+        height, width = int(height_text), int(width_text)
+        return (width, height), (height, width)
+    width, height = _fit_size(source_width, source_height, settings.YOLO_MAX_IMGSZ)
+    longest_side = max(width, height)
+    imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
+    return (width, height), imgsz
+
+
 def _to_cpu_value(value: object) -> object:
     """Materialize one tensor/array only after the caller has batched fields."""
 
@@ -417,11 +436,12 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
     source_width = int(getattr(inference_frame.frame, "width", 0) or 0)
     source_height = int(getattr(inference_frame.frame, "height", 0) or 0)
     if source_width > 0 and source_height > 0:
-        target_width, target_height = _fit_size(
-            source_width, source_height, settings.YOLO_MAX_IMGSZ
+        (target_width, target_height), imgsz = _configured_inference_size(
+            source_width, source_height
         )
     else:
         target_width, target_height = source_width, source_height
+        imgsz = settings.YOLO_MAX_IMGSZ
     if (target_width, target_height) != (source_width, source_height):
         model_frame = inference_frame.frame.reformat(
             width=target_width,
@@ -437,8 +457,9 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         source_width = frame_width
     if source_height <= 0:
         source_height = frame_height
-    longest_side = max(frame_width, frame_height)
-    imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
+    if settings.YOLO_INFERENCE_SIZE == "auto":
+        longest_side = max(frame_width, frame_height)
+        imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
     quantize = (
         16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
     )
@@ -797,6 +818,11 @@ async def yolo_worker(state: AppState) -> None:
         f"retina_masks={settings.YOLO_RETINA_MASKS}; "
         f"max_det={settings.YOLO_MAX_DETECTIONS}; "
         f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}",
+        flush=True,
+    )
+    print(
+        f"YOLO inference size: {settings.YOLO_INFERENCE_SIZE} "
+        f"(max_imgsz={settings.YOLO_MAX_IMGSZ})",
         flush=True,
     )
     run_inference = partial(run_yolo, yolo_model=state.yolo_model)

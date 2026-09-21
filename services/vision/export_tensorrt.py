@@ -22,6 +22,25 @@ VISION_ROOT = Path(__file__).resolve().parent
 DEFAULT_MODEL = VISION_ROOT / "models" / "a4_best.pt"
 
 
+def _parse_imgsz(value: str) -> int | tuple[int, int]:
+    value = value.strip().lower()
+    if value.isdecimal():
+        return int(value)
+    parts = value.replace("x", ",").split(",")
+    if len(parts) == 2 and all(part.strip().isdecimal() for part in parts):
+        return int(parts[0]), int(parts[1])
+    raise argparse.ArgumentTypeError(
+        "imgsz must be an integer or HxW, for example 720x1280"
+    )
+
+
+def _default_imgsz() -> int | tuple[int, int]:
+    configured = os.environ.get("YOLO_INFERENCE_SIZE", "").strip().lower()
+    if configured in {"", "auto", "source", "original"}:
+        configured = os.environ.get("YOLO_MAX_IMGSZ", "640")
+    return _parse_imgsz(configured)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Export a custom Ultralytics segmentation checkpoint to TensorRT."
@@ -45,9 +64,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--imgsz",
-        type=int,
-        default=int(os.environ.get("YOLO_MAX_IMGSZ", "640")),
-        help="fixed square engine input size (default: %(default)s)",
+        type=_parse_imgsz,
+        default=_default_imgsz(),
+        help="fixed engine input size, integer or HxW (default: %(default)s)",
     )
     parser.add_argument(
         "--batch",
@@ -134,8 +153,9 @@ def main() -> int:
         raise SystemExit(f"model file does not exist: {model_path}")
     if model_path.suffix.lower() != ".pt":
         raise SystemExit(f"--model must be a .pt checkpoint: {model_path}")
-    if args.imgsz <= 0 or args.imgsz % 32:
-        raise SystemExit("--imgsz must be a positive multiple of 32")
+    dimensions = (args.imgsz, args.imgsz) if isinstance(args.imgsz, int) else args.imgsz
+    if any(dimension <= 0 or dimension > 4096 for dimension in dimensions):
+        raise SystemExit("--imgsz dimensions must be between 1 and 4096")
     if args.batch < 1:
         raise SystemExit("--batch must be at least 1")
     if args.workspace <= 0:

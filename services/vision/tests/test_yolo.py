@@ -161,6 +161,35 @@ class RunYoloTests(unittest.TestCase):
         self.assertEqual((result["width"], result["height"]), (1920, 1080))
         self.assertEqual(result["items"][0]["bbox"], [30.0, 30.0, 60.0, 60.0])
 
+    def test_explicit_rectangular_inference_size_matches_model_input(self):
+        model = _SegmentationModel(
+            SimpleNamespace(
+                boxes=[_Box(0.9, 0, [0.1, 0.1, 0.2, 0.2])],
+                masks=None,
+            )
+        )
+        source_frame = _SourceFrame(1920, 1080)
+        inference_frame = InferenceFrame(
+            seq=7,
+            frame=source_frame,
+            pts=9000,
+            time_base=1 / 90000,
+            media_time=0.1,
+        )
+
+        with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
+            "app.services.yolo.settings.BBOX_FORMAT", "xyxy_normalized"
+        ), patch("app.services.yolo.settings.YOLO_DEVICE", "cpu"), patch(
+            "app.services.yolo.settings.YOLO_INFERENCE_SIZE", "720x1280"
+        ):
+            run_yolo(inference_frame, model)
+
+        self.assertEqual(
+            source_frame.reformat_args,
+            {"width": 1280, "height": 720, "format": "bgr24"},
+        )
+        self.assertEqual(model.predict_kwargs["imgsz"], (720, 1280))
+
     def test_tracking_emits_ids_and_leaves_weak_boxes_to_the_tracker(self):
         boxes = [
             _Box(0.2, 0, [0.1, 0.1, 0.2, 0.2], track_id=4),
@@ -249,6 +278,14 @@ class VisionSettingsDefaultsTests(unittest.TestCase):
     def test_mask_defaults_keep_detail_first_behavior(self):
         self.assertIs(Settings.model_fields["YOLO_RETINA_MASKS"].default, True)
         self.assertEqual(Settings.model_fields["YOLO_MASK_CONTOUR_SIZE"].default, 640)
+
+    def test_inference_size_accepts_rectangular_height_width(self):
+        configured = Settings(_env_file=None, YOLO_INFERENCE_SIZE="720, 1280")
+        self.assertEqual(configured.YOLO_INFERENCE_SIZE, "720x1280")
+
+    def test_source_inference_size_uses_decoded_dimensions(self):
+        configured = Settings(_env_file=None, YOLO_INFERENCE_SIZE="original")
+        self.assertEqual(configured.YOLO_INFERENCE_SIZE, "source")
 
     def test_bare_model_filename_resolves_under_vision_models_directory(self):
         settings = Settings(_env_file=None, YOLO_MODEL="a4_best.engine")

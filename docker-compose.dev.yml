@@ -186,6 +186,7 @@ services:
       PORT: "39011"
       YOLO_MODEL: ${YOLO_MODEL:-/workspace/services/vision/models/a4_best.engine}
       YOLO_DEVICE: ${YOLO_DEVICE:-cuda:0}
+      YOLO_INFERENCE_SIZE: ${YOLO_INFERENCE_SIZE:-auto}
       YOLO_USE_LAST_GPU: ${YOLO_USE_LAST_GPU:-true}
       YOLO_HALF: ${YOLO_HALF:-true}
       YOLO_RETINA_MASKS: ${YOLO_RETINA_MASKS:-true}

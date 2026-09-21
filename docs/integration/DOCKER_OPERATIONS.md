@@ -68,7 +68,7 @@ The host address and BIMS key are not absolute requirements:
 | `BUSAN_BIMS_SERVICE_KEY` | empty | Required only when the operator selects **Live BIMS**. Replay mode works without it. Compose forwards it to routing; it is not baked into an image. |
 
 Other commonly changed values are optional: `YOLO_MODEL`, `YOLO_DEVICE`,
-`YOLO_USE_LAST_GPU`, `ANDROID_TELEMETRY_ENABLED`, `TURN_URL`,
+`YOLO_INFERENCE_SIZE`, `YOLO_USE_LAST_GPU`, `ANDROID_TELEMETRY_ENABLED`, `TURN_URL`,
 `TURN_USERNAME`, `TURN_PASSWORD`, and the recording queue/sample settings.
 The Compose defaults are used when they are omitted.
 
@@ -155,6 +155,32 @@ Use `--force` to replace an existing engine, `--precision fp32` for an FP32
 engine, or `--keep-onnx` to retain the intermediate ONNX file. TensorRT engines
 are compiled for the GPU and TensorRT runtime used during export; regenerate the
 engine when moving to an incompatible GPU or runtime version.
+
+### Choose the Vision inference dimensions
+
+`YOLO_INFERENCE_SIZE` controls the dimensions sent to Ultralytics. The default
+`auto` setting keeps the existing aspect-preserving resize controlled by
+`YOLO_MAX_IMGSZ`. Set it to `source` to use the decoded frame dimensions, or
+set an explicit height-by-width value such as `720x1280` to match a 1280x720
+camera frame:
+
+```bash
+YOLO_INFERENCE_SIZE=720x1280 docker compose -f docker-compose.dev.yml up -d --force-recreate p4-vision
+```
+
+For a TensorRT engine, export with the same fixed dimensions. A static 640x640
+engine cannot accept a 720x1280 input, so regenerate the engine before selecting
+the rectangular setting:
+
+```bash
+cd services/vision
+uv run python export_tensorrt.py \
+  --model models/a4_best.pt --device 0 --imgsz 720x1280 --force
+```
+
+The Vision startup log prints the active `YOLO_INFERENCE_SIZE`. `source` can
+increase GPU memory and inference time for high-resolution frames; use an
+explicit engine shape when predictable TensorRT performance is required.
 
 Start the production-like stack:
 
