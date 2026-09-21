@@ -1,6 +1,6 @@
 FROM python:3.12-slim-bookworm
 
-WORKDIR /app/routing
+WORKDIR /workspace/services/routing-tracking
 ENV UV_PROJECT_ENVIRONMENT=/opt/routing-venv \
     PATH=/opt/routing-venv/bin:$PATH \
     PYTHONUNBUFFERED=1

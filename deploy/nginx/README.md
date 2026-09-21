@@ -15,12 +15,14 @@ Internal upstreams use Compose DNS:
 The Nginx container mounts:
 
 - `deploy/nginx/nginx.conf` at `/etc/nginx/nginx.conf`;
-- `secrets/tls` at `/etc/nginx/tls`;
+- the named `p4_tls` volume at `/etc/nginx/tls`;
 - the named `p4_nginx_logs` volume at `/var/log/nginx`.
 
-The certificate must contain the public server address in its Subject
-Alternative Name and its issuing CA must be trusted by operator browsers and
-Android. Do not use `curl -k` as an acceptance test.
+The Nginx entrypoint creates a self-signed certificate with
+`TLS_PUBLIC_ADDRESS` in its Subject Alternative Name on first startup. Set
+that Compose variable before creating the stack. For a trusted deployment,
+replace the certificate and key in the `p4_tls` volume with certificates from
+the site's CA. Do not use `curl -k` as an acceptance test.
 
 ## Public routes
 

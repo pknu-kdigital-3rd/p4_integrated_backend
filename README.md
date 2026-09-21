@@ -14,20 +14,28 @@ This repository integrates the existing control backend, BIMS routing/tracking, 
 ## HTTPS startup
 
 Docker Compose runs Node, routing, vision, relay, PostgreSQL, MinIO, Nginx,
-and Coturn. Copy [deploy/env.local.example](deploy/env.local.example) to the
-untracked `deploy/env.local`, configure the public address, credentials, model
-mount, and GPU settings, then run:
+and Coturn. The Compose files use the repository layout directly, so no
+`env.local` file or host-path variables are required for the default stack.
+From the directory containing `docker-compose.yml`, run:
 
 ```bash
-./scripts/run-linux-stack.sh all
+docker compose up -d
 ```
 
-Use `P4_COMPOSE_DEV=true` to add explicit host source mounts and Node/Python
-reload commands. Only Nginx ports `39001-39003` (the third when recording is
-enabled) and Coturn ports `39004-39007` are exposed on the host. Node, Vision,
-routing, relay, PostgreSQL, and MinIO use the private Compose network. See the
-[Docker Linux runbook](docs/integration/LINUX_STARTUP_RUNBOOK.md) and
-[Nginx ingress guide](deploy/nginx/README.md) for the complete procedure.
+Use the development override when editing source files:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+Optional shell variables can override Compose defaults for a different public
+address, credentials, recording, or GPU policy. JWT keys and the Nginx
+certificate are generated into named volumes on first startup. Only Nginx
+ports `39001-39003` (the third when recording is enabled) and Coturn ports
+`39004-39007` are exposed on the host. Node, Vision, routing, relay,
+PostgreSQL, and MinIO use the private Compose network. See the [Docker Linux
+runbook](docs/integration/LINUX_STARTUP_RUNBOOK.md) and [Nginx ingress
+guide](deploy/nginx/README.md) for the complete procedure.
 
 ## Android GPS/IMU telemetry
 

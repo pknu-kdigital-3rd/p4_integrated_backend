@@ -19,15 +19,14 @@ uv sync --extra osmnx
 uv run uvicorn main:app --reload
 ```
 
-The integrated Linux stack selects the backend with `ROUTING_GRAPH_BACKEND` in
-`deploy/env.local`. Use `osmnx` to require the full `osmnx`/`pyrosm` graph and
-make setup install its optional dependencies; use `pure` to require the
-bundled parser; `auto` prefers `osmnx` when it is installed and otherwise
-falls back.
+The integrated Linux stack selects the backend with the Compose
+`ROUTING_GRAPH_BACKEND` variable. Use `osmnx` to require the full
+`osmnx`/`pyrosm` graph and make setup install its optional dependencies; use
+`pure` to require the bundled parser; `auto` prefers `osmnx` when it is
+installed and otherwise falls back.
 
 ```bash
-# In deploy/env.local:
-# export ROUTING_GRAPH_BACKEND="osmnx"
+ROUTING_GRAPH_BACKEND=osmnx docker compose up -d routing
 ./scripts/run-linux-stack.sh setup
 ./scripts/run-linux-stack.sh restart routing
 ```

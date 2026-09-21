@@ -50,15 +50,16 @@ restore the TURN URL and credentials.
 ## 1. Coturn configuration
 
 Coturn is part of the Compose stack and runs with Linux host networking. Set
-its address and credentials in `deploy/env.local`:
+its address and credentials as Compose variables when starting the stack:
 
 ```bash
-TURN_LISTENING_IP=0.0.0.0
-TURN_RELAY_IP=10.174.96.119
-TURN_EXTERNAL_IP=10.174.96.119
-TURN_REALM=p4.local
-TURN_USERNAME=user
-TURN_PASSWORD=replace-with-a-strong-secret
+TURN_LISTENING_IP=0.0.0.0 \
+TURN_RELAY_IP=10.174.96.119 \
+TURN_EXTERNAL_IP=10.174.96.119 \
+TURN_REALM=p4.local \
+TURN_USERNAME=user \
+TURN_PASSWORD=replace-with-a-strong-secret \
+docker compose up -d coturn
 ```
 
 The Compose service always binds UDP/TCP `39004`, optional TLS TCP `39005`,
@@ -110,9 +111,9 @@ export TURN_PASSWORD='pass'
 These are also the application defaults. Override them with environment
 variables when deploying outside this development network.
 
-The Compose services receive their internal TURN and relay URLs from
-`deploy/env.local`; Node, Vision, and the Go relay communicate over the
-private `p4-internal` network. Start them together with:
+The Compose services receive their internal TURN and relay URLs from Compose
+defaults or shell overrides; Node, Vision, and the Go relay communicate over
+the private `p4-internal` network. Start them together with:
 
 ```bash
 ./scripts/run-linux-stack.sh start

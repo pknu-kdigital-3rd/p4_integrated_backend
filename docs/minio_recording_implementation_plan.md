@@ -395,9 +395,27 @@ Create the recording bucket during deployment/bootstrap and keep it private.
 
 ## 9. Environment variables
 
-Set these variables in `deploy/env.local` or `deploy/env.production` when
-recording is enabled. The Linux stack script loads this file and passes the
-relevant settings to MinIO, the Go relay, and the Node backend:
+Recording is disabled by default. Enable it with Compose variables; no
+`env.local` file is required. The same variables are passed to MinIO, the Go
+relay, and the Node backend when the recording profile is started:
+
+```bash
+RECORDING_ENABLED=true \
+NODE_INTERNAL_SERVICE_TOKEN="$(openssl rand -hex 32)" \
+MINIO_ROOT_USER=p4-minio-root \
+MINIO_ROOT_PASSWORD="replace-with-a-random-secret" \
+MINIO_ACCESS_KEY=p4-relay \
+MINIO_SECRET_KEY="replace-with-an-independent-random-secret" \
+MINIO_NODE_ACCESS_KEY=p4-node \
+MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret" \
+docker compose -f docker-compose.yml -f docker-compose.recording.yml \
+  --profile recording up -d --build
+```
+
+The enabled profile starts `minio` and runs the one-shot `minio-bootstrap`
+service after MinIO is ready. For a long-lived deployment, put these variables
+in the service manager's environment rather than committing a repository-local
+file. The application defaults below show the full set of recording settings:
 
 ```dotenv
 RECORDING_ENABLED=true
@@ -443,7 +461,8 @@ playback URLs, and must be reachable by clients at port `39003`. Set
 administration only; application services use their dedicated accounts.
 
 The public URLs above use `10.174.96.119`; change them to match
-`TLS_PUBLIC_ADDRESS` if the host address changes.
+`TLS_PUBLIC_ADDRESS` if the host address changes. `MINIO_ENDPOINT` is always
+the private Compose address `minio:9000` for containerized services.
 
 ---
 

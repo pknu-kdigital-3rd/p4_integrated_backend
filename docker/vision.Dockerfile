@@ -10,11 +10,13 @@ RUN apt-get update \
     && python3.12 -m pip install --break-system-packages --no-cache-dir uv \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/vision
+WORKDIR /workspace/services/vision
 COPY pyproject.toml uv.lock ./
 COPY --from=ultralytics . ./.ultralytics-custom/
 RUN uv sync --frozen
 COPY . ./
+COPY container-entrypoint.sh /usr/local/bin/p4-vision-entrypoint
 
 EXPOSE 39011
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/p4-vision-entrypoint"]
 CMD ["python", "run.py", "--no-tls"]
