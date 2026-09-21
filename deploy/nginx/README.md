@@ -15,8 +15,8 @@ Internal upstreams use Compose DNS:
 The Nginx container mounts:
 
 - `deploy/nginx/nginx.conf` at `/etc/nginx/nginx.conf`;
-- `../p4_integrated_backend_data/tls` at `/etc/nginx/tls`;
-- `../p4_integrated_backend_data/nginx_logs` at `/var/log/nginx`.
+- `./data/tls` at `/etc/nginx/tls`;
+- `./data/nginx_logs` at `/var/log/nginx`.
 
 The Nginx entrypoint creates a self-signed certificate with
 `TLS_PUBLIC_ADDRESS` in its Subject Alternative Name on first startup. Set

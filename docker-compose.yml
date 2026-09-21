@@ -13,7 +13,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-vehicle_platform}
     volumes:
       - type: bind
-        source: ../p4_integrated_backend_data/pgdata
+        source: ./data/pgdata
         target: /var/lib/postgresql/data
     networks: [ p4 ]
 
@@ -45,7 +45,7 @@ services:
         done && npx tsx prisma/seed.ts
     volumes:
       - type: bind
-        source: ../p4_integrated_backend_data/jwt
+        source: ./data/jwt
         target: /run/secrets/jwt
     networks: [ p4 ]
 
@@ -91,7 +91,7 @@ services:
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
     volumes:
       - type: bind
-        source: ../p4_integrated_backend_data/jwt
+        source: ./data/jwt
         target: /run/secrets/jwt
     expose: [ "3000" ]
     networks: [ p4 ]
@@ -152,10 +152,10 @@ services:
       TELEMETRY_CURRENT_MAX_AGE_SECONDS: ${TELEMETRY_CURRENT_MAX_AGE_SECONDS:-30}
     volumes:
       - type: bind
-        source: ../p4_integrated_backend_data/relay_feed
+        source: ./data/relay_feed
         target: /run/p4/relay
       - type: bind
-        source: ../p4_integrated_backend_data/recording_spool
+        source: ./data/recording_spool
         target: /var/tmp/p4-recordings
     expose: [ "39012" ]
     networks: [ p4 ]
@@ -205,7 +205,7 @@ services:
               capabilities: [ gpu ]
     volumes:
       - type: bind
-        source: ../p4_integrated_backend_data/relay_feed
+        source: ./data/relay_feed
         target: /run/p4/relay
       - type: bind
         source: ./services/vision/models
@@ -235,10 +235,10 @@ services:
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - type: bind
-        source: ../p4_integrated_backend_data/tls
+        source: ./data/tls
         target: /etc/nginx/tls
       - type: bind
-        source: ../p4_integrated_backend_data/nginx_logs
+        source: ./data/nginx_logs
         target: /var/log/nginx
     networks: [ p4 ]
 
@@ -254,7 +254,7 @@ services:
     expose: [ "9000", "9001" ]
     volumes:
       - type: bind
-        source: ../p4_integrated_backend_data/minio_data
+        source: ./data/minio_data
         target: /data
     networks: [ p4 ]
 

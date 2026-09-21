@@ -55,7 +55,7 @@ TLS_PUBLIC_ADDRESS=192.0.2.10 docker compose up -d
 ```
 
 Persistent data defaults to the sibling directory
-`../p4_integrated_backend_data`. Each Compose `source:` entry maps one volume
+`./data`. Each Compose `source:` entry maps one volume
 to a visible subdirectory there: `pgdata`, `minio_data`, `jwt`, `tls`,
 `relay_feed`, `recording_spool`, and `nginx_logs`. Development dependencies use
 `node_modules` in the same root. To use a different disk, edit the relevant
@@ -63,14 +63,14 @@ to a visible subdirectory there: `pgdata`, `minio_data`, `jwt`, `tls`,
 
 | Host directory | Service(s) | Container path |
 |---|---|---|
-| `../p4_integrated_backend_data/pgdata` | PostgreSQL | `/var/lib/postgresql/data` |
-| `../p4_integrated_backend_data/minio_data` | MinIO | `/data` |
-| `../p4_integrated_backend_data/jwt` | Node and migrations | `/run/secrets/jwt` |
-| `../p4_integrated_backend_data/tls` | Nginx | `/etc/nginx/tls` |
-| `../p4_integrated_backend_data/relay_feed` | Relay and Vision | `/run/p4/relay` |
-| `../p4_integrated_backend_data/recording_spool` | Relay | `/var/tmp/p4-recordings` |
-| `../p4_integrated_backend_data/nginx_logs` | Nginx | `/var/log/nginx` |
-| `../p4_integrated_backend_data/node_modules` (dev only) | Node | `/workspace/node/node_modules` |
+| `./data/pgdata` | PostgreSQL | `/var/lib/postgresql/data` |
+| `./data/minio_data` | MinIO | `/data` |
+| `./data/jwt` | Node and migrations | `/run/secrets/jwt` |
+| `./data/tls` | Nginx | `/etc/nginx/tls` |
+| `./data/relay_feed` | Relay and Vision | `/run/p4/relay` |
+| `./data/recording_spool` | Relay | `/var/tmp/p4-recordings` |
+| `./data/nginx_logs` | Nginx | `/var/log/nginx` |
+| `./data/node_modules` (dev only) | Node | `/workspace/node/node_modules` |
 
 ```yaml
 services:

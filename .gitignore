@@ -19,6 +19,7 @@ secrets/
 *.pem
 *.p12
 .runtime/
+/data/
 deploy/nginx/logs/*.log
 deploy/nginx/logs/*.pid
 services/vision/models/

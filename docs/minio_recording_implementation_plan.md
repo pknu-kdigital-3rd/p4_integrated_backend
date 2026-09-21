@@ -372,7 +372,7 @@ minio:
     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
   expose: ["9000", "9001"]
   volumes:
-    - ../p4_integrated_backend_data/minio_data:/data
+    - ./data/minio_data:/data
 ```
 
 Keep both MinIO ports private to the Compose network. Replay objects are

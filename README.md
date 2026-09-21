@@ -31,7 +31,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 Optional shell variables can override Compose defaults for a different public
 address, credentials, recording, or GPU policy. The
 The default persistent-data directory is the sibling directory
-`../p4_integrated_backend_data`; each `source:` entry in Compose names its
+`./data`; each `source:` entry in Compose names its
 subdirectory explicitly, so you can change one mapping without adding path
 variables. Only Nginx ports `39001-39003` (the third when recording is enabled)
 and Coturn ports `39004-39007` are exposed on the host. Node, Vision, routing,

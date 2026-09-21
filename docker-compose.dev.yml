@@ -7,7 +7,7 @@ services:
     volumes:
       - ./node:/workspace/node
       - type: bind
-        source: ../p4_integrated_backend_data/node_modules
+        source: ./data/node_modules
         target: /workspace/node/node_modules
       - ./operator-web:/workspace/operator-web
 
@@ -15,7 +15,7 @@ services:
     volumes:
       - ./node:/workspace/node
       - type: bind
-        source: ../p4_integrated_backend_data/node_modules
+        source: ./data/node_modules
         target: /workspace/node/node_modules
 
   routing:
