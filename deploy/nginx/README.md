@@ -22,7 +22,10 @@ The Nginx entrypoint creates a self-signed certificate with
 `TLS_PUBLIC_ADDRESS` in its Subject Alternative Name on first startup. Set
 that Compose variable before creating the stack. For a trusted deployment,
 replace the certificate and key in the host `tls` directory with certificates
-from the site's CA. Do not use `curl -k` as an acceptance test.
+from the site's CA. For development, copy `data/tls/server.crt` to each client
+and import it into that client's trust store; the certificate is not served by
+an HTTP route. Never copy or distribute `data/tls/server.key`. Do not use
+`curl -k` as an acceptance test.
 
 ## Public routes
 

@@ -116,6 +116,7 @@ services:
       ROUTING_GRAPH_BACKEND: ${ROUTING_GRAPH_BACKEND:-auto}
       TELEMETRY_MODE_STATE_PATH: /var/lib/p4-routing/telemetry-mode.json
       MEDIA_RELAY_INTERNAL_BASE_URL: http://relay:39012
+      BUSAN_BIMS_SERVICE_KEY: ${BUSAN_BIMS_SERVICE_KEY:-}
       PBF_PATH: /workspace/services/routing-tracking/busan-roads_osm.pbf
       BUSAN_BUS_HISTORY_PATH: /workspace/services/routing-tracking/data/busan_bus_gps.csv
       BUSAN_BUS_HYBRID_PATH: /workspace/services/routing-tracking/data/busan_bus_hybrid.csv

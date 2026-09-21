@@ -104,6 +104,16 @@ The public URLs are:
 - `https://<PUBLIC_ADDRESS>:39001/operator/`
 - `https://<PUBLIC_ADDRESS>:39002/`
 
+The generated development certificate is stored at `./data/tls/server.crt`.
+Copy that public certificate to a client and import it into the client trust
+store to remove the self-signed warning. Keep `./data/tls/server.key` private.
+
+The default host address is `10.174.96.119`, so `TLS_PUBLIC_ADDRESS` is only
+needed when the server uses another address. The BIMS key is optional for the
+default replay source; when the operator selects **Live BIMS**, set
+`BUSAN_BIMS_SERVICE_KEY` in the host environment before starting Compose. The
+Compose file passes it to routing without storing it in the image.
+
 ## Development hot reload
 
 Use the standalone development file with source bind mounts and reload
