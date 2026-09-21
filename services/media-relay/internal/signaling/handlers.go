@@ -25,6 +25,38 @@ type OfferModel struct {
 	RecordingSessionID string `json:"recordingSessionId,omitempty"`
 }
 
+// StreamIdentityStatus tells the publisher whether the trip/vehicle/session it
+// offered was accepted. A rejected identity is not a negotiation failure - the
+// live stream is still published - but it silently disables recording and makes
+// the relay drop every telemetry batch, which the publisher cannot otherwise
+// observe. Only sent when the offer actually carried identity fields.
+type StreamIdentityStatus struct {
+	Validated bool   `json:"validated"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// AnswerModel is the SDP answer plus the identity verdict.
+type AnswerModel struct {
+	Type           string                `json:"type"`
+	SDP            string                `json:"sdp"`
+	StreamIdentity *StreamIdentityStatus `json:"streamIdentity,omitempty"`
+}
+
+// identityVerdict is the outcome of validating one offer's stream identity.
+// reason is empty exactly when the identity was accepted.
+type identityVerdict struct {
+	offered bool
+	context *recording.Context
+	reason  string
+}
+
+func (v identityVerdict) status() *StreamIdentityStatus {
+	if !v.offered {
+		return nil
+	}
+	return &StreamIdentityStatus{Validated: v.context != nil, Reason: v.reason}
+}
+
 type Handler struct {
 	api           *webrtc.API
 	configuration webrtc.Configuration
@@ -103,7 +135,8 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	recordingContext := h.validateRecordingContext(r.Context(), offer)
+	verdict := h.validateRecordingContext(r.Context(), offer)
+	recordingContext := verdict.context
 	pc, err := h.newPeerConnection()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -131,22 +164,32 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, answer)
+	writeJSON(w, http.StatusOK, AnswerModel{
+		Type:           answer.Type.String(),
+		SDP:            answer.SDP,
+		StreamIdentity: verdict.status(),
+	})
 }
 
-func (h *Handler) validateRecordingContext(requestContext context.Context, offer OfferModel) *recording.Context {
+// validateRecordingContext resolves the offer's stream identity. A rejection is
+// never fatal - the live stream is still published - but the reason travels back
+// to the publisher in the answer, because a publisher that believes it is
+// sending telemetry has no other way to learn that the relay is dropping it.
+func (h *Handler) validateRecordingContext(requestContext context.Context, offer OfferModel) identityVerdict {
 	if offer.TripID == "" && offer.VehicleID == "" && offer.RecordingSessionID == "" {
-		return nil
+		return identityVerdict{}
 	}
 	if h.validator == nil {
+		const reason = "the relay has no Node connection, so recording and telemetry are disabled"
 		log.Printf("stream identity supplied while recording and Android telemetry are disabled; accepting live publisher without identity")
-		return nil
+		return identityVerdict{offered: true, reason: reason}
 	}
 	tripID, tripErr := strconv.ParseInt(offer.TripID, 10, 64)
 	vehicleID, vehicleErr := strconv.ParseInt(offer.VehicleID, 10, 64)
 	if tripErr != nil || vehicleErr != nil || offer.RecordingSessionID == "" {
+		const reason = "the trip, vehicle, or recording session id was missing or malformed"
 		log.Printf("recording identity is incomplete or malformed; accepting live publisher without recording")
-		return nil
+		return identityVerdict{offered: true, reason: reason}
 	}
 	requested := recording.Context{
 		TripID:             tripID,
@@ -158,9 +201,30 @@ func (h *Handler) validateRecordingContext(requestContext context.Context, offer
 	validated, err := h.validator.ValidateRecordingContext(validationContext, requested)
 	if err != nil {
 		log.Printf("recording identity validation failed; accepting live publisher without recording: %v", err)
-		return nil
+		return identityVerdict{offered: true, reason: identityRejectionReason(err)}
 	}
-	return &validated
+	return identityVerdict{offered: true, context: &validated}
+}
+
+// identityRejectionReason turns a Node rejection into one short sentence for the
+// publisher's UI. Node answers with {"error":{"code","message"}}; anything else
+// (an outage, a timeout) is reported as an unreachable Node rather than as a
+// rejected trip, because the two need opposite fixes.
+func identityRejectionReason(err error) string {
+	var coded *recording.HTTPStatusError
+	if !errors.As(err, &coded) {
+		return "the relay could not reach Node to validate it"
+	}
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if jsonErr := json.Unmarshal([]byte(coded.Message), &envelope); jsonErr == nil && envelope.Error.Message != "" {
+		return fmt.Sprintf("Node rejected it: %s", envelope.Error.Message)
+	}
+	return fmt.Sprintf("Node rejected it with HTTP %d", coded.Status)
 }
 
 func (h *Handler) newPeerConnection() (*webrtc.PeerConnection, error) {

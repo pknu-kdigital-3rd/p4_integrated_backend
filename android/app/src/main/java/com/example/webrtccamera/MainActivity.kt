@@ -150,6 +150,19 @@ class MainActivity : AppCompatActivity() {
     private var selectedTelemetryDataset: TelemetryDataset? = null
     private var telemetryReplaySource: CsvReplayTelemetrySource? = null
     private var activeSessionContext: StreamSessionContext? = null
+    /**
+     * The telemetry panel carries three independent facts, each updated by a
+     * different producer: whether the relay accepted this stream's identity,
+     * how the replay source is progressing, and whether the DataChannel is
+     * actually delivering. They are kept as separate lines because the replay
+     * source reports once a second and would otherwise be the only one ever
+     * visible - which is exactly how a stream the relay was discarding could
+     * look healthy on the device.
+     */
+    private var telemetrySourceStatus: String = "Telemetry: disabled"
+    private var telemetryTransportStatus: String? = null
+    private var telemetryIdentityWarning: String? = null
+
     private var captureSummary = ""
     @Volatile
     private var captureFps = 0f
@@ -428,7 +441,10 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { if (streaming.get()) setStatus(message) }
             },
             onTelemetryStatus = { message ->
-                runOnUiThread { if (streaming.get()) setTelemetryStatus(message) }
+                runOnUiThread { if (streaming.get()) setTelemetryTransportStatus(message) }
+            },
+            onStreamIdentity = { warning ->
+                runOnUiThread { if (streaming.get()) setTelemetryIdentityWarning(warning) }
             },
         )
         recordingTripIdInput.isEnabled = false
@@ -946,7 +962,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setTelemetryStatus(text: String) {
-        if (::telemetryStatusText.isInitialized) runOnUiThread { telemetryStatusText.text = text }
+        telemetrySourceStatus = text
+        renderTelemetryStatus()
+    }
+
+    private fun setTelemetryTransportStatus(text: String?) {
+        telemetryTransportStatus = text
+        renderTelemetryStatus()
+    }
+
+    private fun setTelemetryIdentityWarning(text: String?) {
+        telemetryIdentityWarning = text
+        renderTelemetryStatus()
+    }
+
+    private fun renderTelemetryStatus() {
+        if (!::telemetryStatusText.isInitialized) return
+        val text = listOfNotNull(telemetryIdentityWarning, telemetrySourceStatus, telemetryTransportStatus)
+            .joinToString("\n")
+        runOnUiThread { telemetryStatusText.text = text }
     }
 
     private fun stopStreaming() {
@@ -966,6 +1000,8 @@ class MainActivity : AppCompatActivity() {
         selectDatasetButton.isEnabled = true
         actualResolutionText.text = ""
         streamButton.setText(R.string.start_streaming)
+        setTelemetryTransportStatus(null)
+        setTelemetryIdentityWarning(null)
         setTelemetryStatus(
             when {
                 !telemetryEnabled -> "Telemetry: disabled"

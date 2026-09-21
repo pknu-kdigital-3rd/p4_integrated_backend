@@ -52,6 +52,7 @@ class WebRtcPublisher(
     private val sessionContext: StreamSessionContext? = null,
     private val onStatus: (String) -> Unit,
     private val onTelemetryStatus: (String) -> Unit = {},
+    private val onStreamIdentity: (String?) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val stopped = AtomicBoolean(true)
@@ -75,6 +76,8 @@ class WebRtcPublisher(
     private var telemetryChannel: DataChannel? = null
     private val pendingTelemetry = ArrayDeque<PendingTelemetry>()
     private var lastTelemetryStatus: String? = null
+    private var lastTelemetryStatusKind: String? = null
+    private var telemetryBatchesSent = 0L
     private val bitrateCapApplied = AtomicBoolean(false)
     // Reused by the CameraX analyzer thread to avoid allocating conversion
     // buffers for every frame.
@@ -180,7 +183,10 @@ class WebRtcPublisher(
                 override fun onStateChange() {
                     val state = channel.state()
                     postRtc {
-                        reportTelemetryStatus("Telemetry transport: ${state.name.lowercase()} (queued=${pendingTelemetry.size})")
+                        reportTelemetryStatus(
+                            state.name.lowercase(),
+                            "Telemetry transport: ${state.name.lowercase()} (queued=${pendingTelemetry.size})",
+                        )
                         if (state == DataChannel.State.OPEN) flushTelemetry()
                     }
                 }
@@ -188,7 +194,8 @@ class WebRtcPublisher(
                 override fun onMessage(buffer: DataChannel.Buffer) = Unit
             })
         }
-        reportTelemetryStatus("Telemetry transport: ${telemetryChannel?.state()?.name?.lowercase() ?: "unavailable"}")
+        val initialTelemetryState = telemetryChannel?.state()?.name?.lowercase() ?: "unavailable"
+        reportTelemetryStatus(initialTelemetryState, "Telemetry transport: $initialTelemetryState")
         videoTrack.setEnabled(true)
         val sender = connection.addTrack(videoTrack, listOf("camera-stream"))
         // Do not force a 16:9 output here. Some CameraX devices provide a 4:3
@@ -452,6 +459,7 @@ class WebRtcPublisher(
                             restartPeerConnection(current, "Server answer did not contain SDP")
                             return@postRtc
                         }
+                        val streamIdentity = answer.optJSONObject("streamIdentity")
                         current.setRemoteDescription(SimpleSdpObserver(
                             setSuccess = {
                                 val connectedSession = sessionContext
@@ -463,6 +471,7 @@ class WebRtcPublisher(
                                 } else {
                                     onStatus("Connected to relay; no recording IDs sent")
                                 }
+                                reportStreamIdentity(streamIdentity)
                                 // outbound-rtp stats have no codecId until the encoder has
                                 // produced at least one packet, so check once immediately
                                 // (may be empty) and once more after the encoder warms up.
@@ -508,6 +517,10 @@ class WebRtcPublisher(
         telemetryChannel?.dispose()
         telemetryChannel = null
         pendingTelemetry.clear()
+        // The replacement channel starts from scratch, so let its first state
+        // be logged again rather than deduplicated against the dead one's.
+        lastTelemetryStatus = null
+        lastTelemetryStatusKind = null
         peer?.close()
         peer?.dispose()
         peer = null
@@ -586,25 +599,59 @@ class WebRtcPublisher(
     private fun flushTelemetry() {
         val channel = telemetryChannel ?: return
         if (channel.state() != DataChannel.State.OPEN) {
-            reportTelemetryStatus("Telemetry transport: ${channel.state().name.lowercase()} (queued=${pendingTelemetry.size})")
+            val state = channel.state().name.lowercase()
+            reportTelemetryStatus(state, "Telemetry transport: $state (queued=${pendingTelemetry.size})")
             return
         }
         while (pendingTelemetry.isNotEmpty()) {
             val event = pendingTelemetry.first()
             if (!channel.send(DataChannel.Buffer(ByteBuffer.wrap(event.bytes), false))) {
-                reportTelemetryStatus("Telemetry transport: backpressure (queued=${pendingTelemetry.size})")
+                reportTelemetryStatus("backpressure", "Telemetry transport: backpressure (queued=${pendingTelemetry.size})")
                 return
             }
             pendingTelemetry.removeFirst()
+            telemetryBatchesSent++
         }
-        reportTelemetryStatus("Telemetry transport: sent (queued=0)")
+        // The running total is what distinguishes a transport that is still
+        // delivering from one that delivered once and then went quiet - a
+        // constant "sent" line cannot tell those apart.
+        reportTelemetryStatus("sent", "Telemetry transport: sent $telemetryBatchesSent (queued=0)")
     }
 
-    private fun reportTelemetryStatus(status: String) {
-        if (lastTelemetryStatus == status) return
-        lastTelemetryStatus = status
-        Log.i(TAG, status)
-        onTelemetryStatus(status)
+    /**
+     * Publishes the transport's own state. [kind] is the state without the
+     * counters: the UI text is refreshed whenever anything changes, but the log
+     * only records real transitions, since a healthy 25 Hz flush loop would
+     * otherwise write ~25 lines a second.
+     */
+    private fun reportTelemetryStatus(kind: String, status: String) {
+        if (lastTelemetryStatus != status) {
+            lastTelemetryStatus = status
+            onTelemetryStatus(status)
+        }
+        if (lastTelemetryStatusKind != kind) {
+            lastTelemetryStatusKind = kind
+            Log.i(TAG, status)
+        }
+    }
+
+    /**
+     * Surfaces the relay's verdict on the trip/vehicle ids this publisher
+     * offered. A rejected identity still negotiates and still publishes video,
+     * but the relay records nothing and drops every telemetry batch on arrival -
+     * without this the device goes on reporting healthy replay progress for a
+     * stream the server is discarding.
+     */
+    private fun reportStreamIdentity(status: JSONObject?) {
+        // Absent for a live-only offer, and on a relay that predates the field.
+        if (status == null || status.optBoolean("validated", true)) {
+            onStreamIdentity(null)
+            return
+        }
+        val reason = status.optString("reason").takeIf { it.isNotBlank() } ?: "the relay did not say why"
+        val message = "Relay rejected Trip/Vehicle ID: $reason - telemetry and recording are off"
+        Log.w(TAG, message)
+        onStreamIdentity(message)
     }
 
     private fun captureTimestampToRtp(timestampNs: Long): Long {

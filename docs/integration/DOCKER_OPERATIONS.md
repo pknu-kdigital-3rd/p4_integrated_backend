@@ -361,6 +361,14 @@ or Go code requires rebuilding the relevant production image first.
 - The default recording path is always enabled. Relay, Node, and Vision must
   receive the same `NODE_INTERNAL_SERVICE_TOKEN`; mismatches cause recording or
   Android telemetry validation failures.
+- Android telemetry and recording both require the Trip ID entered on the device
+  to name an existing `IN_PROGRESS` trip that belongs to the entered Vehicle ID
+  (`RECORDING_VALIDATE_TRIP_CONTEXT`, default true). A fresh database seeds
+  vehicles but no trips, so create one in the operator dashboard first. Without
+  it the relay still publishes the live stream but stores nothing and drops every
+  telemetry batch on arrival; the offer answer reports the rejection, which the
+  Android app shows above its telemetry status, and the relay logs
+  `Android telemetry DataChannel registered (identity=none)`.
 - `docker compose config --quiet` validates interpolation but does not prove
   GPU access, BIMS credentials, TURN reachability, or that the model file is
   compatible with the CUDA/TensorRT runtime.
