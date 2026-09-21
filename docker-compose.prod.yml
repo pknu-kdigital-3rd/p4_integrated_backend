@@ -172,6 +172,8 @@ services:
         ultralytics: ./services/vision/.ultralytics-custom
     container_name: p4-vision
     restart: unless-stopped
+    depends_on:
+      - p4-relay
     environment:
       HOST: 0.0.0.0
       PORT: "39011"
