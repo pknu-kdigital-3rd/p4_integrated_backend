@@ -8,20 +8,12 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-# The Node image forwards an SSH agent to npm for its private Git dependency;
-# keep BuildKit enabled for every Compose build, including older Docker hosts.
+# Keep BuildKit enabled for every Compose build, including older Docker hosts.
 export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
 
 log() { printf '[p4-stack] %s\n' "$*"; }
 die() { printf '[p4-stack] ERROR: %s\n' "$*" >&2; exit 1; }
 require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
-
-require_buildkit_ssh_agent() {
-  [[ -n "${SSH_AUTH_SOCK:-}" ]] \
-    || die "SSH_AUTH_SOCK is required to build the Node image; start an SSH agent with access to the private Git dependency"
-  ssh-add -L >/dev/null 2>&1 \
-    || die "The SSH agent has no usable key; add the private Git dependency key before building"
-}
 
 load_environment() {
   TLS_PUBLIC_ADDRESS="${TLS_PUBLIC_ADDRESS:-10.174.96.119}"
@@ -60,7 +52,6 @@ recording_bootstrap() {
 
 setup_stack() {
   require_command docker
-  require_buildkit_ssh_agent
   log "Building Compose images"
   compose build
   log "Starting PostgreSQL and applying migrations"
@@ -71,7 +62,6 @@ setup_stack() {
 }
 
 start_stack() {
-  require_buildkit_ssh_agent
   local services=(node routing relay vision nginx coturn)
   compose up -d --build "${services[@]}"
   recording_bootstrap
@@ -83,7 +73,6 @@ start_stack() {
 start_component() {
   local component="${1//route-tracking/routing}"
   [[ "$component" =~ ^(node|routing|relay|vision|nginx|coturn)$ ]] || die "Unknown component '$component'"
-  [[ "$component" == node ]] && require_buildkit_ssh_agent
   compose up -d --build "$component"
 }
 

@@ -22,7 +22,6 @@ services:
       context: .
       dockerfile: docker/node.Dockerfile
       target: runtime
-      ssh: [ default ]
     container_name: vehicle-platform-node-migrate
     restart: "no"
     depends_on:
@@ -58,7 +57,6 @@ services:
       context: .
       dockerfile: docker/node.Dockerfile
       target: runtime
-      ssh: [ default ]
     container_name: vehicle-platform-node
     restart: unless-stopped
     depends_on:

@@ -31,7 +31,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@asteasolutions/zod-to-openapi": "git+ssh://git@github.com:pknu-kdigital-3rd/p4_zod-to-openapi.git#master",
+    "@asteasolutions/zod-to-openapi": "file:vendor/zod-to-openapi",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "argon2": "^0.45.1",
