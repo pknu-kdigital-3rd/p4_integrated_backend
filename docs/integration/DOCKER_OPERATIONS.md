@@ -279,6 +279,26 @@ or Go code requires rebuilding the relevant production image first.
 
 ## Operational gotchas
 
+- The `p4-internal` network defaults to `10.253.240.0/24`. Override
+  `P4_DOCKER_SUBNET` if that range conflicts with your host or VPN routes.
+  Duplicate subnet routes can send host requests to a stale Docker bridge,
+  causing published HTTPS ports to reset even when Nginx works inside its
+  container. Check `ip route get <container-ip>` against the bridge identified
+  by `docker network inspect p4-internal`.
+- Changing the subnet requires recreating this project's network. On an
+  existing development installation, run:
+
+  ```bash
+  docker compose -f docker-compose.dev.yml down
+  docker compose -f docker-compose.dev.yml up -d
+  ```
+
+  This interrupts the stack but preserves bind-mounted data and named volumes.
+  Do not add `--volumes`. Reapply any command-scoped public address/port
+  overrides when running `up`; use `docker-compose.prod.yml` for production.
+  An existing `P4_DOCKER_SUBNET` setting overrides the new default, so update
+  or remove it if it still selects the conflicting subnet.
+
 - `docker compose down` preserves `data/`; deleting `data/minio_data` loses
   recordings, deleting `data/pgdata` loses database state, and deleting
   `data/tls`/`data/jwt` rotates trust material and signing keys.

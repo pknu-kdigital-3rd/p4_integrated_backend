@@ -312,7 +312,7 @@ networks:
     name: p4-internal
     ipam:
       config:
-        - subnet: ${P4_DOCKER_SUBNET:-172.31.0.0/16}
+        - subnet: ${P4_DOCKER_SUBNET:-10.253.240.0/24}
 
 volumes:
   p4_relay_socket:
