@@ -137,6 +137,30 @@ The first startup initializes JWT keys and the self-signed TLS certificate in
 the one-shot `minio-bootstrap` container. The MinIO Console is private and is
 not required for replay.
 
+### Verify and clean up MinIO bootstrap
+
+`minio-bootstrap` is a one-shot service. A successful run ends with `Exited
+(0)`; it is not supposed to keep running after it creates the bucket and
+application accounts. Check its status and logs with the Compose file you are
+using (`docker-compose.dev.yml` or `docker-compose.prod.yml`):
+
+```bash
+docker compose -f docker-compose.dev.yml ps -a minio-bootstrap
+docker compose -f docker-compose.dev.yml logs --no-color minio-bootstrap
+```
+
+The logs should end with a message that the `p4-trip-recordings` bucket and
+recording credentials are ready. After recording the logs, remove the completed
+one-shot container without stopping MinIO:
+
+```bash
+docker compose -f docker-compose.dev.yml rm -f minio-bootstrap
+```
+
+Use `docker compose ... up -d minio` when only MinIO should be started. A later
+`docker compose ... up -d` for the whole stack recreates and runs the bootstrap
+service again; this is safe because the bootstrap script is idempotent.
+
 ## Reload and rebuild methods
 
 ### Development Compose
