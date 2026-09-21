@@ -153,9 +153,11 @@ services:
       TELEMETRY_VISION_QUEUE: ${TELEMETRY_VISION_QUEUE:-64}
       TELEMETRY_CURRENT_MAX_AGE_SECONDS: ${TELEMETRY_CURRENT_MAX_AGE_SECONDS:-30}
     volumes:
-      - type: bind
-        source: ./data/relay_feed
+      - type: volume
+        source: p4_relay_socket
         target: /run/p4/relay
+        volume:
+          nocopy: false
       - type: bind
         source: ./data/recording_spool
         target: /var/tmp/p4-recordings
@@ -206,9 +208,11 @@ services:
               count: all
               capabilities: [ gpu ]
     volumes:
-      - type: bind
-        source: ./data/relay_feed
+      - type: volume
+        source: p4_relay_socket
         target: /run/p4/relay
+        volume:
+          nocopy: false
       - type: bind
         source: ./services/vision/models
         target: /workspace/services/vision/models
@@ -307,3 +311,7 @@ networks:
     ipam:
       config:
         - subnet: ${P4_DOCKER_SUBNET:-172.31.0.0/16}
+
+volumes:
+  p4_relay_socket:
+    name: p4-relay-socket

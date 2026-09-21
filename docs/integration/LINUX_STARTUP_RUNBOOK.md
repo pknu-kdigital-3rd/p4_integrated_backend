@@ -61,7 +61,9 @@ TLS_PUBLIC_ADDRESS=192.0.2.10 docker compose up -d
 Persistent data defaults to the sibling directory
 `./data`. Each Compose `source:` entry maps one volume
 to a visible subdirectory there: `pgdata`, `minio_data`, `jwt`, `tls`,
-`relay_feed`, `recording_spool`, `routing_state`, and `nginx_logs`. Development
+`recording_spool`, `routing_state`, and `nginx_logs`. The relay/vision Unix
+socket uses the Docker-managed `p4-relay-socket` volume, so it does not need a
+host directory or host ownership changes. Development
 dependencies use `node_modules` in the same root. To use a different disk, edit the relevant
 `source:` entry in `docker-compose.yml` or `docker-compose.dev.yml`:
 
@@ -71,7 +73,7 @@ dependencies use `node_modules` in the same root. To use a different disk, edit 
 | `./data/minio_data` | MinIO | `/data` |
 | `./data/jwt` | Node and migrations | `/run/secrets/jwt` |
 | `./data/tls` | Nginx | `/etc/nginx/tls` |
-| `./data/relay_feed` | Relay and Vision | `/run/p4/relay` |
+| `p4-relay-socket` (Docker volume) | Relay and Vision | `/run/p4/relay` |
 | `./data/recording_spool` | Relay | `/var/tmp/p4-recordings` |
 | `./data/routing_state` | Routing/tracking | `/var/lib/p4-routing` |
 | `./data/nginx_logs` | Nginx | `/var/log/nginx` |
