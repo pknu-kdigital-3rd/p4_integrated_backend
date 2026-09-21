@@ -12,7 +12,16 @@ case "$MINIO_RECORDING_BUCKET" in
     ;;
 esac
 
-mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+attempt=0
+until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 60 ]; then
+    echo "MinIO did not become ready after 60 attempts" >&2
+    exit 1
+  fi
+  echo "Waiting for MinIO (attempt $attempt/60)..." >&2
+  sleep 2
+done
 mc mb --ignore-existing "local/$MINIO_RECORDING_BUCKET"
 
 create_policy() {

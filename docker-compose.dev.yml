@@ -1,0 +1,31 @@
+services:
+  node:
+    environment:
+      NODE_ENV: development
+    command: ["./node_modules/.bin/tsx", "watch", "src/server.ts"]
+    working_dir: /app/node
+    volumes:
+      - ${NODE_SOURCE_PATH:-./node}:/app/node
+      - p4_node_modules:/app/node/node_modules
+      - ${OPERATOR_WEB_SOURCE_PATH:-./operator-web}:/app/operator-web
+
+  node-migrate:
+    volumes:
+      - ${NODE_SOURCE_PATH:-./node}:/app/node
+      - p4_node_modules:/app/node/node_modules
+      - ./secrets/jwt:/run/secrets/jwt:ro
+
+  routing:
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/routing"]
+    volumes:
+      - ${ROUTING_SOURCE_PATH:-./services/routing-tracking}:/app/routing
+
+  vision:
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "39011", "--reload", "--reload-dir", "/app/vision"]
+    volumes:
+      - ${VISION_SOURCE_PATH:-./services/vision}:/app/vision
+      - ${VISION_ULTRALYTICS_HOST_PATH:-./services/vision/.ultralytics-custom}:/app/vision/.ultralytics-custom:ro
+      - ${VISION_MODEL_HOST_PATH:-./services/vision/models}:/models:ro
+
+volumes:
+  p4_node_modules:

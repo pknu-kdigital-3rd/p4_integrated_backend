@@ -1,80 +1,30 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Compose is the only process supervisor for the Linux stack.  The wrapper
+# keeps the existing command names while making service ports private to the
+# Compose network and generating a safe runtime env file from deploy/env.local.
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${P4_ENV_FILE:-${PROJECT_ROOT}/deploy/env.local}"
 RUNTIME_DIR="${P4_RUNTIME_DIR:-${PROJECT_ROOT}/.runtime}"
-LOG_DIR="${RUNTIME_DIR}/logs"
-PID_DIR="${RUNTIME_DIR}/pids"
-BIN_DIR="${RUNTIME_DIR}/bin"
+COMPOSE_ENV_FILE="${RUNTIME_DIR}/compose.env"
 TLS_DIR="${PROJECT_ROOT}/secrets/tls"
-NGINX_PREFIX="${PROJECT_ROOT}/deploy/nginx/"
 
-log() {
-  printf '[p4-stack] %s\n' "$*"
-}
+# The Node image forwards an SSH agent to npm for its private Git dependency;
+# keep BuildKit enabled for every Compose build, including older Docker hosts.
+export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
 
-die() {
-  printf '[p4-stack] ERROR: %s\n' "$*" >&2
-  exit 1
-}
+log() { printf '[p4-stack] %s\n' "$*"; }
+die() { printf '[p4-stack] ERROR: %s\n' "$*" >&2; exit 1; }
+require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 
-require_command() {
-  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
-}
-
-load_node_runtime() {
-  if command -v node >/dev/null 2>&1 \
-    && command -v npm >/dev/null 2>&1 \
-    && command -v npx >/dev/null 2>&1; then
-    log "Using Node $(node --version) from PATH"
-    return 0
-  fi
-
-  NODE_VERSION="${NODE_VERSION:-lts/*}"
-  local account_home="${HOME:-}"
-  if [[ -z "$account_home" ]] && command -v getent >/dev/null 2>&1; then
-    account_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
-  fi
-
-  local candidates=()
-  [[ -n "${NVM_DIR:-}" ]] && candidates+=("${NVM_DIR}/nvm.sh")
-  if [[ -n "$account_home" ]]; then
-    candidates+=("${account_home}/.nvm/nvm.sh")
-    candidates+=("${XDG_CONFIG_HOME:-${account_home}/.config}/nvm/nvm.sh")
-  fi
-  candidates+=("/usr/local/share/nvm/nvm.sh")
-
-  local nvm_script=""
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -s "$candidate" ]]; then
-      nvm_script="$candidate"
-      break
-    fi
-  done
-  [[ -n "$nvm_script" ]] \
-    || die "Node is not on PATH and nvm.sh was not found. Set NVM_DIR in $ENV_FILE."
-  NVM_DIR="$(cd -- "$(dirname -- "$nvm_script")" && pwd)"
-  export NVM_DIR NODE_VERSION
-
-  log "Loading nvm from $nvm_script"
-  set +u
-  # shellcheck disable=SC1090
-  source "$nvm_script"
-
-  if ! nvm use --silent "$NODE_VERSION" >/dev/null 2>&1; then
-    log "Installing Node $NODE_VERSION with nvm"
-    nvm install "$NODE_VERSION"
-    nvm use --silent "$NODE_VERSION" >/dev/null
-  fi
-  set -u
-
-  require_command node
-  require_command npm
-  require_command npx
-  log "Using Node $(node --version) from nvm"
+require_buildkit_ssh_agent() {
+  [[ -n "${SSH_AUTH_SOCK:-}" ]] \
+    || die "SSH_AUTH_SOCK is required to build the Node image; start an SSH agent with access to the private Git dependency"
+  ssh-add -L >/dev/null 2>&1 \
+    || die "The SSH agent has no usable key; add the private Git dependency key before building"
 }
 
 load_environment() {
@@ -84,98 +34,124 @@ load_environment() {
   source "$ENV_FILE"
   set +a
 
+  P4_ROOT="${P4_ROOT:-$PROJECT_ROOT}"
+  TLS_PUBLIC_ADDRESS="${TLS_PUBLIC_ADDRESS:-10.174.96.119}"
+  NODE_ENV="${NODE_ENV:-production}"
   RECORDING_ENABLED="${RECORDING_ENABLED:-false}"
-  [[ "$RECORDING_ENABLED" == true || "$RECORDING_ENABLED" == false ]] \
-    || die "RECORDING_ENABLED must be true or false"
-  export RECORDING_ENABLED
   ANDROID_TELEMETRY_ENABLED="${ANDROID_TELEMETRY_ENABLED:-false}"
-  [[ "$ANDROID_TELEMETRY_ENABLED" == true || "$ANDROID_TELEMETRY_ENABLED" == false ]] \
-    || die "ANDROID_TELEMETRY_ENABLED must be true or false"
-  export ANDROID_TELEMETRY_ENABLED
-  # Android telemetry validates stream identity and persists GPS through Node
-  # even when recording is disabled, so it needs the internal URL and token too.
-  if [[ "$ANDROID_TELEMETRY_ENABLED" == true ]]; then
-    [[ -n "${NODE_INTERNAL_BASE_URL:-}" ]] \
-      || die "NODE_INTERNAL_BASE_URL is required when ANDROID_TELEMETRY_ENABLED=true"
-    [[ ${#NODE_INTERNAL_SERVICE_TOKEN} -ge 32 && "$NODE_INTERNAL_SERVICE_TOKEN" != replace-* ]] \
-      || die "NODE_INTERNAL_SERVICE_TOKEN must be a real token of at least 32 characters when ANDROID_TELEMETRY_ENABLED=true"
+  PUBLIC_OPERATOR_URL="${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS}:39001}"
+  VISION_PUBLIC_BASE_URL="${VISION_PUBLIC_BASE_URL:-https://${TLS_PUBLIC_ADDRESS}:39002}"
+  LIVE_VIEW_URL="${LIVE_VIEW_URL:-${VISION_PUBLIC_BASE_URL}/}"
+  DATABASE_URL="${DATABASE_URL:-postgresql://app:app@db:5432/vehicle_platform?schema=public}"
+  POSTGRES_USER="${POSTGRES_USER:-app}"
+  POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-app}"
+  POSTGRES_DB="${POSTGRES_DB:-vehicle_platform}"
+  MINIO_RECORDING_BUCKET="${MINIO_RECORDING_BUCKET:-p4-trip-recordings}"
+  MINIO_PUBLIC_ENDPOINT="${MINIO_PUBLIC_ENDPOINT:-https://${TLS_PUBLIC_ADDRESS}:39003}"
+  MINIO_BROWSER_REDIRECT_URL="${MINIO_BROWSER_REDIRECT_URL:-http://127.0.0.1:9001}"
+  TURN_URL="${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS}:39004?transport=udp}"
+  NODE_SOURCE_PATH="${NODE_SOURCE_PATH:-${PROJECT_ROOT}/node}"
+  OPERATOR_WEB_SOURCE_PATH="${OPERATOR_WEB_SOURCE_PATH:-${PROJECT_ROOT}/operator-web}"
+  ROUTING_SOURCE_PATH="${ROUTING_SOURCE_PATH:-${PROJECT_ROOT}/services/routing-tracking}"
+  VISION_SOURCE_PATH="${VISION_SOURCE_PATH:-${PROJECT_ROOT}/services/vision}"
+  VISION_MODEL_HOST_PATH="${VISION_MODEL_HOST_PATH:-${PROJECT_ROOT}/services/vision/models}"
+  VISION_ULTRALYTICS_HOST_PATH="${VISION_ULTRALYTICS_HOST_PATH:-${PROJECT_ROOT}/services/vision/.ultralytics-custom}"
+  VISION_ULTRALYTICS_CONTEXT="${VISION_ULTRALYTICS_CONTEXT:-$VISION_ULTRALYTICS_HOST_PATH}"
+  YOLO_DEVICE_CONTAINER="${YOLO_DEVICE_CONTAINER:-cuda:0}"
+
+  [[ "$RECORDING_ENABLED" == true || "$RECORDING_ENABLED" == false ]] || die "RECORDING_ENABLED must be true or false"
+  [[ "$ANDROID_TELEMETRY_ENABLED" == true || "$ANDROID_TELEMETRY_ENABLED" == false ]] || die "ANDROID_TELEMETRY_ENABLED must be true or false"
+  [[ "$(cd -- "$P4_ROOT" 2>/dev/null && pwd)" == "$PROJECT_ROOT" ]] || die "P4_ROOT must point to this checkout: $PROJECT_ROOT"
+  [[ -n "${JWT_ISSUER:-}" && -n "${JWT_AUDIENCE:-}" && -n "${JWT_KEY_ID:-}" ]] || die "JWT_ISSUER, JWT_AUDIENCE, and JWT_KEY_ID are required"
+
+  if [[ "$RECORDING_ENABLED" == true || "$ANDROID_TELEMETRY_ENABLED" == true ]]; then
+    local internal_token="${NODE_INTERNAL_SERVICE_TOKEN:-}"
+    [[ ${#internal_token} -ge 32 && "$internal_token" != replace-* ]] \
+      || die "NODE_INTERNAL_SERVICE_TOKEN must be a real token of at least 32 characters"
   fi
-
-  : "${P4_ROOT:?P4_ROOT is required in $ENV_FILE}"
-  : "${HOST:?HOST is required in $ENV_FILE}"
-  : "${NODE_PORT:?NODE_PORT is required in $ENV_FILE}"
-  : "${ROUTING_PORT:?ROUTING_PORT is required in $ENV_FILE}"
-  : "${VISION_PORT:?VISION_PORT is required in $ENV_FILE}"
-  : "${RELAY_LISTEN_ADDR:?RELAY_LISTEN_ADDR is required in $ENV_FILE}"
-  : "${PUBLIC_OPERATOR_URL:?PUBLIC_OPERATOR_URL is required in $ENV_FILE}"
-  : "${VISION_PUBLIC_BASE_URL:?VISION_PUBLIC_BASE_URL is required in $ENV_FILE}"
-  : "${LIVE_VIEW_URL:?LIVE_VIEW_URL is required in $ENV_FILE}"
-  : "${TLS_PUBLIC_ADDRESS:?TLS_PUBLIC_ADDRESS is required in $ENV_FILE}"
-
   if [[ "$RECORDING_ENABLED" == true ]]; then
-    local recording_variable recording_secret recording_secret_value
-    for recording_variable in NODE_INTERNAL_SERVICE_TOKEN MINIO_ENDPOINT MINIO_ACCESS_KEY \
-      MINIO_SECRET_KEY MINIO_NODE_ACCESS_KEY MINIO_NODE_SECRET_KEY MINIO_RECORDING_BUCKET \
-      MINIO_PUBLIC_ENDPOINT MINIO_BROWSER_REDIRECT_URL MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do
-      [[ -n "${!recording_variable:-}" ]] \
-        || die "$recording_variable is required when RECORDING_ENABLED=true"
+    local variable
+    for variable in MINIO_ROOT_USER MINIO_ROOT_PASSWORD MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_NODE_ACCESS_KEY MINIO_NODE_SECRET_KEY MINIO_PUBLIC_ENDPOINT; do
+      [[ -n "${!variable:-}" ]] || die "$variable is required when RECORDING_ENABLED=true"
     done
-    for recording_secret in NODE_INTERNAL_SERVICE_TOKEN MINIO_ROOT_PASSWORD MINIO_SECRET_KEY MINIO_NODE_SECRET_KEY; do
-      recording_secret_value="${!recording_secret}"
-      [[ "$recording_secret_value" != replace-* ]] \
-        || die "$recording_secret must be replaced before recording is enabled"
-    done
-    for minio_secret in MINIO_ROOT_PASSWORD MINIO_SECRET_KEY MINIO_NODE_SECRET_KEY; do
-      minio_secret_value="${!minio_secret}"
-      [[ ${#minio_secret_value} -ge 8 ]] \
-        || die "$minio_secret must contain at least 8 characters (MinIO requirement)"
-    done
-    [[ ${#NODE_INTERNAL_SERVICE_TOKEN} -ge 32 ]] \
-      || die "NODE_INTERNAL_SERVICE_TOKEN must contain at least 32 characters"
-    [[ "$MINIO_PUBLIC_ENDPOINT" == https://* ]] \
-      || die "MINIO_PUBLIC_ENDPOINT must use HTTPS"
-    [[ "$MINIO_BROWSER_REDIRECT_URL" == https://* ]] \
-      || die "MINIO_BROWSER_REDIRECT_URL must use HTTPS"
+    [[ "$MINIO_PUBLIC_ENDPOINT" == https://* ]] || die "MINIO_PUBLIC_ENDPOINT must use HTTPS"
   fi
-
-  [[ "$PUBLIC_OPERATOR_URL" == https://* ]] || die "PUBLIC_OPERATOR_URL must use HTTPS"
-  [[ "$VISION_PUBLIC_BASE_URL" == https://* ]] || die "VISION_PUBLIC_BASE_URL must use HTTPS"
-  [[ "$LIVE_VIEW_URL" == https://* ]] || die "LIVE_VIEW_URL must use HTTPS"
-
-  local configured_root
-  configured_root="$(cd -- "$P4_ROOT" 2>/dev/null && pwd)" || die "P4_ROOT does not exist: $P4_ROOT"
-  [[ "$configured_root" == "$PROJECT_ROOT" ]] || die "P4_ROOT must point to this checkout: $PROJECT_ROOT"
-
-  HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-300}"
-  [[ "$HEALTH_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "HEALTH_TIMEOUT_SECONDS must be a positive integer"
-
-  ROUTING_GRAPH_BACKEND="${ROUTING_GRAPH_BACKEND:-auto}"
-  [[ "$ROUTING_GRAPH_BACKEND" == "auto" || "$ROUTING_GRAPH_BACKEND" == "osmnx" || "$ROUTING_GRAPH_BACKEND" == "pure" || "$ROUTING_GRAPH_BACKEND" == "fallback" ]] \
-    || die "ROUTING_GRAPH_BACKEND must be auto, osmnx, or pure"
-  export ROUTING_GRAPH_BACKEND
+  export P4_ROOT TLS_PUBLIC_ADDRESS NODE_ENV RECORDING_ENABLED ANDROID_TELEMETRY_ENABLED
+  export PUBLIC_OPERATOR_URL VISION_PUBLIC_BASE_URL LIVE_VIEW_URL DATABASE_URL
+  export POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB MINIO_RECORDING_BUCKET
+  export MINIO_PUBLIC_ENDPOINT MINIO_BROWSER_REDIRECT_URL TURN_URL
+  export NODE_SOURCE_PATH OPERATOR_WEB_SOURCE_PATH ROUTING_SOURCE_PATH VISION_SOURCE_PATH
+  export VISION_MODEL_HOST_PATH VISION_ULTRALYTICS_HOST_PATH VISION_ULTRALYTICS_CONTEXT YOLO_DEVICE_CONTAINER
 }
 
-preflight() {
-  load_node_runtime
-  local command_name
-  for command_name in docker uv go openssl curl nginx nvidia-smi; do
-    require_command "$command_name"
-  done
-  docker compose version >/dev/null
-  nvidia-smi --query-gpu=name --format=csv,noheader | grep -Fq 'RTX 3090' \
-    || die "RTX 3090 was not detected by nvidia-smi"
+compose_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
+write_compose_env() {
+  mkdir -p "$RUNTIME_DIR"
+  local name
+  # Compose env_file syntax is deliberately generated from the already
+  # sourced shell environment; deploy/env.local remains shell-compatible and
+  # never needs to be passed directly to Docker Compose.
+  {
+    for name in \
+      NODE_ENV DATABASE_URL JWT_PRIVATE_KEY_PATH JWT_PUBLIC_KEY_PATH JWT_ISSUER JWT_AUDIENCE JWT_ACCESS_TOKEN_TTL JWT_KEY_ID \
+      PUBLIC_OPERATOR_URL VISION_PUBLIC_BASE_URL LIVE_VIEW_URL ROUTING_TRACKING_SERVICE_TOKEN ROUTING_GRAPH_BACKEND \
+      OPERATOR_DEMO_PUBLIC TRUST_PROXY RECORDING_ENABLED RECORDING_VALIDATE_TRIP_CONTEXT ANDROID_TELEMETRY_ENABLED \
+      NODE_INTERNAL_SERVICE_TOKEN RECORDING_SEGMENT_SECONDS RECORDING_QUEUE_FRAMES RECORDING_UPLOAD_QUEUE RECORDING_SPOOL_DIR RECORDING_SPOOL_MAX_BYTES \
+      RECORDING_DETECTION_QUEUE_SIZE RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES MINIO_ENDPOINT MINIO_USE_SSL MINIO_RECORDING_BUCKET \
+      MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_NODE_ACCESS_KEY MINIO_NODE_SECRET_KEY MINIO_PUBLIC_ENDPOINT MINIO_BROWSER_REDIRECT_URL \
+      MINIO_ROOT_USER MINIO_ROOT_PASSWORD YOLO_MODEL YOLO_DEVICE YOLO_HALF YOLO_RETINA_MASKS YOLO_MAX_DETECTIONS \
+      YOLO_MASK_CONTOUR_SIZE YOLO_MASK_POLYGON_SIMPLIFY YOLO_MASK_POLYGON_EPSILON_RATIO YOLO_FRAME_DROP_POLICY \
+      YOLO_INFERENCE_QUEUE_SIZE METRICS_LOG_INTERVAL_SECONDS ENABLE_PYTHON_ALLOC_PROFILE FORWARDED_ALLOW_IPS \
+      TURN_URL TURN_USERNAME TURN_PASSWORD TURN_REALM TURN_LISTENING_IP TURN_RELAY_IP TURN_EXTERNAL_IP \
+      PY_ANDROID_LIVE_URL PY_TELEMETRY_URL MEDIA_RELAY_INTERNAL_BASE_URL LIVE_VIEW_PARENT_ORIGINS \
+      TELEMETRY_NODE_QUEUE TELEMETRY_VISION_QUEUE TELEMETRY_CURRENT_MAX_AGE_SECONDS ROUTING_EDGE_INDEX_BUCKET_DEGREES; do
+      if [[ -v "$name" ]]; then
+        printf '%s=%s\n' "$name" "$(compose_escape "${!name}")"
+      fi
+    done
+    printf 'P4_ROOT=%s\n' "$(compose_escape "$P4_ROOT")"
+    printf 'TLS_PUBLIC_ADDRESS=%s\n' "$(compose_escape "$TLS_PUBLIC_ADDRESS")"
+    printf 'NODE_SOURCE_PATH=%s\n' "$(compose_escape "$NODE_SOURCE_PATH")"
+    printf 'OPERATOR_WEB_SOURCE_PATH=%s\n' "$(compose_escape "$OPERATOR_WEB_SOURCE_PATH")"
+    printf 'ROUTING_SOURCE_PATH=%s\n' "$(compose_escape "$ROUTING_SOURCE_PATH")"
+    printf 'VISION_SOURCE_PATH=%s\n' "$(compose_escape "$VISION_SOURCE_PATH")"
+    printf 'VISION_MODEL_HOST_PATH=%s\n' "$(compose_escape "$VISION_MODEL_HOST_PATH")"
+    printf 'VISION_ULTRALYTICS_HOST_PATH=%s\n' "$(compose_escape "$VISION_ULTRALYTICS_HOST_PATH")"
+    printf 'VISION_ULTRALYTICS_CONTEXT=%s\n' "$(compose_escape "$VISION_ULTRALYTICS_CONTEXT")"
+    printf 'YOLO_DEVICE_CONTAINER=%s\n' "$(compose_escape "$YOLO_DEVICE_CONTAINER")"
+  } >"$COMPOSE_ENV_FILE"
+  chmod 600 "$COMPOSE_ENV_FILE"
+}
+
+compose_files() {
+  printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.yml"
+  [[ "${P4_COMPOSE_DEV:-false}" == true ]] && printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.dev.yml"
+  [[ "$RECORDING_ENABLED" == true ]] && printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.recording.yml"
+}
+
+compose() {
+  local args=()
+  while IFS= read -r item; do args+=("$item"); done < <(compose_files)
+  docker compose --env-file "$COMPOSE_ENV_FILE" "${args[@]}" "$@"
 }
 
 generate_jwt_keys() {
-  mkdir -p "${PROJECT_ROOT}/secrets/jwt"
-  if [[ ! -f "$JWT_PRIVATE_KEY_PATH" ]]; then
+  local jwt_dir="${PROJECT_ROOT}/secrets/jwt"
+  mkdir -p "$jwt_dir"
+  if [[ ! -f "${jwt_dir}/private.pem" ]]; then
     log "Generating JWT private key"
-    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$JWT_PRIVATE_KEY_PATH"
-    chmod 600 "$JWT_PRIVATE_KEY_PATH"
+    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "${jwt_dir}/private.pem"
+    chmod 600 "${jwt_dir}/private.pem"
   fi
-  if [[ ! -f "$JWT_PUBLIC_KEY_PATH" ]]; then
+  if [[ ! -f "${jwt_dir}/public.pem" ]]; then
     log "Generating JWT public key"
-    openssl rsa -pubout -in "$JWT_PRIVATE_KEY_PATH" -out "$JWT_PUBLIC_KEY_PATH"
+    openssl rsa -pubout -in "${jwt_dir}/private.pem" -out "${jwt_dir}/public.pem"
   fi
 }
 
@@ -186,581 +162,124 @@ generate_tls_certificate() {
   local server_csr="${TLS_DIR}/server.csr"
   local server_cert="${TLS_DIR}/server.crt"
   local serial_file="${TLS_DIR}/development-ca.srl"
-  local present=0
-  local path
-
   mkdir -p "$TLS_DIR"
-  for path in "$ca_key" "$ca_cert" "$server_key" "$server_cert"; do
-    [[ -e "$path" ]] && present=$((present + 1))
-  done
-
-  if (( present == 0 )); then
-    log "Generating development CA and TLS certificate for ${TLS_PUBLIC_ADDRESS}"
-    export ITS_TLS_SAN="IP:${TLS_PUBLIC_ADDRESS}"
-    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$ca_key"
-    openssl req -x509 -new -sha256 -days 825 \
-      -key "$ca_key" \
-      -config "${PROJECT_ROOT}/scripts/openssl-development.cnf" -section req \
-      -subj "/CN=ITS Development CA" -extensions ca_ext \
-      -out "$ca_cert"
-    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$server_key"
-    openssl req -new -sha256 -key "$server_key" \
-      -config "${PROJECT_ROOT}/scripts/openssl-development.cnf" -section req \
-      -out "$server_csr"
-    openssl x509 -req -sha256 -days 397 -in "$server_csr" \
-      -CA "$ca_cert" -CAkey "$ca_key" -CAcreateserial \
-      -copy_extensions copy -out "$server_cert"
-    rm -f -- "$server_csr" "$serial_file"
-    chmod 600 "$ca_key" "$server_key"
-    unset ITS_TLS_SAN
-  elif (( present != 4 )); then
-    die "TLS directory is incomplete. Preserve or repair ${TLS_DIR}; files were not overwritten."
+  if [[ -e "$ca_key" && -e "$ca_cert" && -e "$server_key" && -e "$server_cert" ]]; then
+    return 0
   fi
-
-  openssl verify -CAfile "$ca_cert" "$server_cert"
-  openssl x509 -in "$server_cert" -noout -checkend 0 >/dev/null \
-    || die "TLS server certificate is expired"
-  openssl x509 -in "$server_cert" -noout -ext subjectAltName | grep -Fq "IP Address:${TLS_PUBLIC_ADDRESS}" \
-    || die "TLS certificate SAN does not contain ${TLS_PUBLIC_ADDRESS}"
-}
-
-wait_for_http() {
-  local name="$1"
-  local url="$2"
-  local ca_file="${3:-}"
-  local elapsed=0
-  local curl_args=(-fsS --max-time 3)
-  [[ -n "$ca_file" ]] && curl_args+=(--cacert "$ca_file")
-
-  while (( elapsed < HEALTH_TIMEOUT_SECONDS )); do
-    if curl "${curl_args[@]}" "$url" >/dev/null 2>&1; then
-      log "$name is healthy: $url"
-      return 0
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
-  return 1
-}
-
-wait_for_database() {
-  local elapsed=0
-  while (( elapsed < HEALTH_TIMEOUT_SECONDS )); do
-    if docker compose -f "${PROJECT_ROOT}/docker-compose.yml" exec -T db \
-      pg_isready -U app -d vehicle_platform >/dev/null 2>&1; then
-      log "PostgreSQL/PostGIS is ready"
-      return 0
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
-  die "PostgreSQL did not become ready; inspect: docker compose logs db"
-}
-
-bootstrap_recording_storage() {
-  [[ "$RECORDING_ENABLED" == true ]] || die "recording-bootstrap requires RECORDING_ENABLED=true"
-  log "Starting MinIO and applying recording bucket policies"
-  docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" up -d minio
-  wait_for_http "MinIO" "http://127.0.0.1:9000/minio/health/ready" \
-    || die "MinIO health check failed"
-  docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" \
-    run --rm --no-deps minio-bootstrap
+  [[ ! -e "$ca_key" && ! -e "$ca_cert" && ! -e "$server_key" && ! -e "$server_cert" ]] \
+    || die "TLS directory is incomplete; repair ${TLS_DIR} before continuing"
+  log "Generating development CA and TLS certificate for ${TLS_PUBLIC_ADDRESS}"
+  export ITS_TLS_SAN="IP:${TLS_PUBLIC_ADDRESS}"
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out "$ca_key"
+  openssl req -x509 -new -sha256 -days 825 -key "$ca_key" \
+    -config "${PROJECT_ROOT}/scripts/openssl-development.cnf" -section req \
+    -subj "/CN=ITS Development CA" -extensions ca_ext -out "$ca_cert"
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$server_key"
+  openssl req -new -sha256 -key "$server_key" \
+    -config "${PROJECT_ROOT}/scripts/openssl-development.cnf" -section req -out "$server_csr"
+  openssl x509 -req -sha256 -days 397 -in "$server_csr" -CA "$ca_cert" -CAkey "$ca_key" \
+    -CAcreateserial -copy_extensions copy -out "$server_cert"
+  rm -f -- "$server_csr" "$serial_file"
+  chmod 600 "$ca_key" "$server_key"
+  unset ITS_TLS_SAN
 }
 
 setup_stack() {
-  preflight
-  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" \
-    "${NGINX_PREFIX}/logs/client_temp" \
-    "${NGINX_PREFIX}/logs/proxy_temp" \
-    "${NGINX_PREFIX}/logs/fastcgi_temp" \
-    "${NGINX_PREFIX}/logs/uwsgi_temp" \
-    "${NGINX_PREFIX}/logs/scgi_temp"
+  require_command docker
+  require_command openssl
+  require_buildkit_ssh_agent
   generate_jwt_keys
   generate_tls_certificate
-
-  log "Starting PostgreSQL/PostGIS"
-  docker compose -f "${PROJECT_ROOT}/docker-compose.yml" up -d db
-  wait_for_database
-
+  write_compose_env
+  log "Building Compose images"
+  compose build
+  log "Starting PostgreSQL and applying migrations"
+  compose up -d db
+  compose run --rm node-migrate
   if [[ "$RECORDING_ENABLED" == true ]]; then
-    bootstrap_recording_storage
+    recording_bootstrap
   fi
-
-  log "Installing and validating Node dependencies"
-  (
-    cd "${PROJECT_ROOT}/node"
-    # TypeScript compilation and Prisma tooling require devDependencies.
-    # Set NODE_ENV explicitly for compatibility with older npm versions that
-    # do not understand --include=dev and otherwise omit them in production.
-    NODE_ENV=development npm ci --include=dev
-    npx prisma migrate deploy
-    npx tsx prisma/seed.ts
-    npm run build
-  )
-
-  log "Installing route/tracking dependencies"
-  if [[ "$ROUTING_GRAPH_BACKEND" == "osmnx" ]]; then
-    (cd "${PROJECT_ROOT}/services/routing-tracking" && uv sync --extra osmnx)
-  else
-    (cd "${PROJECT_ROOT}/services/routing-tracking" && uv sync)
-  fi
-
-  log "Building the Go media relay"
-  (
-    cd "${PROJECT_ROOT}/services/media-relay"
-    go mod download
-    go build -o "${BIN_DIR}/media-relay" .
-  )
-
-  log "Installing Vision dependencies and verifying CUDA"
-  (
-    cd "${PROJECT_ROOT}/services/vision"
-    uv sync --locked
-    uv run python -c 'import torch; assert torch.cuda.is_available(), "CUDA unavailable"; name=torch.cuda.get_device_name(0); assert "3090" in name, name; print(name); print(torch.cuda.get_arch_list())'
-  )
-
-  log "Validating Nginx configuration"
-  nginx -p "$NGINX_PREFIX" -t -c nginx.conf
   log "Setup completed"
 }
 
-pid_is_running() {
-  local pid_file="$1"
-  [[ -f "$pid_file" ]] || return 1
-  local pid
-  pid="$(<"$pid_file")"
-  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  kill -0 "$pid" 2>/dev/null
-}
-
-nginx_pid_is_running() {
-  local pid_file="${NGINX_PREFIX}/logs/nginx.pid"
-  [[ -f "$pid_file" ]] || return 1
-  local pid process_args
-  pid="$(<"$pid_file")"
-  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
-  process_args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-  [[ "$process_args" == *"nginx: master process"* \
-    && "$process_args" == *"$NGINX_PREFIX"* ]]
-}
-
-stop_nginx_master() {
-  local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
-  local nginx_pid
-  local attempt
-  nginx_pid="$(<"$nginx_pid_file")"
-
-  if ! nginx -p "$NGINX_PREFIX" -c nginx.conf -s quit; then
-    log "Nginx graceful shutdown signal failed; checking whether the master is still running"
-  fi
-  for attempt in {1..5}; do
-    nginx_pid_is_running || break
-    sleep 1
-  done
-
-  if nginx_pid_is_running; then
-    log "Nginx is still draining connections; sending fast stop (PID $nginx_pid)"
-    if ! nginx -p "$NGINX_PREFIX" -c nginx.conf -s stop; then
-      log "Nginx fast stop signal failed; checking whether the master is still running"
-    fi
-    for attempt in {1..15}; do
-      nginx_pid_is_running || break
-      sleep 1
-    done
-  fi
-
-  nginx_pid_is_running && die "Nginx did not stop; inspect PID $nginx_pid"
-  rm -f -- "$nginx_pid_file"
-}
-
-start_service() {
-  local name="$1"
-  local workdir="$2"
-  shift 2
-  local pid_file="${PID_DIR}/${name}.pid"
-  local log_file="${LOG_DIR}/${name}.log"
-
-  if pid_is_running "$pid_file"; then
-    log "$name is already running with PID $(<"$pid_file")"
-    return 0
-  fi
-  rm -f -- "$pid_file"
-  log "Starting $name; log: $log_file"
-  (
-    cd "$workdir"
-    nohup "$@" >"$log_file" 2>&1 &
-    printf '%s\n' "$!" >"$pid_file"
-  )
-  sleep 1
-  if ! pid_is_running "$pid_file"; then
-    tail -n 80 "$log_file" >&2 || true
-    die "$name exited during startup"
-  fi
-}
-
-start_nginx() {
-  local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
-  local public_operator_health_url="${PUBLIC_OPERATOR_URL%/}/health/live"
-  local ca_cert="${TLS_DIR}/development-ca.crt"
-  nginx -p "$NGINX_PREFIX" -t -c nginx.conf
-
-  if nginx_pid_is_running; then
-    if curl -fsS --max-time 3 --cacert "$ca_cert" \
-      "$public_operator_health_url" >/dev/null 2>&1; then
-      log "Reloading Nginx"
-      nginx -p "$NGINX_PREFIX" -c nginx.conf -s reload
-      return 0
-    fi
-
-    local nginx_pid
-    nginx_pid="$(<"$nginx_pid_file")"
-    log "Nginx master is running but the public endpoint is unhealthy; restarting Nginx (PID $nginx_pid)"
-    stop_nginx_master
-  elif [[ -f "$nginx_pid_file" ]]; then
-    log "Removing stale Nginx PID file"
-    rm -f -- "$nginx_pid_file"
-  fi
-
-  log "Starting Nginx"
-  nginx -p "$NGINX_PREFIX" -c nginx.conf
-  sleep 1
-  if ! nginx_pid_is_running; then
-    tail -n 80 "${NGINX_PREFIX}/logs/its-error.log" >&2 || true
-    die "Nginx exited during startup; inspect ${NGINX_PREFIX}/logs/its-error.log"
-  fi
-}
-
-node_dependencies_ready() {
-  local node_dir="${PROJECT_ROOT}/node"
-  local lock_file="${node_dir}/package-lock.json"
-  local installed_lock_file="${node_dir}/node_modules/.package-lock.json"
-
-  [[ -x "${node_dir}/node_modules/.bin/tsx" ]] \
-    && [[ -f "${node_dir}/node_modules/minio/package.json" ]] \
-    && [[ -f "$installed_lock_file" ]] \
-    && [[ ! "$lock_file" -nt "$installed_lock_file" ]] \
-    && (cd "$node_dir" && npm ls --depth=0 >/dev/null 2>&1)
-}
-
-ensure_node_dependencies() {
-  local node_dir="${PROJECT_ROOT}/node"
-  if node_dependencies_ready; then
-    log "Node dependencies are already installed"
-    return 0
-  fi
-
-  log "Installing missing or outdated Node dependencies from package-lock.json"
-  (
-    cd "$node_dir"
-    NODE_ENV=development npm ci --include=dev
-  )
-  node_dependencies_ready || die "Node dependencies are still incomplete after npm ci"
-}
-
-relay_binary_needs_build() {
-  local relay_dir="${PROJECT_ROOT}/services/media-relay"
-  local relay_binary="${BIN_DIR}/media-relay"
-  local newer_source
-
-  [[ -x "$relay_binary" ]] || return 0
-  newer_source="$(find "$relay_dir" -type f \
-    \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) \
-    -newer "$relay_binary" -print -quit)"
-  [[ -n "$newer_source" ]]
-}
-
-ensure_relay_binary() {
-  local relay_dir="${PROJECT_ROOT}/services/media-relay"
-  local relay_binary="${BIN_DIR}/media-relay"
-  require_command go
-
-  if ! relay_binary_needs_build; then
-    log "Go relay binary is current"
-    return 0
-  fi
-
-  log "Building missing or outdated Go relay binary"
-  mkdir -p "$BIN_DIR"
-  (
-    cd "$relay_dir"
-    go mod download
-    go build -o "$relay_binary" .
-  )
-}
-
-show_service_log() {
-  local name="$1"
-  local log_file="${LOG_DIR}/${name}.log"
-  [[ -f "$log_file" ]] && tail -n 80 "$log_file" >&2 || true
+recording_bootstrap() {
+  [[ "$RECORDING_ENABLED" == true ]] || die "recording-bootstrap requires RECORDING_ENABLED=true"
+  compose --profile recording up -d minio
+  compose --profile recording run --rm --no-deps minio-bootstrap
 }
 
 start_stack() {
-  load_node_runtime
-  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" \
-    "${NGINX_PREFIX}/logs/client_temp" \
-    "${NGINX_PREFIX}/logs/proxy_temp" \
-    "${NGINX_PREFIX}/logs/fastcgi_temp" \
-    "${NGINX_PREFIX}/logs/uwsgi_temp" \
-    "${NGINX_PREFIX}/logs/scgi_temp"
-  ensure_node_dependencies
-  ensure_relay_binary
-
-  start_service node "${PROJECT_ROOT}/node" \
-    env PORT="$NODE_PORT" "${PROJECT_ROOT}/node/node_modules/.bin/tsx" src/server.ts
-  wait_for_http "Node" "http://${HOST}:${NODE_PORT}/health/ready" \
-    || { show_service_log node; die "Node health check failed"; }
-
-  start_service routing "${PROJECT_ROOT}/services/routing-tracking" \
-    uv run uvicorn main:app --host "$HOST" --port "$ROUTING_PORT"
-  wait_for_http "Route/tracking" "http://${HOST}:${ROUTING_PORT}/health/ready" \
-    || { show_service_log routing; die "Route/tracking health check failed"; }
-
-  start_service relay "${PROJECT_ROOT}/services/media-relay" "${BIN_DIR}/media-relay"
-  wait_for_http "Go relay" "http://${RELAY_LISTEN_ADDR}/healthz" \
-    || { show_service_log relay; die "Relay health check failed"; }
-
-  start_service vision "${PROJECT_ROOT}/services/vision" \
-    env PORT="$VISION_PORT" uv run python run.py --no-tls
-  wait_for_http "Vision" "http://${HOST}:${VISION_PORT}/health/live" \
-    || { show_service_log vision; die "Vision health check failed"; }
-
-  start_nginx
-  local ca_cert="${TLS_DIR}/development-ca.crt"
-  wait_for_http "Public operator" "${PUBLIC_OPERATOR_URL%/}/health/live" "$ca_cert" \
-    || die "Public operator HTTPS health check failed"
-  wait_for_http "Public Vision" "${VISION_PUBLIC_BASE_URL%/}/health/live" "$ca_cert" \
-    || die "Public Vision HTTPS health check failed"
+  write_compose_env
+  require_buildkit_ssh_agent
+  local services=(node routing relay vision nginx coturn)
+  compose up -d --build "${services[@]}"
   if [[ "$RECORDING_ENABLED" == true ]]; then
-    wait_for_http "MinIO Console" "${MINIO_BROWSER_REDIRECT_URL%/}/" "$ca_cert" \
-      || die "MinIO Console HTTPS check failed"
+    recording_bootstrap
   fi
-
-  log "Stack is ready"
+  log "Compose stack started"
   log "Operator: ${PUBLIC_OPERATOR_URL%/}/operator/"
   log "Live View: ${LIVE_VIEW_URL}"
-  if [[ "$RECORDING_ENABLED" == true ]]; then
-    log "MinIO Console: ${MINIO_BROWSER_REDIRECT_URL%/}/"
-  fi
-}
-
-prepare_runtime_dirs() {
-  mkdir -p "$LOG_DIR" "$PID_DIR" "$BIN_DIR" \
-    "${NGINX_PREFIX}/logs/client_temp" \
-    "${NGINX_PREFIX}/logs/proxy_temp" \
-    "${NGINX_PREFIX}/logs/fastcgi_temp" \
-    "${NGINX_PREFIX}/logs/uwsgi_temp" \
-    "${NGINX_PREFIX}/logs/scgi_temp"
 }
 
 start_component() {
-  local component="$1"
-  prepare_runtime_dirs
-  case "$component" in
-    node)
-      load_node_runtime
-      ensure_node_dependencies
-      start_service node "${PROJECT_ROOT}/node" \
-        env PORT="$NODE_PORT" "${PROJECT_ROOT}/node/node_modules/.bin/tsx" src/server.ts
-      wait_for_http "Node" "http://${HOST}:${NODE_PORT}/health/ready" \
-        || { show_service_log node; die "Node health check failed"; }
-      ;;
-    routing)
-      start_service routing "${PROJECT_ROOT}/services/routing-tracking" \
-        uv run uvicorn main:app --host "$HOST" --port "$ROUTING_PORT"
-      wait_for_http "Route/tracking" "http://${HOST}:${ROUTING_PORT}/health/ready" \
-        || { show_service_log routing; die "Route/tracking health check failed"; }
-      ;;
-    relay)
-      ensure_relay_binary
-      start_service relay "${PROJECT_ROOT}/services/media-relay" "${BIN_DIR}/media-relay"
-      wait_for_http "Go relay" "http://${RELAY_LISTEN_ADDR}/healthz" \
-        || { show_service_log relay; die "Relay health check failed"; }
-      ;;
-    vision)
-      start_service vision "${PROJECT_ROOT}/services/vision" \
-        env PORT="$VISION_PORT" uv run python run.py --no-tls
-      wait_for_http "Vision" "http://${HOST}:${VISION_PORT}/health/live" \
-        || { show_service_log vision; die "Vision health check failed"; }
-      ;;
-    nginx)
-      start_nginx
-      local ca_cert="${TLS_DIR}/development-ca.crt"
-      wait_for_http "Public operator" "${PUBLIC_OPERATOR_URL%/}/health/live" "$ca_cert" \
-        || die "Public operator HTTPS health check failed"
-      if [[ "$RECORDING_ENABLED" == true ]]; then
-        wait_for_http "MinIO Console" "${MINIO_BROWSER_REDIRECT_URL%/}/" "$ca_cert" \
-          || die "MinIO Console HTTPS check failed"
-      fi
-      ;;
-    *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
-  esac
-}
-
-stop_service() {
-  local name="$1"
-  local pid_file="${PID_DIR}/${name}.pid"
-  if ! pid_is_running "$pid_file"; then
-    rm -f -- "$pid_file"
-    log "$name is not running"
-    return 0
-  fi
-  local pid
-  pid="$(<"$pid_file")"
-  log "Stopping $name (PID $pid)"
-  kill "$pid"
-  local attempt
-  for attempt in {1..20}; do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 1
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    die "$name did not stop; inspect PID $pid"
-  fi
-  rm -f -- "$pid_file"
-}
-
-stop_nginx() {
-  local nginx_pid_file="${NGINX_PREFIX}/logs/nginx.pid"
-  if nginx_pid_is_running; then
-    log "Stopping Nginx"
-    stop_nginx_master
-  else
-    rm -f -- "$nginx_pid_file"
-    log "Nginx is not running under the project prefix"
-  fi
-}
-
-stop_stack() {
-  stop_nginx
-  stop_service vision
-  stop_service relay
-  stop_service routing
-  stop_service node
-}
-
-status_line() {
-  local name="$1"
-  local url="$2"
-  local pid_file="${PID_DIR}/${name}.pid"
-  if pid_is_running "$pid_file" && curl -fsS --max-time 3 "$url" >/dev/null 2>&1; then
-    printf '%-10s RUNNING pid=%s %s\n' "$name" "$(<"$pid_file")" "$url"
-  else
-    printf '%-10s NOT_READY %s\n' "$name" "$url"
-    return 1
-  fi
-}
-
-status_stack() {
-  local failed=0
-  status_line node "http://${HOST}:${NODE_PORT}/health/ready" || failed=1
-  status_line routing "http://${HOST}:${ROUTING_PORT}/health/ready" || failed=1
-  status_line relay "http://${RELAY_LISTEN_ADDR}/healthz" || failed=1
-  status_line vision "http://${HOST}:${VISION_PORT}/health/live" || failed=1
-  curl -fsS --max-time 3 --cacert "${TLS_DIR}/development-ca.crt" \
-    "${PUBLIC_OPERATOR_URL%/}/health/live" >/dev/null 2>&1 \
-    && printf '%-10s READY %s\n' nginx "$PUBLIC_OPERATOR_URL" \
-    || { printf '%-10s NOT_READY %s\n' nginx "$PUBLIC_OPERATOR_URL"; failed=1; }
-  if [[ "$RECORDING_ENABLED" == true ]]; then
-    curl -fsS --max-time 3 --cacert "${TLS_DIR}/development-ca.crt" \
-      "${MINIO_BROWSER_REDIRECT_URL%/}/" >/dev/null 2>&1 \
-      && printf '%-10s READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL" \
-      || { printf '%-10s NOT_READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL"; failed=1; }
-  fi
-  return "$failed"
-}
-
-status_component() {
-  local component="$1"
-  case "$component" in
-    node) status_line node "http://${HOST}:${NODE_PORT}/health/ready" ;;
-    routing) status_line routing "http://${HOST}:${ROUTING_PORT}/health/ready" ;;
-    relay) status_line relay "http://${RELAY_LISTEN_ADDR}/healthz" ;;
-    vision) status_line vision "http://${HOST}:${VISION_PORT}/health/live" ;;
-    nginx)
-      curl -fsS --max-time 3 --cacert "${TLS_DIR}/development-ca.crt" \
-        "${PUBLIC_OPERATOR_URL%/}/health/live" >/dev/null 2>&1 \
-        && printf '%-10s READY %s\n' nginx "$PUBLIC_OPERATOR_URL" \
-        || { printf '%-10s NOT_READY %s\n' nginx "$PUBLIC_OPERATOR_URL"; return 1; }
-      if [[ "$RECORDING_ENABLED" == true ]]; then
-        curl -fsS --max-time 3 --cacert "${TLS_DIR}/development-ca.crt" \
-          "${MINIO_BROWSER_REDIRECT_URL%/}/" >/dev/null 2>&1 \
-          && printf '%-10s READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL" \
-          || { printf '%-10s NOT_READY %s\n' minio-console "$MINIO_BROWSER_REDIRECT_URL"; return 1; }
-      fi
-      ;;
-    *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
-  esac
+  local component="${1//route-tracking/routing}"
+  [[ "$component" =~ ^(node|routing|relay|vision|nginx|coturn)$ ]] || die "Unknown component '$component'"
+  write_compose_env
+  [[ "$component" == node ]] && require_buildkit_ssh_agent
+  compose up -d --build "$component"
 }
 
 stop_component() {
-  local component="$1"
-  case "$component" in
-    node|routing|relay|vision) stop_service "$component" ;;
-    nginx) stop_nginx ;;
-    *) die "Unknown component '$component'. Use node, routing, relay, vision, or nginx." ;;
-  esac
+  local component="${1//route-tracking/routing}"
+  [[ "$component" =~ ^(node|routing|relay|vision|nginx|coturn)$ ]] || die "Unknown component '$component'"
+  compose stop "$component"
+}
+
+status_stack() {
+  write_compose_env
+  compose ps
 }
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/run-linux-stack.sh [all|setup|start|restart|status|stop|down|recording-bootstrap]
+Usage: scripts/run-linux-stack.sh [all|setup|start|restart|status|stop|down|logs|recording-bootstrap]
 
 Individual components:
-  scripts/run-linux-stack.sh start <node|routing|relay|vision|nginx>
-  scripts/run-linux-stack.sh stop <node|routing|relay|vision|nginx>
-  scripts/run-linux-stack.sh restart <node|routing|relay|vision|nginx>
-  scripts/run-linux-stack.sh status <node|routing|relay|vision|nginx>
+  scripts/run-linux-stack.sh start <node|routing|relay|vision|nginx|coturn>
+  scripts/run-linux-stack.sh stop <node|routing|relay|vision|nginx|coturn>
+  scripts/run-linux-stack.sh restart <node|routing|relay|vision|nginx|coturn>
+  scripts/run-linux-stack.sh status [component]
 
-  all     Run setup, start every service, and require all health checks (default)
-  setup   Install/sync dependencies, prepare DB/keys/certs, and validate CUDA/Nginx
-  start   Start services and require all internal/public health checks
-  status  Show process and health status; nonzero exit means not fully ready
-  stop    Stop Nginx and the four application services; leave PostgreSQL running
-  down    Stop the stack and stop PostgreSQL
-  recording-bootstrap  Start MinIO if needed and apply recording bucket policies
-
-Set RECORDING_ENABLED=true in deploy/env.local to start MinIO and create its
-private bucket with relay-write, Node-read, and Node-delete permissions.
+Compose is the service supervisor. Set P4_COMPOSE_DEV=true for the explicit
+source bind mounts and Node/Python reload commands from docker-compose.dev.yml.
+Set RECORDING_ENABLED=true to enable MinIO and publish replay port 39003.
 USAGE
 }
 
 main() {
   local action="${1:-all}"
-  if [[ "$action" == "-h" || "$action" == "--help" || "$action" == "help" ]]; then
-    usage
-    return 0
-  fi
+  [[ "$action" == -h || "$action" == --help || "$action" == help ]] && { usage; return 0; }
   load_environment
+  require_command docker
+  write_compose_env
   case "$action" in
-    all)
-      setup_stack
-      start_stack
-      ;;
+    all) setup_stack; start_stack ;;
     setup) setup_stack ;;
-    recording-bootstrap) bootstrap_recording_storage ;;
-    start)
-      if [[ -n "${2:-}" ]]; then start_component "${2//route-tracking/routing}"; else start_stack; fi
-      ;;
+    start) [[ -n "${2:-}" ]] && start_component "$2" || start_stack ;;
     restart)
       [[ -n "${2:-}" ]] || die "restart requires a component"
-      local restart_component="${2//route-tracking/routing}"
-      stop_component "$restart_component"
-      start_component "$restart_component"
+      stop_component "$2"
+      start_component "$2"
       ;;
     status)
-      if [[ -n "${2:-}" ]]; then status_component "${2//route-tracking/routing}"; else status_stack; fi
+      if [[ -n "${2:-}" ]]; then compose ps "$2"; else status_stack; fi
       ;;
     stop)
-      if [[ -n "${2:-}" ]]; then stop_component "${2//route-tracking/routing}"; else stop_stack; fi
+      if [[ -n "${2:-}" ]]; then stop_component "$2"; else compose stop; fi
       ;;
-    down)
-      stop_stack
-      docker compose -f "${PROJECT_ROOT}/docker-compose.yml" stop db
-      if [[ "$RECORDING_ENABLED" == true ]]; then
-        docker compose --profile recording -f "${PROJECT_ROOT}/docker-compose.yml" stop minio
-      fi
-      ;;
+    down) compose down ;;
+    logs) shift; compose logs -f "$@" ;;
+    recording-bootstrap) recording_bootstrap ;;
     *) usage; die "Unknown action: $action" ;;
   esac
 }

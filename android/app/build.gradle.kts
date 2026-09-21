@@ -6,7 +6,7 @@ fun buildConfigString(value: String): String =
     "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 val turnUrl = providers.gradleProperty("turn.url").orNull
-    ?: "turn:10.174.96.119:39006?transport=udp"
+    ?: "turn:10.174.96.119:39004?transport=udp"
 val turnUsername = providers.gradleProperty("turn.username").orNull ?: "user"
 val turnPassword = providers.gradleProperty("turn.password").orNull ?: "pass"
 val relayUrl = providers.gradleProperty("relay.url").orNull

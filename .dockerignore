@@ -1,0 +1,16 @@
+.git
+.runtime
+.uv-cache
+secrets
+node/node_modules
+node/dist
+**/.venv
+**/__pycache__
+**/*.pyc
+services/vision/models
+services/vision/.ultralytics-custom
+services/vision/tests
+data
+android/.gradle
+android/build
+android/app/build

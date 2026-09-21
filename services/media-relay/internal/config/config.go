@@ -62,7 +62,7 @@ func Load() (Config, error) {
 		// An explicitly empty TURN_URL is meaningful: it disables the TURN
 		// server and leaves ICE to direct host candidates. Keep the default
 		// for deployments that do not set the variable at all.
-		TurnURL:      envAllowEmpty("TURN_URL", "turn:10.174.96.119:39006?transport=udp"),
+		TurnURL:      envAllowEmpty("TURN_URL", "turn:10.174.96.119:39004?transport=udp"),
 		TurnUsername: env("TURN_USERNAME", "user"),
 		TurnPassword: env("TURN_PASSWORD", "pass"),
 		// A filesystem path, not host:port - renamed from the old
