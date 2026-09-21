@@ -34,7 +34,7 @@ services:
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
       JWT_ISSUER: project4-node
       JWT_AUDIENCE: project4-api
-      JWT_ACCESS_TOKEN_TTL: 15m
+      JWT_ACCESS_TOKEN_TTL: never
       JWT_KEY_ID: project4-2026-01
     command:
       - /bin/sh
@@ -69,7 +69,7 @@ services:
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
       JWT_ISSUER: project4-node
       JWT_AUDIENCE: project4-api
-      JWT_ACCESS_TOKEN_TTL: 15m
+      JWT_ACCESS_TOKEN_TTL: never
       JWT_KEY_ID: project4-2026-01
       PUBLIC_OPERATOR_URL: ${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
       ROUTING_TRACKING_BASE_URL: http://routing:8000
