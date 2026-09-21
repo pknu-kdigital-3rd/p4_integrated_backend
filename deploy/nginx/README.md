@@ -19,13 +19,15 @@ The Nginx container mounts:
 - `./data/nginx_logs` at `/var/log/nginx`.
 
 The Nginx entrypoint creates a self-signed certificate with
-`TLS_PUBLIC_ADDRESS` in its Subject Alternative Name on first startup. Set
-that Compose variable before creating the stack. For a trusted deployment,
-replace the certificate and key in the host `tls` directory with certificates
-from the site's CA. For development, copy `data/tls/server.crt` to each client
-and import it into that client's trust store; the certificate is not served by
-an HTTP route. Never copy or distribute `data/tls/server.key`. Do not use
-`curl -k` as an acceptance test.
+`TLS_PUBLIC_ADDRESS` in its Subject Alternative Name when either TLS file is
+missing. Once `data/tls/server.crt` and `data/tls/server.key` exist, container
+recreation reuses them, even if `TLS_PUBLIC_ADDRESS` changes. Set the address
+before the first startup so the generated certificate matches the clients that
+will connect. For a trusted deployment, replace both files in the host `tls`
+directory with certificates from the site's CA. For development, copy
+`data/tls/server.crt` to each client and import it into that client's trust
+store; the certificate is not served by an HTTP route. Never copy or distribute
+`data/tls/server.key`. Do not use `curl -k` as an acceptance test.
 
 ## Public routes
 

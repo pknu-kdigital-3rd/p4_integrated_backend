@@ -173,6 +173,13 @@ The first startup initializes JWT keys and the self-signed TLS certificate in
 the one-shot `p4-minio-bootstrap` container. The MinIO Console is private and is
 not required for replay.
 
+Nginx reuses the existing `data/tls/server.crt` and `data/tls/server.key` on
+container recreation. It generates a new self-signed pair only when either
+file is missing. To rotate the development certificate, stop the stack and
+remove both files from `data/tls` before starting it again. Set
+`TLS_PUBLIC_ADDRESS` before that first generation so the certificate includes
+the address used by clients.
+
 ### Verify and clean up MinIO bootstrap
 
 `p4-minio-bootstrap` is a one-shot service. A successful run ends with `Exited
