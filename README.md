@@ -22,19 +22,18 @@ From the directory containing `docker-compose.yml`, run:
 docker compose up -d
 ```
 
-Use the development override when editing source files:
+Use the standalone development Compose file when editing source files:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 ```
 
 Optional shell variables can override Compose defaults for a different public
-address, credentials, recording, or GPU policy. The
-The default persistent-data directory is the sibling directory
+address, credentials, or GPU policy. The default persistent-data directory is
 `./data`; each `source:` entry in Compose names its
 subdirectory explicitly, so you can change one mapping without adding path
-variables. Only Nginx ports `39001-39003` (the third when recording is enabled)
-and Coturn ports `39004-39007` are exposed on the host. Node, Vision, routing,
+variables. Recording is always enabled, so Nginx ports `39001-39003` and
+Coturn ports `39004-39007` are exposed on the host. Node, Vision, routing,
 relay, PostgreSQL, and MinIO use the private Compose network. See the [Docker
 Linux runbook](docs/integration/LINUX_STARTUP_RUNBOOK.md) and [Nginx ingress
 guide](deploy/nginx/README.md) for the complete procedure.

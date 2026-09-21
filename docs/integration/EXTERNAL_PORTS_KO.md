@@ -10,7 +10,7 @@ Docker Compose 배포에서 애플리케이션 서비스는 `p4-internal` 네트
 |---:|---|---|---|
 | `39001` | TCP | 필수 | Nginx 운영자 HTTPS와 Node API |
 | `39002` | TCP | 필수 | Nginx Vision/WSS/Android 시그널링 HTTPS |
-| `39003` | TCP | 녹화/재생 사용 시 | Nginx를 통한 MinIO 서명된 Range GET 재생 |
+| `39003` | TCP | 항상 | Nginx를 통한 MinIO 서명된 Range GET 재생 |
 | `39004` | UDP/TCP | TURN 사용 시 | Coturn TURN/STUN 리스너 |
 | `39005` | TCP | `turns:` 사용 시 선택 | Coturn TLS 리스너 |
 | `39006-39007` | UDP | TURN 사용 시 | Coturn 릴레이 할당 범위 |
@@ -54,7 +54,7 @@ sudo ufw allow 39006:39007/udp
 sudo ufw reload
 ```
 
-녹화를 사용하지 않으면 `39003/tcp`를 열지 않는다. TURN을 직접 연결할 수
+녹화/재생은 항상 사용하므로 `39003/tcp`를 연다. TURN을 직접 연결할 수
 있는 네트워크라면 `39004-39007`도 열지 않고 `TURN_URL=""`로 비활성화할 수
 있다.
 

@@ -280,7 +280,7 @@ Important policy:
 Suggested configuration:
 
 ```text
-RECORDING_ENABLED=true
+# Recording is always enabled by both Compose files.
 RECORDING_SEGMENT_SECONDS=60
 RECORDING_QUEUE_FRAMES=180
 RECORDING_UPLOAD_QUEUE=8
@@ -356,15 +356,12 @@ If Node is temporarily unavailable after upload, retry metadata registration ide
 
 ## 8. MinIO deployment
 
-Extend `docker-compose.yml` with a MinIO service and persistent volume.
-
-The repository now uses the recording profile in `docker-compose.yml` rather
-than publishing MinIO ports directly:
+The production and development Compose files both include MinIO and recording.
+Recording is always enabled, while MinIO ports remain private:
 
 ```yaml
 minio:
   image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-  profiles: [recording]
   command: ["server", "/data", "--console-address", ":9001"]
   restart: unless-stopped
   environment:
@@ -386,12 +383,11 @@ Create the recording bucket during deployment/bootstrap and keep it private.
 
 ## 9. Environment variables
 
-Recording is disabled by default. Enable it with Compose variables; no
-`env.local` file is required. The same variables are passed to MinIO, the Go
-relay, and the Node backend when the recording profile is started:
+Recording is always enabled. Configure the credentials with Compose variables;
+no `env.local` file is required. The same variables are passed to MinIO, the
+Go relay, and the Node backend:
 
 ```bash
-RECORDING_ENABLED=true \
 NODE_INTERNAL_SERVICE_TOKEN="$(openssl rand -hex 32)" \
 MINIO_ROOT_USER=p4-minio-root \
 MINIO_ROOT_PASSWORD="replace-with-a-random-secret" \
@@ -399,17 +395,15 @@ MINIO_ACCESS_KEY=p4-relay \
 MINIO_SECRET_KEY="replace-with-an-independent-random-secret" \
 MINIO_NODE_ACCESS_KEY=p4-node \
 MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret" \
-docker compose -f docker-compose.yml -f docker-compose.recording.yml \
-  --profile recording up -d --build
+docker compose up -d --build
 ```
 
-The enabled profile starts `minio` and runs the one-shot `minio-bootstrap`
+The production file starts `minio` and runs the one-shot `minio-bootstrap`
 service after MinIO is ready. For a long-lived deployment, put these variables
 in the service manager's environment rather than committing a repository-local
-file. The application defaults below show the full set of recording settings:
+file. The application defaults below show the recording settings:
 
 ```dotenv
-RECORDING_ENABLED=true
 RECORDING_SEGMENT_SECONDS=60
 RECORDING_QUEUE_FRAMES=180
 RECORDING_SPOOL_DIR=/var/tmp/p4-recordings
@@ -436,7 +430,7 @@ MINIO_ROOT_USER=p4-minio-root
 MINIO_ROOT_PASSWORD="replace-with-an-independent-random-secret"
 ```
 
-Replace every example secret before setting `RECORDING_ENABLED=true`. Use
+Replace every example secret before deployment. Use
 independent secrets for the Node internal-service token, relay MinIO account,
 Node MinIO account, and MinIO root account. MinIO secret keys must be at least
 8 characters; `NODE_INTERNAL_SERVICE_TOKEN` must be at least 32 characters and

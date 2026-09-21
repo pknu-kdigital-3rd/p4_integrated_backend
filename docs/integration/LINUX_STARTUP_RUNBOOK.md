@@ -13,7 +13,7 @@ Coturn are the only services that use public host ports.
 | Routing/tracking | `routing:8000` | none |
 | Vision | `vision:39011` | through Nginx `39002` |
 | Go relay | `relay:39012` | through Nginx `39002` |
-| MinIO S3 API | `minio:9000` | through Nginx `39003` when recording is enabled |
+| MinIO S3 API | `minio:9000` | through Nginx `39003` |
 | MinIO Console | `minio:9001` | none |
 | Coturn | host network | `39004` UDP/TCP, `39005` TCP, `39006-39007` UDP |
 
@@ -105,28 +105,26 @@ The public URLs are:
 
 ## Development hot reload
 
-Use the explicit source bind mounts and reload commands when editing Node or
-Python code:
+Use the standalone development file with source bind mounts and reload
+commands when editing Node or Python code:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f node
+docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml logs -f node
 ```
 
-The override mounts source directories individually; it never mounts the whole
-repository into a service container. Node uses `tsx watch`, routing uses
-Uvicorn reload, and Vision uses Uvicorn reload. The relay remains an
+The development file mounts source directories individually; it never mounts
+the whole repository into a service container. Node uses `tsx watch`, routing
+uses Uvicorn reload, and Vision uses Uvicorn reload. The relay remains an
 image-built Go binary.
 
 ## Recording and replay
 
-Set `RECORDING_ENABLED=true` and configure independent MinIO root, relay, and
-Node credentials in the Compose invocation. The recording profile starts
-MinIO and publishes the replay proxy; no repository-local env file is needed.
-For a one-off shell session, keep the values in a command-scoped environment:
+Recording is always enabled. Configure independent MinIO root, relay, and Node
+credentials in the Compose invocation when deploying beyond local defaults; no
+repository-local env file is needed:
 
 ```bash
-RECORDING_ENABLED=true \
 NODE_INTERNAL_SERVICE_TOKEN="$(openssl rand -hex 32)" \
 MINIO_ROOT_USER=p4-minio-root \
 MINIO_ROOT_PASSWORD="replace-with-a-random-secret" \
@@ -134,19 +132,15 @@ MINIO_ACCESS_KEY=p4-relay \
 MINIO_SECRET_KEY="replace-with-an-independent-random-secret" \
 MINIO_NODE_ACCESS_KEY=p4-node \
 MINIO_NODE_SECRET_KEY="replace-with-an-independent-random-secret" \
-docker compose -f docker-compose.yml -f docker-compose.recording.yml \
-  --profile recording up -d --build
+docker compose up -d --build
 ```
 
-The enabled profile starts `minio` and runs the one-shot `minio-bootstrap`
-service after MinIO is ready. If bootstrap must be repeated, rerun the same
-command-scoped variables with `docker compose --profile recording run --rm
---no-deps minio-bootstrap`; values exported in a prior shell command are not
-assumed.
+The production file starts MinIO and runs the one-shot `minio-bootstrap`
+service after MinIO is ready. If bootstrap must be repeated, run
+`docker compose run --rm --no-deps minio-bootstrap` with the same credentials.
 
-The recording override publishes `39003/tcp`, and replay uses Node-issued
-presigned MinIO URLs with HTTP range requests. MinIO API port `9000`, Console
-port `9001`, and PostgreSQL `5432` remain private.
+Replay uses Node-issued presigned MinIO URLs with HTTP range requests. MinIO API
+port `9000`, Console port `9001`, and PostgreSQL `5432` remain private.
 
 ## Coturn
 

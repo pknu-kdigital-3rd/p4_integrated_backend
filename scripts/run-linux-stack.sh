@@ -26,7 +26,6 @@ require_buildkit_ssh_agent() {
 load_environment() {
   TLS_PUBLIC_ADDRESS="${TLS_PUBLIC_ADDRESS:-10.174.96.119}"
   NODE_ENV="${NODE_ENV:-production}"
-  RECORDING_ENABLED="${RECORDING_ENABLED:-false}"
   ANDROID_TELEMETRY_ENABLED="${ANDROID_TELEMETRY_ENABLED:-false}"
   PUBLIC_OPERATOR_URL="${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS}:39001}"
   VISION_PUBLIC_BASE_URL="${VISION_PUBLIC_BASE_URL:-https://${TLS_PUBLIC_ADDRESS}:39002}"
@@ -34,8 +33,6 @@ load_environment() {
   TURN_URL="${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS}:39004?transport=udp}"
   P4_COMPOSE_DEV="${P4_COMPOSE_DEV:-false}"
 
-  [[ "$RECORDING_ENABLED" == true || "$RECORDING_ENABLED" == false ]] \
-    || die "RECORDING_ENABLED must be true or false"
   [[ "$ANDROID_TELEMETRY_ENABLED" == true || "$ANDROID_TELEMETRY_ENABLED" == false ]] \
     || die "ANDROID_TELEMETRY_ENABLED must be true or false"
   [[ "$P4_COMPOSE_DEV" == true || "$P4_COMPOSE_DEV" == false ]] \
@@ -43,9 +40,11 @@ load_environment() {
 }
 
 compose_files() {
-  printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.yml"
-  [[ "$P4_COMPOSE_DEV" == true ]] && printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.dev.yml"
-  [[ "$RECORDING_ENABLED" == true ]] && printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.recording.yml"
+  if [[ "$P4_COMPOSE_DEV" == true ]]; then
+    printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.dev.yml"
+  else
+    printf '%s\n' -f "${PROJECT_ROOT}/docker-compose.yml"
+  fi
 }
 
 compose() {
@@ -55,9 +54,8 @@ compose() {
 }
 
 recording_bootstrap() {
-  [[ "$RECORDING_ENABLED" == true ]] || die "recording-bootstrap requires RECORDING_ENABLED=true"
-  compose --profile recording up -d minio
-  compose --profile recording run --rm --no-deps minio-bootstrap
+  compose up -d minio
+  compose run --rm --no-deps minio-bootstrap
 }
 
 setup_stack() {
@@ -68,7 +66,7 @@ setup_stack() {
   log "Starting PostgreSQL and applying migrations"
   compose up -d db
   compose run --rm node-migrate
-  [[ "$RECORDING_ENABLED" == true ]] && recording_bootstrap
+  recording_bootstrap
   log "Setup completed"
 }
 
@@ -76,7 +74,7 @@ start_stack() {
   require_buildkit_ssh_agent
   local services=(node routing relay vision nginx coturn)
   compose up -d --build "${services[@]}"
-  [[ "$RECORDING_ENABLED" == true ]] && recording_bootstrap
+  recording_bootstrap
   log "Compose stack started"
   log "Operator: ${PUBLIC_OPERATOR_URL%/}/operator/"
   log "Live View: ${LIVE_VIEW_URL}"
@@ -105,10 +103,10 @@ Individual components:
   scripts/run-linux-stack.sh restart <node|routing|relay|vision|nginx|coturn>
   scripts/run-linux-stack.sh status [component]
 
-The wrapper is optional. Plain `docker compose up -d` uses the same defaults.
-Set P4_COMPOSE_DEV=true for the explicit source bind mounts and reload commands
-from docker-compose.dev.yml. Set RECORDING_ENABLED=true and use the recording
-profile to enable MinIO and publish replay port 39003.
+The wrapper is optional. Plain `docker compose up -d` uses the production file
+with recording enabled and replay port 39003. Set P4_COMPOSE_DEV=true to use
+the standalone development Compose file with source bind mounts and reload
+commands.
 USAGE
 }
 

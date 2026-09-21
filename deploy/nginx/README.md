@@ -2,7 +2,7 @@
 
 Docker Compose runs Nginx as the only HTTP/TLS gateway. It publishes operator
 HTTPS on `39001`, Vision/WebRTC signaling on `39002`, and MinIO signed replay
-traffic on `39003` when the recording override is enabled. MinIO Console is not
+traffic on `39003`. MinIO Console is not
 published.
 
 Internal upstreams use Compose DNS:
@@ -33,6 +33,5 @@ from the site's CA. Do not use `curl -k` as an acceptance test.
 - `https://<PUBLIC_ADDRESS>:39002/offer/android` — Android SDP signaling
 - `https://<PUBLIC_ADDRESS>:39003/<bucket>/<object>` — signed MinIO replay object
 
-The `39003` listener is configured in the base Nginx container so it can be
-validated internally, but the host mapping is added only by
-`docker-compose.recording.yml` when recording is enabled.
+The `39003` listener is published by both the production and development
+Compose files because recording is always enabled.

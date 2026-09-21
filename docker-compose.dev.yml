@@ -1,31 +1,320 @@
+name: p4-integrated-backend
+
+# Persistent data lives outside the checkout. Edit each `source` path below
+# when a volume should live somewhere else; Compose creates missing directories.
 services:
+  db:
+    image: postgis/postgis:17-3.5
+    container_name: vehicle-platform-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-vehicle_platform}
+    volumes:
+      - type: bind
+        source: ./data/pgdata
+        target: /var/lib/postgresql/data
+    networks: [ p4 ]
+
+  node-migrate:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      target: runtime
+      ssh: [ default ]
+    container_name: vehicle-platform-node-migrate
+    restart: "no"
+    depends_on:
+      - db
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/private.pem
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
+      JWT_ISSUER: ${JWT_ISSUER:-project4-node}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-project4-api}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
+      JWT_KEY_ID: ${JWT_KEY_ID:-project4-2026-01}
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        until npx prisma migrate deploy; do
+          echo 'Waiting for PostgreSQL/migrations...'; sleep 2;
+        done && npx tsx prisma/seed.ts
+    volumes:
+      - ./node:/workspace/node
+      - type: bind
+        source: ./data/node_modules
+        target: /workspace/node/node_modules
+      - type: bind
+        source: ./data/jwt
+        target: /run/secrets/jwt
+    networks: [ p4 ]
+
   node:
+    build:
+      context: .
+      dockerfile: docker/node.Dockerfile
+      target: runtime
+      ssh: [ default ]
+    container_name: vehicle-platform-node
+    restart: unless-stopped
+    depends_on:
+      node-migrate:
+        condition: service_completed_successfully
+    working_dir: /workspace/node
     environment:
       NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-vehicle_platform}?schema=public
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt/private.pem
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt/public.pem
+      JWT_ISSUER: ${JWT_ISSUER:-project4-node}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-project4-api}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-15m}
+      JWT_KEY_ID: ${JWT_KEY_ID:-project4-2026-01}
+      PUBLIC_OPERATOR_URL: ${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
+      ROUTING_TRACKING_BASE_URL: http://routing:8000
+      VISION_PUBLIC_BASE_URL: ${VISION_PUBLIC_BASE_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002}
+      LIVE_VIEW_URL: ${LIVE_VIEW_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002/}
+      ROUTING_TRACKING_SERVICE_TOKEN: ${ROUTING_TRACKING_SERVICE_TOKEN:-}
+      OPERATOR_DEMO_PUBLIC: ${OPERATOR_DEMO_PUBLIC:-true}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      RECORDING_VALIDATE_TRIP_CONTEXT: ${RECORDING_VALIDATE_TRIP_CONTEXT:-true}
+      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:-replace-with-a-random-token-at-least-32-characters}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_USE_SSL: "false"
+      MINIO_RECORDING_BUCKET: ${MINIO_RECORDING_BUCKET:-p4-trip-recordings}
+      MINIO_NODE_ACCESS_KEY: ${MINIO_NODE_ACCESS_KEY:-p4-node}
+      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:-replace-node-secret}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39003}
+      RECORDING_PLAYBACK_URL_TTL_SECONDS: ${RECORDING_PLAYBACK_URL_TTL_SECONDS:-300}
+      RECORDING_ENABLED: "true"
+      ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
     command: ["./node_modules/.bin/tsx", "watch", "src/server.ts"]
-    working_dir: /workspace/node
     volumes:
       - ./node:/workspace/node
       - type: bind
         source: ./data/node_modules
         target: /workspace/node/node_modules
       - ./operator-web:/workspace/operator-web
-
-  node-migrate:
-    volumes:
-      - ./node:/workspace/node
       - type: bind
-        source: ./data/node_modules
-        target: /workspace/node/node_modules
+        source: ./data/jwt
+        target: /run/secrets/jwt
+    expose: [ "3000" ]
+    networks: [ p4 ]
 
   routing:
+    build:
+      context: ./services/routing-tracking
+      dockerfile: ../../docker/routing.Dockerfile
+    container_name: vehicle-platform-routing
+    restart: unless-stopped
+    environment:
+      ROUTING_TRACKING_SERVICE_TOKEN: ${ROUTING_TRACKING_SERVICE_TOKEN:-}
+      ROUTING_GRAPH_BACKEND: ${ROUTING_GRAPH_BACKEND:-auto}
+      TELEMETRY_MODE: ${TELEMETRY_MODE:-playback}
+      MEDIA_RELAY_INTERNAL_BASE_URL: http://relay:39012
+      PBF_PATH: /workspace/services/routing-tracking/busan-roads_osm.pbf
+      BUSAN_BUS_HISTORY_PATH: /workspace/services/routing-tracking/data/busan_bus_gps.csv
+      BUSAN_BUS_HYBRID_PATH: /workspace/services/routing-tracking/data/busan_bus_hybrid.csv
+      BUSAN_BUS_ROUTES_PATH: ${BUSAN_BUS_ROUTES_PATH:-/workspace/services/routing-tracking/data/busan_bus_routes.json}
+      BUSAN_BUS_RAW_PATH: ${BUSAN_BUS_RAW_PATH:-/workspace/services/routing-tracking/data/busan_bus_live.csv}
+      BUSAN_BUS_LINE_IDS: ${BUSAN_BUS_LINE_IDS:-}
+      DEVICE_TELEMETRY_TIMEOUT_S: ${DEVICE_TELEMETRY_TIMEOUT_S:-1.0}
+      ROUTING_EDGE_INDEX_BUCKET_DEGREES: ${ROUTING_EDGE_INDEX_BUCKET_DEGREES:-0.01}
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/workspace/services/routing-tracking"]
     volumes:
       - ./services/routing-tracking:/workspace/services/routing-tracking
+    expose: [ "8000" ]
+    networks: [ p4 ]
+
+  relay:
+    build:
+      context: ./services/media-relay
+      dockerfile: ../../docker/relay.Dockerfile
+    container_name: vehicle-platform-relay
+    restart: unless-stopped
+    environment:
+      RELAY_LISTEN_ADDR: 0.0.0.0:39012
+      TURN_URL: ${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39004?transport=udp}
+      TURN_USERNAME: ${TURN_USERNAME:-user}
+      TURN_PASSWORD: ${TURN_PASSWORD:-replace-with-strong-turn-password}
+      YOLO_FEED_SOCKET: /run/p4/relay/yolo.sock
+      PY_ANDROID_LIVE_URL: http://vision:39011/internal/android-live
+      PY_TELEMETRY_URL: http://vision:39011/internal/telemetry
+      NODE_INTERNAL_BASE_URL: http://node:3000
+      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:-replace-with-a-random-token-at-least-32-characters}
+      ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-p4-relay}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-replace-relay-secret}
+      MINIO_RECORDING_BUCKET: ${MINIO_RECORDING_BUCKET:-p4-trip-recordings}
+      RECORDING_ENABLED: "true"
+      RECORDING_SEGMENT_SECONDS: ${RECORDING_SEGMENT_SECONDS:-60}
+      RECORDING_QUEUE_FRAMES: ${RECORDING_QUEUE_FRAMES:-180}
+      RECORDING_UPLOAD_QUEUE: ${RECORDING_UPLOAD_QUEUE:-8}
+      RECORDING_SPOOL_DIR: /var/tmp/p4-recordings
+      RECORDING_SPOOL_MAX_BYTES: ${RECORDING_SPOOL_MAX_BYTES:-10737418240}
+      TELEMETRY_NODE_QUEUE: ${TELEMETRY_NODE_QUEUE:-512}
+      TELEMETRY_VISION_QUEUE: ${TELEMETRY_VISION_QUEUE:-64}
+      TELEMETRY_CURRENT_MAX_AGE_SECONDS: ${TELEMETRY_CURRENT_MAX_AGE_SECONDS:-30}
+    volumes:
+      - type: bind
+        source: ./data/relay_feed
+        target: /run/p4/relay
+      - type: bind
+        source: ./data/recording_spool
+        target: /var/tmp/p4-recordings
+    expose: [ "39012" ]
+    networks: [ p4 ]
 
   vision:
+    build:
+      context: ./services/vision
+      dockerfile: ../../docker/vision.Dockerfile
+      additional_contexts:
+        ultralytics: ./services/vision/.ultralytics-custom
+    container_name: vehicle-platform-vision
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: "39011"
+      YOLO_MODEL: ${YOLO_MODEL:-/workspace/services/vision/models/a4_best.engine}
+      YOLO_DEVICE: ${YOLO_DEVICE:-cuda:0}
+      YOLO_USE_LAST_GPU: ${YOLO_USE_LAST_GPU:-true}
+      YOLO_HALF: ${YOLO_HALF:-true}
+      YOLO_RETINA_MASKS: ${YOLO_RETINA_MASKS:-true}
+      YOLO_MAX_DETECTIONS: ${YOLO_MAX_DETECTIONS:-100}
+      YOLO_MASK_CONTOUR_SIZE: ${YOLO_MASK_CONTOUR_SIZE:-640}
+      YOLO_MASK_POLYGON_SIMPLIFY: ${YOLO_MASK_POLYGON_SIMPLIFY:-false}
+      YOLO_MASK_POLYGON_EPSILON_RATIO: ${YOLO_MASK_POLYGON_EPSILON_RATIO:-0.002}
+      YOLO_FRAME_DROP_POLICY: ${YOLO_FRAME_DROP_POLICY:-latest}
+      YOLO_INFERENCE_QUEUE_SIZE: ${YOLO_INFERENCE_QUEUE_SIZE:-1}
+      YOLO_FEED_SOCKET: /run/p4/relay/yolo.sock
+      RELAY_KEYFRAME_URL: http://relay:39012/internal/request-keyframe
+      RELAY_STATUS_URL: http://relay:39012/internal/status
+      NODE_INTERNAL_BASE_URL: http://node:3000
+      NODE_INTERNAL_SERVICE_TOKEN: ${NODE_INTERNAL_SERVICE_TOKEN:-replace-with-a-random-token-at-least-32-characters}
+      TURN_URL: ${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39004?transport=udp}
+      TURN_USERNAME: ${TURN_USERNAME:-user}
+      TURN_PASSWORD: ${TURN_PASSWORD:-replace-with-strong-turn-password}
+      RECORDING_ENABLED: "true"
+      RECORDING_DETECTION_QUEUE_SIZE: ${RECORDING_DETECTION_QUEUE_SIZE:-256}
+      RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES: ${RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES:-1}
+      METRICS_LOG_INTERVAL_SECONDS: ${METRICS_LOG_INTERVAL_SECONDS:-5}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      LIVE_VIEW_PARENT_ORIGINS: ${LIVE_VIEW_PARENT_ORIGINS:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "39011", "--reload", "--reload-dir", "/workspace/services/vision"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
     volumes:
       - ./services/vision:/workspace/services/vision
       - ./services/vision/.ultralytics-custom:/workspace/services/vision/.ultralytics-custom:ro
-      - ./services/vision/models:/workspace/services/vision/models:ro
+      - type: bind
+        source: ./data/relay_feed
+        target: /run/p4/relay
+      - type: bind
+        source: ./services/vision/models
+        target: /workspace/services/vision/models
+        read_only: true
+    expose: [ "39011" ]
+    networks: [ p4 ]
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx.Dockerfile
+    image: p4-integrated-backend-nginx:dev
+    container_name: vehicle-platform-nginx
+    restart: unless-stopped
+    depends_on:
+      - node
+      - routing
+      - relay
+      - vision
+    environment:
+      TLS_PUBLIC_ADDRESS: ${TLS_PUBLIC_ADDRESS:-10.174.96.119}
+    ports:
+      - "${PUBLIC_OPERATOR_PORT:-39001}:39001"
+      - "${PUBLIC_VISION_PORT:-39002}:39002"
+      - "${PUBLIC_RECORDING_PORT:-39003}:39003"
+    expose: [ "39001", "39002", "39003" ]
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - type: bind
+        source: ./data/tls
+        target: /etc/nginx/tls
+      - type: bind
+        source: ./data/nginx_logs
+        target: /var/log/nginx
+    networks: [ p4 ]
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: vehicle-platform-minio
+    restart: unless-stopped
+    command: [ "server", "/data", "--console-address", ":9001" ]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-p4-minio-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-development-password-change-me}
+    expose: [ "9000", "9001" ]
+    volumes:
+      - type: bind
+        source: ./data/minio_data
+        target: /data
+    networks: [ p4 ]
+
+  minio-bootstrap:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: vehicle-platform-minio-bootstrap
+    restart: "no"
+    depends_on:
+      - minio
+    entrypoint: [ "/bin/sh", "/bootstrap.sh" ]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-p4-minio-local}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-local-development-password-change-me}
+      MINIO_RECORDING_BUCKET: ${MINIO_RECORDING_BUCKET:-p4-trip-recordings}
+      MINIO_RELAY_ACCESS_KEY: ${MINIO_ACCESS_KEY:-p4-relay}
+      MINIO_RELAY_SECRET_KEY: ${MINIO_SECRET_KEY:-replace-relay-secret}
+      MINIO_NODE_ACCESS_KEY: ${MINIO_NODE_ACCESS_KEY:-p4-node}
+      MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:-replace-node-secret}
+    volumes:
+      - ./deploy/minio/bootstrap.sh:/bootstrap.sh:ro
+      - ./deploy/minio/policies:/policies:ro
+    networks: [ p4 ]
+
+  coturn:
+    image: coturn/coturn:4.6.3
+    container_name: vehicle-platform-coturn
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --no-cli
+      - --realm=${TURN_REALM:-p4.local}
+      - --user=${TURN_USERNAME:-user}:${TURN_PASSWORD:-replace-with-strong-turn-password}
+      - --listening-port=39004
+      - --tls-listening-port=39005
+      - --min-port=39006
+      - --max-port=39007
+      - --listening-ip=${TURN_LISTENING_IP:-0.0.0.0}
+      - --relay-ip=${TURN_RELAY_IP:-10.174.96.119}
+      - --external-ip=${TURN_EXTERNAL_IP:-10.174.96.119}
+
+networks:
+  p4:
+    name: p4-internal

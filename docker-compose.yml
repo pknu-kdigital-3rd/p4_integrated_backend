@@ -87,7 +87,7 @@ services:
       MINIO_NODE_SECRET_KEY: ${MINIO_NODE_SECRET_KEY:-replace-node-secret}
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39003}
       RECORDING_PLAYBACK_URL_TTL_SECONDS: ${RECORDING_PLAYBACK_URL_TTL_SECONDS:-300}
-      RECORDING_ENABLED: ${RECORDING_ENABLED:-false}
+      RECORDING_ENABLED: "true"
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
     volumes:
       - type: bind
@@ -141,7 +141,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-p4-relay}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-replace-relay-secret}
       MINIO_RECORDING_BUCKET: ${MINIO_RECORDING_BUCKET:-p4-trip-recordings}
-      RECORDING_ENABLED: ${RECORDING_ENABLED:-false}
+      RECORDING_ENABLED: "true"
       RECORDING_SEGMENT_SECONDS: ${RECORDING_SEGMENT_SECONDS:-60}
       RECORDING_QUEUE_FRAMES: ${RECORDING_QUEUE_FRAMES:-180}
       RECORDING_UPLOAD_QUEUE: ${RECORDING_UPLOAD_QUEUE:-8}
@@ -190,7 +190,7 @@ services:
       TURN_URL: ${TURN_URL:-turn:${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39004?transport=udp}
       TURN_USERNAME: ${TURN_USERNAME:-user}
       TURN_PASSWORD: ${TURN_PASSWORD:-replace-with-strong-turn-password}
-      RECORDING_ENABLED: ${RECORDING_ENABLED:-false}
+      RECORDING_ENABLED: "true"
       RECORDING_DETECTION_QUEUE_SIZE: ${RECORDING_DETECTION_QUEUE_SIZE:-256}
       RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES: ${RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES:-1}
       METRICS_LOG_INTERVAL_SECONDS: ${METRICS_LOG_INTERVAL_SECONDS:-5}
@@ -218,7 +218,7 @@ services:
     build:
       context: .
       dockerfile: docker/nginx.Dockerfile
-    image: p4-integrated-backend-nginx:dev
+    image: p4-integrated-backend-nginx:prod
     container_name: vehicle-platform-nginx
     restart: unless-stopped
     depends_on:
@@ -231,6 +231,7 @@ services:
     ports:
       - "${PUBLIC_OPERATOR_PORT:-39001}:39001"
       - "${PUBLIC_VISION_PORT:-39002}:39002"
+      - "${PUBLIC_RECORDING_PORT:-39003}:39003"
     expose: [ "39001", "39002", "39003" ]
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -245,7 +246,6 @@ services:
   minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: vehicle-platform-minio
-    profiles: [ recording ]
     restart: unless-stopped
     command: [ "server", "/data", "--console-address", ":9001" ]
     environment:
@@ -261,7 +261,6 @@ services:
   minio-bootstrap:
     image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
     container_name: vehicle-platform-minio-bootstrap
-    profiles: [ recording ]
     restart: "no"
     depends_on:
       - minio
