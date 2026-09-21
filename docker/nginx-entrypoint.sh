@@ -27,6 +27,9 @@ if [ ! -s "$certificate" ] || [ ! -s "$private_key" ] || [ "$previous_address" !
     >/dev/null 2>&1
   printf '%s\n' "$address" >"$marker"
 fi
+# The certificate is public and must be copyable to Android/browser clients.
+# Apply this on every startup to repair certificates generated with umask 077.
+chmod 644 "$certificate"
 chmod 600 "$private_key"
 
 exec "$@"

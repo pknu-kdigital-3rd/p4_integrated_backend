@@ -279,6 +279,17 @@ or Go code requires rebuilding the relevant production image first.
 
 ## Operational gotchas
 
+- Nginx sets `server.crt` permissions to `0644` for copying to clients and
+  keeps `server.key` at `0600`. To export the public certificate from an older
+  installation without host `sudo`, run on the Linux server:
+
+  ```bash
+  docker exec p4-nginx cat /etc/nginx/tls/server.crt > "$HOME/p4-server.crt"
+  ```
+
+  The exported file belongs to your login user. Download `p4-server.crt` using
+  SCP and transfer it to Android. Do not export `server.key`.
+
 - The `p4-internal` network defaults to `10.253.240.0/24`. Override
   `P4_DOCKER_SUBNET` if that range conflicts with your host or VPN routes.
   Duplicate subnet routes can send host requests to a stale Docker bridge,

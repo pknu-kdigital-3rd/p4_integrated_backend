@@ -88,7 +88,7 @@ services:
       MINIO_PUBLIC_ENDPOINT: https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39003
       RECORDING_PLAYBACK_URL_TTL_SECONDS: 300
       RECORDING_ENABLED: "true"
-      ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
+      ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-true}
     command: [ "./node_modules/.bin/tsx", "watch", "src/server.ts" ]
     volumes:
       - ./node/src:/workspace/node/src
@@ -144,7 +144,7 @@ services:
       PY_TELEMETRY_URL: http://p4-vision:39011/internal/telemetry
       NODE_INTERNAL_BASE_URL: http://p4-node:3000
       NODE_INTERNAL_SERVICE_TOKEN: dev-only-node-internal-service-token-2026
-      ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-false}
+      ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-true}
       MINIO_ENDPOINT: p4-minio:9000
       MINIO_USE_SSL: "false"
       MINIO_ACCESS_KEY: p4-relay
