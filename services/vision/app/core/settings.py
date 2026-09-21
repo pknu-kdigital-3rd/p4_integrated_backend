@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     # --- TURN / ICE ---
     TURN_URL: str = "turn:10.174.96.119:39004?transport=udp"
     TURN_USERNAME: str = "user"
-    TURN_PASSWORD: str = "pass"
+    TURN_PASSWORD: str = "replace-with-strong-turn-password"
     YOLO_FEED_SOCKET: str = "/tmp/poc-relay-yolo.sock"
     RELAY_KEYFRAME_URL: str = "http://127.0.0.1:39012/internal/request-keyframe"
     RELAY_STATUS_URL: str = "http://127.0.0.1:39012/internal/status"

@@ -64,7 +64,7 @@ func Load() (Config, error) {
 		// for deployments that do not set the variable at all.
 		TurnURL:      envAllowEmpty("TURN_URL", "turn:10.174.96.119:39004?transport=udp"),
 		TurnUsername: env("TURN_USERNAME", "user"),
-		TurnPassword: env("TURN_PASSWORD", "pass"),
+		TurnPassword: env("TURN_PASSWORD", "replace-with-strong-turn-password"),
 		// A filesystem path, not host:port - renamed from the old
 		// YOLO_FEED_ADDR (TCP) so a stale env var fails loudly instead of
 		// being silently misinterpreted as a path.

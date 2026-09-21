@@ -105,7 +105,7 @@ The Python server reads these environment variables:
 ```bash
 export TURN_URL='turn:10.174.96.119:39004?transport=udp'
 export TURN_USERNAME='user'
-export TURN_PASSWORD='pass'
+export TURN_PASSWORD='replace-with-strong-turn-password'
 ```
 
 These are also the application defaults. Override them with environment
@@ -131,7 +131,7 @@ them on the Gradle command line:
 ```text
 turn.url=turn:10.174.96.119:39004?transport=udp
 turn.username=user
-turn.password=pass
+turn.password=replace-with-strong-turn-password
 relay.url=https://10.174.96.119:39002
 ```
 

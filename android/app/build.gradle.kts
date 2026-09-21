@@ -8,7 +8,8 @@ fun buildConfigString(value: String): String =
 val turnUrl = providers.gradleProperty("turn.url").orNull
     ?: "turn:10.174.96.119:39004?transport=udp"
 val turnUsername = providers.gradleProperty("turn.username").orNull ?: "user"
-val turnPassword = providers.gradleProperty("turn.password").orNull ?: "pass"
+val turnPassword = providers.gradleProperty("turn.password").orNull
+    ?: "replace-with-strong-turn-password"
 val relayUrl = providers.gradleProperty("relay.url").orNull
     ?: "https://10.174.96.119:39002"
 
