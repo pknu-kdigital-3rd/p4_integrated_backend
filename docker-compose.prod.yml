@@ -179,6 +179,7 @@ services:
       PORT: "39011"
       YOLO_MODEL: ${YOLO_MODEL:-/workspace/services/vision/models/a4_best.engine}
       UNIDEPTH_MODEL_DIR: ${UNIDEPTH_MODEL_DIR:-/workspace/services/vision/models/unidepth-v2-vitb14}
+      LOG_TELEMETRY_ACCESS: ${LOG_TELEMETRY_ACCESS:-false}
       YOLO_DEVICE: ${YOLO_DEVICE:-cuda:0}
       YOLO_INFERENCE_SIZE: ${YOLO_INFERENCE_SIZE:-auto}
       YOLO_USE_LAST_GPU: ${YOLO_USE_LAST_GPU:-true}
