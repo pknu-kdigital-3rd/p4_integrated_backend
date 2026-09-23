@@ -35,7 +35,7 @@ export YOLO_HALF=true
 export YOLO_MAX_IMGSZ=640
 export YOLO_RETINA_MASKS=true
 export YOLO_MASK_CONTOUR_SIZE=640
-export UNIDEPTH_MODEL_DIR=/home/user/models/unidepth-v2-vitb14
+export UNIDEPTH_MODEL_DIR=/home/user/p4-integrated-backend/services/vision/models/unidepth-v2-vitb14
 
 .venv/bin/python benchmark_yolo.py \
   --model "$YOLO_MODEL" \
@@ -139,7 +139,7 @@ export YOLO_HALF=true
 export YOLO_MAX_IMGSZ=640
 export YOLO_RETINA_MASKS=true
 export YOLO_MASK_CONTOUR_SIZE=640
-export UNIDEPTH_MODEL_DIR=/home/user/models/unidepth-v2-vitb14
+export UNIDEPTH_MODEL_DIR=/home/user/p4-integrated-backend/services/vision/models/unidepth-v2-vitb14
 export YOLO_FRAME_DROP_POLICY=latest
 export YOLO_INFERENCE_QUEUE_SIZE=1
 ```
