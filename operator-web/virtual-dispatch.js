@@ -32,6 +32,7 @@ let mode = 'normal';
 let scenarioId = '';
 let scenarioRevision = 0;
 let selectedVehicleId = '';
+let speedControlEditing = false;
 let vehicles = [];
 let restrictions = [];
 let draft = null;
@@ -40,6 +41,7 @@ let pickMode = null;
 let restrictionCorners = [];
 let restrictionGeometry = null;
 let pollTimer = null;
+let vehiclePollTimer = null;
 let lastEventId = '';
 let pointContextPopup = null;
 const SPEED_PRESETS_KMH = [25, 50, 100, 200];
@@ -70,7 +72,7 @@ function renderSpeedControl(speedKmh) {
   if (!slider || !output) return;
   let displayedSpeed = selectedSpeedKmh();
   const currentSpeed = Number(speedKmh);
-  if (Number.isFinite(currentSpeed) && currentSpeed > 0) {
+  if (!speedControlEditing && Number.isFinite(currentSpeed) && currentSpeed > 0) {
     slider.value = String(speedPresetIndex(currentSpeed));
     displayedSpeed = currentSpeed;
   }
@@ -100,13 +102,12 @@ function animateVehicleMarker(vehicleId, marker, target) {
     return;
   }
   const startedAt = performance.now();
-  const durationMs = 900;
+  const durationMs = 300;
   const tick = (now) => {
     const fraction = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
-    const eased = fraction * fraction * (3 - 2 * fraction);
     marker.setLatLng([
-      from.lat + (to.lat - from.lat) * eased,
-      from.lon + (to.lon - from.lon) * eased,
+      from.lat + (to.lat - from.lat) * fraction,
+      from.lon + (to.lon - from.lon) * fraction,
     ]);
     if (fraction < 1) virtualVehicleAnimationFrames.set(vehicleId, requestAnimationFrame(tick));
     else virtualVehicleAnimationFrames.delete(vehicleId);
@@ -511,15 +512,19 @@ function renderActiveTripRoute(vehicle) {
 map.on?.('zoomend', () => {
   for (const visual of routeVisuals) applyRouteStrokeWidths(visual);
 });
-function renderVehicles() {
+function renderVehicles({ updateVehicleSelect = true } = {}) {
   const selected = selectedVehicleId;
-  vehicleSelect.replaceChildren(new Option('Select a virtual vehicle', ''));
-  for (const vehicle of vehicles) {
-    const state = vehicle.state?.simStatus || vehicle.vehicleStatus || 'READY';
-    vehicleSelect.add(new Option(`${vehicle.vehicleCode}${vehicle.vehicleName ? ` · ${vehicle.vehicleName}` : ''} · ${state}`, String(vehicle.vehicleId)));
+  if (updateVehicleSelect) {
+    vehicleSelect.replaceChildren(new Option('Select a virtual vehicle', ''));
+    for (const vehicle of vehicles) {
+      const state = vehicle.state?.simStatus || vehicle.vehicleStatus || 'READY';
+      vehicleSelect.add(new Option(`${vehicle.vehicleCode}${vehicle.vehicleName ? ` · ${vehicle.vehicleName}` : ''} · ${state}`, String(vehicle.vehicleId)));
+    }
+    if (vehicles.some((vehicle) => String(vehicle.vehicleId) === selected)) vehicleSelect.value = selected;
+    else selectedVehicleId = '';
+  } else if (!vehicles.some((vehicle) => String(vehicle.vehicleId) === selected)) {
+    selectedVehicleId = '';
   }
-  if (vehicles.some((vehicle) => String(vehicle.vehicleId) === selected)) vehicleSelect.value = selected;
-  else selectedVehicleId = '';
   if (draft) {
     const draftVehicleId = String(draft.selectedVehicleId ?? selectedVehicleId);
     const draftVehicle = vehicles.find((vehicle) => String(vehicle.vehicleId) === draftVehicleId);
@@ -542,7 +547,7 @@ function renderVehicles() {
     if (!marker) {
       marker = L.circleMarker([Number(position.lat), Number(position.lon)], { radius: vehicleId === selected ? 11 : 8, color: '#6a4c93', fillColor: '#b185db', fillOpacity: 0.9 });
       marker.bindTooltip(`Virtual · ${vehicle.vehicleCode}`);
-      marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); });
+      marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; speedControlEditing = false; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); });
       virtualVehicleMarkers.set(vehicleId, marker);
       markerLayerGroup.addLayer(marker);
     } else {
@@ -565,7 +570,7 @@ function renderSelectedVehicle(vehicle) {
   const trip = vehicle?.state?.trip;
   renderActiveTripRoute(vehicle);
   controls.hidden = !trip;
-  if (!trip) { renderSpeedControl(); return; }
+  if (!trip) { speedControlEditing = false; renderSpeedControl(vehicle?.state?.speedKmh); return; }
   const settings = vehicle.following || { autoFollowEnabled: true };
   document.querySelector('#virtual-following').checked = Boolean(settings.autoFollowEnabled);
   renderSpeedControl(vehicle.state?.speedKmh);
@@ -631,6 +636,14 @@ async function loadScenarioData() {
   renderVehicles();
   renderRequests(requests);
   renderEvents(events);
+}
+async function refreshVehiclePositions() {
+  if (!scenarioId || mode !== 'virtual') return;
+  const requestedScenarioId = scenarioId;
+  const latestVehicles = await api(`/api/v1/virtual/scenarios/${requestedScenarioId}/vehicles`);
+  if (mode !== 'virtual' || scenarioId !== requestedScenarioId) return;
+  vehicles = latestVehicles;
+  renderVehicles({ updateVehicleSelect: false });
 }
 async function decideRequest(requestId, action) {
   try { await api(`/api/v1/virtual/dispatch-requests/${requestId}/${action}`, { method: 'POST', body: '{}' }); await loadScenarioData(); setStatus(`Request ${requestId} ${action}ed.`); }
@@ -713,7 +726,11 @@ async function command(command, extra = {}) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
   const tripId = vehicle?.state?.virtualTripId || vehicle?.state?.trip?.virtualTripId;
   if (!tripId) { setStatus('The selected virtual vehicle has no active trip.', true); return; }
-  try { await api(`/api/v1/virtual/trips/${tripId}/commands`, { method: 'POST', body: JSON.stringify({ command, ...extra }) }); await loadScenarioData(); }
+  try {
+    await api(`/api/v1/virtual/trips/${tripId}/commands`, { method: 'POST', body: JSON.stringify({ command, ...extra }) });
+    if (command === 'SET_SPEED_KMH') speedControlEditing = false;
+    await loadScenarioData();
+  }
   catch (error) { setStatus(error.message, true); }
 }
 function closePointContextMenu() {
@@ -836,6 +853,7 @@ async function switchMode(next) {
     window.__operatorDetachMapLayers?.();
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
+    if (!vehiclePollTimer) vehiclePollTimer = setInterval(() => void refreshVehiclePositions().catch((error) => setStatus(error.message, true)), 250);
   } else {
     normalSectionVisibility.restore();
     window.__operatorAttachMapLayers?.();
@@ -843,6 +861,7 @@ async function switchMode(next) {
     draftRouteSignature = '';
     activeRouteSignature = '';
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (vehiclePollTimer) { clearInterval(vehiclePollTimer); vehiclePollTimer = null; }
     window.__virtualMode = false;
   }
   setTimeout(() => map.invalidateSize({ pan: false }), 0);
@@ -855,9 +874,10 @@ map.on('click', (event) => {
 map.on('contextmenu', (event) => showPointContextMenu(event));
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
-scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
+scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
 vehicleSelect.addEventListener('change', () => {
   selectedVehicleId = vehicleSelect.value;
+  speedControlEditing = false;
   draft = null;
   renderDraft();
   renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId));
@@ -871,7 +891,7 @@ document.querySelector('#virtual-preview').addEventListener('click', () => void 
 document.querySelector('#virtual-dispatch').addEventListener('click', () => void generateRequest());
 document.querySelector('#virtual-following').addEventListener('change', (event) => void setFollowing(event.target.checked));
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
-document.querySelector('#virtual-speed').addEventListener('input', () => renderSpeedControl());
+document.querySelector('#virtual-speed').addEventListener('input', () => { speedControlEditing = true; renderSpeedControl(); });
 document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
 document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; setStatus('Click two opposite corners on the map.'); });
 document.querySelector('#virtual-restriction-commit').addEventListener('click', () => void commitRestriction());
