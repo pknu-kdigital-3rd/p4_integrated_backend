@@ -7,6 +7,7 @@ from importlib.metadata import distribution
 import json
 import os
 from pathlib import Path
+import shutil
 from time import perf_counter
 from typing import Any
 
@@ -78,9 +79,24 @@ class DepthEstimator:
             str(model_path), local_files_only=True
         ).to(self._device).eval()
         self._model.resolution_level = 3
-        self._model.encode_decode = torch.compile(
-            self._model.encode_decode, mode="default", fullgraph=False
+        self._eager_encode_decode = self._model.encode_decode
+        requested_compiler = os.environ.get("CC")
+        compiler_name = requested_compiler.split()[0] if requested_compiler else None
+        compiler_available = (
+            shutil.which(compiler_name) is not None
+            if compiler_name
+            else any(shutil.which(name) is not None for name in ("gcc", "cc", "clang"))
         )
+        self._compiled = compiler_available
+        if self._compiled:
+            self._model.encode_decode = torch.compile(
+                self._eager_encode_decode, mode="default", fullgraph=False
+            )
+        else:
+            print(
+                "UniDepth C compiler unavailable; using eager inference",
+                flush=True,
+            )
         self._stream = (
             torch.cuda.Stream(device=self._device)
             if self._device.type == "cuda"
@@ -92,17 +108,37 @@ class DepthEstimator:
         height, width = frame_bgr.shape[:2]
         rgb = torch.from_numpy(frame_bgr[:, :, ::-1].copy()).permute(2, 0, 1).to(self._device)
         camera = torch.as_tensor(camera_intrinsic.copy(), device=self._device)
-        with torch.inference_mode():
-            if self._stream is None:
-                output = self._model.infer(rgb, camera)
-            else:
-                with torch.cuda.stream(self._stream):
-                    output = self._model.infer(rgb, camera)
-                self._stream.synchronize()
+        try:
+            output = self._infer(rgb, camera)
+        except Exception as exc:
+            message = str(exc).lower()
+            compiler_unavailable = (
+                "failed to find c compiler" in message
+                or "c compiler is not available" in message
+            )
+            if not self._compiled or not compiler_unavailable:
+                raise
+            self._model.encode_decode = self._eager_encode_decode
+            self._compiled = False
+            print(
+                "UniDepth compiler unavailable during JIT; retrying in eager mode",
+                flush=True,
+            )
+            output = self._infer(rgb, camera)
         depth = output["depth"]
         if tuple(depth.shape) != (1, 1, height, width):
             raise RuntimeError("UniDepth output is not aligned to the model input frame")
         return DepthFrame(width, height, depth[0, 0].detach().float())
+
+    def _infer(self, rgb: Any, camera: Any) -> dict[str, Any]:
+        torch = self._torch
+        with torch.inference_mode():
+            if self._stream is None:
+                return self._model.infer(rgb, camera)
+            with torch.cuda.stream(self._stream):
+                output = self._model.infer(rgb, camera)
+            self._stream.synchronize()
+        return output
 
 
 def load_depth_estimator() -> DepthEstimator:
