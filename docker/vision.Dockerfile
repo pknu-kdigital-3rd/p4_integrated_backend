@@ -24,7 +24,9 @@ RUN apt-get update \
 WORKDIR /workspace/services/vision
 COPY pyproject.toml uv.lock ./
 COPY --from=ultralytics . ./.ultralytics-custom/
-RUN uv sync --frozen
+# The copied venv must reference the system interpreter present in both stages,
+# rather than a uv-managed interpreter under the builder's home directory.
+RUN uv sync --frozen --python /usr/bin/python3.12 --no-python-downloads
 
 # Build xFormers against the exact Python and PyTorch already installed above.
 # The default architecture targets the deployment RTX 6000 Ada; override this
@@ -61,6 +63,8 @@ RUN apt-get update \
 
 WORKDIR /workspace/services/vision
 COPY --from=build /opt/vision-venv /opt/vision-venv
+# Check the copied interpreter and PyTorch without requiring a GPU at build time.
+RUN /opt/vision-venv/bin/python -c "import sys, torch; print(sys.executable, torch.__version__)"
 COPY --from=build /workspace/services/vision /workspace/services/vision
 COPY --from=build /usr/local/bin/p4-vision-entrypoint /usr/local/bin/p4-vision-entrypoint
 
