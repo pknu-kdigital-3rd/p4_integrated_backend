@@ -34,9 +34,15 @@ fi
 # address one directly - now in nvidia-smi order.
 if [ "${YOLO_DEVICE:-cuda:0}" != "cpu" ] \
     && { [ -n "$gpu_index" ] || [ "${YOLO_USE_LAST_GPU:-true}" = "true" ]; }; then
-    visible=$(python -c 'import torch; print(torch.cuda.device_count())' 2>/dev/null || printf '0')
+    if ! visible=$(python -c 'import torch; print(torch.cuda.device_count())'); then
+        echo "p4-vision: GPU probe failed to run Python/PyTorch; see the error above. Check the image's /opt/vision-venv interpreter and dependencies." >&2
+        exit 1
+    fi
     case "$visible" in
-        ''|*[!0-9]*) visible=0 ;;
+        ''|*[!0-9]*)
+            echo "p4-vision: GPU probe returned an invalid device count: '$visible'" >&2
+            exit 1
+            ;;
     esac
     if [ "$visible" -eq 0 ]; then
         # A pinned index cannot be honored without a CUDA runtime, so fail
