@@ -17,6 +17,17 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
   return entry;
 }
+// Every normal-monitoring layer on the map. All three are cached and only
+// added to the map when first created, so whoever takes the map away has to
+// put them back: render() reuses a cached marker rather than recreating it, so
+// a detached marker would never reappear for the rest of the session.
+function normalMapLayers(){
+  return [...markers.values()].map(entry=>entry.marker)
+    .concat([...tripMapMarkers.values()],routeLayer?[routeLayer]:[]);
+}
+// Used by the virtual workspace, which takes the map over while it is open.
+window.__operatorDetachMapLayers=()=>{for(const layer of normalMapLayers())map.removeLayer(layer)};
+window.__operatorAttachMapLayers=()=>{for(const layer of normalMapLayers())layer.addTo(map)};
 const liveMapFollower=createLiveMapFollower({
   map,markers,
   createEntry:(item,position)=>createMarkerEntry(item,position,{liveOnly:true}),

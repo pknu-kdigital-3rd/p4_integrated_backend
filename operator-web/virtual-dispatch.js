@@ -829,13 +829,16 @@ async function switchMode(next) {
     // switch back, however the individual sections are set.
     window.__operatorStopLiveView?.();
     normalSectionVisibility.hide();
-    map.eachLayer((layer) => {
-      if (layer !== routeLayerGroup && layer !== activeRouteLayerGroup && layer !== markerLayerGroup && layer !== pointLayerGroup && layer !== restrictionLayerGroup && layer !== restrictionDraftLayerGroup && !layer._url) map.removeLayer(layer);
-    });
+    // Ask the normal workspace to take its own layers off the map. Sweeping
+    // them off from here removed markers this module cannot put back: they are
+    // cached by external_id and only ever added to the map on creation, so the
+    // fleet never reappeared after switching back.
+    window.__operatorDetachMapLayers?.();
     try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
   } else {
     normalSectionVisibility.restore();
+    window.__operatorAttachMapLayers?.();
     clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
     draftRouteSignature = '';
     activeRouteSignature = '';
