@@ -8,6 +8,19 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <TextView
+        android:id="@+id/zoomStatusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="12dp"
+        android:background="#CC101820"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
+        android:text="Pinch to zoom · 1.0×  |  Tap to focus"
+        android:textColor="#FFFFFFFF"
+        android:textStyle="bold" />
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -56,43 +69,63 @@
                 android:textColor="#FFFFD54F"
                 android:textSize="12sp" />
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Trip ID"
-                android:textColor="#FFFFFFFF"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+                android:orientation="horizontal">
 
-            <EditText
-                android:id="@+id/recordingTripId"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Enter a positive trip ID"
-                android:inputType="number"
-                android:singleLine="true"
-                android:textColor="#FFFFFFFF"
-                android:textColorHint="#B0FFFFFF" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Vehicle ID"
-                android:textColor="#FFFFFFFF"
-                android:textSize="12sp"
-                android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Trip ID"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
 
-            <EditText
-                android:id="@+id/recordingVehicleId"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Enter a positive vehicle ID"
-                android:inputType="number"
-                android:singleLine="true"
-                android:textColor="#FFFFFFFF"
-                android:textColorHint="#B0FFFFFF" />
+                    <EditText
+                        android:id="@+id/recordingTripId"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="Positive ID"
+                        android:inputType="number"
+                        android:singleLine="true"
+                        android:textColor="#FFFFFFFF"
+                        android:textColorHint="#B0FFFFFF" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Vehicle ID"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <EditText
+                        android:id="@+id/recordingVehicleId"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="Positive ID"
+                        android:inputType="number"
+                        android:singleLine="true"
+                        android:textColor="#FFFFFFFF"
+                        android:textColorHint="#B0FFFFFF" />
+                </LinearLayout>
+            </LinearLayout>
 
             <Spinner
                 android:id="@+id/resolutionSpinner"
@@ -129,6 +162,13 @@
                 android:textSize="14sp"
                 android:textStyle="bold" />
 
+            <Button
+                android:id="@+id/streamButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/start_streaming" />
+
             <Switch
                 android:id="@+id/telemetrySwitch"
                 android:layout_width="match_parent"
@@ -164,11 +204,6 @@
                 android:textSize="12sp"
                 android:textStyle="bold" />
 
-            <Button
-                android:id="@+id/streamButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/start_streaming" />
         </LinearLayout>
     </ScrollView>
 </FrameLayout>

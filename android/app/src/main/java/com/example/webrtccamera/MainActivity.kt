@@ -112,18 +112,18 @@ private const val QR_FAILURE_LOG_INTERVAL_NS = 250_000_000L
 private const val QR_LOG_TAG = "MainActivity"
 
 // The rig points at a screen a fixed distance away. Autofocus hunts badly on a
-// flat, periodic pixel pattern, so the lens is pinned rather than scanned and
-// the operator pinches to find the sharp point by eye. Focus is held as a 0..1
-// fraction of the lens range because many devices report LENS_FOCUS_DISTANCE as
-// UNCALIBRATED, where the diopter scale is repeatable but not physically true.
+// flat, periodic pixel pattern, so the lens is pinned between tap-to-focus
+// scans. Focus is held as a 0..1 fraction of the lens range because many devices
+// report LENS_FOCUS_DISTANCE as UNCALIBRATED, where the diopter scale is
+// repeatable but not physically true.
 private const val FOCUS_FRACTION_KEY = "focus_fraction"
 private const val RECORDING_TRIP_ID_KEY = "recording_trip_id"
 private const val RECORDING_VEHICLE_ID_KEY = "recording_vehicle_id"
-private const val FOCUS_PINCH_SENSITIVITY = 2.0f
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewFinder: PreviewView
     private lateinit var statusText: TextView
+    private lateinit var zoomStatusText: TextView
     private lateinit var streamButton: Button
     private lateinit var serverUrl: EditText
     private lateinit var recordingTripIdInput: EditText
@@ -212,19 +212,18 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private val focusGestureDetector by lazy {
+    private val zoomGestureDetector by lazy {
         ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                if (focusRangeDiopters == null) return false
-                focusFraction =
-                    (focusFraction + (detector.scaleFactor - 1f) * FOCUS_PINCH_SENSITIVITY)
-                        .coerceIn(0f, 1f)
-                camera?.let(::applyFocus)
+                val activeCamera = camera ?: return true
+                val zoomState = activeCamera.cameraInfo.zoomState.value ?: return true
+                val zoomRatio = (zoomState.zoomRatio * detector.scaleFactor)
+                    .coerceIn(zoomState.minZoomRatio, zoomState.maxZoomRatio)
+                activeCamera.cameraControl.setZoomRatio(zoomRatio).addListener(
+                    { runOnUiThread(::updateZoomStatus) },
+                    ContextCompat.getMainExecutor(this@MainActivity),
+                )
                 return true
-            }
-
-            override fun onScaleEnd(detector: ScaleGestureDetector) {
-                getPreferences(MODE_PRIVATE).edit { putFloat(FOCUS_FRACTION_KEY, focusFraction) }
             }
         })
     }
@@ -245,6 +244,7 @@ class MainActivity : AppCompatActivity() {
 
         viewFinder = findViewById(R.id.viewFinder)
         statusText = findViewById(R.id.statusText)
+        zoomStatusText = findViewById(R.id.zoomStatusText)
         streamButton = findViewById(R.id.streamButton)
         serverUrl = findViewById(R.id.serverUrl)
         serverUrl.setText(BuildConfig.DEFAULT_SERVER_URL)
@@ -285,11 +285,12 @@ class MainActivity : AppCompatActivity() {
         }
         selectDatasetButton.setOnClickListener { datasetFolderLauncher.launch(null) }
         focusFraction = getPreferences(MODE_PRIVATE).getFloat(FOCUS_FRACTION_KEY, 0f)
+        updateZoomStatus()
         viewFinder.setOnTouchListener { view, event ->
-            focusGestureDetector.onTouchEvent(event)
+            zoomGestureDetector.onTouchEvent(event)
             // Suppress the tap while a pinch is running, so lifting two fingers
-            // cannot fire a scan that undoes the adjustment just made.
-            if (!focusGestureDetector.isInProgress) tapFocusDetector.onTouchEvent(event)
+            // cannot fire a focus scan when the user intended to zoom.
+            if (!zoomGestureDetector.isInProgress) tapFocusDetector.onTouchEvent(event)
             if (event.actionMasked == MotionEvent.ACTION_UP) view.performClick()
             true
         }
@@ -513,6 +514,7 @@ class MainActivity : AppCompatActivity() {
                 cameraProvider = provider
                 camera = bound
                 applyFocus(bound)
+                updateZoomStatus()
                 // The requested Size is only a target - the camera HAL may not offer
                 // that exact size/aspect ratio, so show what was actually bound. This
                 // gets its own label rather than statusText, since WebRtcPublisher's
@@ -546,7 +548,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Diopters at the lens's near limit, or null when focus cannot be driven
-     * manually. Doubles as the top of the pinch range.
+     * manually. Used to pin focus after a tap-to-focus scan.
      */
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun manualFocusRangeDiopters(cameraInfo: CameraInfo): Float? {
@@ -562,9 +564,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Pins the lens at the current pinch position. Applied through
-     * Camera2CameraControl rather than the use-case builder so a pinch takes
-     * effect on the running session instead of needing a rebind.
+     * Pins the lens at the position found by tap-to-focus. Applied through
+     * Camera2CameraControl so the running session can keep that position.
      */
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun applyFocus(camera: Camera) {
@@ -584,10 +585,19 @@ class MainActivity : AppCompatActivity() {
         updateCaptureLabel()
     }
 
+    private fun updateZoomStatus() {
+        if (!::zoomStatusText.isInitialized) return
+        val state = camera?.cameraInfo?.zoomState?.value
+        zoomStatusText.text = if (state == null) {
+            "Pinch to zoom  |  Tap to focus"
+        } else {
+            "Pinch to zoom · %.1f×  |  Tap to focus".format(state.zoomRatio)
+        }
+    }
+
     /**
      * Runs one autofocus scan at the tapped point, then re-pins the lens where
-     * it settled. The scan is a starting point; pinch still fine-tunes from
-     * whatever it found.
+     * it settled when manual focus is supported.
      */
     @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun autoFocusAt(x: Float, y: Float) {
@@ -605,8 +615,7 @@ class MainActivity : AppCompatActivity() {
             val range = focusRangeDiopters
             val settled = lastLensPosition
             if (range == null || settled == null) return@addListener
-            // Adopting the scan's position keeps pinch continuous instead of
-            // snapping back to the fraction held before the tap.
+            // Adopt the scan's position so focus is retained after the tap.
             focusFraction = (settled / range).coerceIn(0f, 1f)
             getPreferences(MODE_PRIVATE).edit { putFloat(FOCUS_FRACTION_KEY, focusFraction) }
             applyFocus(camera)
@@ -988,6 +997,7 @@ class MainActivity : AppCompatActivity() {
         cameraProvider?.unbindAll()
         cameraProvider = null
         camera = null
+        updateZoomStatus()
         telemetryReplaySource?.stop()
         telemetryReplaySource = null
         activeSessionContext = null
