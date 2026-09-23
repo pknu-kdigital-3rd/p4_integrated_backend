@@ -283,7 +283,8 @@ Vision container recreation.
 Production commands do not use source reloaders:
 
 ```bash
-docker compose --env-file <secrets-file> up -d --build p4-node-migrate p4-node
+docker compose --env-file <secrets-file> run --rm p4-node-migrate
+docker compose --env-file <secrets-file> up -d --build p4-node
 docker compose --env-file <secrets-file> up -d --build p4-routing
 docker compose --env-file <secrets-file> up -d --build p4-vision
 docker compose --env-file <secrets-file> build p4-relay

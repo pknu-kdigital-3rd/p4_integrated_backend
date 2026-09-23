@@ -57,8 +57,8 @@ services:
     container_name: p4-node
     restart: unless-stopped
     depends_on:
-      p4-node-migrate:
-        condition: service_completed_successfully
+      p4-db:
+        condition: service_started
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       HOST: 0.0.0.0
