@@ -1,5 +1,4 @@
 import asyncio
-import json
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,11 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import internal, pages, playback, telemetry
 from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
-from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
-from app.services.monocular import MonocularTimeline, QRResolver
 from app.core.settings import settings
+from app.services.depth import load_depth_estimator, make_depth_executor
 from app.services.metrics import metrics_worker
 from app.services.recording_detections import RecordingDetectionWriter
+from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
 
 
 @asynccontextmanager
@@ -36,31 +35,12 @@ async def lifespan(app: FastAPI):
             flush=True,
         )
 
-    if settings.MONOCULAR_ENABLED:
-        # Keep the resolver alive even when the sidecars are unavailable. The
-        # browser then receives an explicit `dataset_unavailable` diagnostic
-        # instead of silently omitting the monocular field altogether.
-        state.monocular_resolver = QRResolver(settings.MONOCULAR_QR_MAX_AGE_MS)
-        if not settings.MONOCULAR_DATASET_DIR:
-            print("monocular distance unavailable: MONOCULAR_DATASET_DIR is empty")
-        else:
-            try:
-                state.monocular_timeline = MonocularTimeline.load(
-                    settings.MONOCULAR_DATASET_DIR,
-                    settings.MONOCULAR_CALIBRATION_FILE,
-                )
-                print(
-                    "monocular distance enabled: "
-                    f"dataset={settings.MONOCULAR_DATASET_DIR} "
-                    f"calibrated={state.monocular_timeline.calibration is not None}"
-                )
-            except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
-                print(f"monocular distance unavailable: {exc}")
-
     # Explicit device selection rather than relying on Ultralytics' implicit
     # per-call auto-detection, so the chosen device is logged once at startup
     # and stays fixed for the life of the process.
     state.yolo_model = load_yolo_model()
+    state.depth_model = load_depth_estimator()
+    state.depth_executor = make_depth_executor()
 
     # Reference the tasks for the lifetime of the app (held by this suspended
     # generator frame across the yield below) - asyncio only keeps a weak
@@ -106,6 +86,12 @@ async def lifespan(app: FastAPI):
         except asyncio.TimeoutError:
             detection_writer_task.cancel()
             await asyncio.gather(detection_writer_task, return_exceptions=True)
+    if state.depth_executor is not None:
+        await asyncio.to_thread(
+            state.depth_executor.shutdown, wait=True, cancel_futures=True
+        )
+        state.depth_executor = None
+        state.depth_model = None
 
 
 app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")

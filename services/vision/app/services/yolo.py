@@ -18,7 +18,7 @@ from ultralytics import YOLO
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
-from app.services.monocular import annotate_result
+from app.services.depth import masked_median_distances, predict_timed, scale_camera_intrinsic
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
 # one-byte record kind and the kind-specific body.
@@ -249,16 +249,16 @@ def _skipped_frame_result(
     # dictionaries and only copy the outer list so a skipped media frame does
     # not spend time cloning every detection while the model is overloaded.
     items = list(previous_items)
-    if previous_result and previous_result.get("monocular"):
-        # A monocular distance is tied to the inferred frame's QR/IMU sample;
-        # never present that stale measurement as if it belonged to this media
-        # frame. The geometry/classification can still be held for continuity.
+    if previous_result:
+        # Distance belongs to the inferred frame's depth map. Keep held boxes
+        # and masks for continuity, but never present a stale measurement.
         items = []
         for item in previous_items:
             copied = dict(item) if isinstance(item, dict) else item
             if isinstance(copied, dict):
                 for key in ("distance_m", "distance_status", "distance_anchor"):
                     copied.pop(key, None)
+                copied["distance_status"] = "inference_skipped"
             items.append(copied)
     return {
         "source": _source_metadata(inference_frame),
@@ -270,7 +270,7 @@ def _skipped_frame_result(
         ),
         "inference_ms": 0.0,
         "inference_skipped": True,
-        "monocular": {"status": "inference_skipped"},
+        "depth": {"status": "inference_skipped", "model": "unidepth-v2-vitb14"},
     }
 
 
@@ -430,7 +430,12 @@ def reset_tracker(yolo_model: YOLO) -> None:
         del predictor.trackers
 
 
-def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
+def run_yolo(
+    inference_frame: InferenceFrame,
+    yolo_model: YOLO,
+    depth_model=None,
+    depth_executor=None,
+) -> dict:
     start = perf_counter()
     frame_convert_start = start
     source_width = int(getattr(inference_frame.frame, "width", 0) or 0)
@@ -464,35 +469,70 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
     )
     tracking = settings.YOLO_TRACKING
+    depth_future = None
+    if depth_model is not None:
+        camera_intrinsic = scale_camera_intrinsic(
+            settings.UNIDEPTH_CAMERA_INTRINSIC,
+            frame_width,
+            frame_height,
+            settings.UNIDEPTH_CALIBRATION_WIDTH,
+            settings.UNIDEPTH_CALIBRATION_HEIGHT,
+        )
+        depth_input = img.copy()
+        if depth_executor is not None:
+            depth_future = depth_executor.submit(
+                predict_timed, depth_model, depth_input, camera_intrinsic
+            )
     model_start = perf_counter()
-    with torch.inference_mode():
-        if tracking:
-            results = yolo_model.track(
-                img,
-                device=settings.YOLO_DEVICE,
-                imgsz=imgsz,
-                quantize=quantize,
-                # Hand the weak detections to the tracker rather than dropping
-                # them here; its second association stage is what keeps an
-                # established track alive through a confidence dip.
-                conf=settings.CONF_THRESHOLD_LOW,
-                max_det=settings.YOLO_MAX_DETECTIONS,
-                tracker=settings.YOLO_TRACKER_CONFIG,
-                persist=True,
-                verbose=False,
-                retina_masks=settings.YOLO_RETINA_MASKS,
-            )
-        else:
-            results = yolo_model(
-                img,
-                device=settings.YOLO_DEVICE,
-                imgsz=imgsz,
-                quantize=quantize,
-                max_det=settings.YOLO_MAX_DETECTIONS,
-                verbose=False,
-                retina_masks=settings.YOLO_RETINA_MASKS,
-            )
+    try:
+        with torch.inference_mode():
+            if tracking:
+                results = yolo_model.track(
+                    img,
+                    device=settings.YOLO_DEVICE,
+                    imgsz=imgsz,
+                    quantize=quantize,
+                    # Keep weak detections available to ByteTrack's second
+                    # association stage without allowing them to start tracks.
+                    conf=settings.CONF_THRESHOLD_LOW,
+                    max_det=settings.YOLO_MAX_DETECTIONS,
+                    tracker=settings.YOLO_TRACKER_CONFIG,
+                    persist=True,
+                    verbose=False,
+                    retina_masks=settings.YOLO_RETINA_MASKS,
+                )
+            else:
+                results = yolo_model(
+                    img,
+                    device=settings.YOLO_DEVICE,
+                    imgsz=imgsz,
+                    quantize=quantize,
+                    max_det=settings.YOLO_MAX_DETECTIONS,
+                    verbose=False,
+                    retina_masks=settings.YOLO_RETINA_MASKS,
+                )
+    except BaseException:
+        if depth_future is not None:
+            with suppress(Exception):
+                depth_future.result()
+        raise
     model_ms = (perf_counter() - model_start) * 1000
+    depth_frame = None
+    depth_ms = 0.0
+    if depth_model is None:
+        depth_status = "depth_unavailable"
+    else:
+        try:
+            if depth_future is None:
+                depth_frame, depth_ms = predict_timed(
+                    depth_model, depth_input, camera_intrinsic
+                )
+            else:
+                depth_frame, depth_ms = depth_future.result()
+            depth_status = "ok"
+        except Exception as exc:
+            depth_status = "inference_error"
+            print(f"UniDepth inference failed: {type(exc).__name__}: {exc}", flush=True)
     postprocess_start = perf_counter()
     detections = []
     coordinate_field = {
@@ -513,8 +553,18 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
             if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
                 continue
             retained_indices.append(box_index)
+        masks = getattr(result, "masks", None)
+        masks_data = getattr(masks, "data", None) if masks is not None else None
+        if depth_frame is None:
+            item_distances = [(None, depth_status) for _ in retained_indices]
+        else:
+            item_distances = masked_median_distances(
+                depth_frame.tensor, masks_data, retained_indices
+            )
         normalized_polygons = _normalized_mask_polygons(result, retained_indices)
-        for polygon_index, box_index in enumerate(retained_indices):
+        for polygon_index, (box_index, (distance, distance_status)) in enumerate(
+            zip(retained_indices, item_distances)
+        ):
             conf = float(_scalar(confidence_values[box_index]))
             cls_id = int(_scalar(class_values[box_index]))
             bbox = [float(value) for value in coordinate_values[box_index]]
@@ -536,6 +586,8 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
                 "confidence": round(conf, 2),
                 "bbox": bbox,
                 "bbox_format": settings.BBOX_FORMAT,
+                "distance_m": round(distance, 2) if distance is not None else None,
+                "distance_status": distance_status,
             }
             track_id = (
                 track_values[box_index] if box_index < len(track_values) else None
@@ -560,7 +612,13 @@ def run_yolo(inference_frame: InferenceFrame, yolo_model: YOLO) -> dict:
         "inference_ms": round((perf_counter() - start) * 1000, 1),
         "frame_convert_ms": round(frame_convert_ms, 1),
         "model_ms": round(model_ms, 1),
+        "depth_ms": round(depth_ms, 1),
         "postprocess_ms": round((perf_counter() - postprocess_start) * 1000, 1),
+        "depth": {
+            "model": "unidepth-v2-vitb14",
+            "status": depth_status,
+            "duration_ms": round(depth_ms, 1),
+        },
     }
 
 
@@ -660,8 +718,6 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             decoder = av.CodecContext.create("h264", "r")
             pending.clear()
             pending_by_pts.clear()
-            if state.monocular_resolver is not None:
-                state.monocular_resolver.reset()
             state.source_timeline.reset()
         elif kind == K_RESET:
             metadata = json.loads(body.tobytes() or b"{}")
@@ -680,8 +736,6 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             decoder = av.CodecContext.create("h264", "r")
             pending.clear()
             pending_by_pts.clear()
-            if state.monocular_resolver is not None:
-                state.monocular_resolver.reset()
             state.source_timeline.reset()
         elif kind == K_FRAME:
             if len(body) < FRAME_META_LENGTH.size:
@@ -825,7 +879,12 @@ async def yolo_worker(state: AppState) -> None:
         f"(max_imgsz={settings.YOLO_MAX_IMGSZ})",
         flush=True,
     )
-    run_inference = partial(run_yolo, yolo_model=state.yolo_model)
+    run_inference = partial(
+        run_yolo,
+        yolo_model=state.yolo_model,
+        depth_model=state.depth_model,
+        depth_executor=state.depth_executor,
+    )
     retry_frame: InferenceFrame | None = None
     previous_result: dict | None = None
     previous_result_epoch: int | None = None
@@ -899,15 +958,6 @@ async def yolo_worker(state: AppState) -> None:
             state.last_inference_result_epoch = None
             continue
 
-        if state.monocular_resolver is not None:
-            annotate_result(
-                result,
-                inference_frame,
-                state.monocular_timeline,
-                state.monocular_resolver,
-                max_frame_delta_ms=settings.MONOCULAR_SOURCE_MAX_DELTA_MS,
-                max_imu_delta_ms=settings.MONOCULAR_IMU_MAX_DELTA_MS,
-            )
         previous_result = result
         previous_result_epoch = inference_frame.epoch
         state.last_inference_result = result

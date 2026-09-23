@@ -367,7 +367,7 @@ class YoloWorkerEpochRaceTests(unittest.IsolatedAsyncioTestCase):
         )
         await state.inference_queue.put(frame)
 
-        def fake_run_yolo(inference_frame, yolo_model):
+        def fake_run_yolo(inference_frame, yolo_model, **_kwargs):
             # Stand in for a reset landing on Python's side while this
             # frame's inference was already running in its own thread -
             # exactly the race that used to regress current_epoch.
@@ -410,7 +410,7 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
             await state.inference_queue.put(frame)
         calls = []
 
-        def fake_run_yolo(inference_frame, yolo_model):
+        def fake_run_yolo(inference_frame, yolo_model, **_kwargs):
             calls.append(inference_frame.seq)
             return {
                 "source": {"seq": inference_frame.seq},
@@ -459,7 +459,7 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
             await state.inference_queue.put(frame)
         calls = []
 
-        def fake_run_yolo(inference_frame, yolo_model):
+        def fake_run_yolo(inference_frame, yolo_model, **_kwargs):
             calls.append(inference_frame.seq)
             return {
                 "source": {"seq": inference_frame.seq},

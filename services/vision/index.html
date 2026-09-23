@@ -88,7 +88,7 @@
   let decoder = null, decoderGeneration = 0, decoding = false, playing = false, sourceEnded = false;
   let lastPresentedTs = null, lastInferenceMs = 0, presentedCount = 0;
   let browserFps = 0, fpsWindowStarted = performance.now(), fpsWindowFrames = 0;
-  let lastMonocular = {};
+  let lastDepth = {};
   let modelFilename = '--';
   let nextPaintAt = null;
   let tracks = new Map(), nextTrackId = 1;
@@ -209,8 +209,8 @@
     return Math.max(0, (queue[queue.length - 1].timestamp_us - queue[0].timestamp_us) / 1e6);
   }
   function updateStats() {
-    const monocularStatus = lastMonocular.status ? `  monocular=${lastMonocular.status}  qr=${lastMonocular.qr_status || '?'}` : '';
-    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  ghost_frames=${ghostFrames}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${monocularStatus}`;
+    const depthStatus = lastDepth.status ? `  depth=${lastDepth.status}` : '';
+    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  ghost_frames=${ghostFrames}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${depthStatus}`;
     modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
   }
   function updateBrowserFps() {
@@ -239,7 +239,7 @@
     nextTrackId = 1;
     previousMotionLuma = null;
     globalMotion = { dx: 0, dy: 0, confidence: 0 };
-    lastMonocular = {};
+    lastDepth = {};
     updateStats();
   }
 
@@ -362,7 +362,7 @@
     videoCtx.drawImage(frame, 0, 0, videoCanvas.width, videoCanvas.height);
     estimateGlobalMotion();
     frame.close();
-    lastMonocular = pair.inference.monocular || {};
+    lastDepth = pair.inference.depth || {};
     drawOverlay(pair.inference, pair.frame.width, pair.frame.height);
     updateBrowserFps();
     lastPresentedTs = pair.timestamp_us;
