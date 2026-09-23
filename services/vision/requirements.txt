@@ -7,6 +7,7 @@ aiortc
 psutil
 pydantic-settings
 tensorrt-cu13
+unidepth @ git+https://github.com/lpiccinelli-eth/UniDepth.git@8d8cfe4c7ee15297099983607febf0d4f32eb3d6
 
 # ultralytics pulls in torch/torchvision transitively, but plain `pip install
 # -r requirements.txt` resolves the CPU-only build. For GPU inference, install

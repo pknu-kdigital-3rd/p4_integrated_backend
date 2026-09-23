@@ -118,6 +118,7 @@ async def metrics_worker(state: AppState) -> None:
                 inferred_delta,
             )
             model_ms = _average_ms(current, previous, "model_ms_total", inferred_delta)
+            depth_ms = _average_ms(current, previous, "depth_ms_total", inferred_delta)
             inference_ms = _average_ms(
                 current, previous, "inference_ms_total", inferred_delta
             )
@@ -145,6 +146,7 @@ async def metrics_worker(state: AppState) -> None:
                 f"decode_ms={decode_ms:.1f} "
                 f"convert_ms={frame_convert_ms:.1f} "
                 f"model_ms={model_ms:.1f} "
+                f"depth_ms={depth_ms:.1f} "
                 f"inference_ms={inference_ms:.1f} "
                 f"postprocess_ms={postprocess_ms:.1f} "
                 f"recording_samples_queued={current['recording_samples_queued']} "

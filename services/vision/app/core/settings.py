@@ -84,16 +84,15 @@ class Settings(BaseSettings):
     # small because every entry owns a PyAV VideoFrame and its encoded AU.
     YOLO_INFERENCE_QUEUE_SIZE: int = Field(default=1, ge=1, le=120)
 
-    # --- QR-synchronised monocular distance ---
-    # Disabled unless a dataset and a per-session camera calibration are
-    # explicitly supplied.  Missing QR/data never blocks YOLO; it produces a
-    # nullable distance with a diagnostic status instead.
-    MONOCULAR_ENABLED: bool = False
-    MONOCULAR_DATASET_DIR: str | None = None
-    MONOCULAR_CALIBRATION_FILE: str | None = None
-    MONOCULAR_QR_MAX_AGE_MS: float = Field(default=200.0, ge=0.0, le=10_000.0)
-    MONOCULAR_SOURCE_MAX_DELTA_MS: float = Field(default=50.0, ge=0.0, le=10_000.0)
-    MONOCULAR_IMU_MAX_DELTA_MS: float = Field(default=50.0, ge=0.0, le=10_000.0)
+    # --- UniDepth metric distance ---
+    UNIDEPTH_MODEL_DIR: str = str(BASE_DIR / "models" / "unidepth-v2-vitb14")
+    UNIDEPTH_CAMERA_INTRINSIC: tuple[tuple[float, float, float], ...] = (
+        (1266.417203046554, 0.0, 816.2670197447984),
+        (0.0, 1266.417203046554, 491.50706579294757),
+        (0.0, 0.0, 1.0),
+    )
+    UNIDEPTH_CALIBRATION_WIDTH: int = Field(default=1920, ge=1, le=16384)
+    UNIDEPTH_CALIBRATION_HEIGHT: int = Field(default=1080, ge=1, le=16384)
 
     # --- Server ---
     HOST: str = "127.0.0.1"
@@ -149,8 +148,7 @@ class Settings(BaseSettings):
         "YOLO_FEED_SOCKET",
         "RELAY_KEYFRAME_URL",
         "RELAY_STATUS_URL",
-        "MONOCULAR_DATASET_DIR",
-        "MONOCULAR_CALIBRATION_FILE",
+        "UNIDEPTH_MODEL_DIR",
         "TLS_CERT_FILE",
         "TLS_KEY_FILE",
         "NODE_INTERNAL_BASE_URL",
@@ -171,6 +169,21 @@ class Settings(BaseSettings):
             else:
                 path = BASE_DIR / "models" / path
         return str(path.resolve())
+
+    @field_validator("UNIDEPTH_MODEL_DIR")
+    @classmethod
+    def _resolve_unidepth_model_path(cls, v: str) -> str:
+        path = Path(v).expanduser()
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        return str(path.resolve())
+
+    @field_validator("UNIDEPTH_CAMERA_INTRINSIC")
+    @classmethod
+    def _validate_unidepth_camera_intrinsic(cls, value):
+        if len(value) != 3 or any(len(row) != 3 for row in value):
+            raise ValueError("UNIDEPTH_CAMERA_INTRINSIC must be a 3x3 matrix")
+        return value
 
     @field_validator("BBOX_FORMAT", mode="before")
     @classmethod
