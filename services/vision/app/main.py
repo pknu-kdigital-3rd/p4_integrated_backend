@@ -8,6 +8,7 @@ from app.api import internal, pages, playback, telemetry
 from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
 from app.core.settings import settings
+from app.services.botsort import BotSortTracker
 from app.services.depth import load_depth_estimator, make_depth_executor
 from app.services.metrics import metrics_worker
 from app.services.recording_detections import RecordingDetectionWriter
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     state.yolo_model = load_yolo_model()
     state.depth_model = load_depth_estimator()
     state.depth_executor = make_depth_executor()
+    state.botsort_tracker = BotSortTracker()
 
     # Reference the tasks for the lifetime of the app (held by this suspended
     # generator frame across the yield below) - asyncio only keeps a weak
