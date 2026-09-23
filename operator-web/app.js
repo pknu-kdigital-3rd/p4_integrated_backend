@@ -89,6 +89,18 @@ window.addEventListener('resize',()=>applyLayoutSplit());
 applyLayoutSplit();
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)&&liveTarget?.tripId===(item?.tripId!=null?String(item.tripId):null)}
+function matchesLiveTarget(item){
+  const metadata=item?.telemetry?.source_metadata||{};
+  return item?.vehicleId!=null&&item?.tripId!=null
+    &&String(metadata.vehicleId??'')===String(item.vehicleId)
+    &&String(metadata.tripId??'')===String(item.tripId)
+    &&typeof metadata.recordingSessionId==='string'&&metadata.recordingSessionId.length>0;
+}
+function syncLiveViewButton(item=selected){
+  const button=document.querySelector('#live-view');
+  button.disabled=!bootstrap||!matchesLiveTarget(item);
+  button.title=button.disabled?'Live View is available when this vehicle matches an active recording session.':'';
+}
 function releaseLiveMarker(){
   const markerState=liveMapFollower.end();
   if(!markerState.markerKey)return;
@@ -116,6 +128,7 @@ function retargetLiveView(item){
 }
 function selectVehicle(item){
   selected=item;
+  syncLiveViewButton(item);
   details.hidden=false;
   const t=item.telemetry,r=item.plannedRoute;
   fields.replaceChildren();
@@ -132,11 +145,13 @@ function selectVehicle(item){
 }
 function render(snapshot){
   if(window.__virtualMode)return;
+  if(selected&&!snapshot.vehicles.some(item=>item.telemetry?.external_id===selected.telemetry?.external_id))syncLiveViewButton(null);
   for(const item of snapshot.vehicles){
     const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
+    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton()}
     // A new Android stream reuses device:<vehicleId>; reveal it again when its
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
@@ -356,7 +371,7 @@ installForegroundResume(window,document,()=>{
   liveFrame.contentWindow?.postMessage({type:FOREGROUND_RESUME_MESSAGE},liveView.frameOrigin);
 });
 document.querySelector('#live-view').addEventListener('click',()=>{
-  if(!bootstrap||!selected)return;
+  if(!bootstrap||!matchesLiveTarget(selected))return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
   liveViewUrlObject.searchParams.set('autostart','1');
   const liveViewUrl=liveViewUrlObject.href;
