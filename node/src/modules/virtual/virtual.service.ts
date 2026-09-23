@@ -416,6 +416,11 @@ export const virtualService = {
         return { ...scenario, vehicles, pendingRequests: requests, restrictions };
     },
 
+    async snapRoutePoint(scenarioId: bigint, coordinate: Coordinate) {
+        await getScenario(scenarioId);
+        return routingInternalClient.snap(coordinate);
+    },
+
     async listVehicles(scenarioId: bigint) {
         const vehicles = await prisma.vehicle.findMany({
             where: { vehicleSource: "VIRTUAL", isActive: true },

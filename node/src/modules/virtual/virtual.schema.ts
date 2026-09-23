@@ -53,6 +53,8 @@ export const routePreviewSchema = z.object({
     expectedRestrictionRevision: z.number().int().nonnegative().optional(),
 });
 
+export const snapPointSchema = coordinate;
+
 export const dispatchRequestSchema = z.object({
     draftId: z.string().regex(/^[1-9]\d*$/),
     selectedVehicleId: z.string().regex(/^[1-9]\d*$/),
@@ -124,6 +126,7 @@ export type WaypointInput = z.infer<typeof waypoint>;
 export type CreateScenarioBody = z.infer<typeof createScenarioSchema>;
 export type CreateVirtualVehicleBody = z.infer<typeof createVirtualVehicleSchema>;
 export type RoutePreviewBody = z.infer<typeof routePreviewSchema>;
+export type SnapPointBody = z.infer<typeof snapPointSchema>;
 export type DispatchRequestBody = z.infer<typeof dispatchRequestSchema>;
 export type CommandBody = z.infer<typeof commandSchema>;
 export type FollowingBody = z.infer<typeof followingSchema>;

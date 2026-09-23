@@ -24,6 +24,8 @@ type RouteInput = {
     avoidInitialReverseOfEdgeId?: string;
 };
 
+type SnapInput = Coordinate;
+
 async function request<T>(path: string, body?: unknown): Promise<T> {
     try {
         const headers: Record<string, string> = { "content-type": "application/json" };
@@ -39,7 +41,7 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
             const detail = payload?.detail;
             const code = typeof payload?.code === "string" ? payload.code : typeof detail?.code === "string" ? detail.code : "ROUTING_UNAVAILABLE";
             const message = typeof payload?.message === "string" ? payload.message : typeof detail === "string" ? detail : typeof detail?.message === "string" ? detail.message : "Routing service unavailable";
-            throw new AppError(response.status === 404 || code === "ROUTE_NOT_FOUND" ? 422 : 503, message, code);
+            throw new AppError(response.status === 404 || response.status === 422 || code === "ROUTE_NOT_FOUND" ? 422 : 503, message, code);
         }
         return payload as T;
     } catch (error) {
@@ -54,6 +56,9 @@ export const routingInternalClient = {
     },
     async route(input: RouteInput): Promise<InternalRoute> {
         return request<InternalRoute>("/internal/routing/route", input);
+    },
+    async snap(input: SnapInput) {
+        return request<{ graphVersion: string; nodeId: string; lat: number; lon: number; distanceM: number }>("/internal/routing/snap", input);
     },
     async resolveRestriction(input: { geometry: unknown; blockedEdgeIds?: string[]; penaltyFactor?: number }) {
         return request<{

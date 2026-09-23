@@ -43,7 +43,6 @@ let restrictionGeometry = null;
 let pollTimer = null;
 let vehiclePollTimer = null;
 let lastEventId = '';
-let pointContextPopup = null;
 const SPEED_PRESETS_KMH = [25, 50, 100, 200];
 const virtualVehicleMarkers = new Map();
 const virtualVehicleAnimationFrames = new Map();
@@ -205,12 +204,7 @@ function drawPoint(kind, point, index = 0) {
   marker.bindTooltip(kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1));
   marker.on('dragend', () => {
     const position = marker.getLatLng();
-    const moved = { lat: position.lat, lon: position.lng };
-    if (kind === 'origin') points.origin = moved;
-    else if (kind === 'destination') points.destination = moved;
-    else if (points.waypoints[index]) points.waypoints[index] = moved;
-    renderPoints();
-    void refreshPreviewAfterPointChange(`${kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1)} moved.`, kind, kind === 'destination' ? point : null);
+    void snapAndSetRoutePoint(kind, { lat: position.lat, lon: position.lng }, index);
   });
   pointLayerGroup.addLayer(marker);
 }
@@ -681,6 +675,7 @@ async function removeScenario() {
     restrictionCorners = [];
     restrictionGeometry = null;
     pickMode = null;
+    map.getContainer().style.cursor = '';
     restrictionLayerGroup.clearLayers();
     restrictionDraftLayerGroup.clearLayers();
     renderRestrictions([]);
@@ -733,50 +728,36 @@ async function command(command, extra = {}) {
   }
   catch (error) { setStatus(error.message, true); }
 }
-function closePointContextMenu() {
-  if (!pointContextPopup) return;
-  map.closePopup(pointContextPopup);
-  pointContextPopup = null;
+function beginRoutePointPick(kind) {
+  if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
+  pickMode = kind;
+  map.getContainer().style.cursor = 'crosshair';
+  const label = kind === 'waypoint' ? `waypoint ${points.waypoints.length + 1}` : kind;
+  setStatus(`Click the map to place the ${label}; it will snap to the nearest road.`);
 }
-function setPointFromContext(action, point) {
-  const previousDestination = action === 'destination' ? points.destination : null;
-  if (action === 'origin') points.origin = point;
-  else if (action === 'destination') points.destination = point;
-  else if (action === 'waypoint') points.waypoints.push(point);
-  renderPoints();
-  closePointContextMenu();
-  void refreshPreviewAfterPointChange(action === 'waypoint' ? `Waypoint ${points.waypoints.length} added.` : `${action[0].toUpperCase() + action.slice(1)} set.`, action, previousDestination);
-}
-function showPointContextMenu(event) {
-  if (mode !== 'virtual') return;
-  event.originalEvent?.preventDefault();
-  if (pickMode === 'restriction') {
-    setStatus('Finish the restriction region first.');
-    return;
+async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
+  const previousDestination = kind === 'destination' ? points.destination : null;
+  const label = kind === 'waypoint' ? `Waypoint ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind[0].toUpperCase() + kind.slice(1);
+  setStatus(`Snapping ${label.toLowerCase()} to the nearest road…`);
+  try {
+    const snapped = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(scenarioId)}/route-points/snap`, {
+      method: 'POST', body: JSON.stringify(rawPoint),
+    });
+    const point = { lat: Number(snapped.lat), lon: Number(snapped.lon) };
+    if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) throw new Error('Routing returned an invalid snapped point.');
+    if (kind === 'origin') points.origin = point;
+    else if (kind === 'destination') points.destination = point;
+    else if (waypointIndex === null) points.waypoints.push(point);
+    else if (points.waypoints[waypointIndex]) points.waypoints[waypointIndex] = point;
+    renderPoints();
+    const message = kind === 'waypoint' && waypointIndex === null
+      ? `${label} added and snapped to road.`
+      : `${label} snapped to road.`;
+    await refreshPreviewAfterPointChange(message, kind, previousDestination);
+  } catch (error) {
+    renderPoints();
+    setStatus(`Could not snap ${label.toLowerCase()}: ${error.message}`, true);
   }
-  const point = { lat: event.latlng.lat, lon: event.latlng.lng };
-  const content = document.createElement('div');
-  content.className = 'virtual-map-context-menu';
-  const title = document.createElement('strong');
-  title.textContent = 'Set route point';
-  content.append(title);
-  const actions = [
-    ['origin', 'Set origin here'],
-    ['destination', 'Set destination here'],
-    ['waypoint', `Add waypoint ${points.waypoints.length + 1} here`],
-  ];
-  for (const [action, label] of actions) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = label;
-    button.addEventListener('click', () => setPointFromContext(action, point));
-    content.append(button);
-  }
-  closePointContextMenu();
-  pointContextPopup = L.popup({ closeButton: true, closeOnClick: true, autoClose: true, className: 'virtual-map-context-popup', offset: [0, -8] })
-    .setLatLng(event.latlng)
-    .setContent(content)
-    .openOn(map);
 }
 function selectRestrictionPoint(point) {
   restrictionCorners.push(point);
@@ -787,7 +768,7 @@ function selectRestrictionPoint(point) {
   restrictionDraftLayerGroup.clearLayers();
   L.rectangle([[south, west], [north, east]], { color: '#e76f51', weight: 2, fillOpacity: 0.15 }).addTo(restrictionDraftLayerGroup);
   document.querySelector('#virtual-restriction-commit').disabled = false;
-  restrictionCorners = []; pickMode = null; setStatus('Restriction region ready to activate.');
+  restrictionCorners = []; pickMode = null; map.getContainer().style.cursor = ''; setStatus('Restriction region ready to activate.');
 }
 async function refreshAfterRestrictionChange(message) {
   draft = null;
@@ -835,6 +816,8 @@ async function removeRestriction(restriction) {
   } catch (error) { setStatus(error.message, true); }
 }
 async function switchMode(next) {
+  pickMode = null;
+  map.getContainer().style.cursor = '';
   mode = next; window.__virtualMode = next === 'virtual';
   document.body.classList.toggle('virtual-mode', next === 'virtual');
   virtualPanel.hidden = next !== 'virtual';
@@ -869,9 +852,14 @@ async function switchMode(next) {
 map.on('click', (event) => {
   if (mode !== 'virtual' || !pickMode) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
-  if (pickMode === 'restriction') selectRestrictionPoint(point);
+  const selectedMode = pickMode;
+  if (selectedMode === 'restriction') selectRestrictionPoint(point);
+  else {
+    pickMode = null;
+    map.getContainer().style.cursor = '';
+    void snapAndSetRoutePoint(selectedMode, point);
+  }
 });
-map.on('contextmenu', (event) => showPointContextMenu(event));
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
 scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
@@ -893,5 +881,8 @@ document.querySelector('#virtual-following').addEventListener('change', (event) 
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => { speedControlEditing = true; renderSpeedControl(); });
 document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
-document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; setStatus('Click two opposite corners on the map.'); });
+document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; map.getContainer().style.cursor = 'crosshair'; setStatus('Click two opposite corners on the map.'); });
+document.querySelector('#virtual-place-origin').addEventListener('click', () => beginRoutePointPick('origin'));
+document.querySelector('#virtual-place-destination').addEventListener('click', () => beginRoutePointPick('destination'));
+document.querySelector('#virtual-add-waypoint').addEventListener('click', () => beginRoutePointPick('waypoint'));
 document.querySelector('#virtual-restriction-commit').addEventListener('click', () => void commitRestriction());

@@ -11,6 +11,7 @@ import type {
     RoutePreviewBody,
     WaypointsBody,
     RestrictionUpdateBody,
+    SnapPointBody,
     VirtualVehicleLifecycleBody,
 } from "./virtual.schema.ts";
 
@@ -49,6 +50,10 @@ export const virtualController = {
 
     async previewRoute(req: Request<{ scenarioId: string }, {}, RoutePreviewBody>, res: Response) {
         res.status(201).json({ data: await virtualService.previewRoute(BigInt(req.params.scenarioId), req.body, actorId(req)) });
+    },
+
+    async snapRoutePoint(req: Request<{ scenarioId: string }, {}, SnapPointBody>, res: Response) {
+        res.json({ data: await virtualService.snapRoutePoint(BigInt(req.params.scenarioId), req.body) });
     },
 
     async listRequests(req: Request<{ scenarioId: string }>, res: Response) {

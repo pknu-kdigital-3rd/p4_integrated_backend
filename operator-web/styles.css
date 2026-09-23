@@ -52,10 +52,8 @@ body.resizing-layout{user-select:none}
 .virtual-flag-cloth{position:absolute;left:14px;top:2px;display:flex;width:25px;height:19px;align-items:center;justify-content:center;clip-path:polygon(0 0,100% 0,82% 50%,100% 100%,0 100%);background:var(--flag-color);color:#fff;font:700 12px/1 ui-sans-serif,system-ui,sans-serif;text-shadow:0 1px 1px #0008}
 .virtual-flag-base{position:absolute;left:2px;bottom:0;width:23px;height:7px;border:1px solid #fff8;border-radius:50%;background:var(--flag-color);box-shadow:0 1px 2px #07111f99}
 .virtual-flag-waypoint .virtual-flag-cloth{color:#1b2430;text-shadow:none}
-.virtual-map-context-menu{display:grid;min-width:170px;gap:5px}
-.virtual-map-context-menu strong{font-size:12px;color:#243b53}
-.virtual-map-context-menu button{padding:6px 8px;text-align:left;font-size:12px}
-.virtual-map-context-popup .leaflet-popup-content{margin:10px}
+.virtual-point-actions{display:flex;gap:6px;flex-wrap:wrap}
+.virtual-point-actions button{padding:7px 9px;font-size:12px}
 .virtual-actions{display:flex;gap:6px;flex-wrap:wrap}
 #virtual-draft-summary{margin:0;min-height:1.4em;color:#b8cbe2;font-size:12px}
 #virtual-trip-controls{display:grid;gap:7px}

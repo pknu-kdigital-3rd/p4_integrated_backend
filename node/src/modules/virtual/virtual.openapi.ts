@@ -11,6 +11,7 @@ import {
     requestIdParamSchema,
     routePreviewSchema,
     scenarioIdParamSchema,
+    snapPointSchema,
     virtualTripIdParamSchema,
     virtualVehicleIdParamSchema,
     virtualVehicleLifecycleSchema,
@@ -61,6 +62,16 @@ registry.registerPath({
     security: bearer,
     request: { params: scenarioIdParamSchema, body: { content: { "application/json": { schema: routePreviewSchema } } } },
     responses: { 201: { description: "Route draft", content: { "application/json": { schema: dataResponse } } }, 409: { description: "Stale revision or busy vehicle", content: { "application/json": { schema: apiErrorSchema } } } },
+});
+
+registry.registerPath({
+    method: "post",
+    path: "/api/v1/virtual/scenarios/{scenarioId}/route-points/snap",
+    tags: ["Virtual Dispatch"],
+    summary: "Snap a selected route point to the nearest road",
+    security: bearer,
+    request: { params: scenarioIdParamSchema, body: { content: { "application/json": { schema: snapPointSchema } } } },
+    responses: { 200: { description: "Snapped route point", content: { "application/json": { schema: dataResponse } } }, 422: { description: "No road is near the point", content: { "application/json": { schema: apiErrorSchema } } } },
 });
 
 registry.registerPath({

@@ -109,7 +109,8 @@
           <div><strong>Destination</strong><output id="virtual-destination">not set</output></div>
           <div><strong>Waypoints</strong><output id="virtual-waypoints">none</output></div>
         </div>
-        <p class="virtual-map-hint">Right-click the map to set an origin, destination, or waypoint. Drag a flag to adjust its position.</p>
+        <div class="virtual-point-actions"><button id="virtual-place-origin" type="button">Place origin</button><button id="virtual-place-destination" type="button">Place destination</button><button id="virtual-add-waypoint" type="button">Add waypoint</button></div>
+        <p class="virtual-map-hint">Choose a route point, then click the map. Points snap to the nearest road; drag a flag to reposition it.</p>
         <div class="virtual-actions"><button id="virtual-preview" type="button">Preview optimal path</button><button id="virtual-dispatch" type="button" disabled>Generate driver request</button></div>
         <p id="virtual-draft-summary" role="status">No route draft.</p>
         <h3>Assignment inbox</h3><ul id="virtual-requests"></ul>
