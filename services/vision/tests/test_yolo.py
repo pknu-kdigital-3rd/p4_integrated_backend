@@ -56,6 +56,9 @@ class _SegmentationModel:
         self.predict_kwargs = kwargs
         return [self.result]
 
+    def predict(self, *args, **kwargs):
+        return self(*args, **kwargs)
+
     def track(self, *_args, **kwargs):
         self.track_kwargs = kwargs
         return [self.result]
@@ -225,6 +228,39 @@ class RunYoloTests(unittest.TestCase):
         self.assertTrue(model.track_kwargs["retina_masks"])
         self.assertEqual(model.track_kwargs["max_det"], 100)
         self.assertEqual(model.track_kwargs["tracker"], "bytetrack.yaml")
+
+    def test_botsort_branch_uses_predict_and_assigns_ids(self):
+        class _BotSort:
+            def __init__(self):
+                self.rows = None
+
+            def update(self, frame, rows):
+                self.rows = rows
+                return [17 for _ in rows]
+
+        model = _SegmentationModel(
+            SimpleNamespace(
+                boxes=[_Box(0.8, 0, [0.1, 0.1, 0.2, 0.2])],
+                masks=None,
+            )
+        )
+        tracker = _BotSort()
+        frame = av.VideoFrame.from_ndarray(
+            np.zeros((64, 96, 3), dtype=np.uint8), format="bgr24"
+        )
+        inference_frame = InferenceFrame(
+            seq=7, frame=frame, pts=9000, time_base=1 / 90000, media_time=0.1
+        )
+
+        with patch("app.services.yolo.settings.YOLO_TRACKING", True), patch(
+            "app.services.yolo.settings.YOLO_DEVICE", "cpu"
+        ), patch("app.services.yolo.settings.BBOX_FORMAT", "xyxy_normalized"):
+            result = run_yolo(inference_frame, model, botsort_tracker=tracker)
+
+        self.assertEqual(result["items"][0]["track_id"], 17)
+        self.assertEqual(tracker.rows[0]["class_name"], "person")
+        self.assertIsNone(model.track_kwargs)
+        self.assertEqual(model.predict_kwargs["conf"], 0.1)
 
     def test_reset_tracker_clears_state_for_a_new_epoch(self):
         class _Tracker:

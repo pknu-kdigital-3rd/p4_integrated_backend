@@ -27,6 +27,7 @@ from ultralytics import YOLO
 
 from app.core.settings import settings
 from app.core.state import InferenceFrame
+from app.services.botsort import BotSortTracker
 from app.services.depth import load_depth_estimator, make_depth_executor
 from app.services.yolo import load_yolo_model, run_yolo
 
@@ -122,6 +123,7 @@ def main() -> None:
         raise SystemExit(f"expected a segmentation model, got task={model.task!r}")
     depth_model = load_depth_estimator()
     depth_executor = make_depth_executor()
+    botsort_tracker = BotSortTracker()
 
     image = np.zeros((args.height, args.width, 3), dtype=np.uint8)
     frame = av.VideoFrame.from_ndarray(image, format="bgr24")
@@ -140,7 +142,7 @@ def main() -> None:
     print(f"warming up exact run_yolo path ({args.warmup} iterations)...")
     for warmup_index in range(args.warmup):
         inference_frame.seq = -warmup_index - 1
-        run_yolo(inference_frame, model, depth_model, depth_executor)
+        run_yolo(inference_frame, model, depth_model, depth_executor, botsort_tracker)
     _sync(args.device)
 
     # This is the public Ultralytics path used by run_yolo, but without PyAV
@@ -190,7 +192,9 @@ def main() -> None:
     # Exact production path, including PyAV conversion and bbox/mask extraction.
     gc.disable()
     exact_seconds, exact_fps = _measure_wall(
-        lambda: run_yolo(inference_frame, model, depth_model, depth_executor),
+        lambda: run_yolo(
+            inference_frame, model, depth_model, depth_executor, botsort_tracker
+        ),
         args.iterations,
         args.device,
     )

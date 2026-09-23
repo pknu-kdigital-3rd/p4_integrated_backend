@@ -18,6 +18,7 @@ from ultralytics import YOLO
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
+from app.services.botsort import BotSortTracker
 from app.services.depth import masked_median_distances, predict_timed, scale_camera_intrinsic
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
@@ -414,8 +415,13 @@ def load_yolo_model() -> YOLO:
     return model
 
 
-def reset_tracker(yolo_model: YOLO) -> None:
+def reset_tracker(
+    yolo_model: YOLO, botsort_tracker: BotSortTracker | None = None
+) -> None:
     """Drop tracker state so a new epoch cannot inherit old track identities."""
+
+    if botsort_tracker is not None:
+        botsort_tracker.reset()
 
     predictor = getattr(yolo_model, "predictor", None)
     trackers = getattr(predictor, "trackers", None)
@@ -435,6 +441,7 @@ def run_yolo(
     yolo_model: YOLO,
     depth_model=None,
     depth_executor=None,
+    botsort_tracker: BotSortTracker | None = None,
 ) -> dict:
     start = perf_counter()
     frame_convert_start = start
@@ -487,20 +494,32 @@ def run_yolo(
     try:
         with torch.inference_mode():
             if tracking:
-                results = yolo_model.track(
-                    img,
-                    device=settings.YOLO_DEVICE,
-                    imgsz=imgsz,
-                    quantize=quantize,
-                    # Keep weak detections available to ByteTrack's second
-                    # association stage without allowing them to start tracks.
-                    conf=settings.CONF_THRESHOLD_LOW,
-                    max_det=settings.YOLO_MAX_DETECTIONS,
-                    tracker=settings.YOLO_TRACKER_CONFIG,
-                    persist=True,
-                    verbose=False,
-                    retina_masks=settings.YOLO_RETINA_MASKS,
-                )
+                if botsort_tracker is None:
+                    results = yolo_model.track(
+                        img,
+                        device=settings.YOLO_DEVICE,
+                        imgsz=imgsz,
+                        quantize=quantize,
+                        # Keep weak detections available to ByteTrack's second
+                        # association stage without allowing them to start tracks.
+                        conf=settings.CONF_THRESHOLD_LOW,
+                        max_det=settings.YOLO_MAX_DETECTIONS,
+                        tracker=settings.YOLO_TRACKER_CONFIG,
+                        persist=True,
+                        verbose=False,
+                        retina_masks=settings.YOLO_RETINA_MASKS,
+                    )
+                else:
+                    results = yolo_model.predict(
+                        img,
+                        device=settings.YOLO_DEVICE,
+                        imgsz=imgsz,
+                        quantize=quantize,
+                        conf=settings.CONF_THRESHOLD_LOW,
+                        max_det=settings.YOLO_MAX_DETECTIONS,
+                        verbose=False,
+                        retina_masks=settings.YOLO_RETINA_MASKS,
+                    )
             else:
                 results = yolo_model(
                     img,
@@ -546,7 +565,32 @@ def run_yolo(
         confidence_values = _box_field_values(boxes, "conf")
         class_values = _box_field_values(boxes, "cls")
         coordinate_values = _box_field_values(boxes, coordinate_field)
-        track_values = _box_field_values(boxes, "id") if tracking else []
+        track_values = (
+            _box_field_values(boxes, "id")
+            if tracking and botsort_tracker is None
+            else []
+        )
+        if tracking and botsort_tracker is not None:
+            pixel_boxes = _box_field_values(boxes, "xyxy")
+            track_rows = []
+            for box_index in range(len(boxes)):
+                class_id = int(_scalar(class_values[box_index]))
+                class_name = yolo_model.names[class_id]
+                track_rows.append(
+                    {
+                        "box_index": box_index,
+                        "class_name": class_name,
+                        "bbox": [
+                            float(value)
+                            for value in _to_cpu_value(pixel_boxes[box_index])
+                        ],
+                        "confidence": float(_scalar(confidence_values[box_index])),
+                    }
+                )
+            assignments = botsort_tracker.update(img, track_rows)
+            track_values = [None] * len(boxes)
+            for row, track_id in zip(track_rows, assignments):
+                track_values[row["box_index"]] = track_id
         retained_indices = []
         for box_index in range(len(boxes)):
             conf = float(_scalar(confidence_values[box_index]))
@@ -884,6 +928,7 @@ async def yolo_worker(state: AppState) -> None:
         yolo_model=state.yolo_model,
         depth_model=state.depth_model,
         depth_executor=state.depth_executor,
+        botsort_tracker=state.botsort_tracker,
     )
     retry_frame: InferenceFrame | None = None
     previous_result: dict | None = None
@@ -923,7 +968,9 @@ async def yolo_worker(state: AppState) -> None:
         if state.tracker_epoch != inference_frame.epoch:
             # An epoch boundary is a hard discontinuity in the source, so the
             # tracker's identities and motion models must not survive it.
-            await asyncio.to_thread(reset_tracker, state.yolo_model)
+            await asyncio.to_thread(
+                reset_tracker, state.yolo_model, state.botsort_tracker
+            )
             state.tracker_epoch = inference_frame.epoch
         result = None
         last_error: Exception | None = None

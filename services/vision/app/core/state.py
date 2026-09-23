@@ -140,6 +140,7 @@ class AppState:
     inference_active: bool = False
     depth_model: Any | None = None
     depth_executor: Any | None = None
+    botsort_tracker: Any | None = None
     # The last completed result is used to create cheap passthrough results
     # when the bounded inference handoff evicts an older decoded frame.
     last_inference_result: dict[str, Any] | None = None
