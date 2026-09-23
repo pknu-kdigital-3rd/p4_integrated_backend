@@ -22,6 +22,8 @@ RUN apt-get update \
 
 WORKDIR /workspace/services/vision
 COPY --from=build /opt/vision-venv /opt/vision-venv
+# Check the copied interpreter and PyTorch without requiring a GPU at build time.
+RUN /opt/vision-venv/bin/python -c "import sys, torch; print(sys.executable, torch.__version__)"
 COPY --from=build /workspace/services/vision /workspace/services/vision
 COPY --from=build /usr/local/bin/p4-vision-entrypoint /usr/local/bin/p4-vision-entrypoint
 
