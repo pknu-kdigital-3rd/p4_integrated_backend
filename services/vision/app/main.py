@@ -8,10 +8,13 @@ from app.api import internal, pages, playback, telemetry
 from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
 from app.core.settings import settings
+from app.services.access_logs import configure_telemetry_access_logging
 from app.services.depth import load_depth_estimator, make_depth_executor
 from app.services.metrics import metrics_worker
 from app.services.recording_detections import RecordingDetectionWriter
 from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
+
+configure_telemetry_access_logging(settings.LOG_TELEMETRY_ACCESS)
 
 
 @asynccontextmanager

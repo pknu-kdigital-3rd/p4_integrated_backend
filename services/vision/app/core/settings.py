@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     )
     UNIDEPTH_CALIBRATION_WIDTH: int = Field(default=1920, ge=1, le=16384)
     UNIDEPTH_CALIBRATION_HEIGHT: int = Field(default=1080, ge=1, le=16384)
+    LOG_TELEMETRY_ACCESS: bool = False
 
     # --- Server ---
     HOST: str = "127.0.0.1"
