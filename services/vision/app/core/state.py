@@ -66,6 +66,7 @@ class VisionMetrics:
     decode_ms_total: float = 0.0
     frame_convert_ms_total: float = 0.0
     model_ms_total: float = 0.0
+    depth_ms_total: float = 0.0
     inference_ms_total: float = 0.0
     postprocess_ms_total: float = 0.0
     recording_samples_queued: int = 0
@@ -76,6 +77,7 @@ class VisionMetrics:
         self.frames_inferred += 1
         self.frame_convert_ms_total += float(result.get("frame_convert_ms", 0.0))
         self.model_ms_total += float(result.get("model_ms", 0.0))
+        self.depth_ms_total += float(result.get("depth_ms", 0.0))
         self.inference_ms_total += float(result.get("inference_ms", 0.0))
         self.postprocess_ms_total += float(result.get("postprocess_ms", 0.0))
 
@@ -89,6 +91,7 @@ class VisionMetrics:
             "decode_ms_total": self.decode_ms_total,
             "frame_convert_ms_total": self.frame_convert_ms_total,
             "model_ms_total": self.model_ms_total,
+            "depth_ms_total": self.depth_ms_total,
             "inference_ms_total": self.inference_ms_total,
             "postprocess_ms_total": self.postprocess_ms_total,
             "recording_samples_queued": self.recording_samples_queued,
@@ -135,8 +138,8 @@ class AppState:
     # inference calls that mutate the same tracker.
     tracker_epoch: int | None = None
     inference_active: bool = False
-    monocular_timeline: Any | None = None
-    monocular_resolver: Any | None = None
+    depth_model: Any | None = None
+    depth_executor: Any | None = None
     # The last completed result is used to create cheap passthrough results
     # when the bounded inference handoff evicts an older decoded frame.
     last_inference_result: dict[str, Any] | None = None

@@ -185,6 +185,7 @@ services:
       HOST: 0.0.0.0
       PORT: "39011"
       YOLO_MODEL: ${YOLO_MODEL:-/workspace/services/vision/models/a4_best.engine}
+      UNIDEPTH_MODEL_DIR: ${UNIDEPTH_MODEL_DIR:-/opt/models/unidepth-v2-vitb14}
       YOLO_DEVICE: ${YOLO_DEVICE:-cuda:0}
       YOLO_INFERENCE_SIZE: ${YOLO_INFERENCE_SIZE:-auto}
       YOLO_USE_LAST_GPU: ${YOLO_USE_LAST_GPU:-true}
@@ -231,6 +232,10 @@ services:
       - type: bind
         source: ./services/vision/models
         target: /workspace/services/vision/models
+        read_only: true
+      - type: bind
+        source: ../models/unidepth-v2-vitb14
+        target: /opt/models/unidepth-v2-vitb14
         read_only: true
     expose: [ "39011" ]
     networks: [ p4 ]

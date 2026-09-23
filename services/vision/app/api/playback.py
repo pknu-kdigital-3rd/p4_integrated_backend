@@ -52,7 +52,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
         "inference": {
             "duration_ms": result.get("inference_ms", 0),
             "items": result.get("items", []),
-            "monocular": result.get("monocular", {}),
+            "depth": result.get("depth", {}),
         },
     }
     metadata_bytes = json.dumps(metadata, separators=(",", ":")).encode()

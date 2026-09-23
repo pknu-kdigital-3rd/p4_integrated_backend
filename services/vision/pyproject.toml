@@ -15,6 +15,7 @@ dependencies = [
     "torch",
     "torchvision",
     "ultralytics",
+    "unidepth @ git+https://github.com/lpiccinelli-eth/UniDepth.git@8d8cfe4c7ee15297099983607febf0d4f32eb3d6",
 ]
 
 # Ultralytics currently declares the GUI-enabled opencv-python package on

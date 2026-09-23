@@ -21,6 +21,7 @@ import torch
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame
+from app.services.depth import load_depth_estimator, make_depth_executor
 from app.services.yolo import (
     _enqueue_inference_frame,
     load_yolo_model,
@@ -104,6 +105,8 @@ async def _run(args: argparse.Namespace) -> None:
         )
 
     model = load_yolo_model()
+    depth_model = load_depth_estimator()
+    depth_executor = make_depth_executor()
     print(
         f"engine={settings.YOLO_MODEL} gpu={torch.cuda.get_device_name(0)} "
         f"source={first_frame.width}x{first_frame.height}@{source_fps or args.input_fps:.3f} "
@@ -125,12 +128,17 @@ async def _run(args: argparse.Namespace) -> None:
     print(f"warming the production path ({args.warmup_frames} frames)...", flush=True)
     for warmup_index in range(args.warmup_frames):
         warmup_frame.seq = -warmup_index - 1
-        run_yolo(warmup_frame, model)
+        run_yolo(warmup_frame, model, depth_model, depth_executor)
     torch.cuda.synchronize()
     reset_tracker(model)
     torch.cuda.reset_peak_memory_stats(torch.device(settings.YOLO_DEVICE))
 
-    state = AppState(yolo_model=model, current_epoch=1)
+    state = AppState(
+        yolo_model=model,
+        depth_model=depth_model,
+        depth_executor=depth_executor,
+        current_epoch=1,
+    )
     process = psutil.Process()
     args.csv.parent.mkdir(parents=True, exist_ok=True)
     columns = [
@@ -152,6 +160,7 @@ async def _run(args: argparse.Namespace) -> None:
         "cuda_interval_peak_mib",
         "frame_convert_ms",
         "model_ms",
+        "depth_ms",
         "postprocess_ms",
     ]
     input_frames = 0
@@ -209,6 +218,9 @@ async def _run(args: argparse.Namespace) -> None:
             ),
             "model_ms": _mean_stage_ms(
                 current, previous, "model_ms_total", inferred_delta
+            ),
+            "depth_ms": _mean_stage_ms(
+                current, previous, "depth_ms_total", inferred_delta
             ),
             "postprocess_ms": _mean_stage_ms(
                 current, previous, "postprocess_ms_total", inferred_delta
@@ -322,6 +334,7 @@ async def _run(args: argparse.Namespace) -> None:
             worker_task.cancel()
             await asyncio.gather(ack_task, worker_task, return_exceptions=True)
             container.close()
+            await asyncio.to_thread(depth_executor.shutdown, wait=True, cancel_futures=True)
 
     feed_elapsed = max(feed_finished - feed_started, 1e-6)
     total_elapsed = max(monotonic() - feed_started, 1e-6)

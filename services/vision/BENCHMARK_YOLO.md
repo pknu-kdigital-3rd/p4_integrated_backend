@@ -35,6 +35,7 @@ export YOLO_HALF=true
 export YOLO_MAX_IMGSZ=640
 export YOLO_RETINA_MASKS=true
 export YOLO_MASK_CONTOUR_SIZE=640
+export UNIDEPTH_MODEL_DIR=/home/user/models/unidepth-v2-vitb14
 
 .venv/bin/python benchmark_yolo.py \
   --model "$YOLO_MODEL" \
@@ -53,7 +54,7 @@ The report separates:
 | Direct model forward | Only neural-network kernels on the GPU; skipped for TensorRT engines | PyTorch model limit |
 | Ultralytics predict | Ultralytics preprocessing, forward, NMS, masks, result creation | Ultralytics CPU/GPU overhead |
 | PyAV conversion | `VideoFrame.to_ndarray()` | Decode/frame conversion overhead |
-| Exact `run_yolo` path | The production worker path | Real single-frame inference throughput |
+| Exact `run_yolo` path | The production worker path, including UniDepth mask distance | Real single-frame inference throughput |
 
 The target is 30 FPS, or 33.33 ms per frame. Interpret the results in order:
 
@@ -138,6 +139,7 @@ export YOLO_HALF=true
 export YOLO_MAX_IMGSZ=640
 export YOLO_RETINA_MASKS=true
 export YOLO_MASK_CONTOUR_SIZE=640
+export UNIDEPTH_MODEL_DIR=/home/user/models/unidepth-v2-vitb14
 export YOLO_FRAME_DROP_POLICY=latest
 export YOLO_INFERENCE_QUEUE_SIZE=1
 ```
@@ -183,12 +185,24 @@ Live View. During the same ten-minute period, save the Vision `[mem]` and Go
 browser's displayed FPS remain near real time, and boxes, masks and timestamps
 stay aligned with the source video.
 
-For an A/B comparison, use the same engine file, input video, runtime, GPU,
-`YOLO_MAX_IMGSZ`, mask settings, warmup count, duration and queue policy. Record
-the code revision, `sha256sum` of the engine and video, `nvidia-smi`, the
-custom Ultralytics path, and each CSV/log set. The stage commits on this branch
-are independently benchmarkable; compare one stage at a time against its
-parent commit. Treat 30 FPS as the target, not a guarantee with
+## ByteTrack versus BoT-SORT branches
+
+The two integration branches share the UniDepth and segmentation changes:
+
+- `feature/vision-unidepth-bytetrack` uses Vision's existing ByteTrack setup.
+- `feature/vision-unidepth-botsort` uses the `vehicle_runtime` BoT-SORT setup.
+
+Run the same commands and input video on both branches, on the same GPU and
+runtime. Save each branch's commit ID and CSV. Compare throughput and stage
+timings, then review the overlay for ID continuity, ID switches, lost/reacquired
+objects, and false tracks. Ground-truth labels are optional for this review;
+they are needed to calculate formal tracking accuracy metrics such as IDF1 or
+HOTA. The pipeline benchmark reports a separate `depth_ms` stage.
+
+For a quantitative comparison, use the same engine file, input video, runtime,
+GPU, `YOLO_MAX_IMGSZ`, mask settings, warmup count, duration and queue policy.
+Record the code revision, hashes of the engine and video, GPU details, the
+custom Ultralytics path, and each CSV/log set. Treat 30 FPS as the target, not a guarantee with
 `YOLO_RETINA_MASKS=true` and contour size 640.
 
 The deployment test suites are prepared but are not run on developer machines:
