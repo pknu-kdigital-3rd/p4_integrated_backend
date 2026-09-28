@@ -86,6 +86,9 @@ class Settings(BaseSettings):
 
     # --- UniDepth metric distance ---
     UNIDEPTH_MODEL_DIR: str = str(BASE_DIR / "models" / "unidepth-v2-vitb14")
+    # UniDepth's internal inference pixel budget increases from 0 to 9.
+    # Level 2 trades some fine depth detail for lower per-frame latency.
+    UNIDEPTH_RESOLUTION_LEVEL: int = Field(default=2, ge=0, le=9)
     UNIDEPTH_CAMERA_INTRINSIC: tuple[tuple[float, float, float], ...] = (
         (1266.417203046554, 0.0, 816.2670197447984),
         (0.0, 1266.417203046554, 491.50706579294757),

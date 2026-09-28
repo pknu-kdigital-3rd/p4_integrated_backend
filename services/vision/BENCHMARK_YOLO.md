@@ -36,6 +36,7 @@ export YOLO_MAX_IMGSZ=640
 export YOLO_RETINA_MASKS=true
 export YOLO_MASK_CONTOUR_SIZE=640
 export UNIDEPTH_MODEL_DIR=/home/user/p4-integrated-backend/services/vision/models/unidepth-v2-vitb14
+export UNIDEPTH_RESOLUTION_LEVEL=2
 
 .venv/bin/python benchmark_yolo.py \
   --model "$YOLO_MODEL" \
@@ -198,6 +199,13 @@ timings, then review the overlay for ID continuity, ID switches, lost/reacquired
 objects, and false tracks. Ground-truth labels are optional for this review;
 they are needed to calculate formal tracking accuracy metrics such as IDF1 or
 HOTA. The pipeline benchmark reports a separate `depth_ms` stage.
+
+UniDepth's `UNIDEPTH_RESOLUTION_LEVEL` accepts 0 through 9. The default is 2;
+the previous setting was 3. Lower values reduce its internal inference pixel
+budget and can improve throughput at the cost of depth detail. Compare levels
+2 and 3 with the same input video and GPU, using `depth_ms`, `infer_fps`, and
+measured distance error on representative objects. This setting changes the
+Vision application only; it does not require rebuilding the dependency image.
 
 For a quantitative comparison, use the same engine file, input video, runtime,
 GPU, `YOLO_MAX_IMGSZ`, mask settings, warmup count, duration and queue policy.
