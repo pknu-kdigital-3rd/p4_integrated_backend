@@ -272,6 +272,8 @@ services:
         source: ./data/minio.license
         target: /minio.license
         read_only: true
+        bind:
+          create_host_path: false
     networks: [ p4 ]
 
   p4-minio-bootstrap:
@@ -296,6 +298,8 @@ services:
         source: ./data/minio.license
         target: /minio.license
         read_only: true
+        bind:
+          create_host_path: false
     networks: [ p4 ]
 
   p4-coturn:

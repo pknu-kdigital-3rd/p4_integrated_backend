@@ -114,6 +114,8 @@ Before starting either stack, request/download an AIStor Free license and put
 the license file at `data/minio.license` from the repository root. Check that
 it is a regular file with `Test-Path -PathType Leaf data/minio.license` in
 PowerShell. Compose mounts it read-only into the server and bootstrap client.
+The bind mounts disable automatic host-path creation so a missing file fails
+at startup instead of becoming a directory.
 The server receives `--license /minio.license`; bootstrap also installs the
 license with `mc license update` if the cluster reports none installed, before
 creating the recording bucket.
