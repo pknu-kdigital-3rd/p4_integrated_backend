@@ -213,6 +213,16 @@ on a four-GPU machine). The entrypoint maps them to container `cuda:1` and
 comparison. Compare `inference_ms`, `depth_ms`, `model_ms`, and `infer_fps` at
 the same resolution level; cross-GPU mask transfer is included in postprocess.
 
+The Vision application image installs GCC, G++, and Python headers so
+UniDepth's existing `torch.compile` path can run without rebuilding the large
+dependency image. Compilation is enabled by default. The app compiles with a
+dummy frame at startup and logs the warmup shape, duration, and whether it
+stayed compiled or fell back to eager execution. The first warmup may take
+minutes; the Compose cache volume keeps compiler artifacts across container
+recreations. Set `UNIDEPTH_COMPILE=false` to compare the eager path with the
+same model, input size, and GPU. Compare steady-state `depth_ms` and
+`infer_fps` after startup; successful compilation does not guarantee a speedup.
+
 For a quantitative comparison, use the same engine file, input video, runtime,
 GPU, `YOLO_MAX_IMGSZ`, mask settings, warmup count, duration and queue policy.
 Record the code revision, hashes of the engine and video, GPU details, the

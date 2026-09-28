@@ -172,6 +172,7 @@ services:
     networks: [ p4 ]
 
   p4-vision:
+    image: ${VISION_IMAGE:-p4-integrated-backend-p4-vision:latest}
     build:
       context: ./services/vision
       dockerfile: ../../docker/vision.Dockerfile
@@ -187,6 +188,9 @@ services:
       YOLO_MODEL: ${YOLO_MODEL:-/workspace/services/vision/models/a4_best.engine}
       UNIDEPTH_MODEL_DIR: ${UNIDEPTH_MODEL_DIR:-/workspace/services/vision/models/unidepth-v2-vitb14}
       UNIDEPTH_RESOLUTION_LEVEL: ${UNIDEPTH_RESOLUTION_LEVEL:-2}
+      UNIDEPTH_COMPILE: ${UNIDEPTH_COMPILE:-true}
+      TORCHINDUCTOR_CACHE_DIR: /var/cache/p4-vision-compile/inductor
+      TRITON_CACHE_DIR: /var/cache/p4-vision-compile/triton
       LOG_TELEMETRY_ACCESS: ${LOG_TELEMETRY_ACCESS:-false}
       YOLO_DEVICE: ${YOLO_DEVICE:-cuda:0}
       YOLO_INFERENCE_SIZE: ${YOLO_INFERENCE_SIZE:-auto}
@@ -228,6 +232,7 @@ services:
       - ./services/vision:/workspace/services/vision
       - ./services/vision/container-entrypoint.sh:/usr/local/bin/p4-vision-entrypoint:ro
       - ./services/vision/.ultralytics-custom:/workspace/services/vision/.ultralytics-custom:ro
+      - p4_vision_compile_cache:/var/cache/p4-vision-compile
       - type: volume
         source: p4_relay_socket
         target: /run/p4/relay
@@ -339,3 +344,5 @@ networks:
 volumes:
   p4_relay_socket:
     name: p4-relay-socket
+  p4_vision_compile_cache:
+    name: p4-vision-compile-cache
