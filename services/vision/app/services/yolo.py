@@ -251,14 +251,18 @@ def _skipped_frame_result(
     # not spend time cloning every detection while the model is overloaded.
     items = list(previous_items)
     if previous_result:
-        # Distance belongs to the inferred frame's depth map. Keep held boxes
-        # and masks for continuity, but never present a stale measurement.
+        # Distance belongs to the inferred frame's depth map. Keep the last
+        # value in a separate field for display, without presenting it as a
+        # measurement made on this skipped frame.
         items = []
         for item in previous_items:
             copied = dict(item) if isinstance(item, dict) else item
             if isinstance(copied, dict):
+                held_distance = copied.get("distance_m")
                 for key in ("distance_m", "distance_status", "distance_anchor"):
                     copied.pop(key, None)
+                if held_distance is not None:
+                    copied["held_distance_m"] = held_distance
                 copied["distance_status"] = "inference_skipped"
             items.append(copied)
     return {
