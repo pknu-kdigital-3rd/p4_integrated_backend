@@ -86,6 +86,9 @@ class Settings(BaseSettings):
 
     # --- UniDepth metric distance ---
     UNIDEPTH_MODEL_DIR: str = str(BASE_DIR / "models" / "unidepth-v2-vitb14")
+    # Defaults to YOLO_DEVICE. The entrypoint sets cuda:1 when a separate
+    # UNIDEPTH_GPU_INDEX is selected.
+    UNIDEPTH_DEVICE: str | None = None
     # UniDepth's internal inference pixel budget increases from 0 to 9.
     # Level 2 trades some fine depth detail for lower per-frame latency.
     UNIDEPTH_RESOLUTION_LEVEL: int = Field(default=2, ge=0, le=9)
@@ -153,6 +156,7 @@ class Settings(BaseSettings):
         "RELAY_KEYFRAME_URL",
         "RELAY_STATUS_URL",
         "UNIDEPTH_MODEL_DIR",
+        "UNIDEPTH_DEVICE",
         "TLS_CERT_FILE",
         "TLS_KEY_FILE",
         "NODE_INTERNAL_BASE_URL",

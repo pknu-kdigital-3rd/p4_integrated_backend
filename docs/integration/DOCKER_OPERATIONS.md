@@ -76,9 +76,10 @@ and are not included in either image.
 - NVIDIA Container Toolkit and a working `nvidia-smi` check.
 - The same model and routing data files described below.
 
-The Vision entrypoint pins the process to one GPU and exposes it to the
-application as `cuda:0`, logging its choice as
-`p4-vision: selected GPU <n> of <count> visible`. Device indices match
+The Vision entrypoint pins YOLO to one GPU and exposes it to the application
+as `cuda:0`. By default, UniDepth uses host GPU 2, exposed inside the
+container as `cuda:1`; YOLO uses the last host GPU (GPU 3 on a four-GPU host).
+Device indices match
 `nvidia-smi`, because the entrypoint sets `CUDA_DEVICE_ORDER=PCI_BUS_ID`; CUDA's
 own default (`FASTEST_FIRST`) renumbers devices by a speed heuristic, so without
 it "GPU 1" in Compose and "GPU 1" on the host can be different cards.
@@ -86,8 +87,9 @@ it "GPU 1" in Compose and "GPU 1" on the host can be different cards.
 | Variable | Effect |
 |---|---|
 | `YOLO_GPU_INDEX` | Pins that `nvidia-smi` index. Startup fails if the index does not exist, rather than silently using another card. |
+| `UNIDEPTH_GPU_INDEX` | Defaults to host GPU 2. When different from YOLO's GPU, exposes both cards and runs UniDepth on container `cuda:1`. Set it to YOLO's GPU index to use one card. Startup fails if the index does not exist. |
 | `YOLO_USE_LAST_GPU` | Default `true`: uses the highest index when `YOLO_GPU_INDEX` is unset. Set `false` to leave every GPU visible and address one through `YOLO_DEVICE` instead. |
-| `YOLO_DEVICE` | `cpu` skips GPU selection entirely. Any other value is overwritten while selection is active, since the process then sees exactly one device; use `YOLO_GPU_INDEX` to choose a card. |
+| `YOLO_DEVICE` | `cpu` skips GPU selection entirely. Otherwise the entrypoint maps the selected YOLO card to `cuda:0`; use `YOLO_GPU_INDEX` to choose a card. |
 | `CUDA_DEVICE_ORDER` | Override the `PCI_BUS_ID` ordering if some other tool's numbering must be matched. |
 
 ## Compose credentials
@@ -126,6 +128,7 @@ The host address and BIMS key are not absolute requirements:
 
 Other commonly changed values are optional: `YOLO_MODEL`, `YOLO_DEVICE`,
 `YOLO_INFERENCE_SIZE`, `YOLO_USE_LAST_GPU`, `YOLO_GPU_INDEX`,
+`UNIDEPTH_GPU_INDEX`,
 `CUDA_DEVICE_ORDER`, `ANDROID_TELEMETRY_ENABLED`, `TURN_URL`,
 `TURN_USERNAME`, `TURN_PASSWORD`, and the recording queue/sample settings.
 The Compose defaults are used when they are omitted.

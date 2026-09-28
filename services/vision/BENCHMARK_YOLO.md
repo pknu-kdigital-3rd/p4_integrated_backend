@@ -207,6 +207,12 @@ budget and can improve throughput at the cost of depth detail. Compare levels
 measured distance error on representative objects. This setting changes the
 Vision application only; it does not require rebuilding the dependency image.
 
+Compose defaults UniDepth to host GPU 2 and YOLO to the last host GPU (GPU 3
+on a four-GPU machine). The entrypoint maps them to container `cuda:1` and
+`cuda:0`. Set `UNIDEPTH_GPU_INDEX` to the YOLO host index for a same-GPU
+comparison. Compare `inference_ms`, `depth_ms`, `model_ms`, and `infer_fps` at
+the same resolution level; cross-GPU mask transfer is included in postprocess.
+
 For a quantitative comparison, use the same engine file, input video, runtime,
 GPU, `YOLO_MAX_IMGSZ`, mask settings, warmup count, duration and queue policy.
 Record the code revision, hashes of the engine and video, GPU details, the
