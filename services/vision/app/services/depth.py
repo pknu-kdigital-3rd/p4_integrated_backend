@@ -91,11 +91,14 @@ class DepthEstimator:
             if compiler_name
             else any(shutil.which(name) is not None for name in ("gcc", "cc", "clang"))
         )
-        self._compiled = compiler_available
+        self._compiled = settings.UNIDEPTH_COMPILE and compiler_available
         if self._compiled:
             self._model.encode_decode = torch.compile(
                 self._eager_encode_decode, mode="default", fullgraph=False
             )
+            print("UniDepth torch.compile enabled; warming up before serving frames", flush=True)
+        elif not settings.UNIDEPTH_COMPILE:
+            print("UniDepth torch.compile disabled; using eager inference", flush=True)
         else:
             print(
                 "UniDepth C compiler unavailable; using eager inference",
@@ -115,17 +118,13 @@ class DepthEstimator:
         try:
             output = self._infer(rgb, camera)
         except Exception as exc:
-            message = str(exc).lower()
-            compiler_unavailable = (
-                "failed to find c compiler" in message
-                or "c compiler is not available" in message
-            )
-            if not self._compiled or not compiler_unavailable:
+            if not self._compiled:
                 raise
             self._model.encode_decode = self._eager_encode_decode
             self._compiled = False
             print(
-                "UniDepth compiler unavailable during JIT; retrying in eager mode",
+                f"UniDepth torch.compile failed ({type(exc).__name__}: {exc}); "
+                "retrying in eager mode",
                 flush=True,
             )
             output = self._infer(rgb, camera)
@@ -133,6 +132,41 @@ class DepthEstimator:
         if tuple(depth.shape) != (1, 1, height, width):
             raise RuntimeError("UniDepth output is not aligned to the model input frame")
         return DepthFrame(width, height, depth[0, 0].detach().float())
+
+    def warmup(self) -> None:
+        """Compile for the configured input shape before the live feed starts."""
+        if not self._compiled:
+            return
+        configured = settings.YOLO_INFERENCE_SIZE
+        if configured == "source":
+            width = settings.UNIDEPTH_CALIBRATION_WIDTH
+            height = settings.UNIDEPTH_CALIBRATION_HEIGHT
+        elif configured == "auto":
+            source_width = settings.UNIDEPTH_CALIBRATION_WIDTH
+            source_height = settings.UNIDEPTH_CALIBRATION_HEIGHT
+            scale = min(
+                settings.YOLO_MAX_IMGSZ / max(source_width, source_height), 1.0
+            )
+            width = max(1, round(source_width * scale))
+            height = max(1, round(source_height * scale))
+        else:
+            height_text, width_text = configured.split("x", 1)
+            height, width = int(height_text), int(width_text)
+        camera = scale_camera_intrinsic(
+            settings.UNIDEPTH_CAMERA_INTRINSIC,
+            width,
+            height,
+            settings.UNIDEPTH_CALIBRATION_WIDTH,
+            settings.UNIDEPTH_CALIBRATION_HEIGHT,
+        )
+        print(f"UniDepth torch.compile warmup shape: {width}x{height}", flush=True)
+        started = perf_counter()
+        self.predict(np.zeros((height, width, 3), dtype=np.uint8), camera)
+        print(
+            f"UniDepth warmup finished in {perf_counter() - started:.1f}s; "
+            f"mode={'compiled' if self._compiled else 'eager fallback'}",
+            flush=True,
+        )
 
     def _infer(self, rgb: Any, camera: Any) -> dict[str, Any]:
         torch = self._torch
@@ -148,7 +182,9 @@ class DepthEstimator:
 def load_depth_estimator() -> DepthEstimator:
     device = settings.UNIDEPTH_DEVICE or settings.YOLO_DEVICE
     print(f"UniDepth inference device: {device}", flush=True)
-    return DepthEstimator(settings.UNIDEPTH_MODEL_DIR, device)
+    estimator = DepthEstimator(settings.UNIDEPTH_MODEL_DIR, device)
+    estimator.warmup()
+    return estimator
 
 
 def _exact_median(values: Any, torch: Any) -> Any:

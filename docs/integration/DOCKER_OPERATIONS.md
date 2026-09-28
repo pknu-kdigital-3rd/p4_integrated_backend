@@ -88,9 +88,18 @@ it "GPU 1" in Compose and "GPU 1" on the host can be different cards.
 |---|---|
 | `YOLO_GPU_INDEX` | Pins that `nvidia-smi` index. Startup fails if the index does not exist, rather than silently using another card. |
 | `UNIDEPTH_GPU_INDEX` | Defaults to host GPU 2. When different from YOLO's GPU, exposes both cards and runs UniDepth on container `cuda:1`. Set it to YOLO's GPU index to use one card. Startup fails if the index does not exist. |
+| `UNIDEPTH_COMPILE` | Default `true`: compile UniDepth during Vision startup using the toolchain in the Vision app image. Set `false` to compare eager inference. The compiler cache survives container recreation in `p4-vision-compile-cache`. |
+| `VISION_IMAGE` | Optional app image tag. Set this to a locally built and pushed Vision image on the server, then use Compose `--no-build` to run that image without building there. |
 | `YOLO_USE_LAST_GPU` | Default `true`: uses the highest index when `YOLO_GPU_INDEX` is unset. Set `false` to leave every GPU visible and address one through `YOLO_DEVICE` instead. |
 | `YOLO_DEVICE` | `cpu` skips GPU selection entirely. Otherwise the entrypoint maps the selected YOLO card to `cuda:0`; use `YOLO_GPU_INDEX` to choose a card. |
 | `CUDA_DEVICE_ORDER` | Override the `PCI_BUS_ID` ordering if some other tool's numbering must be matched. |
+
+To try compiled UniDepth without building on the server, build the small Vision
+application image locally against the existing `VISION_DEPS_IMAGE`, verify it,
+then push it under a new `VISION_IMAGE` tag. On the server, pull that tag and
+set `VISION_IMAGE` when recreating Vision with `--no-build`. The dependency
+image does not change. Startup logs report the compile warmup outcome; the
+first uncached warmup can take minutes.
 
 ## Compose credentials
 
@@ -128,7 +137,7 @@ The host address and BIMS key are not absolute requirements:
 
 Other commonly changed values are optional: `YOLO_MODEL`, `YOLO_DEVICE`,
 `YOLO_INFERENCE_SIZE`, `YOLO_USE_LAST_GPU`, `YOLO_GPU_INDEX`,
-`UNIDEPTH_GPU_INDEX`,
+`UNIDEPTH_GPU_INDEX`, `UNIDEPTH_COMPILE`,
 `CUDA_DEVICE_ORDER`, `ANDROID_TELEMETRY_ENABLED`, `TURN_URL`,
 `TURN_USERNAME`, `TURN_PASSWORD`, and the recording queue/sample settings.
 The Compose defaults are used when they are omitted.
