@@ -23,3 +23,4 @@ secrets/
 deploy/nginx/logs/*.log
 deploy/nginx/logs/*.pid
 services/vision/models/
+/operator-web/.vite/
