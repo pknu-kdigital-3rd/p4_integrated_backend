@@ -69,6 +69,12 @@ class VisionMetrics:
     depth_ms_total: float = 0.0
     inference_ms_total: float = 0.0
     postprocess_ms_total: float = 0.0
+    worker_cycle_ms_total: float = 0.0
+    queue_wait_ms_total: float = 0.0
+    inference_wait_ms_total: float = 0.0
+    publish_ms_total: float = 0.0
+    skipped_publish_ms_total: float = 0.0
+    skipped_frames_published: int = 0
     recording_samples_queued: int = 0
     recording_samples_dropped: int = 0
     recording_samples_uploaded: int = 0
@@ -94,6 +100,12 @@ class VisionMetrics:
             "depth_ms_total": self.depth_ms_total,
             "inference_ms_total": self.inference_ms_total,
             "postprocess_ms_total": self.postprocess_ms_total,
+            "worker_cycle_ms_total": self.worker_cycle_ms_total,
+            "queue_wait_ms_total": self.queue_wait_ms_total,
+            "inference_wait_ms_total": self.inference_wait_ms_total,
+            "publish_ms_total": self.publish_ms_total,
+            "skipped_publish_ms_total": self.skipped_publish_ms_total,
+            "skipped_frames_published": self.skipped_frames_published,
             "recording_samples_queued": self.recording_samples_queued,
             "recording_samples_dropped": self.recording_samples_dropped,
             "recording_samples_uploaded": self.recording_samples_uploaded,

@@ -289,6 +289,7 @@ async def _publish_skipped_frames(
 
     if not frames:
         return 0
+    started = perf_counter()
     published = 0
     async with state.result_condition:
         for inference_frame in frames:
@@ -319,6 +320,9 @@ async def _publish_skipped_frames(
         state.metrics.playback_frames_published += published
         if published:
             state.result_condition.notify_all()
+    if published:
+        state.metrics.skipped_frames_published += published
+        state.metrics.skipped_publish_ms_total += (perf_counter() - started) * 1000
     return published
 
 
@@ -941,7 +945,10 @@ async def yolo_worker(state: AppState) -> None:
     window_completed = 0
     while True:
         retrying = retry_frame is not None
+        queue_wait_started = perf_counter()
         inference_frame = retry_frame or await state.inference_queue.get()
+        queue_wait_ms = (perf_counter() - queue_wait_started) * 1000
+        cycle_started = perf_counter()
         retry_frame = None
         if settings.YOLO_FRAME_DROP_POLICY == "latest" and not retrying:
             inference_frame, dropped_frames = _take_latest_inference_frame(
@@ -978,9 +985,12 @@ async def yolo_worker(state: AppState) -> None:
             state.tracker_epoch = inference_frame.epoch
         result = None
         last_error: Exception | None = None
+        inference_wait_ms = 0.0
         state.inference_active = True
         try:
             for attempt in range(max(1, settings.INFERENCE_RETRY_COUNT)):
+                inference_wait_started = perf_counter()
+                retry_delay = None
                 try:
                     result = await asyncio.to_thread(run_inference, inference_frame)
                     break
@@ -988,7 +998,11 @@ async def yolo_worker(state: AppState) -> None:
                     last_error = exc
                     if attempt + 1 < settings.INFERENCE_RETRY_COUNT:
                         delays = settings.INFERENCE_RETRY_DELAYS or (0.1,)
-                        await asyncio.sleep(delays[min(attempt, len(delays) - 1)])
+                        retry_delay = delays[min(attempt, len(delays) - 1)]
+                finally:
+                    inference_wait_ms += (perf_counter() - inference_wait_started) * 1000
+                if retry_delay is not None:
+                    await asyncio.sleep(retry_delay)
         finally:
             state.inference_active = False
         if result is None:
@@ -1009,11 +1023,11 @@ async def yolo_worker(state: AppState) -> None:
             state.last_inference_result_epoch = None
             continue
 
+        publish_started = perf_counter()
         previous_result = result
         previous_result_epoch = inference_frame.epoch
         state.last_inference_result = result
         state.last_inference_result_epoch = inference_frame.epoch
-        state.metrics.record_inference(result)
         if state.recording_writer is not None:
             state.recording_writer.offer(result, state.metrics)
 
@@ -1031,6 +1045,11 @@ async def yolo_worker(state: AppState) -> None:
             state.put_result(item)
             state.metrics.playback_frames_published += 1
             state.result_condition.notify_all()
+        state.metrics.record_inference(result)
+        state.metrics.queue_wait_ms_total += queue_wait_ms
+        state.metrics.inference_wait_ms_total += inference_wait_ms
+        state.metrics.publish_ms_total += (perf_counter() - publish_started) * 1000
+        state.metrics.worker_cycle_ms_total += (perf_counter() - cycle_started) * 1000
         window_completed += 1
         if window_completed >= 30:
             elapsed = max(perf_counter() - window_started, 1e-6)
