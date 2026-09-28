@@ -1,5 +1,5 @@
 ARG VISION_DEPS_IMAGE=p4-vision-deps:local
-FROM ${VISION_DEPS_IMAGE}
+FROM ${VISION_DEPS_IMAGE} AS build
 
 COPY . ./
 COPY container-entrypoint.sh /usr/local/bin/p4-vision-entrypoint
