@@ -24,6 +24,17 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
         }
         self.assertTrue(_edge_intersects_polygon(edge, polygon))
 
+    def test_overlapping_multipolygon_corridors_resolve_as_individual_polygons(self):
+        edge = [[0.5, 0.0], [0.5, 1.0]]
+        geometry = {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [[[0.4, 0.2], [0.6, 0.2], [0.6, 0.6], [0.4, 0.6], [0.4, 0.2]]],
+                [[[0.4, 0.4], [0.6, 0.4], [0.6, 0.8], [0.4, 0.8], [0.4, 0.4]]],
+            ],
+        }
+        self.assertTrue(_edge_intersects_polygon(edge, geometry))
+
     def test_blocked_edge_is_removed_from_pure_python_route(self):
         graph = object.__new__(PurePythonGraph)
         graph.coords = {

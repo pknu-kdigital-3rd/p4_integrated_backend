@@ -90,13 +90,17 @@ export const destinationSchema = z.object({
     expectedTripRevision: z.number().int().positive(),
 });
 
-const polygonCoordinates = z.array(z.array(z.array(z.number().finite()))).min(1).max(1000);
+const polygonCoordinate = z.array(z.number().finite()).length(2);
+const polygonRing = z.array(polygonCoordinate).min(4).max(10000);
+const polygonCoordinates = z.array(polygonRing).min(1).max(1000);
+const multiPolygonCoordinates = z.array(polygonCoordinates).min(1).max(1000);
+const restrictionGeometrySchema = z.discriminatedUnion("type", [
+    z.object({ type: z.literal("Polygon"), coordinates: polygonCoordinates }),
+    z.object({ type: z.literal("MultiPolygon"), coordinates: multiPolygonCoordinates }),
+]);
 export const restrictionSchema = z.object({
     kind: z.enum(["BLOCKED", "HEAVY_PENALTY"]),
-    geometry: z.object({
-        type: z.enum(["Polygon", "MultiPolygon"]),
-        coordinates: polygonCoordinates,
-    }),
+    geometry: restrictionGeometrySchema,
     reason: z.string().trim().max(240).optional(),
     penaltyFactor: z.number().finite().gt(1).max(100).optional(),
     expectedRestrictionRevision: z.number().int().nonnegative().optional(),
@@ -112,7 +116,7 @@ export const restrictionSchema = z.object({
 export const restrictionUpdateSchema = z.object({
     isActive: z.boolean().optional(),
     kind: z.enum(["BLOCKED", "HEAVY_PENALTY"]).optional(),
-    geometry: z.object({ type: z.enum(["Polygon", "MultiPolygon"]), coordinates: polygonCoordinates }).optional(),
+    geometry: restrictionGeometrySchema.optional(),
     reason: z.string().trim().max(240).nullable().optional(),
     penaltyFactor: z.number().finite().gt(1).max(100).nullable().optional(),
     expectedRestrictionRevision: z.number().int().nonnegative().optional(),

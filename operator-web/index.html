@@ -122,8 +122,14 @@
           <button id="virtual-speed-apply" type="button">Apply speed</button>
         </div>
         <h3>Road state</h3>
-        <p>Pick two corners on the map to mark a region.</p>
-        <select id="virtual-restriction-kind"><option value="BLOCKED">Blocked</option><option value="HEAVY_PENALTY">Heavy penalty</option></select><input id="virtual-penalty" type="number" min="1.01" max="100" step="0.1" value="5" placeholder="Penalty factor"><button id="virtual-restriction-pick" type="button">Pick region</button><button id="virtual-restriction-commit" type="button" disabled>Activate region</button>
+        <p class="virtual-map-hint">Click individual roads or draw a freeform area to select roads. Add and remove selections before previewing.</p>
+        <label for="virtual-restriction-kind">Restriction</label><select id="virtual-restriction-kind"><option value="BLOCKED">Blocked</option><option value="HEAVY_PENALTY">Heavy penalty</option></select><input id="virtual-penalty" type="number" min="1.01" max="100" step="0.1" value="5" placeholder="Penalty factor">
+        <div class="virtual-point-actions"><button id="virtual-restriction-roads" type="button" aria-pressed="false">Select roads</button><button id="virtual-restriction-area" type="button" aria-pressed="false">Draw area</button><button id="virtual-restriction-finish-area" type="button" disabled>Finish area</button></div>
+        <div class="virtual-point-actions"><button id="virtual-restriction-undo" type="button" disabled>Undo last</button><button id="virtual-restriction-clear" type="button" disabled>Clear selection</button></div>
+        <p id="virtual-restriction-selection-summary" role="status">No roads selected.</p>
+        <button id="virtual-restriction-preview" type="button" disabled>Preview affected roads</button>
+        <p id="virtual-restriction-preview-summary" role="status"></p>
+        <button id="virtual-restriction-commit" type="button" disabled>Activate restriction</button>
         <h4 id="virtual-restrictions-title">Active regions</h4><ul id="virtual-restrictions"></ul>
         <h3>Events</h3><ul id="virtual-events"></ul>
       </section>

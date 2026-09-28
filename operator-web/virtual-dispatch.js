@@ -43,8 +43,10 @@ let restrictionRoadRefreshQueued = false;
 let draft = null;
 let points = { origin: null, destination: null, waypoints: [] };
 let pickMode = null;
-let restrictionCorners = [];
+let restrictionSelections = [];
+let restrictionAreaPoints = [];
 let restrictionGeometry = null;
+let restrictionPreviewResult = null;
 let pollTimer = null;
 let vehiclePollTimer = null;
 let lastEventId = '';
@@ -231,7 +233,10 @@ function restrictionLabel(restriction) {
 function refreshRestrictionRoads() {
   restrictionRoadLayerGroup.clearLayers();
   const maplibreMap = window.__operatorMaplibreLayer?.getMaplibreMap?.();
-  for (const segment of restrictionRoadSegments(maplibreMap, restrictions)) {
+  const pending = restrictionPreviewResult && restrictionGeometry
+    ? [{ kind: restrictionSelectionKind() === 'penalty' ? 'HEAVY_PENALTY' : 'BLOCKED', geometry: restrictionGeometry }]
+    : [];
+  for (const segment of restrictionRoadSegments(maplibreMap, [...restrictions, ...pending])) {
     const latLngs = segment.coordinates.map(([lng, lat]) => [lat, lng]);
     const color = segment.kind === 'penalty' ? MAP_COLORS.virtualPenalty : MAP_COLORS.virtualRestriction;
     L.polyline(latLngs, {
@@ -707,8 +712,10 @@ async function removeScenario() {
     vehicles = [];
     draft = null;
     points = { origin: null, destination: null, waypoints: [] };
-    restrictionCorners = [];
+    restrictionSelections = [];
+    restrictionAreaPoints = [];
     restrictionGeometry = null;
+    restrictionPreviewResult = null;
     pickMode = null;
     map.getContainer().style.cursor = '';
     restrictionLayerGroup.clearLayers();
@@ -794,16 +801,115 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
     setStatus(`Could not snap ${label.toLowerCase()}: ${error.message}`, true);
   }
 }
-function selectRestrictionPoint(point) {
-  restrictionCorners.push(point);
-  if (restrictionCorners.length < 2) { setStatus('Pick the opposite corner of the restriction region.'); return; }
-  const [a, b] = restrictionCorners;
-  const west = Math.min(a.lon, b.lon), east = Math.max(a.lon, b.lon), south = Math.min(a.lat, b.lat), north = Math.max(a.lat, b.lat);
-  restrictionGeometry = { type: 'Polygon', coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]] };
+function restrictionSelectionKind() {
+  return document.querySelector('#virtual-restriction-kind').value === 'HEAVY_PENALTY' ? 'penalty' : 'blocked';
+}
+function invalidateRestrictionPreview() {
+  restrictionPreviewResult = null;
+  restrictionGeometry = null;
+  document.querySelector('#virtual-restriction-preview-summary').textContent = '';
+  document.querySelector('#virtual-restriction-preview').disabled = !restrictionSelections.length;
+  document.querySelector('#virtual-restriction-commit').disabled = true;
   restrictionDraftLayerGroup.clearLayers();
-  L.rectangle([[south, west], [north, east]], { color: '#e76f51', weight: 2, fillOpacity: 0.15 }).addTo(restrictionDraftLayerGroup);
-  document.querySelector('#virtual-restriction-commit').disabled = false;
-  restrictionCorners = []; pickMode = null; map.getContainer().style.cursor = ''; setStatus('Restriction region ready to activate.');
+  renderRestrictionSelection();
+  scheduleRestrictionRoadRefresh();
+}
+function combinedRestrictionGeometry() {
+  const polygons = restrictionSelections.flatMap((selection) => selection.geometry.type === 'Polygon'
+    ? [selection.geometry.coordinates]
+    : selection.geometry.coordinates);
+  if (polygons.length === 1) return { type: 'Polygon', coordinates: polygons[0] };
+  return { type: 'MultiPolygon', coordinates: polygons };
+}
+function renderRestrictionSelection() {
+  const summary = document.querySelector('#virtual-restriction-selection-summary');
+  const undo = document.querySelector('#virtual-restriction-undo');
+  const clear = document.querySelector('#virtual-restriction-clear');
+  const preview = document.querySelector('#virtual-restriction-preview');
+  summary.textContent = restrictionSelections.length
+    ? `${restrictionSelections.length} selection${restrictionSelections.length === 1 ? '' : 's'} ready. Preview to see the routing segments affected.`
+    : 'No roads selected.';
+  undo.disabled = clear.disabled = !restrictionSelections.length;
+  preview.disabled = !restrictionSelections.length;
+  restrictionDraftLayerGroup.clearLayers();
+  const color = restrictionSelectionKind() === 'penalty' ? MAP_COLORS.virtualPenalty : MAP_COLORS.virtualRestriction;
+  for (const selection of restrictionSelections) L.geoJSON(selection.geometry, {
+    style: { color, weight: 2, fillColor: color, fillOpacity: 0.2 },
+  }).addTo(restrictionDraftLayerGroup);
+  if (restrictionAreaPoints.length) {
+    restrictionAreaPoints.forEach((point) => L.circleMarker([point.lat, point.lon], { radius: 4, color, fillOpacity: 1 }).addTo(restrictionDraftLayerGroup));
+    if (restrictionAreaPoints.length > 1) L.polyline(restrictionAreaPoints.map((point) => [point.lat, point.lon]), { color, weight: 2, dashArray: '4 4' }).addTo(restrictionDraftLayerGroup);
+  }
+  scheduleRestrictionRoadRefresh();
+}
+function addRestrictionSelection(geometry, label) {
+  const signature = JSON.stringify(geometry);
+  const existing = restrictionSelections.findIndex((selection) => JSON.stringify(selection.geometry) === signature);
+  if (existing >= 0) restrictionSelections.splice(existing, 1);
+  else restrictionSelections.push({ geometry, label });
+  restrictionPreviewResult = null;
+  restrictionGeometry = null;
+  document.querySelector('#virtual-restriction-preview-summary').textContent = '';
+  document.querySelector('#virtual-restriction-commit').disabled = true;
+  renderRestrictionSelection();
+}
+function selectRestrictionPoint(point) {
+  const maplibre = window.__operatorMaplibreLayer?.getMaplibreMap?.();
+  if (pickMode === 'restriction-area') {
+    restrictionAreaPoints.push(point);
+    document.querySelector('#virtual-restriction-finish-area').disabled = restrictionAreaPoints.length < 3;
+    renderRestrictionSelection();
+    setStatus(`${restrictionAreaPoints.length} area points. Add more points, then finish the area.`);
+    return;
+  }
+  if (!maplibre) { setStatus('The road map is still loading.', true); return; }
+  let candidates = [];
+  try { candidates = maplibre.queryRenderedFeatures(maplibre.project([point.lon, point.lat]), { layers: ['minor-road', 'major-road'] }); }
+  catch { candidates = []; }
+  const pixel = maplibre.project([point.lon, point.lat]);
+  let best = null;
+  for (const feature of candidates) {
+    const lines = feature.geometry?.type === 'LineString' ? [feature.geometry.coordinates]
+      : feature.geometry?.type === 'MultiLineString' ? feature.geometry.coordinates : [];
+    for (const line of lines) for (let i = 1; i < line.length; i++) {
+      const a = maplibre.project(line[i - 1]), b = maplibre.project(line[i]);
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const t = Math.max(0, Math.min(1, ((pixel.x - a.x) * dx + (pixel.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+      const distance = Math.hypot(pixel.x - (a.x + t * dx), pixel.y - (a.y + t * dy));
+      if (!best || distance < best.distance) best = { distance, a: line[i - 1], b: line[i], t };
+    }
+  }
+  if (!best || best.distance > 14) { setStatus('Click closer to a visible road line to select it.', true); return; }
+  const lat = (best.a[1] + best.b[1]) / 2;
+  const metersLon = Math.max(0.15, Math.cos(lat * Math.PI / 180)) * 111320;
+  const metersLat = 110540;
+  let ax = best.a[0] * metersLon, ay = best.a[1] * metersLat;
+  let bx = best.b[0] * metersLon, by = best.b[1] * metersLat;
+  let dx = bx - ax, dy = by - ay, length = Math.hypot(dx, dy);
+  if (length < 0.1) return;
+  const centerX = ax + dx * best.t, centerY = ay + dy * best.t;
+  const halfLength = Math.min(35, Math.max(12, length / 2));
+  const ux = dx / length, uy = dy / length, halfWidth = 5;
+  ax = centerX - ux * halfLength; ay = centerY - uy * halfLength;
+  bx = centerX + ux * halfLength; by = centerY + uy * halfLength;
+  const ring = [[ax - uy * halfWidth, ay + ux * halfWidth], [bx - uy * halfWidth, by + ux * halfWidth], [bx + uy * halfWidth, by - ux * halfWidth], [ax + uy * halfWidth, ay - ux * halfWidth]]
+    .map(([x, y]) => [x / metersLon, y / metersLat]);
+  ring.push(ring[0]);
+  addRestrictionSelection({ type: 'Polygon', coordinates: [ring] }, 'road');
+  setStatus('Road segment selected. Select more roads or preview the affected routes.');
+}
+function finishRestrictionArea() {
+  if (restrictionAreaPoints.length < 3) return;
+  const ring = restrictionAreaPoints.map(({ lat, lon }) => [lon, lat]);
+  ring.push(ring[0]);
+  addRestrictionSelection({ type: 'Polygon', coordinates: [ring] }, 'area');
+  restrictionAreaPoints = [];
+  pickMode = null;
+  map.getContainer().style.cursor = '';
+  document.querySelector('#virtual-restriction-area').setAttribute('aria-pressed', 'false');
+  document.querySelector('#virtual-restriction-finish-area').disabled = true;
+  renderRestrictionSelection();
+  setStatus('Area added. Preview to see the affected routing segments.');
 }
 async function refreshAfterRestrictionChange(message) {
   draft = null;
@@ -817,17 +923,19 @@ async function refreshAfterRestrictionChange(message) {
   else setStatus(message);
 }
 async function commitRestriction() {
-  if (!restrictionGeometry || !scenarioId) return;
+  if (!restrictionPreviewResult?.canActivate || !restrictionGeometry || !scenarioId) return;
   const kind = document.querySelector('#virtual-restriction-kind').value;
   const body = { kind, geometry: restrictionGeometry, ...(kind === 'HEAVY_PENALTY' ? { penaltyFactor: Number(document.querySelector('#virtual-penalty').value) } : {}) };
   try {
-    setStatus('Checking the road change and recalculating affected virtual routes…');
-    const preview = await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions/preview`, { method: 'POST', body: JSON.stringify(body) });
-    if (!preview.canActivate) { setStatus(`Blocked region is occupied by vehicle(s): ${preview.occupyingVirtualVehicleIds.join(', ')}`, true); return; }
+    setStatus('Activating the previewed road change…');
     await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions`, { method: 'POST', body: JSON.stringify({ ...body, expectedRestrictionRevision: scenarioRevision }) });
+    restrictionSelections = [];
+    restrictionAreaPoints = [];
     restrictionGeometry = null;
+    restrictionPreviewResult = null;
     restrictionDraftLayerGroup.clearLayers();
-    document.querySelector('#virtual-restriction-commit').disabled = true;
+    document.querySelector('#virtual-restriction-preview-summary').textContent = '';
+    renderRestrictionSelection();
     // The existing draft was calculated against the previous restriction
     // revision.  Remove it before refreshing so the map cannot keep showing
     // a route that still crosses the newly blocked region.  Re-preview an
@@ -836,6 +944,44 @@ async function commitRestriction() {
     await refreshAfterRestrictionChange('Road state activated.');
   }
   catch (error) { setStatus(error.message, true); }
+}
+async function previewRestriction() {
+  if (!scenarioId || !restrictionSelections.length) return;
+  restrictionGeometry = combinedRestrictionGeometry();
+  const kind = document.querySelector('#virtual-restriction-kind').value;
+  const body = { kind, geometry: restrictionGeometry, ...(kind === 'HEAVY_PENALTY' ? { penaltyFactor: Number(document.querySelector('#virtual-penalty').value) } : {}) };
+  const previewButton = document.querySelector('#virtual-restriction-preview');
+  const commitButton = document.querySelector('#virtual-restriction-commit');
+  previewButton.disabled = true;
+  commitButton.disabled = true;
+  document.querySelector('#virtual-restriction-preview-summary').textContent = 'Resolving selected roads against the routing graph…';
+  try {
+    const result = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(scenarioId)}/road-restrictions/preview`, { method: 'POST', body: JSON.stringify(body) });
+    restrictionPreviewResult = result;
+    const edgeCount = Number(result.resolvedEdgeCount ?? result.affectedDirectedEdgeIds?.length ?? 0);
+    const segmentCount = Number(result.affectedPhysicalSegmentIds?.length ?? 0);
+    const summary = document.querySelector('#virtual-restriction-preview-summary');
+    if (result.canActivate && edgeCount > 0) {
+      summary.textContent = `Preview: ${segmentCount} road segment${segmentCount === 1 ? '' : 's'} (${edgeCount} routing direction${edgeCount === 1 ? '' : 's'}). Review the highlighted roads, then activate.`;
+      commitButton.disabled = false;
+      scheduleRestrictionRoadRefresh();
+      setStatus('Restriction preview ready.');
+    } else if (!result.canActivate) {
+      const ids = result.occupyingVirtualVehicleIds || [];
+      summary.textContent = `Cannot activate while vehicle${ids.length === 1 ? '' : 's'} ${ids.join(', ')} occupy the selected roads.`;
+      setStatus('The restriction conflicts with an active virtual vehicle.', true);
+    } else {
+      summary.textContent = 'No routing roads intersect this selection. Adjust the selected roads or area.';
+      setStatus('No routing roads were found in the selection.', true);
+    }
+  } catch (error) {
+    restrictionPreviewResult = null;
+    restrictionGeometry = null;
+    document.querySelector('#virtual-restriction-preview-summary').textContent = error.message;
+    setStatus(error.message, true);
+  } finally {
+    previewButton.disabled = !restrictionSelections.length;
+  }
 }
 async function removeRestriction(restriction) {
   if (!scenarioId || !restriction?.restrictionId) return;
@@ -906,7 +1052,7 @@ map.on('click', (event) => {
   if (mode !== 'virtual' || !pickMode) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
   const selectedMode = pickMode;
-  if (selectedMode === 'restriction') selectRestrictionPoint(point);
+  if (selectedMode === 'restriction-roads' || selectedMode === 'restriction-area') selectRestrictionPoint(point);
   else {
     pickMode = null;
     map.getContainer().style.cursor = '';
@@ -915,7 +1061,16 @@ map.on('click', (event) => {
 });
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
-scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
+scenarioSelect.addEventListener('change', () => {
+  scenarioId = scenarioSelect.value;
+  speedControlEditing = false;
+  draft = null;
+  restrictionSelections = [];
+  restrictionAreaPoints = [];
+  invalidateRestrictionPreview();
+  renderDraft();
+  void loadScenarios().then(loadScenarioData);
+});
 vehicleSelect.addEventListener('change', () => {
   selectedVehicleId = vehicleSelect.value;
   speedControlEditing = false;
@@ -934,7 +1089,31 @@ document.querySelector('#virtual-following').addEventListener('change', (event) 
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => { speedControlEditing = true; renderSpeedControl(); });
 document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
-document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; map.getContainer().style.cursor = 'crosshair'; setStatus('Click two opposite corners on the map.'); });
+document.querySelector('#virtual-restriction-roads').addEventListener('click', (event) => {
+  const active = pickMode !== 'restriction-roads';
+  pickMode = active ? 'restriction-roads' : null;
+  map.getContainer().style.cursor = active ? 'crosshair' : '';
+  event.currentTarget.setAttribute('aria-pressed', String(active));
+  document.querySelector('#virtual-restriction-area').setAttribute('aria-pressed', 'false');
+  if (active) setStatus('Click road lines to add or remove individual segments. Select roads, then preview.');
+});
+document.querySelector('#virtual-restriction-area').addEventListener('click', (event) => {
+  const active = pickMode !== 'restriction-area';
+  restrictionAreaPoints = [];
+  pickMode = active ? 'restriction-area' : null;
+  map.getContainer().style.cursor = active ? 'crosshair' : '';
+  event.currentTarget.setAttribute('aria-pressed', String(active));
+  document.querySelector('#virtual-restriction-roads').setAttribute('aria-pressed', 'false');
+  document.querySelector('#virtual-restriction-finish-area').disabled = true;
+  renderRestrictionSelection();
+  if (active) setStatus('Click at least three points around the area, then finish it.');
+});
+document.querySelector('#virtual-restriction-finish-area').addEventListener('click', finishRestrictionArea);
+document.querySelector('#virtual-restriction-undo').addEventListener('click', () => { restrictionSelections.pop(); invalidateRestrictionPreview(); });
+document.querySelector('#virtual-restriction-clear').addEventListener('click', () => { restrictionSelections = []; restrictionAreaPoints = []; invalidateRestrictionPreview(); });
+document.querySelector('#virtual-restriction-preview').addEventListener('click', () => void previewRestriction());
+document.querySelector('#virtual-restriction-kind').addEventListener('change', () => { invalidateRestrictionPreview(); });
+document.querySelector('#virtual-penalty').addEventListener('input', () => { if (restrictionPreviewResult) invalidateRestrictionPreview(); });
 document.querySelector('#virtual-place-origin').addEventListener('click', () => beginRoutePointPick('origin'));
 document.querySelector('#virtual-place-destination').addEventListener('click', () => beginRoutePointPick('destination'));
 document.querySelector('#virtual-add-waypoint').addEventListener('click', () => beginRoutePointPick('waypoint'));

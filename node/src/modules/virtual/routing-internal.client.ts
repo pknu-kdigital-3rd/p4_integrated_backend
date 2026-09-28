@@ -66,6 +66,7 @@ export const routingInternalClient = {
             affectedDirectedEdgeIds: string[];
             affectedPhysicalSegmentIds: string[];
             occupiedCandidateEdges: string[];
+            resolvedEdgeCount: number;
         }>("/internal/routing/road-restrictions/resolve", input);
     },
 };

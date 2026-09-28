@@ -35,8 +35,12 @@ Open `http://127.0.0.1:5173/operator/?preview=1`. Both dashboard tabs use
 read-only sample states. Add `&workspace=virtual` to open the restriction
 fixtures directly: blocked road segments are solid red and heavy-penalty
 segments are dashed violet. Edit `virtualRestriction` and `virtualPenalty` in
-`operator-web/map-colors.js` to adjust them. Selection and layout controls work;
-backend actions are disabled. Edit `operator-web/map-style.json` for road, land,
+`operator-web/map-colors.js` to adjust them. This visual-only preview has no
+routing service, so restriction resolution and activation require the normal
+virtual dispatch services. In a live virtual scenario, use **Select roads** to
+click individual road segments or **Draw area** to make a freeform lasso, then
+preview the affected routing segments before activating. Edit
+`operator-web/map-style.json` for road, land,
 water, and label colors; `operator-web/map-colors.js` for markers and routes;
 and the variables near the top of `operator-web/styles.css` for the main UI
 colors. Vite reloads the preview as files change.

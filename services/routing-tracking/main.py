@@ -505,14 +505,15 @@ def _fallback_edge_intersects(edge_points, prepared):
 
 
 def _make_edge_intersector(geometry):
-    """Build one reusable edge predicate for a restriction polygon."""
+    """Build one reusable edge predicate for one or more restriction polygons."""
     polygons = _geometry_polygons(geometry)
     try:
-        from shapely.geometry import LineString, shape
-        restriction_shape = shape(geometry)
+        from shapely.geometry import LineString, Polygon
+        restriction_shapes = [Polygon(rings[0], rings[1:]) for rings in polygons]
 
         def intersects(coords):
-            return LineString([(lon, lat) for lat, lon in coords]).intersects(restriction_shape)
+            edge = LineString([(lon, lat) for lat, lon in coords])
+            return any(edge.intersects(restriction) for restriction in restriction_shapes)
 
         return intersects
     except (ImportError, ValueError, TypeError):
