@@ -2,9 +2,11 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
+import {PREVIEW_MODE,PREVIEW_VEHICLES} from './preview-data.js';
+import {MAP_COLORS} from './map-colors.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
-L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
+window.__createOperatorBaseLayer(map);
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout'),layoutSplitter=document.querySelector('#layout-splitter'),stackedLayout=window.matchMedia('(max-width: 1000px)');
@@ -138,7 +140,7 @@ function selectVehicle(item){
   }
   document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;
   if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}
-  if(r?.routeGeojson)routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map);
+  if(r?.routeGeojson)routeLayer=L.geoJSON(r.routeGeojson,{style:{color:MAP_COLORS.plannedRoute,weight:5}}).addTo(map);
   document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';
   if(item.tripId)void loadTripRecordings(String(item.tripId));
   retargetLiveView(item);
@@ -426,7 +428,7 @@ map.on('click',event=>{
   let marker=tripMapMarkers.get(kind);
   if(marker)marker.setLatLng(event.latlng);
   else{
-    marker=L.circleMarker(event.latlng,{radius:9,color:'#fff',weight:3,fillColor:kind==='origin'?'#ff8a3d':'#20a4f3',fillOpacity:1}).addTo(map);
+    marker=L.circleMarker(event.latlng,{radius:9,color:'#fff',weight:3,fillColor:kind==='origin'?MAP_COLORS.tripOrigin:MAP_COLORS.tripDestination,fillOpacity:1}).addTo(map);
     marker.bindTooltip(label,{permanent:true,direction:'top',offset:[0,-8],className:'trip-point-label'});
     tripMapMarkers.set(kind,marker);
   }
@@ -455,6 +457,24 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
   finally{button.disabled=false;form.querySelector('#trip-destination-name').focus()}
 });
 async function boot(){
+  if(PREVIEW_MODE){
+    document.body.classList.add('preview-mode');
+    document.querySelector('#connection').textContent='Offline visual preview';
+    document.querySelector('#login').hidden=true;
+    telemetrySettings.hidden=false;
+    telemetryModeStatus.textContent='Fixture data · no live connection';
+    telemetryModeSelect.disabled=true;
+    telemetryModeApply.disabled=true;
+    document.querySelector('#trip-panel').hidden=false;
+    document.querySelector('#trip-form').hidden=true;
+    document.querySelector('#trip-status-message').textContent='Read-only preview fixture.';
+    document.querySelector('#trips-list').replaceChildren(Object.assign(document.createElement('li'),{textContent:'Sample trip · Busan Station → waterfront · IN_PROGRESS'}));
+    document.querySelector('#recordings-status').textContent='Recordings are unavailable in the visual preview.';
+    document.querySelectorAll('#recordings-form input,#recordings-form button').forEach(element=>element.disabled=true);
+    render(PREVIEW_VEHICLES);
+    selectVehicle(PREVIEW_VEHICLES.vehicles[0]);
+    return;
+  }
   if(token){
     demoMode=false;
     try{const auth=await api('/api/v1/auth/me',{},true);await start(auth.role);return}catch{token=null;sessionStorage.removeItem('itsToken')}

@@ -23,6 +23,7 @@ RUN DATABASE_URL=postgresql://app:app@127.0.0.1:5432/vehicle_platform?schema=pub
 
 COPY node/ ./
 COPY operator-web/ /workspace/operator-web/
+RUN cd /workspace/operator-web && npm ci --ignore-scripts --no-audit --no-fund && npm run build
 RUN npm run build \
     && rm -rf vendor/zod-to-openapi/node_modules
 
@@ -33,9 +34,9 @@ RUN apt-get update \
 WORKDIR /workspace/node
 ENV NODE_ENV=production
 COPY --from=build /workspace/node /workspace/node
-COPY --from=build /workspace/operator-web /workspace/operator-web
+COPY --from=build /workspace/operator-web/dist /workspace/operator-web/dist
 COPY --from=build /root/.cache/prisma /root/.cache/prisma
 COPY docker/node-entrypoint.sh /usr/local/bin/p4-node-entrypoint
 EXPOSE 3000
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/p4-node-entrypoint"]
-CMD ["node", "/workspace/node/dist/server.js"]
+CMD ["./node_modules/.bin/tsx", "src/server.ts"]

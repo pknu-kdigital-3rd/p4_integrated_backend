@@ -94,6 +94,7 @@ services:
       - ./node/src:/workspace/node/src
       - ./node/tsconfig.json:/workspace/node/tsconfig.json:ro
       - ./operator-web:/workspace/operator-web
+      - ./data/map:/workspace/data/map:ro
       - type: bind
         source: ./data/jwt
         target: /run/secrets/jwt

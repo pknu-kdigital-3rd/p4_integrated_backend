@@ -1,0 +1,28 @@
+{
+  "version": 8,
+  "name": "P4 Busan editable",
+  "glyphs": "/map-assets/fonts/{fontstack}/{range}.pbf",
+  "sprite": "/map-assets/sprites/ofm",
+  "sources": {
+    "openmaptiles": {
+      "type": "vector",
+      "url": "pmtiles:///map-assets/busan.pmtiles",
+      "attribution": "© OpenMapTiles © OpenStreetMap contributors"
+    }
+  },
+  "layers": [
+    { "id": "land", "type": "background", "paint": { "background-color": "#edf1eb" } },
+    { "id": "wood", "type": "fill", "source": "openmaptiles", "source-layer": "landcover", "filter": ["==", ["get", "class"], "wood"], "paint": { "fill-color": "#cce3ce", "fill-opacity": 0.85 } },
+    { "id": "grass", "type": "fill", "source": "openmaptiles", "source-layer": "landcover", "filter": ["==", ["get", "class"], "grass"], "paint": { "fill-color": "#dce9cb", "fill-opacity": 0.8 } },
+    { "id": "park", "type": "fill", "source": "openmaptiles", "source-layer": "park", "paint": { "fill-color": "#bde0bf", "fill-opacity": 0.85 } },
+    { "id": "water", "type": "fill", "source": "openmaptiles", "source-layer": "water", "paint": { "fill-color": "#a9d5e8" } },
+    { "id": "waterway", "type": "line", "source": "openmaptiles", "source-layer": "waterway", "paint": { "line-color": "#91c6df", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 15, 2] } },
+    { "id": "buildings", "type": "fill", "source": "openmaptiles", "source-layer": "building", "minzoom": 13, "paint": { "fill-color": "#d9d8d0", "fill-opacity": 0.7 } },
+    { "id": "minor-road-casing", "type": "line", "source": "openmaptiles", "source-layer": "transportation", "filter": ["in", ["get", "class"], ["literal", ["minor", "service", "track"]]], "paint": { "line-color": "#d3d7d3", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.5, 15, 5] } },
+    { "id": "minor-road", "type": "line", "source": "openmaptiles", "source-layer": "transportation", "filter": ["in", ["get", "class"], ["literal", ["minor", "service", "track"]]], "paint": { "line-color": "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.2, 15, 3] } },
+    { "id": "major-road-casing", "type": "line", "source": "openmaptiles", "source-layer": "transportation", "filter": ["in", ["get", "class"], ["literal", ["primary", "secondary", "tertiary", "trunk", "motorway"]]], "paint": { "line-color": "#c9b79c", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1.5, 15, 9] } },
+    { "id": "major-road", "type": "line", "source": "openmaptiles", "source-layer": "transportation", "filter": ["in", ["get", "class"], ["literal", ["primary", "secondary", "tertiary", "trunk", "motorway"]]], "paint": { "line-color": "#f6e4bf", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1, 15, 7] } },
+    { "id": "road-label", "type": "symbol", "source": "openmaptiles", "source-layer": "transportation_name", "minzoom": 12, "layout": { "symbol-placement": "line", "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]], "text-font": ["Noto Sans Regular"], "text-size": 11 }, "paint": { "text-color": "#59666f", "text-halo-color": "#ffffff", "text-halo-width": 1 } },
+    { "id": "place-label", "type": "symbol", "source": "openmaptiles", "source-layer": "place", "layout": { "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]], "text-font": ["Noto Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 8, 11, 15, 15] }, "paint": { "text-color": "#334d59", "text-halo-color": "#edf1eb", "text-halo-width": 1.5 } }
+  ]
+}

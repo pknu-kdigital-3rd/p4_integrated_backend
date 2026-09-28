@@ -11,6 +11,41 @@ This repository integrates the existing control backend, BIMS routing/tracking, 
 - `services/media-relay/` — existing Go/Pion relay
 - `android/` — existing Android publisher
 
+## Offline operator map preview
+
+The operator page uses a local vector basemap. To prepare its Busan tiles, fonts,
+and sprites once on Windows, start Docker Desktop and run from the repository root:
+
+```powershell
+./scripts/prepare-offline-map.ps1
+```
+
+The source download and Planetiler build require internet access and several GB
+of free disk space. Generated assets are kept in ignored `data/map/`; subsequent
+preview sessions use no internet or real-time services. Install the frontend
+dependencies once, then launch the visual preview:
+
+```powershell
+cd operator-web
+npm ci
+npm run preview:offline
+```
+
+Open `http://127.0.0.1:5173/operator/?preview=1`. Both dashboard tabs use
+read-only sample states. Selection and layout controls work; backend actions
+are disabled. Edit `operator-web/map-style.json` for road, land, water, and
+label colors; `operator-web/map-colors.js` for markers and routes; and the
+variables near the top of `operator-web/styles.css` for the main UI colors.
+Vite reloads the preview as files change.
+
+The production Node image builds the frontend and serves the same map package
+from `data/map/`, mounted by both Compose files. The package must be prepared
+on the deployment host before starting the dashboard. Map data attribution is
+displayed from the style source. Source data comes from Geofabrik/OpenStreetMap;
+the font and sprite assets come from OpenFreeMap.
+The development Compose file bind-mounts `operator-web/`, so run `npm run build`
+in that directory after source edits when viewing the page through Compose.
+
 ## HTTPS startup
 
 Docker Compose runs Node, routing, vision, relay, PostgreSQL, MinIO, Nginx,

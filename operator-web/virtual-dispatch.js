@@ -1,6 +1,8 @@
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
+import { PREVIEW_MODE, PREVIEW_VIRTUAL_VEHICLES, PREVIEW_RESTRICTION } from './preview-data.js';
+import { MAP_COLORS } from './map-colors.js';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -234,7 +236,7 @@ function renderRestrictions(items) {
     return;
   }
   for (const restriction of restrictions) {
-    const color = restriction.kind === 'HEAVY_PENALTY' ? '#f4a261' : '#e76f51';
+    const color = restriction.kind === 'HEAVY_PENALTY' ? MAP_COLORS.virtualPenalty : MAP_COLORS.virtualRestriction;
     if (restriction.geometry) {
       const layer = L.geoJSON(restriction.geometry, {
         style: { color, weight: 2, fillColor: color, fillOpacity: 0.16 },
@@ -498,8 +500,8 @@ function renderActiveTripRoute(vehicle) {
     const duplicateGeometry = !current && currentGeometry !== ''
       && routeGeometryIdentity(route.routeGeojson) === currentGeometry;
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
-      ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowOpacity: 0.98, arrowYawn: 36, showArrows: true }
-      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: !duplicateGeometry && Boolean(previousArrowGeometry), arrowGeometry: previousArrowGeometry },
+      ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: MAP_COLORS.virtualActiveRoute, lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowOpacity: 0.98, arrowYawn: 36, showArrows: true }
+      : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: MAP_COLORS.virtualPreviousRoute, lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: !duplicateGeometry && Boolean(previousArrowGeometry), arrowGeometry: previousArrowGeometry },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
 }
@@ -539,7 +541,7 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     visibleVehicleIds.add(vehicleId);
     let marker = virtualVehicleMarkers.get(vehicleId);
     if (!marker) {
-      marker = L.circleMarker([Number(position.lat), Number(position.lon)], { radius: vehicleId === selected ? 11 : 8, color: '#6a4c93', fillColor: '#b185db', fillOpacity: 0.9 });
+      marker = L.circleMarker([Number(position.lat), Number(position.lon)], { radius: vehicleId === selected ? 11 : 8, color: MAP_COLORS.virtualVehicleStroke, fillColor: MAP_COLORS.virtualVehicleFill, fillOpacity: 0.9 });
       marker.bindTooltip(`Virtual · ${vehicle.vehicleCode}`);
       marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; speedControlEditing = false; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); });
       virtualVehicleMarkers.set(vehicleId, marker);
@@ -834,9 +836,27 @@ async function switchMode(next) {
     // cached by external_id and only ever added to the map on creation, so the
     // fleet never reappeared after switching back.
     window.__operatorDetachMapLayers?.();
-    try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
-    if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
-    if (!vehiclePollTimer) vehiclePollTimer = setInterval(() => void refreshVehiclePositions().catch((error) => setStatus(error.message, true)), 250);
+    if (PREVIEW_MODE) {
+      scenarioId = 'preview-scenario';
+      scenarioRevision = 1;
+      scenarioSelect.replaceChildren(new Option('Busan visual preview · rev 1', scenarioId));
+      scenarioSelect.value = scenarioId;
+      vehicles = PREVIEW_VIRTUAL_VEHICLES;
+      selectedVehicleId = String(vehicles[0].vehicleId);
+      renderRestrictions([PREVIEW_RESTRICTION]);
+      renderVehicles();
+      vehicleSelect.value = selectedVehicleId;
+      renderSelectedVehicle(vehicles[0]);
+      renderRequests([{ requestId: 'sample-17', selectedVehicleId, state: 'PENDING' }]);
+      renderEvents([{ eventId: 'sample-1', createdAt: '2026-09-28T09:00:00Z', eventType: 'ROUTE_ACTIVATED' }]);
+      for (const element of virtualPanel.querySelectorAll('button, input')) element.disabled = true;
+      scenarioSelect.disabled = true;
+      setStatus('Offline visual preview · actions are disabled.');
+    } else {
+      try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
+      if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
+      if (!vehiclePollTimer) vehiclePollTimer = setInterval(() => void refreshVehiclePositions().catch((error) => setStatus(error.message, true)), 250);
+    }
   } else {
     normalSectionVisibility.restore();
     window.__operatorAttachMapLayers?.();

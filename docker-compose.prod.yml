@@ -88,6 +88,7 @@ services:
       RECORDING_ENABLED: "true"
       ANDROID_TELEMETRY_ENABLED: ${ANDROID_TELEMETRY_ENABLED:-true}
     volumes:
+      - ./data/map:/workspace/data/map:ro
       - type: bind
         source: ./data/jwt
         target: /run/secrets/jwt

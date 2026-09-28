@@ -3,8 +3,6 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>ITS Operator Dashboard</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header><h1>ITS Operator Dashboard</h1><nav id="workspace-nav" aria-label="Workspace"><button id="normal-workspace" type="button" aria-pressed="true">Normal monitoring</button><button id="virtual-workspace-tab" type="button" aria-pressed="false">Virtual routing &amp; dispatch</button></nav><span id="connection">Signed out</span></header>
@@ -145,10 +143,6 @@
       <iframe id="live-view-frame" title="Vehicle live view" loading="eager" allow="autoplay; camera; microphone; fullscreen"></iframe>
     </section>
   </main>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet-geometryutil@0.10.3/src/leaflet.geometryutil.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js"></script>
-  <script type="module" src="app.js"></script>
-  <script type="module" src="virtual-dispatch.js"></script>
+  <script type="module" src="/main.js"></script>
 </body>
 </html>

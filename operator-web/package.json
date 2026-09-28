@@ -1,0 +1,21 @@
+{
+  "name": "p4-operator-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "preview:offline": "vite --host 127.0.0.1 --open '/operator/?preview=1'",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
+    "leaflet": "1.9.4",
+    "leaflet-arrowheads": "1.4.0",
+    "leaflet-geometryutil": "0.10.3",
+    "maplibre-gl": "^6.3.0",
+    "pmtiles": "^4.3.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
+  }
+}

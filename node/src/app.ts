@@ -66,7 +66,9 @@ export function createApp() {
 	app.use("/api/v1", recordingRouter);
 	app.use("/api/v1/virtual", virtualRouter);
 
-	const operatorWeb = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../operator-web");
+	const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+	app.use("/map-assets", express.static(path.join(projectRoot, "data/map")));
+	const operatorWeb = path.join(projectRoot, "operator-web/dist");
 	app.use("/operator", express.static(operatorWeb));
 
 	app.get("/openapi.json", (_req, res) => {

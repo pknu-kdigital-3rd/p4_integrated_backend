@@ -1,21 +1,23 @@
+import { MAP_COLORS } from './map-colors.js';
+
 export const LIVE_MARKER_STYLE = {
   color: '#ffffff',
   weight: 3,
-  fillColor: '#ff8a3d',
+  fillColor: MAP_COLORS.live,
   fillOpacity: 1,
 };
 
 export const FLEET_MARKER_STYLE = {
   color: '#ffffff',
   weight: 1,
-  fillColor: '#16c79a',
+  fillColor: MAP_COLORS.fleet,
   fillOpacity: 0.9,
 };
 
 export const ANDROID_GPS_MARKER_STYLE = {
   color: '#ffffff',
   weight: 3,
-  fillColor: '#9b59ff',
+  fillColor: MAP_COLORS.androidGps,
   fillOpacity: 1,
 };
 

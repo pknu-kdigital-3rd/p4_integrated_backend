@@ -4,6 +4,8 @@
 secrets
 node/node_modules
 node/dist
+operator-web/node_modules
+operator-web/dist
 **/.venv
 **/__pycache__
 **/*.pyc
