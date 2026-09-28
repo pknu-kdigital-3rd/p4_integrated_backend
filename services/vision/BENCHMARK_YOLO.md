@@ -213,6 +213,14 @@ on a four-GPU machine). The entrypoint maps them to container `cuda:1` and
 comparison. Compare `inference_ms`, `depth_ms`, `model_ms`, and `infer_fps` at
 the same resolution level; cross-GPU mask transfer is included in postprocess.
 
+The live Vision `[mem]` line also reports `worker_cycle_ms` (from taking an
+inference frame through publishing its result), `queue_wait_ms` (time waiting
+for the next inference frame), `inference_wait_ms` (time awaiting the model
+thread), `thread_gap_ms` (wait time minus the model's own `inference_ms`),
+`publish_ms`, `worker_other_ms` (remaining worker time), and
+`skipped_publish_ms` per skipped playback frame. These measurements identify
+where throughput is lost after the model has finished.
+
 The Vision application image installs GCC, G++, and Python headers so
 UniDepth's existing `torch.compile` path can run without rebuilding the large
 dependency image. Compilation is enabled by default. The app compiles with a

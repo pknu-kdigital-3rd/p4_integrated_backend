@@ -128,6 +128,24 @@ async def metrics_worker(state: AppState) -> None:
                 "postprocess_ms_total",
                 inferred_delta,
             )
+            worker_cycle_ms = _average_ms(
+                current, previous, "worker_cycle_ms_total", inferred_delta
+            )
+            queue_wait_ms = _average_ms(
+                current, previous, "queue_wait_ms_total", inferred_delta
+            )
+            inference_wait_ms = _average_ms(
+                current, previous, "inference_wait_ms_total", inferred_delta
+            )
+            publish_ms = _average_ms(
+                current, previous, "publish_ms_total", inferred_delta
+            )
+            skipped_delta = int(current["skipped_frames_published"]) - int(
+                previous["skipped_frames_published"]
+            )
+            skipped_publish_ms = _average_ms(
+                current, previous, "skipped_publish_ms_total", skipped_delta
+            )
             allocated, reserved, peak_allocated, peak_reserved = _cuda_memory()
             queue_max = state.inference_queue.maxsize
             queue_limit = str(queue_max) if queue_max > 0 else "unbounded"
@@ -141,6 +159,7 @@ async def metrics_worker(state: AppState) -> None:
                 f"dropped={current['inference_frames_dropped']} "
                 f"input_fps={_rate(decoded_delta, elapsed):.1f} "
                 f"infer_fps={_rate(inferred_delta, elapsed):.1f} "
+                f"skipped_fps={_rate(skipped_delta, elapsed):.1f} "
                 f"playback_fps={_rate(published_delta, elapsed):.1f} "
                 f"ws_fps={_rate(websocket_delta, elapsed):.1f} "
                 f"decode_ms={decode_ms:.1f} "
@@ -149,6 +168,13 @@ async def metrics_worker(state: AppState) -> None:
                 f"depth_ms={depth_ms:.1f} "
                 f"inference_ms={inference_ms:.1f} "
                 f"postprocess_ms={postprocess_ms:.1f} "
+                f"worker_cycle_ms={worker_cycle_ms:.1f} "
+                f"queue_wait_ms={queue_wait_ms:.1f} "
+                f"inference_wait_ms={inference_wait_ms:.1f} "
+                f"thread_gap_ms={max(0.0, inference_wait_ms - inference_ms):.1f} "
+                f"publish_ms={publish_ms:.1f} "
+                f"worker_other_ms={max(0.0, worker_cycle_ms - inference_wait_ms - publish_ms):.1f} "
+                f"skipped_publish_ms={skipped_publish_ms:.1f} "
                 f"recording_samples_queued={current['recording_samples_queued']} "
                 f"recording_samples_dropped={current['recording_samples_dropped']} "
                 f"recording_samples_uploaded={current['recording_samples_uploaded']} "
