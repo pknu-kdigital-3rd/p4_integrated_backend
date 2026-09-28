@@ -23,6 +23,15 @@ dependencies.
 
 Run the commands below in PowerShell from the repository root.
 
+Confirm the license file is present before starting AIStor:
+
+```powershell
+Test-Path -PathType Leaf data/minio.license
+```
+
+This must print `True`. The bootstrap container installs the license before
+creating the recording bucket.
+
 ## Start the required services
 
 Start PostgreSQL, routing, and AIStor. This does not start Vision, the relay,

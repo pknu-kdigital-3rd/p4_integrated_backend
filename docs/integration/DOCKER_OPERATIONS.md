@@ -111,8 +111,12 @@ required from the host.
 
 Both Compose files use pinned MinIO AIStor Server and Client release images.
 Before starting either stack, request/download an AIStor Free license and put
-the license file at `data/minio.license` from the repository root. Compose
-mounts it read-only into the server and passes `--license /minio.license`.
+the license file at `data/minio.license` from the repository root. Check that
+it is a regular file with `Test-Path -PathType Leaf data/minio.license` in
+PowerShell. Compose mounts it read-only into the server and bootstrap client.
+The server receives `--license /minio.license`; bootstrap also installs the
+license with `mc license update` if the cluster reports none installed, before
+creating the recording bucket.
 AIStor Free is licensed for standalone single-node use; the Compose server is
 configured as one node. Do not commit the license file. See MinIO's [AIStor
 Free license instructions](https://docs.min.io/aistor/installation/container/install/).
@@ -282,6 +286,17 @@ one-shot container without stopping MinIO:
 
 ```bash
 docker compose -f docker-compose.dev.yml rm -f p4-minio-bootstrap
+```
+
+If bootstrap reports `No license is installed`, first confirm that
+`Test-Path -PathType Leaf data/minio.license` prints `True` in PowerShell.
+If `data/minio.license` is a directory, replace it with the downloaded license
+file. Then recreate the server and rerun bootstrap; bootstrap installs the
+license before creating the bucket:
+
+```powershell
+docker compose -f docker-compose.dev.yml up -d --force-recreate p4-minio
+docker compose -f docker-compose.dev.yml run --rm p4-minio-bootstrap
 ```
 
 Use `docker compose ... up -d p4-minio` when only MinIO should be started. A later

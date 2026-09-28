@@ -292,6 +292,10 @@ services:
     volumes:
       - ./deploy/minio/bootstrap.sh:/bootstrap.sh:ro
       - ./deploy/minio/policies:/policies:ro
+      - type: bind
+        source: ./data/minio.license
+        target: /minio.license
+        read_only: true
     networks: [ p4 ]
 
   p4-coturn:

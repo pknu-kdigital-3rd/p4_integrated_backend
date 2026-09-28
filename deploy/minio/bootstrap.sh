@@ -23,6 +23,14 @@ until mc alias set local http://p4-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PA
   echo "Waiting for MinIO (attempt $attempt/60)..." >&2
   sleep 2
 done
+if [ ! -f /minio.license ]; then
+  echo "AIStor license file is missing at /minio.license. Save it as data/minio.license on the host." >&2
+  exit 1
+fi
+if ! mc license info local >/dev/null 2>&1; then
+  mc license update local /minio.license
+fi
+mc license info local >/dev/null
 mc mb --ignore-existing "local/$MINIO_RECORDING_BUCKET"
 
 create_policy() {
