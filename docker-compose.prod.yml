@@ -168,8 +168,8 @@ services:
     build:
       context: ./services/vision
       dockerfile: ../../docker/vision.Dockerfile
-      additional_contexts:
-        ultralytics: ./services/vision/.ultralytics-custom
+      args:
+        VISION_DEPS_IMAGE: ${VISION_DEPS_IMAGE:-p4-vision-deps:local}
     container_name: p4-vision
     restart: unless-stopped
     depends_on:

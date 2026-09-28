@@ -14,6 +14,45 @@ Compose command from the repository root, where `docker-compose.yml` exists.
 The development file still uses the compiled relay image. It does not provide
 Go hot reload.
 
+## Reuse the Vision CUDA dependency image
+
+Vision has two Dockerfiles. `docker/vision-deps.Dockerfile` installs the CUDA
+runtime, Python packages, PyTorch CUDA wheels, TensorRT, and the custom
+Ultralytics fork. `docker/vision.Dockerfile` adds the application code and
+entrypoint on top. Build the dependency image once for each dependency revision;
+ordinary Vision code changes only require rebuilding the small application
+image. Use a new tag when `services/vision/pyproject.toml`, `uv.lock`, or the
+custom Ultralytics fork changes.
+
+From the repository root on the build machine, replace `<dockerhub-user>` with
+your Docker Hub account name:
+
+```powershell
+docker buildx build --load `
+  --build-context ultralytics=./services/vision/.ultralytics-custom `
+  -f docker/vision-deps.Dockerfile `
+  -t <dockerhub-user>/p4-vision-deps:cu13-2026-09 `
+  ./services/vision
+docker login
+docker push <dockerhub-user>/p4-vision-deps:cu13-2026-09
+```
+
+On the machine running Compose, pull that image and tell Compose to use it as
+the Vision build base:
+
+```powershell
+$env:VISION_DEPS_IMAGE = '<dockerhub-user>/p4-vision-deps:cu13-2026-09'
+docker pull $env:VISION_DEPS_IMAGE
+docker compose -f docker-compose.dev.yml up -d --build p4-vision
+```
+
+For a local-only build, tag the dependency image `p4-vision-deps:local` and
+omit `VISION_DEPS_IMAGE`. The production Compose file accepts the same
+variable. The build and run machines must use a compatible CPU architecture;
+the run machine also needs an NVIDIA driver and container GPU support. Keep
+model files in `services/vision/models` as before; they are mounted at runtime
+and are not included in either image.
+
 ## Host prerequisites
 
 ### Windows test host
