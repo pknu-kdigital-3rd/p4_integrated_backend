@@ -15,7 +15,7 @@
       "id": "land",
       "type": "background",
       "paint": {
-        "background-color": "#edf1eb"
+        "background-color": "#eef6ff"
       }
     },
     {
@@ -32,7 +32,7 @@
         "wood"
       ],
       "paint": {
-        "fill-color": "#cce3ce",
+        "fill-color": "#d8eedf",
         "fill-opacity": 0.85
       }
     },
@@ -50,7 +50,7 @@
         "grass"
       ],
       "paint": {
-        "fill-color": "#dce9cb",
+        "fill-color": "#e5f2e4",
         "fill-opacity": 0.8
       }
     },
@@ -60,7 +60,7 @@
       "source": "openmaptiles",
       "source-layer": "park",
       "paint": {
-        "fill-color": "#bde0bf",
+        "fill-color": "#c4e6cf",
         "fill-opacity": 0.85
       }
     },
@@ -70,7 +70,7 @@
       "source": "openmaptiles",
       "source-layer": "water",
       "paint": {
-        "fill-color": "#a9d5e8"
+        "fill-color": "#a9d5f3"
       }
     },
     {
@@ -79,7 +79,7 @@
       "source": "openmaptiles",
       "source-layer": "waterway",
       "paint": {
-        "line-color": "#91c6df",
+        "line-color": "#88c5ed",
         "line-width": [
           "interpolate",
           [
@@ -102,7 +102,7 @@
       "source-layer": "building",
       "minzoom": 13,
       "paint": {
-        "fill-color": "#d9d8d0",
+        "fill-color": "#f2f5f8",
         "fill-opacity": 0.7
       }
     },
@@ -127,7 +127,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#d3d7d3",
+        "line-color": "#d4dfeb",
         "line-width": [
           "interpolate",
           [
@@ -164,7 +164,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#ffffff",
+        "line-color": "#fbfdff",
         "line-width": [
           "interpolate",
           [
@@ -203,7 +203,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#c9b79c",
+        "line-color": "#e5c36f",
         "line-width": [
           "interpolate",
           [
@@ -242,7 +242,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#ffffff",
+        "line-color": "#f7dda0",
         "line-width": [
           "interpolate",
           [
@@ -283,8 +283,8 @@
         "text-size": 11
       },
       "paint": {
-        "text-color": "#59666f",
-        "text-halo-color": "#ffffff",
+        "text-color": "#354b68",
+        "text-halo-color": "#f8fbff",
         "text-halo-width": 1
       }
     },
@@ -323,8 +323,8 @@
         ]
       },
       "paint": {
-        "text-color": "#334d59",
-        "text-halo-color": "#edf1eb",
+        "text-color": "#243d60",
+        "text-halo-color": "#edf6ff",
         "text-halo-width": 1.5
       }
     }
