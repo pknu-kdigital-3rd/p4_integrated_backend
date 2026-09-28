@@ -32,11 +32,14 @@ npm run preview:offline
 ```
 
 Open `http://127.0.0.1:5173/operator/?preview=1`. Both dashboard tabs use
-read-only sample states. Selection and layout controls work; backend actions
-are disabled. Edit `operator-web/map-style.json` for road, land, water, and
-label colors; `operator-web/map-colors.js` for markers and routes; and the
-variables near the top of `operator-web/styles.css` for the main UI colors.
-Vite reloads the preview as files change.
+read-only sample states. Add `&workspace=virtual` to open the restriction
+fixtures directly: blocked road segments are solid red and heavy-penalty
+segments are dashed violet. Edit `virtualRestriction` and `virtualPenalty` in
+`operator-web/map-colors.js` to adjust them. Selection and layout controls work;
+backend actions are disabled. Edit `operator-web/map-style.json` for road, land,
+water, and label colors; `operator-web/map-colors.js` for markers and routes;
+and the variables near the top of `operator-web/styles.css` for the main UI
+colors. Vite reloads the preview as files change.
 
 The production Node image builds the frontend and serves the same map package
 from `data/map/`, mounted by both Compose files. The package must be prepared

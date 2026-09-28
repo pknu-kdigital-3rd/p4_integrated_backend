@@ -1,8 +1,9 @@
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
-import { PREVIEW_MODE, PREVIEW_VIRTUAL_VEHICLES, PREVIEW_RESTRICTION } from './preview-data.js';
+import { PREVIEW_MODE, PREVIEW_VIRTUAL_VEHICLES, PREVIEW_RESTRICTIONS } from './preview-data.js';
 import { MAP_COLORS } from './map-colors.js';
+import { restrictionRoadSegments } from './restriction-road-overlay.js';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -18,6 +19,7 @@ const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
+const restrictionRoadLayerGroup = L.layerGroup().addTo(map);
 const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
 const routeRenderer = L.canvas({ padding: 0.5 });
 const routeVisuals = new Set();
@@ -37,6 +39,7 @@ let selectedVehicleId = '';
 let speedControlEditing = false;
 let vehicles = [];
 let restrictions = [];
+let restrictionRoadRefreshQueued = false;
 let draft = null;
 let points = { origin: null, destination: null, waypoints: [] };
 let pickMode = null;
@@ -225,10 +228,40 @@ function restrictionLabel(restriction) {
     ? ` · ×${Number(restriction.penaltyFactor).toFixed(1)}` : '';
   return `${kind}${factor} · revision ${restriction?.revision ?? '?'}`;
 }
+function refreshRestrictionRoads() {
+  restrictionRoadLayerGroup.clearLayers();
+  const maplibreMap = window.__operatorMaplibreLayer?.getMaplibreMap?.();
+  for (const segment of restrictionRoadSegments(maplibreMap, restrictions)) {
+    const latLngs = segment.coordinates.map(([lng, lat]) => [lat, lng]);
+    const color = segment.kind === 'penalty' ? MAP_COLORS.virtualPenalty : MAP_COLORS.virtualRestriction;
+    L.polyline(latLngs, {
+      color: '#ffffff', weight: 8, opacity: 0.95, interactive: false, lineCap: 'round', lineJoin: 'round',
+    }).addTo(restrictionRoadLayerGroup);
+    L.polyline(latLngs, {
+      color, weight: 5, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round',
+      ...(segment.kind === 'penalty' ? { dashArray: '7 5' } : {}),
+    }).addTo(restrictionRoadLayerGroup);
+  }
+}
+function scheduleRestrictionRoadRefresh() {
+  if (restrictionRoadRefreshQueued) return;
+  restrictionRoadRefreshQueued = true;
+  requestAnimationFrame(() => {
+    restrictionRoadRefreshQueued = false;
+    refreshRestrictionRoads();
+  });
+}
+const maplibreMap = window.__operatorMaplibreLayer?.getMaplibreMap?.();
+maplibreMap?.on('idle', scheduleRestrictionRoadRefresh);
+maplibreMap?.on('moveend', scheduleRestrictionRoadRefresh);
+maplibreMap?.on('sourcedata', (event) => {
+  if (event.sourceId === 'openmaptiles') scheduleRestrictionRoadRefresh();
+});
 function renderRestrictions(items) {
   restrictions = Array.isArray(items) ? items.filter((restriction) => restriction?.isActive !== false) : [];
   restrictionLayerGroup.clearLayers();
   restrictionList.replaceChildren();
+  scheduleRestrictionRoadRefresh();
   if (!restrictions.length) {
     const empty = document.createElement('li');
     empty.textContent = 'No active regions.';
@@ -239,7 +272,7 @@ function renderRestrictions(items) {
     const color = restriction.kind === 'HEAVY_PENALTY' ? MAP_COLORS.virtualPenalty : MAP_COLORS.virtualRestriction;
     if (restriction.geometry) {
       const layer = L.geoJSON(restriction.geometry, {
-        style: { color, weight: 2, fillColor: color, fillOpacity: 0.16 },
+        style: { color, weight: 2, fillColor: color, fillOpacity: 0.1, ...(restriction.kind === 'HEAVY_PENALTY' ? { dashArray: '6 4' } : {}) },
       });
       layer.bindTooltip(restrictionLabel(restriction));
       restrictionLayerGroup.addLayer(layer);
@@ -843,7 +876,7 @@ async function switchMode(next) {
       scenarioSelect.value = scenarioId;
       vehicles = PREVIEW_VIRTUAL_VEHICLES;
       selectedVehicleId = String(vehicles[0].vehicleId);
-      renderRestrictions([PREVIEW_RESTRICTION]);
+      renderRestrictions(PREVIEW_RESTRICTIONS);
       renderVehicles();
       vehicleSelect.value = selectedVehicleId;
       renderSelectedVehicle(vehicles[0]);
@@ -860,7 +893,7 @@ async function switchMode(next) {
   } else {
     normalSectionVisibility.restore();
     window.__operatorAttachMapLayers?.();
-    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
+    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionRoadLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
     draftRouteSignature = '';
     activeRouteSignature = '';
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }

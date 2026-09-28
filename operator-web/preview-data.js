@@ -63,10 +63,18 @@ export const PREVIEW_VIRTUAL_VEHICLES = [
   }
 ];
 
-export const PREVIEW_RESTRICTION = {
-  restrictionId: 'preview-restriction', kind: 'HEAVY_PENALTY', penaltyFactor: 3,
-  revision: 1, isActive: true,
-  geometry: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[
-    [129.095, 35.163], [129.102, 35.163], [129.102, 35.169], [129.095, 35.169], [129.095, 35.163]
-  ]] } }
-};
+export const PREVIEW_RESTRICTIONS = [
+  {
+    restrictionId: 'preview-heavy-penalty', kind: 'HEAVY_PENALTY', penaltyFactor: 3,
+    revision: 1, isActive: true,
+    geometry: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[
+      [129.06, 35.179], [129.068, 35.179], [129.068, 35.185], [129.06, 35.185], [129.06, 35.179]
+    ]] } }
+  },
+  {
+    restrictionId: 'preview-blocked-road', kind: 'BLOCKED', revision: 1, isActive: true,
+    geometry: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[
+      [129.048, 35.179], [129.056, 35.179], [129.056, 35.185], [129.048, 35.185], [129.048, 35.179]
+    ]] } }
+  }
+];

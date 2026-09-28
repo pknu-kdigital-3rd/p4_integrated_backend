@@ -20,7 +20,11 @@ const style = structuredClone(mapStyle);
 style.sources.openmaptiles.url = `pmtiles://${location.origin}/map-assets/busan.pmtiles`;
 style.glyphs = `${location.origin}/map-assets/fonts/{fontstack}/{range}.pbf`;
 style.sprite = `${location.origin}/map-assets/sprites/ofm`;
-window.__createOperatorBaseLayer = (map) => maplibreGL({ style }).addTo(map);
+window.__createOperatorBaseLayer = (map) => {
+  const layer = maplibreGL({ style }).addTo(map);
+  window.__operatorMaplibreLayer = layer;
+  return layer;
+};
 
 await import('./app.js');
 await import('./virtual-dispatch.js');

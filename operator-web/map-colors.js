@@ -10,6 +10,6 @@ export const MAP_COLORS = Object.freeze({
   virtualVehicleFill: '#b185db',
   virtualActiveRoute: '#0875f5',
   virtualPreviousRoute: '#f59e0b',
-  virtualRestriction: '#e76f51',
-  virtualPenalty: '#f4a261'
+  virtualRestriction: '#d9364f',
+  virtualPenalty: '#7657c8'
 });
