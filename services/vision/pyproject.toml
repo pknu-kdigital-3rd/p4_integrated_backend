@@ -17,6 +17,8 @@ dependencies = [
     "torchvision",
     "ultralytics",
     "unidepth @ git+https://github.com/lpiccinelli-eth/UniDepth.git@8d8cfe4c7ee15297099983607febf0d4f32eb3d6",
+    # UniDepth calls xFormers CUDA attention; the PyPI wheel targets another CUDA build.
+    "xformers==0.0.35",
 ]
 
 # Ultralytics currently declares the GUI-enabled opencv-python package on
@@ -37,6 +39,7 @@ exclude-dependencies = [
 ultralytics = { path = ".ultralytics-custom", editable = true }
 torch = [{ index = "pytorch-cu130" }]
 torchvision = [{ index = "pytorch-cu130" }]
+xformers = [{ index = "pytorch-cu130" }]
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

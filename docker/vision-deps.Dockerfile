@@ -14,3 +14,7 @@ WORKDIR /workspace/services/vision
 COPY pyproject.toml uv.lock ./
 COPY --from=ultralytics . ./.ultralytics-custom/
 RUN uv sync --frozen
+# A PyPI xFormers wheel can install successfully while its C++/CUDA operators
+# were built against another Torch/CUDA/Python combination. Fail before this
+# expensive dependency image is tagged or pushed if its extension cannot load.
+RUN /opt/vision-venv/bin/python -c "import sys, torch, xformers._cpp_lib as cpp; print('xFormers build check:', torch.__version__, torch.version.cuda); sys.exit(str(cpp._cpp_library_load_exception) if cpp._cpp_library_load_exception else 0)"
