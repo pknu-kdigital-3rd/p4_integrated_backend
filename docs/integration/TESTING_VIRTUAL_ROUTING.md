@@ -68,8 +68,9 @@ Open `http://localhost:3000/operator/?workspace=virtual`.
 ## Exercise the restriction workflow
 
 1. Open **Virtual Routing & Dispatch** and select or create a scenario.
-2. Choose **Select roads** and click visible road lines to add individual
-   segments. Click a selected segment again to remove it.
+2. Choose **Select roads** and left click visible road lines to add individual
+   segments. Keep left clicking to add more; click a selected segment again to
+   remove it. Right drag to pan the map while selecting.
 3. To select a larger zone, choose **Draw area**, click at least three points
    around the area, then click **Finish area**. Road clicks and areas can be
    combined in one selection.

@@ -50,9 +50,68 @@ let restrictionPreviewResult = null;
 let pollTimer = null;
 let vehiclePollTimer = null;
 let lastEventId = '';
+let restrictionDisabledDragging = false;
+let rightPan = null;
 const SPEED_PRESETS_KMH = [25, 50, 100, 200];
 const virtualVehicleMarkers = new Map();
 const virtualVehicleAnimationFrames = new Map();
+
+function isRestrictionPickMode() {
+  return mode === 'virtual' && (pickMode === 'restriction-roads' || pickMode === 'restriction-area');
+}
+function setPickMode(next) {
+  pickMode = next;
+  map.getContainer().style.cursor = next ? 'crosshair' : '';
+  document.querySelector('#virtual-restriction-roads').setAttribute('aria-pressed', String(next === 'restriction-roads'));
+  document.querySelector('#virtual-restriction-area').setAttribute('aria-pressed', String(next === 'restriction-area'));
+  if (isRestrictionPickMode()) {
+    if (map.dragging.enabled()) {
+      map.dragging.disable();
+      restrictionDisabledDragging = true;
+    }
+  } else if (restrictionDisabledDragging) {
+    map.dragging.enable();
+    restrictionDisabledDragging = false;
+  }
+  if (!isRestrictionPickMode() && rightPan) {
+    if (mapContainer.hasPointerCapture(rightPan.pointerId)) mapContainer.releasePointerCapture(rightPan.pointerId);
+    rightPan = null;
+  }
+}
+
+const mapContainer = map.getContainer();
+mapContainer.addEventListener('pointerdown', (event) => {
+  if (!isRestrictionPickMode() || event.button !== 2) return;
+  rightPan = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  mapContainer.setPointerCapture(event.pointerId);
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+mapContainer.addEventListener('pointermove', (event) => {
+  if (!rightPan || event.pointerId !== rightPan.pointerId) return;
+  const dx = event.clientX - rightPan.x;
+  const dy = event.clientY - rightPan.y;
+  rightPan.x = event.clientX;
+  rightPan.y = event.clientY;
+  if (dx || dy) map.panBy([-dx, -dy], { animate: false });
+  event.preventDefault();
+  event.stopPropagation();
+}, true);
+function endRightPan(event) {
+  if (!rightPan || event.pointerId !== rightPan.pointerId) return;
+  rightPan = null;
+  if (mapContainer.hasPointerCapture(event.pointerId)) mapContainer.releasePointerCapture(event.pointerId);
+  event.preventDefault();
+  event.stopPropagation();
+}
+mapContainer.addEventListener('pointerup', endRightPan, true);
+mapContainer.addEventListener('pointercancel', endRightPan, true);
+mapContainer.addEventListener('lostpointercapture', (event) => {
+  if (rightPan?.pointerId === event.pointerId) rightPan = null;
+});
+mapContainer.addEventListener('contextmenu', (event) => {
+  if (isRestrictionPickMode()) event.preventDefault();
+});
 
 function speedPresetIndex(speedKmh) {
   const numeric = Number(speedKmh);
@@ -716,8 +775,7 @@ async function removeScenario() {
     restrictionAreaPoints = [];
     restrictionGeometry = null;
     restrictionPreviewResult = null;
-    pickMode = null;
-    map.getContainer().style.cursor = '';
+    setPickMode(null);
     restrictionLayerGroup.clearLayers();
     restrictionDraftLayerGroup.clearLayers();
     renderRestrictions([]);
@@ -772,8 +830,7 @@ async function command(command, extra = {}) {
 }
 function beginRoutePointPick(kind) {
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
-  pickMode = kind;
-  map.getContainer().style.cursor = 'crosshair';
+  setPickMode(kind);
   const label = kind === 'waypoint' ? `waypoint ${points.waypoints.length + 1}` : kind;
   setStatus(`Click the map to place the ${label}; it will snap to the nearest road.`);
 }
@@ -834,11 +891,12 @@ function renderRestrictionSelection() {
   restrictionDraftLayerGroup.clearLayers();
   const color = restrictionSelectionKind() === 'penalty' ? MAP_COLORS.virtualPenalty : MAP_COLORS.virtualRestriction;
   for (const selection of restrictionSelections) L.geoJSON(selection.geometry, {
+    interactive: false,
     style: { color, weight: 2, fillColor: color, fillOpacity: 0.2 },
   }).addTo(restrictionDraftLayerGroup);
   if (restrictionAreaPoints.length) {
-    restrictionAreaPoints.forEach((point) => L.circleMarker([point.lat, point.lon], { radius: 4, color, fillOpacity: 1 }).addTo(restrictionDraftLayerGroup));
-    if (restrictionAreaPoints.length > 1) L.polyline(restrictionAreaPoints.map((point) => [point.lat, point.lon]), { color, weight: 2, dashArray: '4 4' }).addTo(restrictionDraftLayerGroup);
+    restrictionAreaPoints.forEach((point) => L.circleMarker([point.lat, point.lon], { radius: 4, color, fillOpacity: 1, interactive: false }).addTo(restrictionDraftLayerGroup));
+    if (restrictionAreaPoints.length > 1) L.polyline(restrictionAreaPoints.map((point) => [point.lat, point.lon]), { color, weight: 2, dashArray: '4 4', interactive: false }).addTo(restrictionDraftLayerGroup);
   }
   scheduleRestrictionRoadRefresh();
 }
@@ -864,9 +922,9 @@ function selectRestrictionPoint(point) {
   }
   if (!maplibre) { setStatus('The road map is still loading.', true); return; }
   let candidates = [];
-  try { candidates = maplibre.queryRenderedFeatures(maplibre.project([point.lon, point.lat]), { layers: ['minor-road', 'major-road'] }); }
-  catch { candidates = []; }
   const pixel = maplibre.project([point.lon, point.lat]);
+  try { candidates = maplibre.queryRenderedFeatures([[pixel.x - 14, pixel.y - 14], [pixel.x + 14, pixel.y + 14]], { layers: ['minor-road', 'major-road'] }); }
+  catch { candidates = []; }
   let best = null;
   for (const feature of candidates) {
     const lines = feature.geometry?.type === 'LineString' ? [feature.geometry.coordinates]
@@ -904,9 +962,7 @@ function finishRestrictionArea() {
   ring.push(ring[0]);
   addRestrictionSelection({ type: 'Polygon', coordinates: [ring] }, 'area');
   restrictionAreaPoints = [];
-  pickMode = null;
-  map.getContainer().style.cursor = '';
-  document.querySelector('#virtual-restriction-area').setAttribute('aria-pressed', 'false');
+  setPickMode(null);
   document.querySelector('#virtual-restriction-finish-area').disabled = true;
   renderRestrictionSelection();
   setStatus('Area added. Preview to see the affected routing segments.');
@@ -997,8 +1053,7 @@ async function removeRestriction(restriction) {
   } catch (error) { setStatus(error.message, true); }
 }
 async function switchMode(next) {
-  pickMode = null;
-  map.getContainer().style.cursor = '';
+  setPickMode(null);
   mode = next; window.__virtualMode = next === 'virtual';
   document.body.classList.toggle('virtual-mode', next === 'virtual');
   virtualPanel.hidden = next !== 'virtual';
@@ -1050,12 +1105,12 @@ async function switchMode(next) {
 }
 map.on('click', (event) => {
   if (mode !== 'virtual' || !pickMode) return;
+  if (event.originalEvent?.button !== undefined && event.originalEvent.button !== 0) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
   const selectedMode = pickMode;
   if (selectedMode === 'restriction-roads' || selectedMode === 'restriction-area') selectRestrictionPoint(point);
   else {
-    pickMode = null;
-    map.getContainer().style.cursor = '';
+    setPickMode(null);
     void snapAndSetRoutePoint(selectedMode, point);
   }
 });
@@ -1089,24 +1144,18 @@ document.querySelector('#virtual-following').addEventListener('change', (event) 
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => { speedControlEditing = true; renderSpeedControl(); });
 document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
-document.querySelector('#virtual-restriction-roads').addEventListener('click', (event) => {
+document.querySelector('#virtual-restriction-roads').addEventListener('click', () => {
   const active = pickMode !== 'restriction-roads';
-  pickMode = active ? 'restriction-roads' : null;
-  map.getContainer().style.cursor = active ? 'crosshair' : '';
-  event.currentTarget.setAttribute('aria-pressed', String(active));
-  document.querySelector('#virtual-restriction-area').setAttribute('aria-pressed', 'false');
-  if (active) setStatus('Click road lines to add or remove individual segments. Select roads, then preview.');
+  setPickMode(active ? 'restriction-roads' : null);
+  if (active) setStatus('Left click roads to add or remove segments. Right drag to pan, then preview.');
 });
-document.querySelector('#virtual-restriction-area').addEventListener('click', (event) => {
+document.querySelector('#virtual-restriction-area').addEventListener('click', () => {
   const active = pickMode !== 'restriction-area';
   restrictionAreaPoints = [];
-  pickMode = active ? 'restriction-area' : null;
-  map.getContainer().style.cursor = active ? 'crosshair' : '';
-  event.currentTarget.setAttribute('aria-pressed', String(active));
-  document.querySelector('#virtual-restriction-roads').setAttribute('aria-pressed', 'false');
+  setPickMode(active ? 'restriction-area' : null);
   document.querySelector('#virtual-restriction-finish-area').disabled = true;
   renderRestrictionSelection();
-  if (active) setStatus('Click at least three points around the area, then finish it.');
+  if (active) setStatus('Left click at least three area points; right drag to pan, then finish.');
 });
 document.querySelector('#virtual-restriction-finish-area').addEventListener('click', finishRestrictionArea);
 document.querySelector('#virtual-restriction-undo').addEventListener('click', () => { restrictionSelections.pop(); invalidateRestrictionPreview(); });
