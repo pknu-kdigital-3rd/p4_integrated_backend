@@ -78,7 +78,11 @@ class DepthEstimator:
         self._model = UniDepthV2.from_pretrained(
             str(model_path), local_files_only=True
         ).to(self._device).eval()
-        self._model.resolution_level = 3
+        self._model.resolution_level = settings.UNIDEPTH_RESOLUTION_LEVEL
+        print(
+            f"UniDepth resolution level: {self._model.resolution_level}",
+            flush=True,
+        )
         self._eager_encode_decode = self._model.encode_decode
         requested_compiler = os.environ.get("CC")
         compiler_name = requested_compiler.split()[0] if requested_compiler else None
