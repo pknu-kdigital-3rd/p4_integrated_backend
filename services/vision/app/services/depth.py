@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass
 from importlib.metadata import distribution
 import json
@@ -14,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from app.core.settings import settings
+from app.services.depth_path import DepthOnlyPath
 
 
 SOURCE_REVISION = "8d8cfe4c7ee15297099983607febf0d4f32eb3d6"
@@ -83,7 +85,8 @@ class DepthEstimator:
             f"UniDepth resolution level: {self._model.resolution_level}",
             flush=True,
         )
-        self._eager_encode_decode = self._model.encode_decode
+        self._depth_path = DepthOnlyPath(self._model, torch)
+        self._optimized = True
         requested_compiler = os.environ.get("CC")
         compiler_name = requested_compiler.split()[0] if requested_compiler else None
         compiler_available = (
@@ -93,8 +96,8 @@ class DepthEstimator:
         )
         self._compiled = settings.UNIDEPTH_COMPILE and compiler_available
         if self._compiled:
-            self._model.encode_decode = torch.compile(
-                self._eager_encode_decode, mode="default", fullgraph=False
+            self._depth_path.forward = torch.compile(
+                self._depth_path.eager_forward, mode="default", fullgraph=False
             )
             print("UniDepth torch.compile enabled; warming up before serving frames", flush=True)
         elif not settings.UNIDEPTH_COMPILE:
@@ -113,30 +116,25 @@ class DepthEstimator:
     def predict(self, frame_bgr: np.ndarray, camera_intrinsic: np.ndarray) -> DepthFrame:
         torch = self._torch
         height, width = frame_bgr.shape[:2]
-        rgb = torch.from_numpy(frame_bgr[:, :, ::-1].copy()).permute(2, 0, 1).to(self._device)
-        camera = torch.as_tensor(camera_intrinsic.copy(), device=self._device)
         try:
-            output = self._infer(rgb, camera)
+            depth = self._infer(frame_bgr, camera_intrinsic)
         except Exception as exc:
             if not self._compiled:
                 raise
-            self._model.encode_decode = self._eager_encode_decode
+            self._depth_path.forward = self._depth_path.eager_forward
             self._compiled = False
             print(
                 f"UniDepth torch.compile failed ({type(exc).__name__}: {exc}); "
                 "retrying in eager mode",
                 flush=True,
             )
-            output = self._infer(rgb, camera)
-        depth = output["depth"]
+            depth = self._infer(frame_bgr, camera_intrinsic)
         if tuple(depth.shape) != (1, 1, height, width):
             raise RuntimeError("UniDepth output is not aligned to the model input frame")
-        return DepthFrame(width, height, depth[0, 0].detach().float())
+        return DepthFrame(width, height, depth[0, 0])
 
     def warmup(self) -> None:
         """Compile for the configured input shape before the live feed starts."""
-        if not self._compiled:
-            return
         configured = settings.YOLO_INFERENCE_SIZE
         if configured == "source":
             width = settings.UNIDEPTH_CALIBRATION_WIDTH
@@ -159,23 +157,41 @@ class DepthEstimator:
             settings.UNIDEPTH_CALIBRATION_WIDTH,
             settings.UNIDEPTH_CALIBRATION_HEIGHT,
         )
-        print(f"UniDepth torch.compile warmup shape: {width}x{height}", flush=True)
+        print(f"UniDepth depth-only warmup shape: {width}x{height}", flush=True)
         started = perf_counter()
-        self.predict(np.zeros((height, width, 3), dtype=np.uint8), camera)
+        frame = np.random.default_rng(0).integers(
+            0, 256, (height, width, 3), dtype=np.uint8
+        )
+        candidate = self.predict(frame, camera).tensor
+        reference = self._infer(frame, camera, reference=True)[0, 0]
+        try:
+            self._torch.testing.assert_close(candidate, reference, rtol=0.01, atol=0.01)
+        except AssertionError as exc:
+            self._optimized = False
+            self._compiled = False
+            print(f"UniDepth depth-only validation failed; using upstream eager path: {exc}", flush=True)
+        else:
+            print("UniDepth depth-only validation passed (rtol=0.01, atol=0.01m)", flush=True)
         print(
             f"UniDepth warmup finished in {perf_counter() - started:.1f}s; "
             f"mode={'compiled' if self._compiled else 'eager fallback'}",
             flush=True,
         )
 
-    def _infer(self, rgb: Any, camera: Any) -> dict[str, Any]:
+    def _infer(self, frame: np.ndarray, camera: np.ndarray, reference: bool = False) -> Any:
         torch = self._torch
         with torch.inference_mode():
-            if self._stream is None:
-                return self._model.infer(rgb, camera)
-            with torch.cuda.stream(self._stream):
-                output = self._model.infer(rgb, camera)
-            self._stream.synchronize()
+            context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
+            with context, torch.autocast("cuda", dtype=torch.float16, enabled=self._device.type == "cuda"):
+                rgb = torch.from_numpy(frame[:, :, ::-1].copy()).permute(2, 0, 1).to(self._device)
+                if reference or not self._optimized:
+                    intrinsic = torch.as_tensor(camera.copy(), device=self._device)
+                    output = self._model.infer(rgb, intrinsic)["depth"]
+                else:
+                    output = self._depth_path(rgb, camera)
+                output = output.detach().float()
+            if self._stream is not None:
+                self._stream.synchronize()
         return output
 
 
