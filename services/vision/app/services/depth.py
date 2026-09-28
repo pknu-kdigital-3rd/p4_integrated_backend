@@ -146,8 +146,9 @@ class DepthEstimator:
 
 
 def load_depth_estimator() -> DepthEstimator:
-    print(f"UniDepth inference device: {settings.YOLO_DEVICE}", flush=True)
-    return DepthEstimator(settings.UNIDEPTH_MODEL_DIR, settings.YOLO_DEVICE)
+    device = settings.UNIDEPTH_DEVICE or settings.YOLO_DEVICE
+    print(f"UniDepth inference device: {device}", flush=True)
+    return DepthEstimator(settings.UNIDEPTH_MODEL_DIR, device)
 
 
 def _exact_median(values: Any, torch: Any) -> Any:
@@ -183,6 +184,10 @@ def masked_median_distances(
         raise ValueError("depth map must be a two-dimensional torch tensor")
     if not isinstance(masks_data, torch.Tensor) or masks_data.ndim != 3:
         return [(None, "mask_unavailable") for _ in detection_indices]
+    # YOLO masks may live on a different GPU from the UniDepth map. Transfer
+    # before resizing so only the smaller mask tensor crosses devices.
+    if masks_data.device != depth_tensor.device:
+        masks_data = masks_data.to(device=depth_tensor.device)
     height, width = map(int, depth_tensor.shape)
     if tuple(masks_data.shape[-2:]) != (height, width):
         masks_data = functional.interpolate(
