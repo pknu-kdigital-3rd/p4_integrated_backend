@@ -54,7 +54,7 @@
     </select>
   </label>
   <label>ghost frames
-    <input id="ghostFrames" type="number" min="0" max="30" step="1" value="0" />
+    <input id="ghostFrames" type="number" min="0" max="30" step="1" value="2" />
   </label>
   <div id="status">Stopped</div><div id="model-label">Segmentation model: --</div><div id="stats"></div>
   <section id="telemetry" aria-live="polite">
@@ -94,7 +94,7 @@
   let tracks = new Map(), nextTrackId = 1;
   let overlayMode = localStorage.getItem('playback-overlay-mode') || 'person_box_other_segmentation';
   let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
-  let ghostFrames = Number.parseInt(localStorage.getItem('playback-ghost-frames') || '0', 10);
+  let ghostFrames = Number.parseInt(localStorage.getItem('playback-ghost-frames') ?? '2', 10);
   let globalMotion = { dx: 0, dy: 0, confidence: 0 };
   const MOTION_WIDTH = 160;
   const MOTION_HEIGHT = 90;
@@ -108,7 +108,9 @@
   const TRACK_CENTER_DISTANCE = 0.20;
   const TRACK_SMOOTHING = 0.45;
   const TRACK_CONFIRM_HITS = 2;
-  const GHOST_OPACITY = 0.18;
+  // Keep a missed box or mask visible briefly while the next detection arrives.
+  // The previous 0.18 alpha made the first held frame almost invisible.
+  const GHOST_OPACITY = 0.7;
   let targetSeconds = 2, lowWatermarkSeconds = 0.5, maxBufferBytes = 64 * 1024 * 1024;
   const telemetryStateEl = document.getElementById('telemetry-state');
   const telemetryFieldsEl = document.getElementById('telemetry-fields');
