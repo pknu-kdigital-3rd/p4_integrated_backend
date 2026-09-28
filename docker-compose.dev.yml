@@ -265,10 +265,10 @@ services:
     networks: [ p4 ]
 
   p4-minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/aistor/minio:RELEASE.2026-09-19T17-05-25Z
     container_name: p4-minio
     restart: unless-stopped
-    command: [ "server", "/data", "--console-address", ":9001" ]
+    command: [ "server", "/data", "--console-address", ":9001", "--license", "/minio.license" ]
     environment:
       MINIO_ROOT_USER: p4-minio-root
       MINIO_ROOT_PASSWORD: dev-only-minio-root-password-2026
@@ -277,10 +277,14 @@ services:
       - type: bind
         source: ./data/minio_data
         target: /data
+      - type: bind
+        source: ./data/minio.license
+        target: /minio.license
+        read_only: true
     networks: [ p4 ]
 
   p4-minio-bootstrap:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: quay.io/minio/aistor/mc:RELEASE.2026-09-19T15-24-59Z
     container_name: p4-minio-bootstrap
     restart: "no"
     depends_on:

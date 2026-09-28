@@ -70,6 +70,14 @@ and `p4-node`). In development, the corresponding fixed secrets are shared by
 the services automatically. In production, only the secrets above are
 required from the host.
 
+Both Compose files use pinned MinIO AIStor Server and Client release images.
+Before starting either stack, request/download an AIStor Free license and put
+the license file at `data/minio.license` from the repository root. Compose
+mounts it read-only into the server and passes `--license /minio.license`.
+AIStor Free is licensed for standalone single-node use; the Compose server is
+configured as one node. Do not commit the license file. See MinIO's [AIStor
+Free license instructions](https://docs.min.io/aistor/installation/container/install/).
+
 The host address and BIMS key are not absolute requirements:
 
 | Variable | Default | When needed |
