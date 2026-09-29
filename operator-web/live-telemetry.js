@@ -1,3 +1,5 @@
+import { formatSpeed } from './dashboard-ui.js';
+
 // Presented-frame telemetry from the Vision live-view iframe drives the selected
 // vehicle's marker while Live View is open; the 3-second fleet poll keeps
 // driving every other marker. Nothing here is persisted: display positions
@@ -79,7 +81,7 @@ export function describeLiveTelemetry(liveView, message, now) {
   };
   const parts = [`Live telemetry: ${labels[telemetry.status] || telemetry.status || 'unknown'}`];
   if (gps) {
-    if (gps.speed_kmh != null) parts.push(`${Number(gps.speed_kmh).toFixed(1)} km/h`);
+    if (gps.speed_kmh != null) parts.push(formatSpeed(gps.speed_kmh));
     if (gps.bearing_deg != null) parts.push(`${Number(gps.bearing_deg).toFixed(0)}°`);
     if (gps.accuracy_quality && gps.accuracy_quality !== 'normal') parts.push(`accuracy ${gps.accuracy_quality}`);
     if (telemetry.match?.gps) parts.push(`gps ${telemetry.match.gps}`);

@@ -26,3 +26,14 @@ describe('dashboard fleet presentation', () => {
     expect(matchesVehicle({},'missing')).toBe(false);
   });
 });
+
+describe('vehicle speed format', () => {
+  it('shows two decimal places and a dash when unknown', async () => {
+    const { formatSpeed } = await import('../../operator-web/dashboard-ui.js');
+    expect(formatSpeed(42.3456)).toBe('42.35 km/h');
+    expect(formatSpeed(7)).toBe('7.00 km/h');
+    expect(formatSpeed('36')).toBe('36.00 km/h');
+    expect(formatSpeed(null)).toBe('— km/h');
+    expect(formatSpeed('')).toBe('— km/h');
+  });
+});

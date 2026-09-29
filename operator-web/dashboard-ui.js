@@ -1,5 +1,10 @@
 // Presentation labels and helpers. Backend enum values remain unchanged.
 export const STATUS_LABELS = { all: '전체', running: '운행중', ready: '대기', maintenance: '점검', offline: '오프라인', stale: 'GPS 지연', unknown: '미확인' };
+/** A vehicle speed with two decimal places, e.g. "42.35 km/h"; "— km/h" when unknown. */
+export function formatSpeed(value) {
+  const speed = value == null || String(value).trim() === '' ? Number.NaN : Number(value);
+  return Number.isFinite(speed) ? `${speed.toFixed(2)} km/h` : '— km/h';
+}
 export const TRIP_STATUS_LABELS = { READY:'출발 대기', IN_PROGRESS:'운행 중', PAUSED:'일시정지', COMPLETED:'완료', CANCELLED:'취소' };
 export const UI_LABELS = {
   'Scenario': '시나리오', 'Virtual vehicle': '가상 차량', 'not set': '미지정', 'none': '없음',
@@ -80,7 +85,7 @@ export function renderVehicleDetails(item) {
   document.querySelector('#selection-empty').hidden = true;
   write('selected-name', item.vehicleCode || item.vehicleName || t.external_id || '차량');
   write('selected-source', [item.vehicleName, item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?'Android GPS 재생':t.telemetry_source].filter(Boolean).join(' · '));
-  write('selected-speed', `${t.speed_kmh ?? '—'} km/h`);
+  write('selected-speed', formatSpeed(t.speed_kmh));
   write('selected-state', TRIP_STATUS_LABELS[item.tripStatus]||STATUS_LABELS[state]); write('selected-trip', item.tripId ?? '—');
   const observed = new Date(t.observed_at_utc);
   write('selected-updated', `최근 업데이트 ${Number.isNaN(observed.getTime()) ? '미확인' : observed.toLocaleTimeString('ko-KR', {hour12:false})}`);

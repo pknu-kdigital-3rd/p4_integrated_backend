@@ -1,4 +1,4 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS} from './dashboard-ui.js';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
@@ -279,7 +279,7 @@ function selectVehicle(item){
   }
   const t=item.telemetry;
   fields.replaceChildren();
-  for(const [label,value] of [[uiText('Vehicle'),item.vehicleName||item.vehicleCode||t.external_id],[uiText('Source'),`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],[uiText('Status'),item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],[uiText('Speed'),`${t.speed_kmh??'—'} km/h`],[uiText('Observed'),t.observed_at_utc||'—'],[uiText('Trip ID'),item.tripId??'—']]){
+  for(const [label,value] of [[uiText('Vehicle'),item.vehicleName||item.vehicleCode||t.external_id],[uiText('Source'),`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],[uiText('Status'),item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],[uiText('Speed'),formatSpeed(t.speed_kmh)],[uiText('Observed'),t.observed_at_utc||'—'],[uiText('Trip ID'),item.tripId??'—']]){
     const term=document.createElement('dt'),description=document.createElement('dd');
     term.textContent=label;description.textContent=String(value);fields.append(term,description);
   }
