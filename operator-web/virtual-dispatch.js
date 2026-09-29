@@ -923,7 +923,9 @@ function selectRestrictionPoint(point) {
   if (!maplibre) { setStatus('The road map is still loading.', true); return; }
   let candidates = [];
   const pixel = maplibre.project([point.lon, point.lat]);
-  try { candidates = maplibre.queryRenderedFeatures([[pixel.x - 14, pixel.y - 14], [pixel.x + 14, pixel.y + 14]], { layers: ['minor-road', 'major-road'] }); }
+  // Query the casing layers too: the visible road line can be wider than its
+  // center stroke, and users naturally click anywhere on the rendered road.
+  try { candidates = maplibre.queryRenderedFeatures([[pixel.x - 14, pixel.y - 14], [pixel.x + 14, pixel.y + 14]], { layers: ['minor-road-casing', 'minor-road', 'major-road-casing', 'major-road'] }); }
   catch { candidates = []; }
   let best = null;
   for (const feature of candidates) {
@@ -1105,7 +1107,9 @@ async function switchMode(next) {
 }
 map.on('click', (event) => {
   if (mode !== 'virtual' || !pickMode) return;
-  if (event.originalEvent?.button !== undefined && event.originalEvent.button !== 0) return;
+  // Leaflet can report a synthetic click after a captured pointer gesture.
+  // Only a genuine primary-button click may select a road or route point.
+  if (event.originalEvent?.button !== 0) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
   const selectedMode = pickMode;
   if (selectedMode === 'restriction-roads' || selectedMode === 'restriction-area') selectRestrictionPoint(point);
