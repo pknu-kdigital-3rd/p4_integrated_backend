@@ -55,7 +55,7 @@ function matchesLiveTarget(item){
 function syncLiveViewButton(item=selected){
   const button=document.querySelector('#live-view');
   button.disabled=!bootstrap||!matchesLiveTarget(item);
-  button.title=button.disabled?'Live View is available while this vehicle's phone is streaming.':'';
+  button.title=button.disabled?"Live View is available while this vehicle's phone is streaming.":'';
 }
 function releaseLiveMarker(){
   const markerState=liveMapFollower.end();
