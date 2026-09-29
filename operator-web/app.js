@@ -43,7 +43,8 @@ function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:fa
 new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
 const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
-function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)&&liveTarget?.tripId===(item?.tripId!=null?String(item.tripId):null)}
+// Live View follows a stream, not a trip, so the trip is not part of the target.
+function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)}
 // Any vehicle whose phone is streaming can be watched; a running trip only
 // decides whether the relay also records it.
 function matchesLiveTarget(item){
@@ -74,6 +75,9 @@ function notifyLiveFrameFullscreen(fullscreen=document.fullscreenElement===liveP
 }
 function retargetLiveView(item){
   if(!liveView||sameLiveTarget(liveView,item))return;
+  // The video belongs to the vehicle it was opened for; selecting another
+  // vehicle closes it instead of relabelling that stream.
+  if(liveView.markerKey!==(item?.telemetry?.external_id??null)){stopLiveView();return}
   const frameOrigin=liveView.frameOrigin;
   releaseLiveMarker();
   liveView=createLiveView(item,frameOrigin);
