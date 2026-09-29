@@ -198,6 +198,16 @@ class DepthEstimator:
 def load_depth_estimator() -> DepthEstimator:
     device = settings.UNIDEPTH_DEVICE or settings.YOLO_DEVICE
     print(f"UniDepth inference device: {device}", flush=True)
+    distance_classes = sorted({
+        name.strip().casefold()
+        for name in settings.UNIDEPTH_DISTANCE_CLASSES.split(",")
+        if name.strip()
+    })
+    print(
+        "UniDepth distance classes: "
+        + (", ".join(distance_classes) if distance_classes else "all"),
+        flush=True,
+    )
     estimator = DepthEstimator(settings.UNIDEPTH_MODEL_DIR, device)
     estimator.warmup()
     return estimator

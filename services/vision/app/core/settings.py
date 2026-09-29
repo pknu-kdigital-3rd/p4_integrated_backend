@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     # Level 2 trades some fine depth detail for lower per-frame latency.
     UNIDEPTH_RESOLUTION_LEVEL: int = Field(default=2, ge=0, le=9)
     UNIDEPTH_COMPILE: bool = True
+    # Empty means preserve depth-distance calculation for every class.
+    # Otherwise use comma-separated class names, compared case-insensitively.
+    UNIDEPTH_DISTANCE_CLASSES: str = ""
     UNIDEPTH_CAMERA_INTRINSIC: tuple[tuple[float, float, float], ...] = (
         (1266.417203046554, 0.0, 816.2670197447984),
         (0.0, 1266.417203046554, 491.50706579294757),

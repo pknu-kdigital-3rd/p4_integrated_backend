@@ -625,6 +625,11 @@ def run_yolo(
             print(f"UniDepth inference failed: {type(exc).__name__}: {exc}", flush=True)
     depth_wait_ms = (perf_counter() - depth_wait_started) * 1000
     postprocess_start = perf_counter()
+    distance_classes = {
+        name.strip().casefold()
+        for name in settings.UNIDEPTH_DISTANCE_CLASSES.split(",")
+        if name.strip()
+    }
     for result, confidence_values, class_values, coordinate_values, track_values in prepared_results:
         boxes = result.boxes
         retained_indices = []
@@ -635,13 +640,30 @@ def run_yolo(
             retained_indices.append(box_index)
         masks = getattr(result, "masks", None)
         masks_data = getattr(masks, "data", None) if masks is not None else None
+        distance_indices = [
+            index
+            for index in retained_indices
+            if not distance_classes
+            or str(yolo_model.names[int(_scalar(class_values[index]))]).casefold()
+            in distance_classes
+        ]
+        distances_by_index = {
+            index: (None, "class_filtered") for index in retained_indices
+            if index not in distance_indices
+        }
         distance_started = perf_counter()
         if depth_frame is None:
-            item_distances = [(None, depth_status) for _ in retained_indices]
-        else:
-            item_distances = masked_median_distances(
-                depth_frame.tensor, masks_data, retained_indices
+            distances_by_index.update(
+                {index: (None, depth_status) for index in distance_indices}
             )
+        elif distance_indices:
+            distances_by_index.update(zip(
+                distance_indices,
+                masked_median_distances(
+                    depth_frame.tensor, masks_data, distance_indices
+                ),
+            ))
+        item_distances = [distances_by_index[index] for index in retained_indices]
         distance_ms += (perf_counter() - distance_started) * 1000
         polygon_started = perf_counter()
         normalized_polygons = [

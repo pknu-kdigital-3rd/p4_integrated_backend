@@ -307,3 +307,16 @@ inspect `gmc_ms`, `gmc_wait_ms`, `tracking_ms`, and `inference_ms`.
 After updating the checkout, apply Compose settings without building:
 `docker compose -f docker-compose.dev.yml up -d --no-build --no-deps --force-recreate p4-vision`.
 The concurrent GMC and association scheduling remains enabled.
+
+## Limit distance calculations to selected classes
+
+Set `UNIDEPTH_DISTANCE_CLASSES` to a comma-separated list of model class names,
+for example `car,truck,bus`. Matching ignores case and surrounding spaces.
+An empty value (the default) calculates distances for every detected class.
+Detections outside the list remain tracked and retain their masks, but have no
+`distance_m`; the live overlay hides the distance status for these filtered items.
+This only reduces per-mask distance work. UniDepth still predicts a full depth
+map each frame, and mask polygon work is unchanged.
+
+Apply a changed value with:
+`UNIDEPTH_DISTANCE_CLASSES=car,truck,bus docker compose -f docker-compose.dev.yml up -d --no-build --no-deps --force-recreate p4-vision`.
