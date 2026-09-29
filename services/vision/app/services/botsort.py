@@ -1,6 +1,7 @@
 """Vehicle-runtime BoT-SORT adapter with one shared sparseOptFlow warp."""
 from __future__ import annotations
 
+from time import perf_counter
 from types import SimpleNamespace
 from typing import Any
 
@@ -73,6 +74,7 @@ class BotSortTracker:
         from ultralytics.trackers.utils.gmc import GMC
 
         self._gmc = GMC(method="sparseOptFlow")
+        self.last_gmc_ms = 0.0
         self._frame_id = 0
         self._identities: dict[tuple[str, int], int] = {}
         self._class_ids: dict[str, int] = {}
@@ -82,6 +84,7 @@ class BotSortTracker:
             backend.reset()
             backend.runtime_warp = None
         self._gmc.reset_params()
+        self.last_gmc_ms = 0.0
         self._frame_id = 0
         self._identities.clear()
         self._class_ids.clear()
@@ -110,7 +113,9 @@ class BotSortTracker:
             )
             groups.append(application_group(row["class_name"]))
 
+        gmc_started = perf_counter()
         warp = self._gmc.apply(frame)
+        self.last_gmc_ms = (perf_counter() - gmc_started) * 1000
         group_values = np.asarray(groups)
         for group, backend in self._backends.items():
             indices = np.flatnonzero(group_values == group)

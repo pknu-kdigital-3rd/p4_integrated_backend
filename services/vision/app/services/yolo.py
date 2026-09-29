@@ -561,6 +561,7 @@ def run_yolo(
             depth_status = "inference_error"
             print(f"UniDepth inference failed: {type(exc).__name__}: {exc}", flush=True)
     postprocess_start = perf_counter()
+    tracking_ms = gmc_ms = distance_ms = polygon_ms = 0.0
     detections = []
     coordinate_field = {
         "xyxy_normalized": "xyxyn",
@@ -579,6 +580,7 @@ def run_yolo(
             else []
         )
         if tracking and botsort_tracker is not None:
+            tracking_started = perf_counter()
             pixel_boxes = _box_field_values(boxes, "xyxy")
             track_rows = []
             for box_index in range(len(boxes)):
@@ -599,6 +601,8 @@ def run_yolo(
             track_values = [None] * len(boxes)
             for row, track_id in zip(track_rows, assignments):
                 track_values[row["box_index"]] = track_id
+            tracking_ms += (perf_counter() - tracking_started) * 1000
+            gmc_ms += getattr(botsort_tracker, "last_gmc_ms", 0.0)
         retained_indices = []
         for box_index in range(len(boxes)):
             conf = float(_scalar(confidence_values[box_index]))
@@ -607,13 +611,20 @@ def run_yolo(
             retained_indices.append(box_index)
         masks = getattr(result, "masks", None)
         masks_data = getattr(masks, "data", None) if masks is not None else None
+        distance_started = perf_counter()
         if depth_frame is None:
             item_distances = [(None, depth_status) for _ in retained_indices]
         else:
             item_distances = masked_median_distances(
                 depth_frame.tensor, masks_data, retained_indices
             )
-        normalized_polygons = _normalized_mask_polygons(result, retained_indices)
+        distance_ms += (perf_counter() - distance_started) * 1000
+        polygon_started = perf_counter()
+        normalized_polygons = [
+            _simplify_mask_polygon(polygon)
+            for polygon in _normalized_mask_polygons(result, retained_indices)
+        ]
+        polygon_ms += (perf_counter() - polygon_started) * 1000
         for polygon_index, (box_index, (distance, distance_status)) in enumerate(
             zip(retained_indices, item_distances)
         ):
@@ -648,13 +659,14 @@ def run_yolo(
             if track_id is not None:
                 detection["track_id"] = int(track_id)
             if polygon_index < len(normalized_polygons):
-                polygon = _simplify_mask_polygon(normalized_polygons[polygon_index])
+                polygon = normalized_polygons[polygon_index]
                 if len(polygon) >= 3:
                     detection["mask"] = (
                         polygon.tolist() if hasattr(polygon, "tolist") else polygon
                     )
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
+    postprocess_ms = (perf_counter() - postprocess_start) * 1000
     return {
         "source": _source_metadata(inference_frame),
         "width": source_width,
@@ -665,7 +677,12 @@ def run_yolo(
         "frame_convert_ms": round(frame_convert_ms, 1),
         "model_ms": round(model_ms, 1),
         "depth_ms": round(depth_ms, 1),
-        "postprocess_ms": round((perf_counter() - postprocess_start) * 1000, 1),
+        "postprocess_ms": postprocess_ms,
+        "tracking_ms": tracking_ms,
+        "gmc_ms": gmc_ms,
+        "distance_ms": distance_ms,
+        "polygon_ms": polygon_ms,
+        "output_ms": max(0.0, postprocess_ms - tracking_ms - distance_ms - polygon_ms),
         "depth": {
             "model": "unidepth-v2-vitb14",
             "status": depth_status,

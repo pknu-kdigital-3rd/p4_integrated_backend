@@ -38,13 +38,13 @@ def _rss_bytes() -> int:
     return 0
 
 
-def _cuda_memory() -> tuple[int, int, int, int]:
+def _cuda_memory(device_name: str) -> tuple[int, int, int, int]:
     """Return current allocated/reserved and process peak CUDA bytes."""
 
-    if not settings.YOLO_DEVICE.startswith("cuda") or not torch.cuda.is_available():
+    if not device_name.startswith("cuda") or not torch.cuda.is_available():
         return 0, 0, 0, 0
     try:
-        device = torch.device(settings.YOLO_DEVICE)
+        device = torch.device(device_name)
         with torch.cuda.device(device):
             allocated = int(torch.cuda.memory_allocated(device))
             reserved = int(torch.cuda.memory_reserved(device))
@@ -56,6 +56,39 @@ def _cuda_memory() -> tuple[int, int, int, int]:
         return allocated, reserved, peak_allocated, peak_reserved
     except (AssertionError, RuntimeError, ValueError):
         return 0, 0, 0, 0
+
+
+
+def _cuda_memory_log() -> str:
+    """Sample each used device once; values cover only the PyTorch allocator."""
+    if not torch.cuda.is_available():
+        return "torch_cuda=unavailable"
+    devices: dict[str, list[str]] = {}
+    for role, name in (
+        ("yolo", settings.YOLO_DEVICE),
+        ("depth", settings.UNIDEPTH_DEVICE or settings.YOLO_DEVICE),
+    ):
+        if not name.startswith("cuda"):
+            continue
+        device = torch.device(name)
+        index = device.index if device.index is not None else torch.cuda.current_device()
+        devices.setdefault(f"cuda:{index}", []).append(role)
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+    parts = []
+    for name, roles in devices.items():
+        index = int(name.split(":")[1])
+        host = visible[index].strip() if index < len(visible) else ""
+        allocated, reserved, peak_allocated, peak_reserved = _cuda_memory(name)
+        label = f"{'+'.join(roles)}@{name}"
+        if host:
+            label += f"/visible={host}"
+        parts.append(
+            f"torch_cuda[{label}]="
+            f"alloc:{allocated / 1024**2:.0f}MiB,"
+            f"reserved:{reserved / 1024**2:.0f}MiB,"
+            f"peak:{peak_allocated / 1024**2:.0f}/{peak_reserved / 1024**2:.0f}MiB"
+        )
+    return " ".join(parts) or "torch_cuda=unavailable"
 
 
 def _rate(delta: float, elapsed: float) -> float:
@@ -146,7 +179,11 @@ async def metrics_worker(state: AppState) -> None:
             skipped_publish_ms = _average_ms(
                 current, previous, "skipped_publish_ms_total", skipped_delta
             )
-            allocated, reserved, peak_allocated, peak_reserved = _cuda_memory()
+            postprocess_detail = " ".join(
+                f"{name}_ms={_average_ms(current, previous, name + '_ms_total', inferred_delta):.1f}"
+                for name in ("tracking", "gmc", "distance", "polygon", "output")
+            )
+            cuda_memory = _cuda_memory_log()
             queue_max = state.inference_queue.maxsize
             queue_limit = str(queue_max) if queue_max > 0 else "unbounded"
             print(
@@ -168,6 +205,7 @@ async def metrics_worker(state: AppState) -> None:
                 f"depth_ms={depth_ms:.1f} "
                 f"inference_ms={inference_ms:.1f} "
                 f"postprocess_ms={postprocess_ms:.1f} "
+                f"{postprocess_detail} "
                 f"worker_cycle_ms={worker_cycle_ms:.1f} "
                 f"queue_wait_ms={queue_wait_ms:.1f} "
                 f"inference_wait_ms={inference_wait_ms:.1f} "
@@ -178,10 +216,7 @@ async def metrics_worker(state: AppState) -> None:
                 f"recording_samples_queued={current['recording_samples_queued']} "
                 f"recording_samples_dropped={current['recording_samples_dropped']} "
                 f"recording_samples_uploaded={current['recording_samples_uploaded']} "
-                f"cuda_alloc={allocated / 1024**2:.0f}MiB "
-                f"cuda_reserved={reserved / 1024**2:.0f}MiB "
-                f"cuda_peak={peak_allocated / 1024**2:.0f}MiB/"
-                f"{peak_reserved / 1024**2:.0f}MiB",
+                f"{cuda_memory}",
                 flush=True,
             )
             telemetry = state.telemetry_store.counters

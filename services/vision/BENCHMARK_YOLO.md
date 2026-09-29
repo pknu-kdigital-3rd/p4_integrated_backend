@@ -245,3 +245,22 @@ uv run python -m unittest discover -s tests -v
 cd "$P4_ROOT/services/media-relay"
 go test ./...
 ```
+# Postprocessing diagnostics
+
+The periodic `[mem]` log reports averages per completed inference:
+
+- `tracking_ms`: BoT-SORT input preparation, update, and ID assignment.
+- `gmc_ms`: sparse optical flow within `tracking_ms`; do not add it again.
+- `distance_ms`: mask transfer and median depth calculation.
+- `polygon_ms`: mask contour extraction and polygon simplification.
+- `output_ms`: remaining postprocessing, including box extraction and detection formatting.
+
+Tracking, distance, polygon, and output timings sum to `postprocess_ms` before
+display rounding. These are wall-clock timings with existing transfer waits;
+diagnostics do not add GPU synchronization. ByteTrack's internal tracking remains
+inside `model_ms`, so its separate `tracking_ms` is zero.
+
+`torch_cuda[role@cuda:N/visible=ID]` identifies the model role, process CUDA index,
+and the corresponding `CUDA_VISIBLE_DEVICES` entry when available. Shared GPUs
+are sampled once. Allocated/reserved memory and interval peaks cover PyTorch's
+allocator, not all TensorRT or device memory. Peaks reset at each log interval.

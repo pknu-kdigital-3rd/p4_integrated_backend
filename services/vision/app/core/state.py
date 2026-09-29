@@ -69,6 +69,11 @@ class VisionMetrics:
     depth_ms_total: float = 0.0
     inference_ms_total: float = 0.0
     postprocess_ms_total: float = 0.0
+    tracking_ms_total: float = 0.0
+    gmc_ms_total: float = 0.0
+    distance_ms_total: float = 0.0
+    polygon_ms_total: float = 0.0
+    output_ms_total: float = 0.0
     worker_cycle_ms_total: float = 0.0
     queue_wait_ms_total: float = 0.0
     inference_wait_ms_total: float = 0.0
@@ -86,6 +91,11 @@ class VisionMetrics:
         self.depth_ms_total += float(result.get("depth_ms", 0.0))
         self.inference_ms_total += float(result.get("inference_ms", 0.0))
         self.postprocess_ms_total += float(result.get("postprocess_ms", 0.0))
+        self.tracking_ms_total += float(result.get("tracking_ms", 0.0))
+        self.gmc_ms_total += float(result.get("gmc_ms", 0.0))
+        self.distance_ms_total += float(result.get("distance_ms", 0.0))
+        self.polygon_ms_total += float(result.get("polygon_ms", 0.0))
+        self.output_ms_total += float(result.get("output_ms", 0.0))
 
     def snapshot(self) -> dict[str, float | int]:
         return {
@@ -100,6 +110,11 @@ class VisionMetrics:
             "depth_ms_total": self.depth_ms_total,
             "inference_ms_total": self.inference_ms_total,
             "postprocess_ms_total": self.postprocess_ms_total,
+            "tracking_ms_total": self.tracking_ms_total,
+            "gmc_ms_total": self.gmc_ms_total,
+            "distance_ms_total": self.distance_ms_total,
+            "polygon_ms_total": self.polygon_ms_total,
+            "output_ms_total": self.output_ms_total,
             "worker_cycle_ms_total": self.worker_cycle_ms_total,
             "queue_wait_ms_total": self.queue_wait_ms_total,
             "inference_wait_ms_total": self.inference_wait_ms_total,
