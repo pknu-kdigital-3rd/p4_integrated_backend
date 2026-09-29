@@ -225,4 +225,32 @@ class TelemetryReplaySchedulerTest {
         assertEquals(listOf(100L, 100L, 200L), batches.flatMap { it.gps }.map { it.timestampNs })
     }
 
+
+    @Test
+    fun `trip switch flushes old samples first, then announces, then relabels`() {
+        val dataset = TelemetryDataset("d", gps = listOf(gps(100), gps(200)), imu = emptyList())
+        val events = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val scheduler = TelemetryReplayScheduler(
+            dataset = dataset,
+            sourceClock = QrSourceClock(nowNs = { 0L }),
+            sessionContext = SESSION,
+            onBatchReady = { batch -> events.add("batch:${batch.recordingSessionId}:${batch.gps.map { it.timestampNs }}") },
+            elapsedMillis = { 0L },
+        )
+        scheduler.testResync(0L)
+        // Due but not yet flushed: the flush interval has not elapsed on this frozen clock.
+        scheduler.advanceCursors(sourceNow = 100L, nowMs = 0L)
+        assertTrue(events.isEmpty())
+
+        val announced = java.util.concurrent.CountDownLatch(1)
+        val next = StreamSessionContext(9L, 2L, "trip-session", TelemetryMode.REPLAY)
+        scheduler.updateSessionContext(next) { events.add("announce"); announced.countDown() }
+        assertTrue(announced.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        Thread.sleep(50) // let the context swap that follows the announcement run
+        scheduler.advanceCursors(sourceNow = 200L, nowMs = 1_000L)
+        scheduler.stop()
+
+        assertEquals(listOf("batch:session:[100]", "announce", "batch:trip-session:[200]"), events.toList())
+    }
+
 }

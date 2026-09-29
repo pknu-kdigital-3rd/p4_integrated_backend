@@ -49,11 +49,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 class WebRtcPublisher(
     context: Context,
     private val offerEndpoint: String,
-    private val sessionContext: StreamSessionContext? = null,
+    initialSessionContext: StreamSessionContext? = null,
     private val onStatus: (String) -> Unit,
     private val onTelemetryStatus: (String) -> Unit = {},
     private val onStreamIdentity: (String?) -> Unit = {},
+    /** Called with the recording session id once the relay answers an in-place identity update. */
+    private val onIdentityUpdated: (String) -> Unit = {},
 ) {
+    // Changes in place when a trip starts or ends; a WebRTC-internal reconnect
+    // offers whichever identity is current.
+    @Volatile private var sessionContext: StreamSessionContext? = initialSessionContext
     private val appContext = context.applicationContext
     private val stopped = AtomicBoolean(true)
     private val disposed = AtomicBoolean(false)
@@ -191,7 +196,13 @@ class WebRtcPublisher(
                     }
                 }
 
-                override fun onMessage(buffer: DataChannel.Buffer) = Unit
+                override fun onMessage(buffer: DataChannel.Buffer) {
+                    val bytes = ByteArray(buffer.data.remaining()).also { buffer.data.get(it) }
+                    val message = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull() ?: return
+                    if (message.optString("type") != "stream_identity_result") return
+                    reportStreamIdentity(message)
+                    onIdentityUpdated(message.optString("recording_session_id"))
+                }
             })
         }
         val initialTelemetryState = telemetryChannel?.state()?.name?.lowercase() ?: "unavailable"
@@ -315,6 +326,26 @@ class WebRtcPublisher(
      * IMU-only batch is dropped before a batch carrying a GPS fix - historical vehicle tracking
      * needs GPS more than it needs an old orientation sample.
      */
+    /**
+     * Switches this stream to [context] without renegotiating: the relay re-validates it,
+     * moves recording and telemetry to the new trip or session, and answers on the same
+     * channel (see [onIdentityUpdated]). The message is queued in order with telemetry, so
+     * batches built for the new session always arrive after it.
+     */
+    fun updateStreamIdentity(context: StreamSessionContext) {
+        val payload = JSONObject()
+            .put("type", "stream_identity")
+            .put("vehicle_id", context.vehicleId.toString())
+            .put("recording_session_id", context.recordingSessionId)
+            .apply { context.tripId?.let { put("trip_id", it.toString()) } }
+            .toString().toByteArray(Charsets.UTF_8)
+        postRtc {
+            sessionContext = context
+            pendingTelemetry.addLast(PendingTelemetry(payload, hasGps = true, control = true))
+            flushTelemetry()
+        }
+    }
+
     fun sendTelemetryBatch(batch: TelemetryBatch) {
         if (batch.isEmpty) return
         // Never hand the relay a message it cannot read: an oversized message closes the
@@ -323,8 +354,10 @@ class WebRtcPublisher(
         postRtc {
             for (message in pending) {
                 if (pendingTelemetry.size >= MAX_PENDING_TELEMETRY_BATCHES) {
-                    val dropIndex = pendingTelemetry.indexOfFirst { !it.hasGps }
-                    if (dropIndex >= 0) pendingTelemetry.removeAt(dropIndex) else pendingTelemetry.removeFirst()
+                    // An identity update is never dropped: losing it would leave the relay on the old trip.
+                    val dropIndex = pendingTelemetry.indexOfFirst { !it.hasGps && !it.control }
+                        .takeIf { it >= 0 } ?: pendingTelemetry.indexOfFirst { !it.control }
+                    if (dropIndex >= 0) pendingTelemetry.removeAt(dropIndex)
                 }
                 pendingTelemetry.addLast(message)
             }
@@ -774,7 +807,7 @@ class WebRtcPublisher(
         }
     }
 
-    private data class PendingTelemetry(val bytes: ByteArray, val hasGps: Boolean)
+    private data class PendingTelemetry(val bytes: ByteArray, val hasGps: Boolean, val control: Boolean = false)
 
     private class SimpleSdpObserver(
         private val createSuccess: (SessionDescription) -> Unit = {},

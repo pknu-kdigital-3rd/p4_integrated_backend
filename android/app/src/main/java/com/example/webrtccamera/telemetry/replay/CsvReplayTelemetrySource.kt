@@ -38,6 +38,10 @@ class CsvReplayTelemetrySource(
 
     override fun stop() = scheduler.stop()
 
+    /** Relabels later batches for a new trip/session; the replay and QR clock keep running. */
+    fun updateSessionContext(context: StreamSessionContext, announce: () -> Unit) =
+        scheduler.updateSessionContext(context, announce)
+
     /** Only call this for a successful QR decode; a failed/absent decode must not touch the clock. */
     fun onQrTimestamp(sourceTimestampNs: Long, captureTimestampNs: Long, decodeLatencyMs: Long) {
         scheduler.onQrTimestamp(sourceTimestampNs, captureTimestampNs, decodeLatencyMs)

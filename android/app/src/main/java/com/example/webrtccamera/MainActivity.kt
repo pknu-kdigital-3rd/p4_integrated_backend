@@ -121,6 +121,8 @@ private const val QR_LOG_TAG = "MainActivity"
 // repeatable but not physically true.
 private const val FOCUS_FRACTION_KEY = "focus_fraction"
 private const val RECORDING_TRIP_ID_KEY = "recording_trip_id"
+// How long to wait for the relay to confirm an in-place trip switch before restarting the stream.
+private const val IDENTITY_SWITCH_TIMEOUT_MS = 5_000L
 private const val RECORDING_VEHICLE_ID_KEY = "recording_vehicle_id"
 
 class MainActivity : AppCompatActivity() {
@@ -163,8 +165,17 @@ class MainActivity : AppCompatActivity() {
     // Non-null while a trip-related transfer runs; shown with the progress bar.
     private var tripBusyMessage: String? = null
     private var previewUploadBusy = false
-    // Set when a trip change must restart the stream; cleared once streaming begins again.
+    // Set while a trip change is being applied to the running stream.
     private var tripStreamSwitchPending = false
+    // Recording session of an in-place identity update awaiting the relay's answer.
+    private var pendingIdentitySession: String? = null
+    // An older relay never answers the update; restart the stream as before.
+    private val identitySwitchFallback = Runnable {
+        if (pendingIdentitySession != null) {
+            pendingIdentitySession = null
+            reconnectStreamForTrip()
+        }
+    }
     private val tripPollHandler = Handler(Looper.getMainLooper())
     private val tripPoll = object : Runnable {
         override fun run() {
@@ -474,9 +485,9 @@ class MainActivity : AppCompatActivity() {
                 // when it answers "no active trip", the relay would reject that ID anyway.
                 assignedTrip = if (result.isSuccess) current else fallbackManualTrip(vehicleId)
                 if (result.isSuccess && previous?.status == "IN_PROGRESS" && assignedTrip?.tripId != previous.tripId) {
-                    if (streaming.get()) reconnectStreamForTrip()
+                    if (streaming.get()) switchStreamToCurrentTrip()
                 } else if (result.isSuccess && previous?.status == "READY" && assignedTrip?.status == "IN_PROGRESS" && streaming.get()) {
-                    reconnectStreamForTrip()
+                    switchStreamToCurrentTrip()
                 }
                 renderTripStatus()
             }
@@ -513,18 +524,62 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 tripRequestBusy = false
                 result.onSuccess { (changed, fingerprint) ->
-                    assignedTrip = changed
+                    // The start response omits the preview; the server just matched this fingerprint.
+                    assignedTrip = changed.copy(fingerprint = fingerprint ?: changed.fingerprint)
                     selectedDatasetFingerprint = fingerprint
                     if (action == "complete") suppressedManualTripId = changed.tripId
                     if (streaming.get()) {
                         tripStreamSwitchPending = true
-                        tripBusyMessage = "Trip ${changed.tripId} ${changed.status}: reconnecting stream…"
-                        reconnectStreamForTrip()
+                        tripBusyMessage = "Trip ${changed.tripId} ${changed.status}: updating stream…"
+                        switchStreamToCurrentTrip()
                     }
                     setStatus("Trip ${changed.tripId}: ${changed.status}")
                 }.onFailure { setStatus("Trip change failed: ${it.message}") }
                 renderTripStatus()
             }
+        }
+    }
+
+    /**
+     * Moves the running stream to the current trip (or to trip-less tracking) without
+     * restarting it: video and the live view keep playing, the GPS replay keeps its QR clock,
+     * and only recording and telemetry switch. Falls back to a restart if the relay does not
+     * answer, which is what an older relay does.
+     */
+    private fun switchStreamToCurrentTrip() {
+        if (!streaming.get()) return
+        val activePublisher = publisher
+        val vehicleId = vehicleIdInput() ?: activeSessionContext?.vehicleId
+        if (activePublisher == null || vehicleId == null) {
+            reconnectStreamForTrip()
+            return
+        }
+        val trip = assignedTrip?.takeIf {
+            it.status == "IN_PROGRESS" && (it.routeMode != "REPLAY_ONLY" || it.fingerprint == selectedDatasetFingerprint)
+        }
+        val context = StreamSessionContext(
+            tripId = trip?.tripId,
+            vehicleId = trip?.vehicleId ?: vehicleId,
+            recordingSessionId = UUID.randomUUID().toString(),
+            telemetryMode = TelemetryMode.REPLAY,
+        )
+        activeSessionContext = context
+        pendingIdentitySession = context.recordingSessionId
+        val replay = telemetryReplaySource
+        if (replay != null) replay.updateSessionContext(context) { activePublisher.updateStreamIdentity(context) }
+        else activePublisher.updateStreamIdentity(context)
+        tripPollHandler.removeCallbacks(identitySwitchFallback)
+        tripPollHandler.postDelayed(identitySwitchFallback, IDENTITY_SWITCH_TIMEOUT_MS)
+        updateRecordingContextText()
+    }
+
+    private fun onStreamIdentityUpdated(recordingSessionId: String) {
+        if (recordingSessionId != pendingIdentitySession) return
+        pendingIdentitySession = null
+        tripPollHandler.removeCallbacks(identitySwitchFallback)
+        if (tripStreamSwitchPending) {
+            tripStreamSwitchPending = false
+            renderTripStatus()
         }
     }
 
@@ -629,10 +684,11 @@ class MainActivity : AppCompatActivity() {
         publisher = WebRtcPublisher(
             context = this,
             offerEndpoint = endpoint,
-            sessionContext = sessionContext,
+            initialSessionContext = sessionContext,
             onStatus = { message ->
                 runOnUiThread { if (streaming.get()) setStatus(message) }
             },
+            onIdentityUpdated = { session -> runOnUiThread { onStreamIdentityUpdated(session) } },
             onTelemetryStatus = { message ->
                 runOnUiThread { if (streaming.get()) setTelemetryTransportStatus(message) }
             },
@@ -1193,6 +1249,8 @@ class MainActivity : AppCompatActivity() {
         telemetryReplaySource?.stop()
         telemetryReplaySource = null
         activeSessionContext = null
+        pendingIdentitySession = null
+        tripPollHandler.removeCallbacks(identitySwitchFallback)
         publisher?.dispose()
         publisher = null
         recordingTripIdInput.isEnabled = true

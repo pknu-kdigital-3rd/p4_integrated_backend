@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicLong
 class TelemetryReplayScheduler(
     private val dataset: TelemetryDataset,
     private val sourceClock: QrSourceClock,
-    private val sessionContext: StreamSessionContext,
+    sessionContext: StreamSessionContext,
     private val onBatchReady: (TelemetryBatch) -> Unit,
     private val onStatus: (String) -> Unit = {},
     private val elapsedMillis: () -> Long = SystemClock::elapsedRealtime,
@@ -51,6 +51,8 @@ class TelemetryReplayScheduler(
     // footage; without this, every sample from the start of the dataset would be released
     // at once as one oversized backlog message.
     private var cursorsSynced = false
+    // Read and replaced only on [executor]; see [updateSessionContext].
+    private var sessionContext = sessionContext
     // The last GPS fix handed to the transport and when, so the vehicle's position can be
     // held on the operator map while no replayed fix is due.
     private var lastSentGps: GpsSample? = null
@@ -96,6 +98,19 @@ class TelemetryReplayScheduler(
         tickFuture?.cancel(false)
         tickFuture = null
         executor.shutdown()
+    }
+
+    /**
+     * Switches later batches to [context] (a trip started or ended in place). Pending samples
+     * are flushed under the old identity first, then [announce] runs - on this thread, so the
+     * identity update is queued after the last old batch and before the first new one.
+     */
+    fun updateSessionContext(context: StreamSessionContext, announce: () -> Unit) {
+        postOrRun {
+            flush(sourceClock.currentSourceTimestampNs() ?: 0L, elapsedMillis())
+            announce()
+            sessionContext = context
+        }
     }
 
     /** Only call for a successful QR decode. */
