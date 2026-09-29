@@ -29,16 +29,17 @@ function syncLiveDetails(){
 // black bars; it stays at most 540px wide and inside the map. With details
 // shown (or before the video size is known) the stylesheet size applies.
 let liveVideoSize=null;
+const LIVE_PANEL_INSET=8; // matches the video's inner margin in styles.css
 function fitLivePanelToVideo(){
   const fit=liveDetailsHidden&&liveVideoSize&&!livePanel.hidden&&document.fullscreenElement!==livePanel;
   if(!fit){livePanel.style.removeProperty('width');livePanel.style.removeProperty('height')}
   else{
-    const surface=document.querySelector('#map-surface').getBoundingClientRect(),header=48;
+    const surface=document.querySelector('#map-surface').getBoundingClientRect(),header=48,inset=LIVE_PANEL_INSET;
     const ratio=liveVideoSize.width/liveVideoSize.height;
-    let width=Math.max(160,Math.min(540,surface.width-36)),videoHeight=width/ratio;
-    const maxVideoHeight=Math.max(90,Math.min(440,surface.height-36,surface.height*0.7)-header);
-    if(videoHeight>maxVideoHeight){videoHeight=maxVideoHeight;width=videoHeight*ratio}
-    livePanel.style.width=`${Math.round(width)}px`;livePanel.style.height=`${Math.round(videoHeight+header)}px`;
+    let videoWidth=Math.max(160,Math.min(540,surface.width-36))-2*inset,videoHeight=videoWidth/ratio;
+    const maxVideoHeight=Math.max(90,Math.min(440,surface.height-36,surface.height*0.7)-header-inset);
+    if(videoHeight>maxVideoHeight){videoHeight=maxVideoHeight;videoWidth=videoHeight*ratio}
+    livePanel.style.width=`${Math.round(videoWidth+2*inset)}px`;livePanel.style.height=`${Math.round(header+videoHeight+inset)}px`;
   }
   livePanelDrag?.apply();
 }

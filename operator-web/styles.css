@@ -186,6 +186,9 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #live-view-panel.dragging #live-view-frame { pointer-events: none; }
 #live-view-panel.details-hidden { grid-template-rows: 48px minmax(0,1fr); }
 #live-view-panel.details-hidden #live-view-diagnostic,#live-view-panel.details-hidden #live-telemetry-status { display: none; }
+/* Inner margin in the panel (title bar) colour around the video; the 8px is
+   mirrored by LIVE_PANEL_INSET in app.js, which sizes the panel to the video. */
+#live-view-panel.details-hidden:not(:fullscreen) #live-view-frame { margin: 0 8px 8px; width: calc(100% - 16px); height: calc(100% - 8px); border-radius: 6px; }
 .live-view-header { user-select: none; }
 /* A dragged position is inline left/top; fullscreen must still cover the screen. */
 #live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr); }
