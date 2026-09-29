@@ -203,7 +203,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:checked="false"
+                android:checked="true"
                 android:text="Telemetry simulation"
                 android:textColor="#FFFFFFFF" />
 

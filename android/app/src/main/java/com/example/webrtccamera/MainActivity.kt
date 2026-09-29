@@ -125,6 +125,8 @@ private const val RECORDING_TRIP_ID_KEY = "recording_trip_id"
 private const val IDENTITY_SWITCH_TIMEOUT_MS = 5_000L
 private const val RECORDING_VEHICLE_ID_KEY = "recording_vehicle_id"
 private const val AUTO_START_TRIPS_KEY = "auto_start_trips"
+private const val TELEMETRY_ENABLED_KEY = "telemetry_enabled"
+private const val DATASET_FOLDER_URI_KEY = "dataset_folder_uri"
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewFinder: PreviewView
@@ -325,6 +327,7 @@ class MainActivity : AppCompatActivity() {
         telemetryStatusText = findViewById(R.id.telemetryStatusText)
         telemetrySwitch.setOnCheckedChangeListener { _, enabled ->
             telemetryEnabled = enabled
+            getPreferences(MODE_PRIVATE).edit { putBoolean(TELEMETRY_ENABLED_KEY, enabled) }
             setTelemetryStatus(
                 when {
                     !enabled -> "Telemetry: disabled"
@@ -333,7 +336,15 @@ class MainActivity : AppCompatActivity() {
                 }
             )
         }
-        selectDatasetButton.setOnClickListener { datasetFolderLauncher.launch(null) }
+        // GPS simulation is on unless the driver switched it off; the listener above applies it.
+        telemetrySwitch.isChecked = getPreferences(MODE_PRIVATE).getBoolean(TELEMETRY_ENABLED_KEY, true)
+        telemetryEnabled = telemetrySwitch.isChecked
+        // The listener does not fire when the saved value equals the layout's, so set the line here.
+        setTelemetryStatus(if (telemetryEnabled) "Telemetry: no dataset selected" else "Telemetry: disabled")
+        // The folder picker opens at the last dataset folder.
+        selectDatasetButton.setOnClickListener {
+            datasetFolderLauncher.launch(getPreferences(MODE_PRIVATE).getString(DATASET_FOLDER_URI_KEY, null)?.let(Uri::parse))
+        }
         focusFraction = getPreferences(MODE_PRIVATE).getFloat(FOCUS_FRACTION_KEY, 0f)
         updateZoomStatus()
         viewFinder.setOnTouchListener { view, event ->
@@ -376,6 +387,7 @@ class MainActivity : AppCompatActivity() {
 
         cameraExecutor = Executors.newSingleThreadExecutor()
         telemetryIoExecutor = Executors.newSingleThreadExecutor()
+        restoreLastDataset()
         setStatus("Ready")
         renderTripStatus()
     }
@@ -391,7 +403,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Runs entirely on [telemetryIoExecutor]; parsing a 54k-row IMU CSV must stay off the UI thread. */
+    /** Reloads the last dataset folder at launch while the app still holds read access to it. */
+    private fun restoreLastDataset() {
+        val saved = getPreferences(MODE_PRIVATE).getString(DATASET_FOLDER_URI_KEY, null) ?: return
+        val folderUri = Uri.parse(saved)
+        val readable = contentResolver.persistedUriPermissions.any { it.uri == folderUri && it.isReadPermission }
+        if (readable) onDatasetFolderSelected(folderUri)
+    }
+
     private fun onDatasetFolderSelected(folderUri: Uri) {
+        getPreferences(MODE_PRIVATE).edit { putString(DATASET_FOLDER_URI_KEY, folderUri.toString()) }
         try {
             contentResolver.takePersistableUriPermission(folderUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) {
