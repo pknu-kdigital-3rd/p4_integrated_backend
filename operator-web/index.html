@@ -500,7 +500,11 @@
        <label for="recording-trip-id">
         운행 ID
        </label>
-       <input id="recording-trip-id" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="차량 선택 또는 운행 ID 입력" required=""/>
+       <select id="recording-trip-id" required="">
+        <option disabled="" selected="" value="">
+         운행 불러오는 중…
+        </option>
+       </select>
        <button type="submit">
         녹화 불러오기
        </button>

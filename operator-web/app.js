@@ -283,7 +283,7 @@ function selectVehicle(item){
     term.textContent=label;description.textContent=String(value);fields.append(term,description);
   }
   void loadSelectedTrip();
-  document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';
+  selectRecordingTrip(item.tripId);
   if(item.tripId)void loadTripRecordings(String(item.tripId));
   retargetLiveView(item);
   // Open the live view as soon as a streaming vehicle is selected, where it is
@@ -428,6 +428,7 @@ async function loadTripAssignments(){
   for(const trip of trips)if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&!activeTripByVehicle.has(String(trip.vehicleId)))activeTripByVehicle.set(String(trip.vehicleId),String(trip.tripId));
   syncTripRouteMode();
   void loadAssignmentPreview();
+  renderRecordingTripOptions(trips);
   const list=document.querySelector('#trips-list');list.replaceChildren();
   for(const trip of trips){
     const row=document.createElement('li'),title=document.createElement('strong'),vehicle=document.createElement('span'),destination=document.createElement('span'),status=document.createElement('span');
@@ -455,6 +456,8 @@ async function start(role){
   telemetrySettings.hidden=false;
   bootstrap=await api('/api/v1/bootstrap');
   document.querySelector('#trip-panel').hidden=demoMode;
+  // Demo mode never loads trips, so the recordings picker has none to offer.
+  if(demoMode)renderRecordingTripOptions([]);
   if(!demoMode){
     document.querySelector('#trip-form').hidden=!['ADMIN','OPERATOR'].includes(role);
     document.querySelector('#trip-status-message').textContent=['ADMIN','OPERATOR'].includes(role)?uiText('Choose a vehicle and destination.'):'You can review recent trips; an operator or admin can create one.';
@@ -546,7 +549,32 @@ document.querySelector('#recording-back').addEventListener('click',()=>void seek
 document.querySelector('#recording-forward').addEventListener('click',()=>void seekReplay(replayCurrentTime()+10,true,1));
 document.querySelector('#recording-seek').addEventListener('input',event=>{beginReplayScrub();setReplayPosition(event.currentTarget.value)});
 document.querySelector('#recording-seek').addEventListener('change',event=>void commitReplayScrub(event.currentTarget.value));
-document.querySelector('#recordings-form').addEventListener('submit',event=>{event.preventDefault();void loadTripRecordings(document.querySelector('#recording-trip-id').value)});
+document.querySelector('#recordings-form').addEventListener('submit',event=>{event.preventDefault();const tripId=document.querySelector('#recording-trip-id').value;if(tripId)void loadTripRecordings(tripId)});
+// Choosing a trip loads its recordings right away.
+document.querySelector('#recording-trip-id').addEventListener('change',event=>{if(event.currentTarget.value)void loadTripRecordings(event.currentTarget.value)});
+// The recordings trip picker lists the recent trips (newest first); with none it says so.
+function renderRecordingTripOptions(trips){
+  const select=document.querySelector('#recording-trip-id'),previous=select.value;
+  select.replaceChildren();
+  if(!trips.length){select.add(new Option('없음','',true,true));select.options[0].disabled=true;return}
+  select.add(new Option('운행 선택','',!previous,!previous));select.options[0].disabled=true;
+  for(const trip of trips){
+    const vehicle=trip.vehicle?.vehicleCode||`Vehicle ${trip.vehicleId}`;
+    select.add(new Option(`운행 ${trip.tripId} · ${vehicle} · ${TRIP_STATUS_LABELS[trip.tripStatus]||trip.tripStatus}`,String(trip.tripId)));
+  }
+  if(previous)selectRecordingTrip(previous);
+}
+// Selects a trip in the picker, adding it if it is older than the listed ones.
+function selectRecordingTrip(tripId){
+  const select=document.querySelector('#recording-trip-id');
+  if(!tripId){if(select.options[0]&&!select.options[0].value)select.selectedIndex=0;return}
+  const value=String(tripId);
+  if(![...select.options].some(option=>option.value===value)){
+    if(select.options.length===1&&!select.options[0].value&&select.options[0].textContent==='없음')select.replaceChildren(new Option('운행 선택','',false,false));
+    select.add(new Option(`운행 ${value}`,value));
+  }
+  select.value=value;
+}
 document.querySelector('#stop-recording').addEventListener('click',stopRecordingPlayback);
 document.querySelector('#recording-delete-toggle').addEventListener('click',event=>{const mode=document.querySelector('#recording-delete-mode');if(mode.hidden){openRecordingDeleteMode();document.querySelector('#recordings-status').textContent='Drag across the timeline to select a contiguous range of segments.'}else{closeRecordingDeleteMode();document.querySelector('#recordings-status').textContent='Delete mode closed.'}});
 document.querySelector('#recording-delete-cancel').addEventListener('click',()=>{closeRecordingDeleteMode();document.querySelector('#recordings-status').textContent='Delete mode closed.'});
@@ -708,7 +736,7 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
   try{
     const trip=await api('/api/v1/trips',{method:'POST',body:JSON.stringify(body)},true);
     message.textContent=`Trip ID ${trip.tripId} 배정 완료 · Android에서 운행 시작을 누르세요.`;
-    document.querySelector('#recording-trip-id').value=String(trip.tripId);
+    selectRecordingTrip(trip.tripId);
     await Promise.all([loadTripAssignments(),loadTripRecordings(String(trip.tripId)),refresh()]);
   }catch(ex){message.textContent=ex.message}
   finally{button.disabled=false;form.querySelector('#trip-destination-name').focus()}
