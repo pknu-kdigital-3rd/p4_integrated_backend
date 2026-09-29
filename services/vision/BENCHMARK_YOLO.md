@@ -320,3 +320,18 @@ map each frame, and mask polygon work is unchanged.
 
 Apply a changed value with:
 `UNIDEPTH_DISTANCE_CLASSES=car,truck,bus docker compose -f docker-compose.dev.yml up -d --no-build --no-deps --force-recreate p4-vision`.
+
+Set `YOLO_SEGMENTATION_CLASSES` to a comma-separated class allowlist, such as
+`person,car`. Other detections and distance values are retained, but their mask
+polygons are omitted. This skips contour conversion and reduces published mask
+data; the YOLO segmentation head still computes masks internally. An empty value
+keeps polygons for all classes.
+
+## Mask outline smoothing
+
+BoT-SORT overlays lightly smooth simplified mask outlines by track ID. Each
+outline is resampled around its perimeter to 32 points, aligned to the previous
+outline's start and direction, then blended with 65% of the current outline.
+This only affects the published polygon; tracker boxes, association, and depth
+distances still use the current frame. The cache is capped at 256 tracks and is
+cleared when the tracker resets. Smoothing may lag during rapid shape changes.

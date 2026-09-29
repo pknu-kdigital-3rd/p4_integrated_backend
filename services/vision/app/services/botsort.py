@@ -1,6 +1,7 @@
 """Vehicle-runtime BoT-SORT adapter with one shared sparseOptFlow warp."""
 from __future__ import annotations
 
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from time import perf_counter
@@ -21,6 +22,56 @@ CLASS_GROUPS = {
     "truck": "vehicle",
     "bus": "vehicle",
 }
+
+_MASK_SMOOTH_POINTS = 32
+_MASK_SMOOTH_ALPHA = 0.65
+_MASK_CACHE_LIMIT = 256
+
+
+def _resample_polygon(polygon: Any, point_count: int) -> np.ndarray | None:
+    points = np.asarray(polygon, dtype=np.float32).reshape(-1, 2)
+    if len(points) < 3 or not np.isfinite(points).all():
+        return None
+    closed = np.concatenate((points, points[:1]), axis=0)
+    lengths = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    cumulative = np.concatenate(([0.0], np.cumsum(lengths)))
+    perimeter = float(cumulative[-1])
+    if perimeter <= 1e-8:
+        return None
+    targets = np.arange(point_count, dtype=np.float32) * (perimeter / point_count)
+    return np.stack(
+        [np.interp(targets, cumulative, closed[:, axis]) for axis in range(2)],
+        axis=1,
+    ).astype(np.float32)
+
+
+def smooth_mask_polygon(
+    previous: Any | None,
+    current: Any,
+    *,
+    alpha: float = _MASK_SMOOTH_ALPHA,
+    point_count: int = _MASK_SMOOTH_POINTS,
+) -> np.ndarray:
+    """Lightly blend same-track polygon outlines after perimeter resampling."""
+    new = _resample_polygon(current, point_count)
+    if new is None:
+        return np.asarray(current, dtype=np.float32).reshape(-1, 2)
+    old = _resample_polygon(previous, point_count) if previous is not None else None
+    if old is None:
+        return new
+
+    # Contour extraction can start at any vertex and traverse either direction.
+    # Align both outlines before blending so index shifts do not warp the mask.
+    best = old
+    best_cost = float("inf")
+    for candidate in (old, old[::-1]):
+        for shift in range(point_count):
+            aligned = np.roll(candidate, shift, axis=0)
+            delta = aligned - new
+            cost = float(np.einsum("ij,ij->", delta, delta))
+            if cost < best_cost:
+                best, best_cost = aligned, cost
+    return (best * (1.0 - alpha) + new * alpha).astype(np.float32)
 
 
 def application_group(class_name: str) -> str | None:
@@ -92,6 +143,7 @@ class BotSortTracker:
         self._frame_id = 0
         self._identities: dict[tuple[str, int], int] = {}
         self._class_ids: dict[str, int] = {}
+        self._mask_polygons: OrderedDict[int, np.ndarray] = OrderedDict()
 
     def reset(self) -> None:
         for backend in self._backends.values():
@@ -103,6 +155,15 @@ class BotSortTracker:
         self._frame_id = 0
         self._identities.clear()
         self._class_ids.clear()
+        self._mask_polygons.clear()
+
+    def smooth_mask(self, track_id: int, polygon: Any) -> np.ndarray:
+        smoothed = smooth_mask_polygon(self._mask_polygons.get(track_id), polygon)
+        self._mask_polygons[track_id] = smoothed
+        self._mask_polygons.move_to_end(track_id)
+        while len(self._mask_polygons) > _MASK_CACHE_LIMIT:
+            self._mask_polygons.popitem(last=False)
+        return smoothed
 
     def prepare_gmc(self, frame: np.ndarray):
         # Own the pixels while YOLO uses its input on another thread.

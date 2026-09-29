@@ -630,6 +630,11 @@ def run_yolo(
         for name in settings.UNIDEPTH_DISTANCE_CLASSES.split(",")
         if name.strip()
     }
+    segmentation_classes = {
+        name.strip().casefold()
+        for name in settings.YOLO_SEGMENTATION_CLASSES.split(",")
+        if name.strip()
+    }
     for result, confidence_values, class_values, coordinate_values, track_values in prepared_results:
         boxes = result.boxes
         retained_indices = []
@@ -666,14 +671,22 @@ def run_yolo(
         item_distances = [distances_by_index[index] for index in retained_indices]
         distance_ms += (perf_counter() - distance_started) * 1000
         polygon_started = perf_counter()
-        normalized_polygons = [
-            _simplify_mask_polygon(polygon)
-            for polygon in _normalized_mask_polygons(result, retained_indices)
+        mask_indices = [
+            index
+            for index in retained_indices
+            if not segmentation_classes
+            or str(yolo_model.names[int(_scalar(class_values[index]))]).casefold()
+            in segmentation_classes
         ]
+        polygons_by_index = dict(zip(
+            mask_indices,
+            (
+                _simplify_mask_polygon(polygon)
+                for polygon in _normalized_mask_polygons(result, mask_indices)
+            ),
+        ))
         polygon_ms += (perf_counter() - polygon_started) * 1000
-        for polygon_index, (box_index, (distance, distance_status)) in enumerate(
-            zip(retained_indices, item_distances)
-        ):
+        for box_index, (distance, distance_status) in zip(retained_indices, item_distances):
             conf = float(_scalar(confidence_values[box_index]))
             cls_id = int(_scalar(class_values[box_index]))
             bbox = [float(value) for value in coordinate_values[box_index]]
@@ -704,8 +717,10 @@ def run_yolo(
             track_id = _scalar(track_id)
             if track_id is not None:
                 detection["track_id"] = int(track_id)
-            if polygon_index < len(normalized_polygons):
-                polygon = normalized_polygons[polygon_index]
+            if box_index in polygons_by_index:
+                polygon = polygons_by_index[box_index]
+                if tracking and botsort_tracker is not None and track_id is not None:
+                    polygon = botsort_tracker.smooth_mask(int(track_id), polygon)
                 if len(polygon) >= 3:
                     detection["mask"] = (
                         polygon.tolist() if hasattr(polygon, "tolist") else polygon

@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     # identical until a deployment opts in.
     YOLO_MASK_POLYGON_SIMPLIFY: bool = False
     YOLO_MASK_POLYGON_EPSILON_RATIO: float = Field(default=0.002, ge=0.0, le=0.2)
+    # Empty publishes mask polygons for all classes; a CSV allowlist limits
+    # contour extraction and mask output to selected model class names.
+    YOLO_SEGMENTATION_CLASSES: str = ""
     BBOX_FORMAT: Literal[
         "xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"
     ] = "xyxy_normalized"
