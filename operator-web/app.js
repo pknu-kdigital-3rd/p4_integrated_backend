@@ -94,7 +94,12 @@ const livePanelDrag=installPanelDrag({panel:livePanel,handle:livePanel.querySele
 syncLiveDetails();
 const livePanelResize=new ResizeObserver(()=>fitLivePanelToVideo());
 livePanelResize.observe(document.querySelector('#map-surface'));livePanelResize.observe(liveDock);
-document.querySelector('#live-float').addEventListener('click',()=>placeLivePanel(!liveDocked));
+// In fullscreen the panel is the fullscreen element and cannot be moved;
+// leave fullscreen first, then dock or float it.
+document.querySelector('#live-float').addEventListener('click',async()=>{
+  if(document.fullscreenElement===livePanel)await document.exitFullscreen().catch(()=>{});
+  placeLivePanel(!liveDocked);
+});
 // A docked preview is hidden by the saved-recordings tab; close it rather than keep a TURN port busy.
 document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView()});
 placeLivePanel(true);
