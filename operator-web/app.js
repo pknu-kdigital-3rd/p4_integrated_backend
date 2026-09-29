@@ -17,6 +17,9 @@ const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
 // Debugging details (diagnostics, telemetry status, the Vision page's controls)
 // are hidden by default and one click away; the choice is remembered.
+// The live preview is docked in the "실시간 영상" tab unless the operator floats it on the map.
+let liveDocked=true;
+const liveDock=document.querySelector('#live-view-dock');
 let liveDetailsHidden=(()=>{try{return localStorage.getItem('operatorLiveDetailsHidden')!=='false'}catch{return true}})();
 function syncLiveDetails(){
   livePanel.classList.toggle('details-hidden',liveDetailsHidden);
@@ -33,11 +36,21 @@ let liveVideoSize=null;
 const LIVE_PANEL_INSET=8; // matches the video's side margins in styles.css
 const LIVE_PANEL_FOOTER=30; // the detection status row under the video
 function fitLivePanelToVideo(){
-  const fit=liveDetailsHidden&&liveVideoSize&&!livePanel.hidden&&document.fullscreenElement!==livePanel;
+  if(livePanel.hidden||document.fullscreenElement===livePanel){livePanel.style.removeProperty('width');livePanel.style.removeProperty('height');livePanelDrag?.apply();return}
+  const header=48,inset=LIVE_PANEL_INSET,footer=LIVE_PANEL_FOOTER,detailRows=50;
+  const ratio=liveVideoSize?liveVideoSize.width/liveVideoSize.height:16/9;
+  if(liveDocked){
+    // Docked: take the sidebar's width and the video's shape (16:9 until it is known).
+    const width=liveDock.clientWidth||320;
+    const videoHeight=(width-(liveDetailsHidden?2*inset:0))/ratio;
+    const height=liveDetailsHidden?header+videoHeight+footer:header+detailRows+Math.max(videoHeight,360)+footer;
+    livePanel.style.width='100%';livePanel.style.height=`${Math.round(height)}px`;
+    return;
+  }
+  const fit=liveDetailsHidden&&liveVideoSize;
   if(!fit){livePanel.style.removeProperty('width');livePanel.style.removeProperty('height')}
   else{
-    const surface=document.querySelector('#map-surface').getBoundingClientRect(),header=48,inset=LIVE_PANEL_INSET,footer=LIVE_PANEL_FOOTER;
-    const ratio=liveVideoSize.width/liveVideoSize.height;
+    const surface=document.querySelector('#map-surface').getBoundingClientRect();
     let videoWidth=Math.max(160,Math.min(540,surface.width-36))-2*inset,videoHeight=videoWidth/ratio;
     const maxVideoHeight=Math.max(90,Math.min(470,surface.height-36,surface.height*0.7)-header-footer);
     if(videoHeight>maxVideoHeight){videoHeight=maxVideoHeight;videoWidth=videoHeight*ratio}
@@ -45,16 +58,38 @@ function fitLivePanelToVideo(){
   }
   livePanelDrag?.apply();
 }
+// Moves the single live panel between the sidebar tab and the map. moveBefore()
+// keeps the iframe's video connection alive where the browser supports it;
+// elsewhere the move reloads the Vision page, which reconnects by itself.
+function placeLivePanel(docked){
+  liveDocked=docked;
+  const host=docked?liveDock:document.querySelector('#map-surface');
+  if(livePanel.parentElement!==host){
+    if(typeof host.moveBefore==='function'){try{host.moveBefore(livePanel,null)}catch{host.appendChild(livePanel)}}
+    else host.appendChild(livePanel);
+  }
+  livePanel.classList.toggle('docked',docked);
+  if(docked)for(const side of ['left','top','right','bottom'])livePanel.style.removeProperty(side);
+  operatorLayout.classList.toggle('live-view-open',!docked&&!livePanel.hidden);
+  document.querySelector('#live-float').textContent=docked?'지도에 띄우기':'사이드바에 고정';
+  fitLivePanelToVideo();
+  refreshMapLayout();
+}
 document.querySelector('#live-details').addEventListener('click',()=>{
   liveDetailsHidden=!liveDetailsHidden;
   try{localStorage.setItem('operatorLiveDetailsHidden',String(liveDetailsHidden))}catch{}
   syncLiveDetails();
 });
 // Drag the live preview by its title bar anywhere inside the map.
-const livePanelDrag=installPanelDrag({panel:livePanel,handle:livePanel.querySelector('.live-view-header'),container:document.querySelector('#map-surface'),storage:(()=>{try{return localStorage}catch{return null}})(),storageKey:'operatorLivePanelPosition'});
+const livePanelDrag=installPanelDrag({panel:livePanel,handle:livePanel.querySelector('.live-view-header'),container:document.querySelector('#map-surface'),storage:(()=>{try{return localStorage}catch{return null}})(),storageKey:'operatorLivePanelPosition',enabled:()=>!liveDocked});
 // Declared above the drag helper it calls, so it runs only once that exists.
 syncLiveDetails();
-new ResizeObserver(()=>fitLivePanelToVideo()).observe(document.querySelector('#map-surface'));
+const livePanelResize=new ResizeObserver(()=>fitLivePanelToVideo());
+livePanelResize.observe(document.querySelector('#map-surface'));livePanelResize.observe(liveDock);
+document.querySelector('#live-float').addEventListener('click',()=>placeLivePanel(!liveDocked));
+// A docked preview is hidden by the saved-recordings tab; close it rather than keep a TURN port busy.
+document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView()});
+placeLivePanel(true);
 function createMarkerEntry(item,position,{liveOnly=false}={}){
   const androidGps=isAndroidGpsItem(item),marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const entry={marker,item,liveOnly};
@@ -573,10 +608,9 @@ document.querySelector('#recording-open-live').addEventListener('click',()=>{
   document.querySelector('#live-view-title').textContent=`실시간 영상 · ${liveTargetLabel(selected)}`;
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
-  operatorLayout.classList.add('live-view-open');
   livePanel.hidden=false;
-  fitLivePanelToVideo();
-  refreshMapLayout();
+  // Opens docked in the "실시간 영상" tab; "지도에 띄우기" moves it onto the map.
+  placeLivePanel(true);
   document.querySelector('#close-live-view').focus({preventScroll:true});
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.

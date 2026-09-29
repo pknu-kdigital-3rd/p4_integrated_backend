@@ -12,8 +12,10 @@ export function clampPanelPosition({left, top}, panel, bounds) {
  * Lets `handle` drag `panel` anywhere inside `container` (the panel's positioned
  * parent). Buttons inside the handle keep working; the last position is kept in
  * `storage` under `storageKey` and re-clamped whenever the container resizes.
+ * While `enabled()` is false (the panel is docked elsewhere) it neither drags nor
+ * positions the panel.
  */
-export function installPanelDrag({panel, handle, container, storage = null, storageKey = 'panelPosition'}) {
+export function installPanelDrag({panel, handle, container, storage = null, storageKey = 'panelPosition', enabled = () => true}) {
   let drag = null;
   let position = null;
   try {
@@ -22,7 +24,7 @@ export function installPanelDrag({panel, handle, container, storage = null, stor
   } catch { /* storage unavailable or corrupt: keep the stylesheet position */ }
 
   function apply() {
-    if (!position || panel.hidden || document.fullscreenElement === panel) return;
+    if (!enabled() || !position || panel.hidden || document.fullscreenElement === panel) return;
     const bounds = container.getBoundingClientRect();
     const size = panel.getBoundingClientRect();
     position = clampPanelPosition(position, size, bounds);
@@ -36,7 +38,7 @@ export function installPanelDrag({panel, handle, container, storage = null, stor
   handle.style.touchAction = 'none';
   handle.style.cursor = 'move';
   handle.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || event.target.closest('button') || document.fullscreenElement === panel) return;
+    if (!enabled() || event.button !== 0 || event.target.closest('button') || document.fullscreenElement === panel) return;
     const bounds = container.getBoundingClientRect();
     const rect = panel.getBoundingClientRect();
     drag = {pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, bounds};

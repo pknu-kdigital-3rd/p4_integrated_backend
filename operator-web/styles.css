@@ -197,6 +197,9 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #live-telemetry-status[data-level=ok] { color: #64e0b2; }
 #live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle] { color: #ffcf70; }
 #live-view-panel.dragging #live-view-frame { pointer-events: none; }
+/* Docked in the "실시간 영상" tab: flows with the sidebar instead of floating on the map. */
+#live-view-panel.docked { position: relative; right: auto; bottom: auto; z-index: auto; width: 100%; margin-top: 10px; border-radius: 10px; box-shadow: none; }
+#live-view-panel.docked .live-view-header { cursor: default !important; }
 #live-view-panel.details-hidden { grid-template-rows: 48px minmax(0,1fr) 30px; }
 /* Detection summary under the video, in the title bar colour (30px row,
    mirrored by LIVE_PANEL_FOOTER in app.js). */
