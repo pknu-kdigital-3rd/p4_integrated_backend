@@ -61,6 +61,13 @@ function fitLivePanelToVideo(){
 // Moves the single live panel between the sidebar tab and the map. moveBefore()
 // keeps the iframe's video connection alive where the browser supports it;
 // elsewhere the move reloads the Vision page, which reconnects by itself.
+// Docked in the sidebar the card already says what this is, so the title is just
+// the vehicle; floating on the map it keeps the "실시간 영상" prefix.
+function updateLiveTitle(){
+  if(!liveView)return;
+  const label=liveTargetLabel(liveView.item);
+  document.querySelector('#live-view-title').textContent=liveDocked?label:`실시간 영상 · ${label}`;
+}
 function placeLivePanel(docked){
   liveDocked=docked;
   const host=docked?liveDock:document.querySelector('#map-surface');
@@ -72,6 +79,7 @@ function placeLivePanel(docked){
   if(docked)for(const side of ['left','top','right','bottom'])livePanel.style.removeProperty(side);
   operatorLayout.classList.toggle('live-view-open',!docked&&!livePanel.hidden);
   document.querySelector('#live-float').textContent=docked?'지도에 띄우기':'사이드바에 고정';
+  updateLiveTitle();
   fitLivePanelToVideo();
   refreshMapLayout();
 }
@@ -165,7 +173,7 @@ function retargetLiveView(item){
   liveView=createLiveView(item,frameOrigin);
   lastLiveMessage=null;
   liveMapFollower.begin(liveView);
-  document.querySelector('#live-view-title').textContent=`실시간 영상 · ${liveTargetLabel(item)}`;
+  updateLiveTitle();
   renderLiveTelemetryStatus();
 }
 function clearTripLayers(){
@@ -351,21 +359,20 @@ const tripRouteMode=document.querySelector('#trip-route-mode');
 tripRouteMode.value=localStorage.getItem('operatorTripRouteMode')==='DUAL'?'DUAL':'REPLAY_ONLY';
 function syncTripRouteMode(){
   const replayOnly=tripRouteMode.value==='REPLAY_ONLY';
-  document.querySelector('#trip-mode-hint').textContent=replayOnly
-    ?'Android GPS 기록의 첫 위치에서 마지막 위치까지 배정합니다. 목적지는 자동 지정됩니다.'
-    :'목적지를 선택하면 최적 경로와 Android GPS 재생 경로를 함께 표시합니다.';
   // The replay path's final GPS point is the destination, so there is nothing to ask.
   document.querySelector('#trip-destination-fields').hidden=replayOnly;
   for(const id of ['trip-destination-name','trip-destination-latitude','trip-destination-longitude']){
     const field=document.getElementById(id);field.disabled=replayOnly;field.required=!replayOnly;
   }
   if(replayOnly&&tripMapPick==='destination')window.__operatorCancelMapPick();
+  // Only actionable problems are shown: why the create button is disabled.
   const preview=assignmentPreview,notice=document.querySelector('#trip-preview-status');
-  notice.textContent=preview?`Android GPS: ${preview.datasetName} · 마지막 위치 ${preview.points.at(-1)[2].toFixed(5)}, ${preview.points.at(-1)[1].toFixed(5)}`
-    :replayOnly?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'Android GPS 미수신 · 경로가 도착하면 함께 표시됩니다.';
+  const vehicleValue=document.querySelector('#trip-vehicle').value;
   // The server rejects a second active assignment; say so before the operator submits.
-  const activeTripId=activeTripByVehicle.get(document.querySelector('#trip-vehicle').value);
-  if(activeTripId)notice.textContent=`Trip ID ${activeTripId}이(가) 이미 배정되어 있습니다. 취소하거나 완료한 뒤 새로 배정하세요.`;
+  const activeTripId=activeTripByVehicle.get(vehicleValue);
+  notice.textContent=activeTripId?`Trip ID ${activeTripId}이(가) 이미 배정되어 있습니다. 취소하거나 완료한 뒤 새로 배정하세요.`
+    :replayOnly&&vehicleValue&&!preview?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'';
+  notice.hidden=!notice.textContent;
   document.querySelector('#create-trip').disabled=Boolean(activeTripId)||(replayOnly&&!preview);
   showAssignmentPreview(replayOnly&&!activeTripId&&!document.querySelector('#trip-form').hidden?preview:null);
 }
@@ -394,7 +401,7 @@ async function loadAssignmentPreview(){
   if(!vehicleId)return;
   try{const preview=await api(`/api/v1/trips/vehicles/${vehicleId}/replay-preview`,{},true);
     if(document.querySelector('#trip-vehicle').value===vehicleId){assignmentPreview=preview;syncTripRouteMode()}}
-  catch(ex){document.querySelector('#trip-preview-status').textContent=`Android GPS 경로 확인 실패 · ${ex.message}`}
+  catch(ex){const notice=document.querySelector('#trip-preview-status');notice.textContent=`Android GPS 경로 확인 실패 · ${ex.message}`;notice.hidden=false}
 }
 document.querySelector('#trip-vehicle').addEventListener('change',()=>void loadAssignmentPreview());
 async function loadTripAssignments(){
@@ -614,7 +621,7 @@ function openLiveView(){
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
   liveView=createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
   liveMapFollower.begin(liveView);
-  document.querySelector('#live-view-title').textContent=`실시간 영상 · ${liveTargetLabel(selected)}`;
+  updateLiveTitle();
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
   livePanel.hidden=false;
