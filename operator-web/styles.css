@@ -184,6 +184,8 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #live-telemetry-status[data-level=ok] { color: #64e0b2; }
 #live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle] { color: #ffcf70; }
 #live-view-panel.dragging #live-view-frame { pointer-events: none; }
+#live-view-panel.details-hidden { grid-template-rows: 48px minmax(0,1fr); }
+#live-view-panel.details-hidden #live-view-diagnostic,#live-view-panel.details-hidden #live-telemetry-status { display: none; }
 .live-view-header { user-select: none; }
 /* A dragged position is inline left/top; fullscreen must still cover the screen. */
 #live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr); }

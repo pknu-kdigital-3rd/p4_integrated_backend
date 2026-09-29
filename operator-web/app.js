@@ -14,6 +14,22 @@ const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getIte
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
+// Debugging details (diagnostics, telemetry status, the Vision page's controls)
+// are hidden by default and one click away; the choice is remembered.
+let liveDetailsHidden=(()=>{try{return localStorage.getItem('operatorLiveDetailsHidden')!=='false'}catch{return true}})();
+function syncLiveDetails(){
+  livePanel.classList.toggle('details-hidden',liveDetailsHidden);
+  const button=document.querySelector('#live-details');
+  button.textContent=liveDetailsHidden?'상세 보기':'상세 숨기기';
+  button.setAttribute('aria-pressed',String(!liveDetailsHidden));
+  notifyLiveFrameFullscreen();
+}
+document.querySelector('#live-details').addEventListener('click',()=>{
+  liveDetailsHidden=!liveDetailsHidden;
+  try{localStorage.setItem('operatorLiveDetailsHidden',String(liveDetailsHidden))}catch{}
+  syncLiveDetails();
+});
+syncLiveDetails();
 // Drag the live preview by its title bar anywhere inside the map.
 const livePanelDrag=installPanelDrag({panel:livePanel,handle:livePanel.querySelector('.live-view-header'),container:document.querySelector('#map-surface'),storage:(()=>{try{return localStorage}catch{return null}})(),storageKey:'operatorLivePanelPosition'});
 function createMarkerEntry(item,position,{liveOnly=false}={}){
@@ -72,7 +88,9 @@ function releaseLiveMarker(){
   }
 }
 function liveTargetLabel(item){return item?.vehicleCode||item?.vehicleName||`Vehicle ID ${item?.vehicleId??item?.telemetry?.external_id??'unknown'}`}
-function notifyLiveFrameFullscreen(fullscreen=document.fullscreenElement===livePanel){
+// The Vision page's "fullscreen" mode shows only the video, scaled to fit the
+// frame; it is also used while the debugging details are hidden.
+function notifyLiveFrameFullscreen(fullscreen=document.fullscreenElement===livePanel||liveDetailsHidden){
   if(!liveView)return;
   liveFrame.contentWindow?.postMessage({type:'operator-live-view-fullscreen',fullscreen},liveView.frameOrigin);
 }
