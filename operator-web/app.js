@@ -5,6 +5,7 @@ import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTeleme
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 import {plannedProgress,recordedProgress} from './trip-route-ui.js';
+import {installPanelDrag} from './panel-drag.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
@@ -13,6 +14,8 @@ const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getIte
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
+// Drag the live preview by its title bar anywhere inside the map.
+const livePanelDrag=installPanelDrag({panel:livePanel,handle:livePanel.querySelector('.live-view-header'),container:document.querySelector('#map-surface'),storage:(()=>{try{return localStorage}catch{return null}})(),storageKey:'operatorLivePanelPosition'});
 function createMarkerEntry(item,position,{liveOnly=false}={}){
   const androidGps=isAndroidGpsItem(item),marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const entry={marker,item,liveOnly};
@@ -498,6 +501,7 @@ document.querySelector('#live-view').addEventListener('click',()=>{
   renderLiveTelemetryStatus();
   operatorLayout.classList.add('live-view-open');
   livePanel.hidden=false;
+  livePanelDrag.apply();
   refreshMapLayout();
   document.querySelector('#close-live-view').focus({preventScroll:true});
   // Set the URL only after opening the panel so navigation/playback starts as

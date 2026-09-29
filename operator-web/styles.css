@@ -183,7 +183,10 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #live-view-diagnostic,#live-telemetry-status { font-size: 11px; padding: 3px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #1e334c; }
 #live-telemetry-status[data-level=ok] { color: #64e0b2; }
 #live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle] { color: #ffcf70; }
-#live-view-panel:fullscreen { position: fixed; inset: 0; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr); }
+#live-view-panel.dragging #live-view-frame { pointer-events: none; }
+.live-view-header { user-select: none; }
+/* A dragged position is inline left/top; fullscreen must still cover the screen. */
+#live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr); }
 #live-view-panel:fullscreen #live-view-diagnostic,#live-view-panel:fullscreen #live-telemetry-status { display: none; }
 
 /* Dedicated virtual dispatch workspace */
