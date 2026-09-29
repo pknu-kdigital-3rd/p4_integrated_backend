@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     # when the model cannot keep up. Disable to use stateless per-frame
     # detection.
     YOLO_TRACKING: bool = True
+    BOTSORT_GMC_DOWNSCALE: int = Field(default=4, ge=1, le=8)
+    BOTSORT_GMC_MAX_CORNERS: int = Field(default=200, ge=16, le=2000)
     YOLO_TRACKER_CONFIG: str = str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml")
     # `latest` keeps only the newest queued frame for the next inference call;
     # skipped media frames still pass through with the last completed

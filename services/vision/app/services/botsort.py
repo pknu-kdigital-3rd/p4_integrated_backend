@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from app.core.settings import settings
+
 
 GROUPS = ("person", "two_wheeler", "vehicle")
 CLASS_GROUPS = {
@@ -75,7 +77,15 @@ class BotSortTracker:
         self._backends = {group: _SharedWarpFactory.build(config) for group in GROUPS}
         from ultralytics.trackers.utils.gmc import GMC
 
-        self._gmc = GMC(method="sparseOptFlow")
+        self._gmc = GMC(
+            method="sparseOptFlow", downscale=settings.BOTSORT_GMC_DOWNSCALE
+        )
+        self._gmc.feature_params["maxCorners"] = settings.BOTSORT_GMC_MAX_CORNERS
+        print(
+            f"BoT-SORT GMC: downscale={self._gmc.downscale}; "
+            f"max_corners={self._gmc.feature_params['maxCorners']}",
+            flush=True,
+        )
         self._gmc_lock = Lock()
         self._gmc_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="botsort-gmc")
         self.last_gmc_ms = 0.0
