@@ -632,8 +632,6 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
   event.preventDefault();
   const form=event.currentTarget,button=document.querySelector('#create-trip'),message=document.querySelector('#trip-status-message');
   const value=id=>document.querySelector(`#${id}`).value.trim();
-  const originLatitude=value('trip-origin-latitude'),originLongitude=value('trip-origin-longitude');
-  if(Boolean(originLatitude)!==Boolean(originLongitude)){message.textContent='Enter both origin coordinates, or leave both empty.';return}
   const mode=tripRouteMode.value;
   if(mode==='REPLAY_ONLY'&&!assignmentPreview){message.textContent='Android GPS 경로를 먼저 받아야 합니다.';return}
   const body={vehicleId:value('trip-vehicle'),routeMode:mode,tripStatus:'READY'};
@@ -643,8 +641,8 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
     body.destinationLatitude=Number(value('trip-destination-latitude'));
     body.destinationLongitude=Number(value('trip-destination-longitude'));
   }
-  for(const [field,id] of [['originName','trip-origin-name'],['destinationAddress','trip-destination-address']])if(value(id))body[field]=value(id);
-  if(originLatitude){body.originLatitude=Number(originLatitude);body.originLongitude=Number(originLongitude)}
+  // Origin, address and initial state are no longer asked: the server uses the
+  // vehicle's current BIMS or Android position as the origin, and trips start READY.
   button.disabled=true;message.textContent='Creating trip…';
   try{
     const trip=await api('/api/v1/trips',{method:'POST',body:JSON.stringify(body)},true);

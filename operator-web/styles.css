@@ -156,7 +156,6 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 .trip-coordinate-heading button { padding: 6px 8px; background: var(--ui-primary-soft); color: var(--ui-primary); }
 .trip-coordinate-heading button[aria-pressed=true] { background: var(--ui-warning-soft); color: #995a08; }
 .trip-coordinate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-#trip-advanced[open] { display: grid; gap: 10px; }
 #trip-status-message,#recordings-status,#telemetry-mode-status { font-size: 12px; color: var(--ui-text-secondary); margin: 12px 0; }
 #trips-list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; max-height: 200px; overflow: auto; }
 #trips-list li { display: grid; gap: 4px; background: var(--ui-surface-soft); border-radius: 8px; padding: 10px; font-size: 12px; }

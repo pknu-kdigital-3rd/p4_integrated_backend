@@ -512,39 +512,6 @@
        <input aria-label="Destination longitude" id="trip-destination-longitude" max="180" min="-180" placeholder="경도" required="" step="any" type="number"/>
       </div>
       </div>
-      <details id="trip-advanced">
-       <summary>
-        고급 설정 · 출발지 / 주소 / 초기 상태
-       </summary>
-       <label for="trip-origin-name">
-        출발지 이름
-       </label>
-       <input id="trip-origin-name" maxlength="150" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="차고지 또는 출발지"/>
-       <div class="trip-coordinate-heading">
-        <span>
-         출발지 좌표
-        </span>
-        <button aria-pressed="false" data-trip-map-pick="origin" type="button">
-         지도에서 선택
-        </button>
-       </div>
-       <div class="trip-coordinate-grid">
-        <input aria-label="Origin latitude" id="trip-origin-latitude" max="90" min="-90" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="위도" step="any" type="number"/>
-        <input aria-label="Origin longitude" id="trip-origin-longitude" max="180" min="-180" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="경도" step="any" type="number"/>
-       </div>
-       <label for="trip-destination-address">
-        목적지 주소
-       </label>
-       <input id="trip-destination-address" maxlength="2000" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="주소"/>
-       <label for="trip-status">
-        초기 운행 상태
-       </label>
-       <select id="trip-status">
-        <option selected="" value="READY">
-         배차 대기
-        </option>
-       </select>
-      </details>
       <button id="create-trip" type="submit">
        운행 생성 및 배정
       </button>
