@@ -251,7 +251,7 @@ The periodic `[mem]` log reports averages per completed inference:
 
 - `tracking_ms`: BoT-SORT input preparation, update, and ID assignment.
 - `gmc_ms`: full optical-flow duration, overlapping model inference.
-- `gmc_wait_ms`: remaining wait after models finish; included in postprocessing.
+- `gmc_wait_ms`: remaining wait after YOLO finishes; included in postprocessing.
 - `distance_ms`: mask transfer and median depth calculation.
 - `polygon_ms`: mask contour extraction and polygon simplification.
 - `output_ms`: remaining postprocessing, including box extraction and detection formatting.
@@ -278,3 +278,16 @@ Compare steady-state `gmc_wait_ms`, `postprocess_ms`, and `infer_fps` on the
 same feed. A near-zero GMC wait means its computation is hidden behind model
 work. CPU contention may reduce the gain. This change requires a Vision restart
 with the development source mount, without an image rebuild.
+
+## Association overlapping depth
+
+After YOLO and GMC finish, the ordered inference worker prepares boxes and runs
+BoT-SORT association before waiting for UniDepth. No extra association thread is
+needed: depth already runs on its own worker. Association failures drain the
+outstanding depth task before the frame is retried.
+
+`depth_wait_ms` measures the remaining wait for depth after association (or
+synchronous depth execution when no depth executor is provided). It is excluded
+from `postprocess_ms`. Postprocessing includes preparation and association that
+can overlap `depth_ms`, so do not add full depth time to postprocessing to
+estimate total latency. Compare `inference_ms` and `infer_fps` on the live feed.

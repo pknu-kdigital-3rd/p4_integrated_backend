@@ -67,6 +67,7 @@ class VisionMetrics:
     frame_convert_ms_total: float = 0.0
     model_ms_total: float = 0.0
     depth_ms_total: float = 0.0
+    depth_wait_ms_total: float = 0.0
     inference_ms_total: float = 0.0
     postprocess_ms_total: float = 0.0
     tracking_ms_total: float = 0.0
@@ -90,6 +91,7 @@ class VisionMetrics:
         self.frame_convert_ms_total += float(result.get("frame_convert_ms", 0.0))
         self.model_ms_total += float(result.get("model_ms", 0.0))
         self.depth_ms_total += float(result.get("depth_ms", 0.0))
+        self.depth_wait_ms_total += float(result.get("depth_wait_ms", 0.0))
         self.inference_ms_total += float(result.get("inference_ms", 0.0))
         self.postprocess_ms_total += float(result.get("postprocess_ms", 0.0))
         self.tracking_ms_total += float(result.get("tracking_ms", 0.0))
@@ -110,6 +112,7 @@ class VisionMetrics:
             "frame_convert_ms_total": self.frame_convert_ms_total,
             "model_ms_total": self.model_ms_total,
             "depth_ms_total": self.depth_ms_total,
+            "depth_wait_ms_total": self.depth_wait_ms_total,
             "inference_ms_total": self.inference_ms_total,
             "postprocess_ms_total": self.postprocess_ms_total,
             "tracking_ms_total": self.tracking_ms_total,

@@ -181,7 +181,7 @@ async def metrics_worker(state: AppState) -> None:
             )
             postprocess_detail = " ".join(
                 f"{name}_ms={_average_ms(current, previous, name + '_ms_total', inferred_delta):.1f}"
-                for name in ("tracking", "gmc", "gmc_wait", "distance", "polygon", "output")
+                for name in ("tracking", "gmc", "gmc_wait", "depth_wait", "distance", "polygon", "output")
             )
             cuda_memory = _cuda_memory_log()
             queue_max = state.inference_queue.maxsize

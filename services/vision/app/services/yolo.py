@@ -551,6 +551,62 @@ def run_yolo(
                 depth_future.result()
         raise
     model_ms = (perf_counter() - model_start) * 1000
+    try:
+        postprocess_start = perf_counter()
+        gmc_wait_started = perf_counter()
+        gmc_result = gmc_future.result() if gmc_future is not None else None
+        gmc_wait_ms = (perf_counter() - gmc_wait_started) * 1000 if gmc_future is not None else 0.0
+        gmc_ms = gmc_result[1] if gmc_result is not None else 0.0
+        tracking_ms = distance_ms = polygon_ms = 0.0
+        detections = []
+        coordinate_field = {
+            "xyxy_normalized": "xyxyn",
+            "xyxy_pixels": "xyxy",
+            "xywh_normalized": "xywhn",
+            "xywh_pixels": "xywh",
+        }[settings.BBOX_FORMAT]
+        prepared_results = []
+        for result in results:
+            boxes = result.boxes
+            confidence_values = _box_field_values(boxes, "conf")
+            class_values = _box_field_values(boxes, "cls")
+            coordinate_values = _box_field_values(boxes, coordinate_field)
+            track_values = (
+                _box_field_values(boxes, "id")
+                if tracking and botsort_tracker is None
+                else []
+            )
+            if tracking and botsort_tracker is not None:
+                tracking_started = perf_counter()
+                pixel_boxes = _box_field_values(boxes, "xyxy")
+                track_rows = []
+                for box_index in range(len(boxes)):
+                    class_id = int(_scalar(class_values[box_index]))
+                    class_name = yolo_model.names[class_id]
+                    track_rows.append(
+                        {
+                            "box_index": box_index,
+                            "class_name": class_name,
+                            "bbox": [
+                                float(value)
+                                for value in _to_cpu_value(pixel_boxes[box_index])
+                            ],
+                            "confidence": float(_scalar(confidence_values[box_index])),
+                        }
+                    )
+                assignments = botsort_tracker.update(img, track_rows, gmc_result=gmc_result)
+                track_values = [None] * len(boxes)
+                for row, track_id in zip(track_rows, assignments):
+                    track_values[row["box_index"]] = track_id
+                tracking_ms += (perf_counter() - tracking_started) * 1000
+            prepared_results.append((result, confidence_values, class_values, coordinate_values, track_values))
+    except BaseException:
+        if depth_future is not None:
+            with suppress(Exception):
+                depth_future.result()
+        raise
+    preparation_ms = (perf_counter() - postprocess_start) * 1000
+    depth_wait_started = perf_counter()
     depth_frame = None
     depth_ms = 0.0
     if depth_model is None:
@@ -567,52 +623,10 @@ def run_yolo(
         except Exception as exc:
             depth_status = "inference_error"
             print(f"UniDepth inference failed: {type(exc).__name__}: {exc}", flush=True)
+    depth_wait_ms = (perf_counter() - depth_wait_started) * 1000
     postprocess_start = perf_counter()
-    gmc_wait_started = perf_counter()
-    gmc_result = gmc_future.result() if gmc_future is not None else None
-    gmc_wait_ms = (perf_counter() - gmc_wait_started) * 1000 if gmc_future is not None else 0.0
-    gmc_ms = gmc_result[1] if gmc_result is not None else 0.0
-    tracking_ms = distance_ms = polygon_ms = 0.0
-    detections = []
-    coordinate_field = {
-        "xyxy_normalized": "xyxyn",
-        "xyxy_pixels": "xyxy",
-        "xywh_normalized": "xywhn",
-        "xywh_pixels": "xywh",
-    }[settings.BBOX_FORMAT]
-    for result in results:
+    for result, confidence_values, class_values, coordinate_values, track_values in prepared_results:
         boxes = result.boxes
-        confidence_values = _box_field_values(boxes, "conf")
-        class_values = _box_field_values(boxes, "cls")
-        coordinate_values = _box_field_values(boxes, coordinate_field)
-        track_values = (
-            _box_field_values(boxes, "id")
-            if tracking and botsort_tracker is None
-            else []
-        )
-        if tracking and botsort_tracker is not None:
-            tracking_started = perf_counter()
-            pixel_boxes = _box_field_values(boxes, "xyxy")
-            track_rows = []
-            for box_index in range(len(boxes)):
-                class_id = int(_scalar(class_values[box_index]))
-                class_name = yolo_model.names[class_id]
-                track_rows.append(
-                    {
-                        "box_index": box_index,
-                        "class_name": class_name,
-                        "bbox": [
-                            float(value)
-                            for value in _to_cpu_value(pixel_boxes[box_index])
-                        ],
-                        "confidence": float(_scalar(confidence_values[box_index])),
-                    }
-                )
-            assignments = botsort_tracker.update(img, track_rows, gmc_result=gmc_result)
-            track_values = [None] * len(boxes)
-            for row, track_id in zip(track_rows, assignments):
-                track_values[row["box_index"]] = track_id
-            tracking_ms += (perf_counter() - tracking_started) * 1000
         retained_indices = []
         for box_index in range(len(boxes)):
             conf = float(_scalar(confidence_values[box_index]))
@@ -676,7 +690,7 @@ def run_yolo(
                     )
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
-    postprocess_ms = (perf_counter() - postprocess_start) * 1000
+    postprocess_ms = preparation_ms + (perf_counter() - postprocess_start) * 1000
     return {
         "source": _source_metadata(inference_frame),
         "width": source_width,
