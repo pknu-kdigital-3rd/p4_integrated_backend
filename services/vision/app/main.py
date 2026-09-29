@@ -91,6 +91,8 @@ async def lifespan(app: FastAPI):
         except asyncio.TimeoutError:
             detection_writer_task.cancel()
             await asyncio.gather(detection_writer_task, return_exceptions=True)
+    if state.botsort_tracker is not None:
+        await asyncio.to_thread(state.botsort_tracker.close)
     if state.depth_executor is not None:
         await asyncio.to_thread(
             state.depth_executor.shutdown, wait=True, cancel_futures=True

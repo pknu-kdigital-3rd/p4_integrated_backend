@@ -71,6 +71,7 @@ class VisionMetrics:
     postprocess_ms_total: float = 0.0
     tracking_ms_total: float = 0.0
     gmc_ms_total: float = 0.0
+    gmc_wait_ms_total: float = 0.0
     distance_ms_total: float = 0.0
     polygon_ms_total: float = 0.0
     output_ms_total: float = 0.0
@@ -93,6 +94,7 @@ class VisionMetrics:
         self.postprocess_ms_total += float(result.get("postprocess_ms", 0.0))
         self.tracking_ms_total += float(result.get("tracking_ms", 0.0))
         self.gmc_ms_total += float(result.get("gmc_ms", 0.0))
+        self.gmc_wait_ms_total += float(result.get("gmc_wait_ms", 0.0))
         self.distance_ms_total += float(result.get("distance_ms", 0.0))
         self.polygon_ms_total += float(result.get("polygon_ms", 0.0))
         self.output_ms_total += float(result.get("output_ms", 0.0))
@@ -112,6 +114,7 @@ class VisionMetrics:
             "postprocess_ms_total": self.postprocess_ms_total,
             "tracking_ms_total": self.tracking_ms_total,
             "gmc_ms_total": self.gmc_ms_total,
+            "gmc_wait_ms_total": self.gmc_wait_ms_total,
             "distance_ms_total": self.distance_ms_total,
             "polygon_ms_total": self.polygon_ms_total,
             "output_ms_total": self.output_ms_total,

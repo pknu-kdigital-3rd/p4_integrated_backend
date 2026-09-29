@@ -498,6 +498,10 @@ def run_yolo(
             depth_future = depth_executor.submit(
                 predict_timed, depth_model, depth_input, camera_intrinsic
             )
+    gmc_future = (
+        botsort_tracker.prepare_gmc(img)
+        if tracking and botsort_tracker is not None else None
+    )
     model_start = perf_counter()
     try:
         with torch.inference_mode():
@@ -539,6 +543,9 @@ def run_yolo(
                     retina_masks=settings.YOLO_RETINA_MASKS,
                 )
     except BaseException:
+        if gmc_future is not None:
+            with suppress(Exception):
+                gmc_future.result()
         if depth_future is not None:
             with suppress(Exception):
                 depth_future.result()
@@ -561,7 +568,11 @@ def run_yolo(
             depth_status = "inference_error"
             print(f"UniDepth inference failed: {type(exc).__name__}: {exc}", flush=True)
     postprocess_start = perf_counter()
-    tracking_ms = gmc_ms = distance_ms = polygon_ms = 0.0
+    gmc_wait_started = perf_counter()
+    gmc_result = gmc_future.result() if gmc_future is not None else None
+    gmc_wait_ms = (perf_counter() - gmc_wait_started) * 1000 if gmc_future is not None else 0.0
+    gmc_ms = gmc_result[1] if gmc_result is not None else 0.0
+    tracking_ms = distance_ms = polygon_ms = 0.0
     detections = []
     coordinate_field = {
         "xyxy_normalized": "xyxyn",
@@ -597,12 +608,11 @@ def run_yolo(
                         "confidence": float(_scalar(confidence_values[box_index])),
                     }
                 )
-            assignments = botsort_tracker.update(img, track_rows)
+            assignments = botsort_tracker.update(img, track_rows, gmc_result=gmc_result)
             track_values = [None] * len(boxes)
             for row, track_id in zip(track_rows, assignments):
                 track_values[row["box_index"]] = track_id
             tracking_ms += (perf_counter() - tracking_started) * 1000
-            gmc_ms += getattr(botsort_tracker, "last_gmc_ms", 0.0)
         retained_indices = []
         for box_index in range(len(boxes)):
             conf = float(_scalar(confidence_values[box_index]))
@@ -680,9 +690,10 @@ def run_yolo(
         "postprocess_ms": postprocess_ms,
         "tracking_ms": tracking_ms,
         "gmc_ms": gmc_ms,
+        "gmc_wait_ms": gmc_wait_ms,
         "distance_ms": distance_ms,
         "polygon_ms": polygon_ms,
-        "output_ms": max(0.0, postprocess_ms - tracking_ms - distance_ms - polygon_ms),
+        "output_ms": max(0.0, postprocess_ms - gmc_wait_ms - tracking_ms - distance_ms - polygon_ms),
         "depth": {
             "model": "unidepth-v2-vitb14",
             "status": depth_status,

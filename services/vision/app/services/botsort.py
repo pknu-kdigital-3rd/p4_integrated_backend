@@ -1,6 +1,8 @@
 """Vehicle-runtime BoT-SORT adapter with one shared sparseOptFlow warp."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from time import perf_counter
 from types import SimpleNamespace
 from typing import Any
@@ -74,6 +76,8 @@ class BotSortTracker:
         from ultralytics.trackers.utils.gmc import GMC
 
         self._gmc = GMC(method="sparseOptFlow")
+        self._gmc_lock = Lock()
+        self._gmc_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="botsort-gmc")
         self.last_gmc_ms = 0.0
         self._frame_id = 0
         self._identities: dict[tuple[str, int], int] = {}
@@ -83,13 +87,29 @@ class BotSortTracker:
         for backend in self._backends.values():
             backend.reset()
             backend.runtime_warp = None
-        self._gmc.reset_params()
+        with self._gmc_lock:
+            self._gmc.reset_params()
         self.last_gmc_ms = 0.0
         self._frame_id = 0
         self._identities.clear()
         self._class_ids.clear()
 
-    def update(self, frame: np.ndarray, rows: list[dict[str, Any]]) -> list[int | None]:
+    def prepare_gmc(self, frame: np.ndarray):
+        # Own the pixels while YOLO uses its input on another thread.
+        return self._gmc_executor.submit(self._compute_gmc, frame.copy())
+
+    def _compute_gmc(self, frame: np.ndarray):
+        with self._gmc_lock:
+            started = perf_counter()
+            warp = self._gmc.apply(frame)
+            return warp, (perf_counter() - started) * 1000
+
+    def close(self) -> None:
+        self._gmc_executor.shutdown(wait=True, cancel_futures=True)
+
+    def update(
+        self, frame: np.ndarray, rows: list[dict[str, Any]], *, gmc_result=None
+    ) -> list[int | None]:
         from ultralytics.engine.results import Boxes
 
         assignments: list[int | None] = [None] * len(rows)
@@ -113,9 +133,9 @@ class BotSortTracker:
             )
             groups.append(application_group(row["class_name"]))
 
-        gmc_started = perf_counter()
-        warp = self._gmc.apply(frame)
-        self.last_gmc_ms = (perf_counter() - gmc_started) * 1000
+        warp, self.last_gmc_ms = (
+            self._compute_gmc(frame) if gmc_result is None else gmc_result
+        )
         group_values = np.asarray(groups)
         for group, backend in self._backends.items():
             indices = np.flatnonzero(group_values == group)

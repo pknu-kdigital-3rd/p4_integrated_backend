@@ -250,12 +250,13 @@ go test ./...
 The periodic `[mem]` log reports averages per completed inference:
 
 - `tracking_ms`: BoT-SORT input preparation, update, and ID assignment.
-- `gmc_ms`: sparse optical flow within `tracking_ms`; do not add it again.
+- `gmc_ms`: full optical-flow duration, overlapping model inference.
+- `gmc_wait_ms`: remaining wait after models finish; included in postprocessing.
 - `distance_ms`: mask transfer and median depth calculation.
 - `polygon_ms`: mask contour extraction and polygon simplification.
 - `output_ms`: remaining postprocessing, including box extraction and detection formatting.
 
-Tracking, distance, polygon, and output timings sum to `postprocess_ms` before
+GMC wait, tracking, distance, polygon, and output timings sum to `postprocess_ms` before
 display rounding. These are wall-clock timings with existing transfer waits;
 diagnostics do not add GPU synchronization. ByteTrack's internal tracking remains
 inside `model_ms`, so its separate `tracking_ms` is zero.
@@ -264,3 +265,16 @@ inside `model_ms`, so its separate `tracking_ms` is zero.
 and the corresponding `CUDA_VISIBLE_DEVICES` entry when available. Shared GPUs
 are sampled once. Allocated/reserved memory and interval peaks cover PyTorch's
 allocator, not all TensorRT or device memory. Peaks reset at each log interval.
+
+## Concurrent GMC
+
+On the BoT-SORT branch, one dedicated worker computes optical flow from an owned
+copy of the current image while YOLO and UniDepth run. The ordered inference
+worker consumes that warp for tracker association. Skipped frames do not submit
+GMC work. Model failures drain the submitted GMC task before retrying; epoch
+reset locks GMC state, and shutdown joins the executor.
+
+Compare steady-state `gmc_wait_ms`, `postprocess_ms`, and `infer_fps` on the
+same feed. A near-zero GMC wait means its computation is hidden behind model
+work. CPU contention may reduce the gain. This change requires a Vision restart
+with the development source mount, without an image rebuild.
