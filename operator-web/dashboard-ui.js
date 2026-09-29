@@ -1,5 +1,5 @@
 // Presentation labels and helpers. Backend enum values remain unchanged.
-export const STATUS_LABELS = { all: '전체', running: '운행중', ready: '대기', maintenance: '점검', offline: '오프라인', unknown: '미확인' };
+export const STATUS_LABELS = { all: '전체', running: '운행중', ready: '대기', maintenance: '점검', offline: '오프라인', stale: 'GPS 지연', unknown: '미확인' };
 export const UI_LABELS = {
   'Scenario': '시나리오', 'Virtual vehicle': '가상 차량', 'not set': '미지정', 'none': '없음',
   'Vehicle': '차량', 'Source': '데이터 소스', 'Status': '상태', 'Speed': '속도', 'Observed': '관측 시각', 'Trip ID': '운행 ID',
@@ -37,6 +37,7 @@ export function applyRoadHatch(layer, kind, color) {
   });
 }
 export function vehicleStatus(item) {
+  if(item?.telemetry?.source_metadata?.state==='stale')return 'stale';
   const status = String(item?.vehicleStatus || item?.telemetry?.source_metadata?.state || '').toUpperCase();
   if (['DRIVING', 'IN_PROGRESS', 'ACTIVE', 'RUNNING'].includes(status)) return 'running';
   if (['READY', 'STOPPED', 'IDLE', 'AVAILABLE'].includes(status)) return 'ready';
@@ -68,7 +69,7 @@ export const icon = name => `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidde
 export function vehicleIcon(item, selected = false, virtual = false) {
   const state = vehicleStatus(item);
   const android = ['DEVICE_GPS','RECORDED_GPS'].includes(item?.telemetry?.telemetry_source);
-  const colors = { running: '#0868dd', ready: '#13ad72', maintenance: '#ed3d4f', offline: '#8995a5', unknown: '#65758b' };
+  const colors = { running: '#0868dd', ready: '#13ad72', maintenance: '#ed3d4f', offline: '#8995a5', stale: '#b86b08', unknown: '#65758b' };
   return L.divIcon({ className: 'vehicle-map-icon', html: `<span class="vehicle-symbol${selected ? ' selected' : ''}${android ? ' android' : ''}" style="--vehicle-color:${android ? '#16a5c8' : virtual ? '#0868dd' : colors[state]}">${icon('bus')}</span>`, iconSize: [32,36], iconAnchor: [16,18], tooltipAnchor: [0,-22] });
 }
 export function renderVehicleDetails(item) {

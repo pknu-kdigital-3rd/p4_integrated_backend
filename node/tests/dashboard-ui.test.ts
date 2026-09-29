@@ -16,6 +16,9 @@ describe('dashboard fleet presentation', () => {
     expect(vehicleStatus({vehicleStatus:'OFFLINE',telemetry:{source_metadata:{state:'ACTIVE'}}})).toBe('offline');
     expect(vehicleStatus({telemetry:{source_metadata:{state:'ACTIVE'}}})).toBe('running');
   });
+  it('labels an outdated BIMS fix as GPS delay even when the registered vehicle is driving', () => {
+    expect(vehicleStatus({vehicleStatus:'DRIVING',telemetry:{source_metadata:{state:'stale'}}})).toBe('stale');
+  });
   it('searches real names, codes and external IDs, ignoring case and surrounding spaces', () => {
     const item={vehicleId:42,vehicleCode:'부산70가1234',vehicleName:'해운대 버스',telemetry:{external_id:'DEVICE:42'}};
     for(const query of ['1234','해운대',' device:42 ','42',''])expect(matchesVehicle(item,query)).toBe(true);

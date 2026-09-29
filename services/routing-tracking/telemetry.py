@@ -38,7 +38,7 @@ class BimsLiveSource:
         for item in raw.get("vehicles", []):
             external_id = str(item.get("vehicle_id") or f"line:{item['line_number']}")
             state = item.get("source", "live")
-            telemetry_source = "BIMS_LIVE" if state in {"live", "reconciling"} else "BIMS_REPLAY"
+            telemetry_source = "BIMS_LIVE" if state in {"live", "reconciling", "stale"} else "BIMS_REPLAY"
             observations.append(asdict(TelemetryObservation(
                 external_id=external_id,
                 latitude=item["lat"],
@@ -47,7 +47,7 @@ class BimsLiveSource:
                 telemetry_source=telemetry_source,
                 observed_at_utc=item.get("live_observed_at_utc") or raw.get("generated_at_utc"),
                 route_progress_pct=item.get("route_progress_pct"),
-                source_metadata={"lineNumber": item.get("line_number"), "lineId": item.get("line_id"), "state": state},
+                source_metadata={"lineNumber": item.get("line_number"), "lineId": item.get("line_id"), "state": state, "liveAgeSeconds": item.get("live_age_s")},
             )))
         return {"generated_at_utc": raw.get("generated_at_utc"), "vehicles": observations, "warnings": raw.get("warnings", [])}
 

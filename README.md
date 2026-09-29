@@ -11,6 +11,18 @@ This repository integrates the existing control backend, BIMS routing/tracking, 
 - `services/media-relay/` — existing Go/Pion relay
 - `android/` — existing Android publisher
 
+## BIMS history compensation
+
+In the operator dashboard, open **설정 → 데이터 소스** to enable
+**실시간 GPS 중단 시 기록 경로로 위치 보정**, then apply the settings.
+This option is off by default, including when an older settings file contains
+only the telemetry mode. The choice is persisted with the telemetry source.
+When disabled, BIMS vehicles keep their last received GPS position and show
+**GPS 지연** after the freshness threshold (15 seconds by default). Their original
+observation timestamp is retained. Recorded-route interpolation runs only after
+an operator enables compensation. This setting applies to live BIMS; selecting
+the playback source still explicitly displays recorded GPS data.
+
 ## HTTPS startup
 
 Docker Compose runs Node, routing, vision, relay, PostgreSQL, MinIO, Nginx,

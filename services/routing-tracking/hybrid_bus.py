@@ -337,6 +337,7 @@ class HybridBusService:
         reconcile_s: float = 3.0,
         request_timeout_s: float = 10.0,
         max_alignment_m: float = 300.0,
+        history_compensation_enabled: bool = False,
     ):
         self.service_key = service_key
         self.history_path = history_path
@@ -351,6 +352,7 @@ class HybridBusService:
         self.reconcile_s = max(0.1, reconcile_s)
         self.request_timeout_s = max(1.0, request_timeout_s)
         self.max_alignment_m = max(1.0, max_alignment_m)
+        self.history_compensation_enabled = history_compensation_enabled
         self.histories = load_history(history_path)
         self.states = {line: BusState(line_number=line) for line in self.lines}
         self._snapshot: dict[str, Any] = {"generated_at_utc": None, "vehicles": [], "warnings": []}
@@ -425,6 +427,20 @@ class HybridBusService:
             reconcile_s=reconcile_s,
         )
 
+    def set_history_compensation(self, enabled: bool) -> None:
+        with self._lock:
+            self.history_compensation_enabled = enabled
+            if not enabled:
+                for state in self.states.values():
+                    state.fallback_key = None
+                    state.fallback_trace_time_s = None
+                    state.fallback_started_mono = None
+                    state.reconcile_started_mono = None
+                    state.reconcile_from = None
+                    state.reconcile_to = None
+                    if state.warning and state.warning.startswith(("collected route", "no collected route history")):
+                        state.warning = None
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -447,6 +463,7 @@ class HybridBusService:
                 "poll_interval_s": self.poll_interval_s,
                 "output_interval_s": self.emit_interval_s,
                 "stale_after_s": self.stale_after_s,
+                "history_compensation_enabled": self.history_compensation_enabled,
                 "reconcile_s": self.reconcile_s,
                 "history_path": str(self.history_path),
                 "history_lines": sorted({key[0] for key in self.histories}),
@@ -590,7 +607,7 @@ class HybridBusService:
 
             if was_interpolated and state.current_lat is not None and state.current_lon is not None:
                 target_lat, target_lon = state.live_lat, state.live_lon
-                key, history = self._history_for(state)
+                key, history = self._history_for(state) if self.history_compensation_enabled else (None, None)
                 if history:
                     projected, distance = _project_to_trace(history, target_lat, target_lon)
                     if distance <= self.max_alignment_m:
@@ -605,7 +622,7 @@ class HybridBusService:
                 state.current_lat = state.live_lat
                 state.current_lon = state.live_lon
                 state.current_progress_pct = None
-                _key, history = self._history_for(state)
+                _key, history = self._history_for(state) if self.history_compensation_enabled else (None, None)
                 if history:
                     projected, distance = _project_to_trace(history, state.live_lat, state.live_lon)
                     if distance <= self.max_alignment_m:
@@ -686,6 +703,15 @@ class HybridBusService:
         return True
 
     def _position_state(self, state: BusState, now: float) -> None:
+        if not self.history_compensation_enabled:
+            if state.live_received_mono is None:
+                state.source = "waiting"
+                return
+            state.current_lat = state.live_lat
+            state.current_lon = state.live_lon
+            state.current_progress_pct = None
+            state.source = "live" if now - state.live_received_mono <= self.stale_after_s else "stale"
+            return
         if state.reconcile_started_mono is not None and state.reconcile_from and state.reconcile_to:
             ratio = min(1.0, max(0.0, (now - state.reconcile_started_mono) / self.reconcile_s))
             state.current_lat = state.reconcile_from[0] + (state.reconcile_to[0] - state.reconcile_from[0]) * ratio

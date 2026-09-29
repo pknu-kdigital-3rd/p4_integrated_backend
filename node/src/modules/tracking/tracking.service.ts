@@ -110,8 +110,8 @@ export const trackingService = {
         return trackingClient.telemetryMode();
     },
 
-    async setTelemetryMode(mode: TelemetryMode) {
-        return trackingClient.setTelemetryMode(mode);
+    async setTelemetryMode(mode: TelemetryMode, historyCompensationEnabled?: boolean) {
+        return trackingClient.setTelemetryMode(mode, historyCompensationEnabled);
     },
 
     async getPlannedRoute(tripId: bigint) {

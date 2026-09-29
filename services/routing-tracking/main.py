@@ -114,22 +114,32 @@ def _load_telemetry_mode() -> str:
     return mode if mode in TELEMETRY_MODES else DEFAULT_TELEMETRY_MODE
 
 
-def _persist_telemetry_mode(mode: str) -> None:
+def _load_history_compensation() -> bool:
+    try:
+        payload = json.loads(TELEMETRY_MODE_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("historyCompensationEnabled") is True
+
+
+def _persist_telemetry_mode(mode: str, history_compensation_enabled: bool = False) -> None:
     TELEMETRY_MODE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     temporary = TELEMETRY_MODE_STATE_PATH.with_name(f".{TELEMETRY_MODE_STATE_PATH.name}.tmp")
-    temporary.write_text(json.dumps({"mode": mode}, separators=(",", ":")) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps({"mode": mode, "historyCompensationEnabled": history_compensation_enabled}, separators=(",", ":")) + "\n", encoding="utf-8")
     os.replace(temporary, TELEMETRY_MODE_STATE_PATH)
 
 
-def _install_telemetry_mode(mode: str, *, persist: bool = True) -> dict:
+def _install_telemetry_mode(mode: str, *, persist: bool = True, history_compensation_enabled: bool | None = None) -> dict:
     global telemetry_mode, vehicle_tracker
     if mode not in TELEMETRY_MODES:
         raise ValueError(f"Unsupported telemetry mode: {mode}")
     with telemetry_lock:
         if hybrid_bus_service is None:
             raise RuntimeError("Routing telemetry service is not ready")
+        enabled = hybrid_bus_service.history_compensation_enabled if history_compensation_enabled is None else history_compensation_enabled
         if persist:
-            _persist_telemetry_mode(mode)
+            _persist_telemetry_mode(mode, enabled)
+        hybrid_bus_service.set_history_compensation(enabled)
         if mode == "live":
             hybrid_bus_service.start()
             bims_source = BimsLiveSource(hybrid_bus_service)
@@ -141,7 +151,7 @@ def _install_telemetry_mode(mode: str, *, persist: bool = True) -> dict:
             DeviceRelaySource(MEDIA_RELAY_INTERNAL_BASE_URL, timeout=DEVICE_TELEMETRY_TIMEOUT_S),
         ))
         telemetry_mode = mode
-        return {"mode": telemetry_mode, "available": vehicle_tracker is not None}
+        return {"mode": telemetry_mode, "available": vehicle_tracker is not None, "historyCompensationEnabled": enabled}
 
 
 @app.get("/health/live")
@@ -173,7 +183,7 @@ def startup():
         line_ids=route_ids,
         line_ids_json=os.environ.get("BUSAN_BUS_LINE_IDS", ""),
     )
-    _install_telemetry_mode(_load_telemetry_mode(), persist=False)
+    _install_telemetry_mode(_load_telemetry_mode(), persist=False, history_compensation_enabled=_load_history_compensation())
     print(f"Graph loaded and ready. {len(override_locations)} manual override location(s) found.")
 
 
@@ -198,6 +208,7 @@ class NearestRequest(BaseModel):
 
 class TelemetryModeRequest(BaseModel):
     mode: Literal["live", "playback"]
+    historyCompensationEnabled: bool | None = None
 
 
 class InternalCoordinate(BaseModel):
@@ -695,13 +706,13 @@ def get_vehicle(external_id: str):
 @app.get("/internal/telemetry/status")
 def telemetry_status():
     with telemetry_lock:
-        return {"mode": telemetry_mode, "available": vehicle_tracker is not None}
+        return {"mode": telemetry_mode, "available": vehicle_tracker is not None, "historyCompensationEnabled": bool(hybrid_bus_service and hybrid_bus_service.history_compensation_enabled)}
 
 
 @app.put("/internal/telemetry/mode")
 def set_telemetry_mode(req: TelemetryModeRequest):
     try:
-        return _install_telemetry_mode(req.mode)
+        return _install_telemetry_mode(req.mode, history_compensation_enabled=req.historyCompensationEnabled)
     except (OSError, RuntimeError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

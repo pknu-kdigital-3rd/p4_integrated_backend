@@ -51,6 +51,7 @@ class HybridBusTests(unittest.TestCase):
             lines=("111-1",),
             line_ids={"111-1": "L111-1"},
             stale_after_s=1.0,
+            history_compensation_enabled=True,
         )
         state = service.states["111-1"]
         state.line_id = "L111-1"
@@ -69,6 +70,40 @@ class HybridBusTests(unittest.TestCase):
         service._position_state(state, 105.1)
         self.assertGreater(state.current_lon, 129.1002)
         self.assertLess(state.current_lon, 129.1007)
+
+    def test_compensation_defaults_off_and_retains_stale_live_position(self):
+        self.write_history()
+        service = HybridBusService(service_key="test", history_path=self.history,
+            output_path=self.output, raw_path=self.raw, lines=("111-1",), stale_after_s=1)
+        state = service.states["111-1"]
+        state.live_lat, state.live_lon = 35.2, 129.2
+        state.live_received_mono = 100
+        state.live_observed_at_utc = "2026-01-01T00:00:00Z"
+        service._emit(110)
+        vehicle = service.snapshot()["vehicles"][0]
+        self.assertFalse(service.history_compensation_enabled)
+        self.assertEqual(vehicle["source"], "stale")
+        self.assertEqual((vehicle["lat"], vehicle["lon"]), (35.2, 129.2))
+        self.assertEqual(vehicle["live_observed_at_utc"], "2026-01-01T00:00:00Z")
+        self.assertIsNone(state.fallback_started_mono)
+
+    def test_disabling_compensation_cancels_interpolation(self):
+        self.write_history()
+        service = HybridBusService(service_key="test", history_path=self.history,
+            output_path=self.output, raw_path=self.raw, lines=("111-1",), stale_after_s=1,
+            history_compensation_enabled=True)
+        state = service.states["111-1"]
+        state.direction = "outbound"
+        state.live_lat, state.live_lon, state.live_received_mono = 35.1, 129.1, 100
+        service._position_state(state, 102)
+        self.assertEqual(state.source, "interpolated")
+        service._position_state(state, 106)
+        self.assertGreater(state.current_lon, state.live_lon)
+        service.set_history_compensation(False)
+        service._position_state(state, 107)
+        self.assertEqual(state.source, "stale")
+        self.assertEqual(state.current_lon, state.live_lon)
+        self.assertIsNone(state.fallback_started_mono)
 
     def test_snapshot_and_persisted_row_keep_same_line_number(self):
         self.write_history()

@@ -95,6 +95,7 @@ form { display: grid; gap: 10px; }
 #map-legend,#virtual-legend { position: absolute; z-index: 600; bottom: 36px; left: 18px; padding: 14px 18px; font-size: 12px; }
 #fleet-legend>span,#virtual-legend>span { display: flex; gap: 9px; align-items: center; margin-top: 8px; }
 .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #8b9bb0; }
+.legend-dot.stale { background: #b86b08; }
 .running { background: #0868dd; }.ready { background: #13ad72; }.maintenance { background: #ed3d4f; }.congestion { background: #f59a23; }
 #settings-drawer { position: absolute; top: 20px; left: 20px; z-index: 900; width: min(340px,calc(100% - 40px)); }
 #telemetry-settings { display: grid; gap: 10px; margin-top: 18px; }

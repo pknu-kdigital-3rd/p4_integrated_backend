@@ -148,15 +148,20 @@ function render(snapshot){
 async function refresh(){try{const snapshot=await api('/api/v1/tracking/vehicles');render(snapshot);error.textContent='';document.querySelector('#connection').textContent=`관제 연결됨 · ${snapshot.vehicles.length}대`}catch(e){console.error('[operator fleet] Fetch or render failed',e);error.textContent=e.message;document.querySelector('#connection').textContent='연결 확인 필요';const notice=document.querySelector('#fleet-status');notice.hidden=false;notice.textContent=`차량을 표시할 수 없습니다: ${e.message}`}}
 const telemetryModeSelect=document.querySelector('#telemetry-mode'),telemetryModeApply=document.querySelector('#telemetry-mode-apply'),telemetryModeStatus=document.querySelector('#telemetry-mode-status'),telemetrySettings=document.querySelector('#telemetry-settings');
 const telemetryModeLabel=mode=>mode==='live'?'Live BIMS':'Replay dataset';
+const historyCompensation=document.querySelector('#history-compensation');
+let telemetrySettingsEditing=false;
+telemetryModeSelect.addEventListener('change',()=>{telemetrySettingsEditing=true});
+historyCompensation.addEventListener('change',()=>{telemetrySettingsEditing=true});
 function canChangeTelemetryMode(){return !demoMode&&['ADMIN','OPERATOR'].includes(currentRole)}
 function renderTelemetryMode(result){
   if(!result||!telemetryModeSelect)return;
-  telemetryModeSelect.value=result.mode;
+  if(!telemetrySettingsEditing){telemetryModeSelect.value=result.mode;historyCompensation.checked=result.historyCompensationEnabled===true;}
   document.querySelector('#fleet-source').textContent=result.mode==='live'?'소스: 실시간 BIMS':'소스: 저장된 GPS';
   telemetryModeStatus.textContent=`Active source: ${telemetryModeLabel(result.mode)}${result.available?'':' · routing is starting'}`;
   telemetryModeStatus.dataset.level=result.available?'ok':'warn';
   telemetryModeApply.disabled=!canChangeTelemetryMode();
   telemetryModeSelect.disabled=!canChangeTelemetryMode();
+  historyCompensation.disabled=!canChangeTelemetryMode();
 }
 async function loadTelemetryMode(){
   if(!telemetryModeSelect)return;
@@ -170,7 +175,7 @@ async function applyTelemetryMode(){
     return;
   }
   const mode=telemetryModeSelect.value;telemetryModeApply.disabled=true;telemetryModeSelect.disabled=true;telemetryModeStatus.textContent=`Switching to ${telemetryModeLabel(mode)}…`;telemetryModeStatus.dataset.level='warn';
-  try{renderTelemetryMode(await api('/api/v1/tracking/telemetry-mode',{method:'PUT',body:JSON.stringify({mode})},true));await refresh()}
+  try{const result=await api('/api/v1/tracking/telemetry-mode',{method:'PUT',body:JSON.stringify({mode,historyCompensationEnabled:historyCompensation.checked})},true);telemetrySettingsEditing=false;renderTelemetryMode(result);await refresh()}
   catch(ex){telemetryModeStatus.textContent=`Could not switch telemetry source: ${ex.message}`;telemetryModeStatus.dataset.level='error';await loadTelemetryMode()}
 }
 async function loadTripAssignments(){

@@ -12,11 +12,13 @@ export const trackingResponseSchema = z.object({
 
 export const telemetryModeSchema = z.object({
     mode: z.enum(["live", "playback"]),
+    historyCompensationEnabled: z.boolean().optional(),
 });
 
 export const telemetryModeResponseSchema = z.object({
     data: z.object({
         mode: z.enum(["live", "playback"]),
         available: z.boolean(),
+        historyCompensationEnabled: z.boolean(),
     }),
 });
