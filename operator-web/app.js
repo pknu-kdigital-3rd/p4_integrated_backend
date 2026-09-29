@@ -265,6 +265,9 @@ function selectVehicle(item){
   document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';
   if(item.tripId)void loadTripRecordings(String(item.tripId));
   retargetLiveView(item);
+  // Open the live view as soon as a streaming vehicle is selected, where it is
+  // visible: the "실시간 영상" tab. Only on selection, so closing it sticks.
+  if(!liveView&&matchesLiveTarget(item)&&!document.querySelector('#recording-live-content').hidden)openLiveView();
 }
 window.__operatorCancelMapPick=()=>{tripMapPick=undefined;document.querySelector('#map-pick-banner').hidden=true;document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.setAttribute('aria-pressed','false'));};
 function render(snapshot){
@@ -595,7 +598,8 @@ installForegroundResume(window,document,()=>{
   if(!liveView||document.hidden)return;
   liveFrame.contentWindow?.postMessage({type:FOREGROUND_RESUME_MESSAGE},liveView.frameOrigin);
 });
-document.querySelector('#recording-open-live').addEventListener('click',()=>{
+document.querySelector('#recording-open-live').addEventListener('click',()=>openLiveView());
+function openLiveView(){
   if(!bootstrap||!matchesLiveTarget(selected))return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
   liveViewUrlObject.searchParams.set('autostart','1');
@@ -615,7 +619,7 @@ document.querySelector('#recording-open-live').addEventListener('click',()=>{
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
   liveFrame.src=liveViewUrl;
-});
+}
 liveFrame.addEventListener('load',event=>{
   if(livePanel.hidden)return;
   const diagnostic=document.querySelector('#live-view-diagnostic');
