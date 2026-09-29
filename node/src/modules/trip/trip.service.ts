@@ -129,6 +129,7 @@ export const tripService = {
             ORDER BY received_at DESC, position_id DESC LIMIT 1`;
         return { tripId: trip.tripId, vehicleId: trip.vehicleId, tripStatus: trip.tripStatus,
             routeMode: trip.routeMode, originName: trip.originName, destinationName: trip.destinationName,
+            plannedStartAt: trip.plannedStartAt, startedAt: trip.startedAt, endedAt: trip.endedAt,
             plannedRoute: trip.routes[0] ?? null,
             replayPreview: preview && { replayPreviewId: preview.replayPreviewId,
                 fingerprint: preview.fingerprint, datasetName: preview.datasetName,
