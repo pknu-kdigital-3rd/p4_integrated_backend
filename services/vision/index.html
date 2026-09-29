@@ -179,7 +179,17 @@
       sourceTimestampNs: source.resolved_source_timestamp_ns || null,
       recording: (pair.telemetry && pair.telemetry.recording) || source.recording || null,
       telemetry: pair.telemetry || null,
+      // Class counts for the presented frame, for the operator's status line.
+      detections: detectionCounts(pair.inference),
     }, parentOrigin);
+  }
+  function detectionCounts(inference) {
+    const counts = {};
+    for (const item of (inference && inference.items) || []) {
+      const name = String(item.class || 'object').toLowerCase();
+      counts[name] = (counts[name] || 0) + 1;
+    }
+    return counts;
   }
 
   function setStatus(text, color = '#aaa') { statusEl.textContent = text; statusEl.style.color = color; }

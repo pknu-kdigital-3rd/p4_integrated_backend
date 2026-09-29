@@ -174,7 +174,7 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #recording-player-panel:fullscreen #recording-player { height: 100%; max-height: none; aspect-ratio: auto; }
 
 /* Floating Live View keeps map and sidebar in place. */
-#live-view-panel { position: absolute; z-index: 850; right: 18px; bottom: 34px; width: min(540px,calc(100% - 36px)); height: min(400px,60%); display: grid; grid-template-rows: 48px 24px 26px minmax(0,1fr); background: #15263b; color: white; border-radius: 14px; overflow: hidden; box-shadow: var(--ui-shadow-floating); }
+#live-view-panel { position: absolute; z-index: 850; right: 18px; bottom: 34px; width: min(540px,calc(100% - 36px)); height: min(400px,60%); display: grid; grid-template-rows: 48px 24px 26px minmax(0,1fr) 30px; background: #15263b; color: white; border-radius: 14px; overflow: hidden; box-shadow: var(--ui-shadow-floating); }
 .live-view-header { display: flex; align-items: center; justify-content: space-between; padding: 0 12px; gap: 8px; }
 .live-view-header h2 { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-view-actions { display: flex; gap: 4px; flex-shrink: 0; }
@@ -184,14 +184,17 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #live-telemetry-status[data-level=ok] { color: #64e0b2; }
 #live-telemetry-status[data-level=warn],#live-telemetry-status[data-level=idle] { color: #ffcf70; }
 #live-view-panel.dragging #live-view-frame { pointer-events: none; }
-#live-view-panel.details-hidden { grid-template-rows: 48px minmax(0,1fr); }
+#live-view-panel.details-hidden { grid-template-rows: 48px minmax(0,1fr) 30px; }
+/* Detection summary under the video, in the title bar colour (30px row,
+   mirrored by LIVE_PANEL_FOOTER in app.js). */
+#live-detection-status { margin: 0; padding: 0 12px; display: flex; align-items: center; font-size: 11px; color: #d6e4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #live-view-panel.details-hidden #live-view-diagnostic,#live-view-panel.details-hidden #live-telemetry-status { display: none; }
 /* Inner margin in the panel (title bar) colour around the video; the 8px is
    mirrored by LIVE_PANEL_INSET in app.js, which sizes the panel to the video. */
-#live-view-panel.details-hidden:not(:fullscreen) #live-view-frame { margin: 0 8px 8px; width: calc(100% - 16px); height: calc(100% - 8px); border-radius: 6px; }
+#live-view-panel.details-hidden:not(:fullscreen) #live-view-frame { margin: 0 8px; width: calc(100% - 16px); height: 100%; border-radius: 6px; }
 .live-view-header { user-select: none; }
 /* A dragged position is inline left/top; fullscreen must still cover the screen. */
-#live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr); }
+#live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr) 30px; }
 #live-view-panel:fullscreen #live-view-diagnostic,#live-view-panel:fullscreen #live-telemetry-status { display: none; }
 
 /* Dedicated virtual dispatch workspace */

@@ -6,6 +6,7 @@ import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAnd
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 import {plannedProgress,recordedProgress} from './trip-route-ui.js';
 import {installPanelDrag} from './panel-drag.js';
+import {describeDetections} from './detection-status.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
@@ -29,17 +30,18 @@ function syncLiveDetails(){
 // black bars; it stays at most 540px wide and inside the map. With details
 // shown (or before the video size is known) the stylesheet size applies.
 let liveVideoSize=null;
-const LIVE_PANEL_INSET=8; // matches the video's inner margin in styles.css
+const LIVE_PANEL_INSET=8; // matches the video's side margins in styles.css
+const LIVE_PANEL_FOOTER=30; // the detection status row under the video
 function fitLivePanelToVideo(){
   const fit=liveDetailsHidden&&liveVideoSize&&!livePanel.hidden&&document.fullscreenElement!==livePanel;
   if(!fit){livePanel.style.removeProperty('width');livePanel.style.removeProperty('height')}
   else{
-    const surface=document.querySelector('#map-surface').getBoundingClientRect(),header=48,inset=LIVE_PANEL_INSET;
+    const surface=document.querySelector('#map-surface').getBoundingClientRect(),header=48,inset=LIVE_PANEL_INSET,footer=LIVE_PANEL_FOOTER;
     const ratio=liveVideoSize.width/liveVideoSize.height;
     let videoWidth=Math.max(160,Math.min(540,surface.width-36))-2*inset,videoHeight=videoWidth/ratio;
-    const maxVideoHeight=Math.max(90,Math.min(440,surface.height-36,surface.height*0.7)-header-inset);
+    const maxVideoHeight=Math.max(90,Math.min(470,surface.height-36,surface.height*0.7)-header-footer);
     if(videoHeight>maxVideoHeight){videoHeight=maxVideoHeight;videoWidth=videoHeight*ratio}
-    livePanel.style.width=`${Math.round(videoWidth+2*inset)}px`;livePanel.style.height=`${Math.round(header+videoHeight+inset)}px`;
+    livePanel.style.width=`${Math.round(videoWidth+2*inset)}px`;livePanel.style.height=`${Math.round(header+videoHeight+footer)}px`;
   }
   livePanelDrag?.apply();
 }
@@ -485,7 +487,12 @@ function browserReachableUrl(configuredUrl){
   if(url.hostname==='127.0.0.1'||url.hostname==='localhost')url.hostname=window.location.hostname;
   return url.href;
 }
+let liveDetections=null;
+function renderDetectionStatus(){
+  document.querySelector('#live-detection-status').textContent=describeDetections(liveDetections?.counts,liveDetections?.receivedAt,Date.now());
+}
 function renderLiveTelemetryStatus(){
+  renderDetectionStatus();
   const element=document.querySelector('#live-telemetry-status');
   const status=describeLiveTelemetry(liveView,lastLiveMessage,Date.now());
   const entry=liveView&&markers.get(liveView.markerKey);
@@ -502,7 +509,7 @@ function stopLiveView(){
   livePanel.hidden=true;
   operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
-  liveView=null;lastLiveMessage=null;liveVideoSize=null;fitLivePanelToVideo();
+  liveView=null;lastLiveMessage=null;liveVideoSize=null;liveDetections=null;fitLivePanelToVideo();
   document.querySelector('#live-view-title').textContent='실시간 전방 영상';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
   refreshMapLayout();
@@ -518,6 +525,10 @@ window.addEventListener('message',event=>{
     const {width,height}=event.data;
     if(Number.isFinite(width)&&Number.isFinite(height)&&width>0&&height>0){liveVideoSize={width,height};fitLivePanelToVideo()}
     return;
+  }
+  // Class counts describe whatever the frame shows, with or without a trip or telemetry.
+  if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-vehicle-telemetry'&&event.data.detections&&typeof event.data.detections==='object'){
+    liveDetections={counts:event.data.detections,receivedAt:Date.now()};renderDetectionStatus();
   }
   const message=acceptLiveTelemetry(liveView,event,liveFrame.contentWindow);
   if(!message)return;
