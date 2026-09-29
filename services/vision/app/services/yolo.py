@@ -689,14 +689,20 @@ async def _queue_decoded_frame(
             resolved_source_timestamp_ns=source_time.source_timestamp_ns,
             source_timeline_status=source_time.status,
             source_timeline_generation=source_time.generation,
+            # tripId is None for a stream tracked without a trip: Live View still
+            # gets its telemetry, while detection persistence requires a trip.
             recording_identity=(
                 {
-                    "tripId": str(metadata["recording"]["trip_id"]),
+                    "tripId": (
+                        str(metadata["recording"]["trip_id"])
+                        if metadata["recording"].get("trip_id") is not None
+                        else None
+                    ),
                     "vehicleId": str(metadata["recording"]["vehicle_id"]),
                     "recordingSessionId": str(metadata["recording"]["recording_session_id"]),
                 }
                 if isinstance(metadata.get("recording"), dict)
-                and metadata["recording"].get("trip_id") is not None
+                and metadata["recording"].get("vehicle_id") is not None
                 and metadata["recording"].get("recording_session_id")
                 else None
             ),

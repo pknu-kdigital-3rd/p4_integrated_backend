@@ -64,6 +64,14 @@ class RecordingDetectionWriterTests(unittest.TestCase):
         self.assertEqual([sample["frameSeq"] for sample in samples], ["0", "1", "2", "3", "4"])
         self.assertEqual(metrics.recording_samples_queued, 5)
 
+    def test_trip_less_stream_is_never_persisted(self):
+        writer = RecordingDetectionWriter("http://p4-node:3000", "secret")
+        metrics = SimpleNamespace(recording_samples_queued=0, recording_samples_dropped=0)
+        result = _result(0)
+        result["source"]["recording"]["tripId"] = None
+        writer.offer(result, metrics)
+        self.assertEqual(metrics.recording_samples_queued, 0)
+
     def test_queue_is_bounded_without_waiting(self):
         writer = RecordingDetectionWriter("http://p4-node:3000", "secret", queue_size=1)
         metrics = SimpleNamespace(

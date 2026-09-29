@@ -85,7 +85,7 @@ class RecordingDetectionWriter:
         identity = source.get("recording") if isinstance(source, dict) else None
         if not isinstance(identity, dict):
             return
-        trip_id = str(identity.get("tripId", ""))
+        trip_id = str(identity.get("tripId") or "")
         session_id = str(identity.get("recordingSessionId", ""))
         pts = source.get("pts_90k")
         if not trip_id.isdecimal() or not session_id or pts is None:

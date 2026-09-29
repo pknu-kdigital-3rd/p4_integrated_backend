@@ -33,7 +33,7 @@ class InferenceFrame:
     qr_source_timestamp_ns: int | None = None
     qr_capture_timestamp_ns: int | None = None
     qr_decode_success: bool = False
-    recording_identity: dict[str, str] | None = None
+    recording_identity: dict[str, str | None] | None = None
     # Position on the source recording timeline (QR anchor + PTS
     # extrapolation). Telemetry is matched on this, never on receive time.
     resolved_source_timestamp_ns: int | None = None

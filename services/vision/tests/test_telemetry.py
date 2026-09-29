@@ -55,6 +55,18 @@ class TelemetryStoreTests(unittest.TestCase):
         with self.assertRaises(TelemetryIdentityError):
             self.store.ingest(batch([gps(T0 + S)], trip="999"))
 
+    def test_trip_less_stream_is_matched_for_live_view(self):
+        tripless = TelemetryBatchIn.model_validate({
+            "mode": "REPLAY", "vehicleId": "3", "recordingSessionId": "S-live",
+            "sourceClockNs": str(T0), "gps": [gps(T0, latitude=11)], "imu": [imu(T0)],
+        })
+        self.store.ingest(tripless)
+        result = self.store.match({"tripId": None, "vehicleId": "3", "recordingSessionId": "S-live"}, T0)
+        self.assertEqual(result["gps"]["latitude"], 11)
+        self.assertIsNone(result["recording"]["tripId"])
+        # A frame claiming a trip for this trip-less session never matches.
+        self.assertEqual(self.store.match({"tripId": "5", "vehicleId": "3", "recordingSessionId": "S-live"}, T0)["status"], "session_mismatch")
+
     def test_insertion_order_duplicates_and_bounded_retention(self):
         self.store.ingest(batch([gps(T0 + 2 * S), gps(T0), gps(T0 + S)]))
         self.store.ingest(batch([gps(T0 + S, latitude=36.0)]))

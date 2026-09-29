@@ -70,7 +70,8 @@ class TelemetryBatchIn(BaseModel):
     """Canonical batch from the media relay. Identity is relay-validated."""
 
     mode: Literal["REPLAY", "LIVE"]
-    tripId: str = Field(pattern=_INT64_PATTERN)
+    # Absent for a vehicle streaming without a trip: kept for Live View only.
+    tripId: str | None = Field(default=None, pattern=_INT64_PATTERN)
     vehicleId: str = Field(pattern=_INT64_PATTERN)
     recordingSessionId: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
     sourceClockNs: int | None = None
@@ -102,7 +103,7 @@ class TelemetryIdentityError(ValueError):
 
 @dataclass
 class SessionTelemetry:
-    trip_id: str
+    trip_id: str | None
     vehicle_id: str
     mode: str
     gps_ts: list[int] = field(default_factory=list)
@@ -344,7 +345,7 @@ class TelemetryStore:
         session = self._sessions.get(recording["recordingSessionId"])
         if session is None:
             return {**base, "status": "waiting_for_telemetry"}
-        if session.trip_id != str(recording.get("tripId")) or session.vehicle_id != str(recording.get("vehicleId")):
+        if (session.trip_id or None) != (recording.get("tripId") or None) or session.vehicle_id != str(recording.get("vehicleId")):
             return {**base, "status": "session_mismatch"}
         base["mode"] = session.mode
         if source_timestamp_ns is None:
