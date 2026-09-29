@@ -210,10 +210,12 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #live-view-panel.details-hidden:not(:fullscreen) #live-view-frame { margin: 0 8px; width: calc(100% - 16px); height: 100%; border-radius: 6px; }
 .live-view-header { user-select: none; }
 /* A dragged position is inline left/top; fullscreen must still cover the screen. */
-#live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr) 30px; }
-#live-view-panel:fullscreen #live-view-diagnostic,#live-view-panel:fullscreen #live-telemetry-status { display: none; }
+#live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px 24px 26px minmax(0,1fr) 30px; }
+#live-view-panel.details-hidden:fullscreen { grid-template-rows: 48px minmax(0,1fr) 30px; }
 /* Docking/floating and the details toggle do not apply to fullscreen. */
-#live-view-panel:fullscreen #live-float,#live-view-panel:fullscreen #live-details { display: none; }
+#live-view-panel:fullscreen #live-float { display: none; }
+/* "상세 보기" (diagnostics and the Vision page's options) is offered only in fullscreen. */
+#live-view-panel:not(:fullscreen) #live-details { display: none; }
 
 /* Dedicated virtual dispatch workspace */
 body.virtual-mode #operator-layout { grid-template-columns: 310px minmax(0,1fr); }

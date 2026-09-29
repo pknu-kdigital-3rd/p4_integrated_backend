@@ -20,8 +20,13 @@ const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.qu
 // The live preview is docked in the "실시간 영상" tab unless the operator floats it on the map.
 let liveDocked=true;
 const liveDock=document.querySelector('#live-view-dock');
-let liveDetailsHidden=(()=>{try{return localStorage.getItem('operatorLiveDetailsHidden')!=='false'}catch{return true}})();
+// Details (diagnostics, telemetry status, the Vision page's information and
+// options) are a fullscreen-only view: "상세 보기" appears only in fullscreen,
+// and leaving fullscreen returns to video only.
+let liveFullscreenDetails=false;
+let liveDetailsHidden=true;
 function syncLiveDetails(){
+  liveDetailsHidden=!(liveFullscreenDetails&&document.fullscreenElement===livePanel);
   livePanel.classList.toggle('details-hidden',liveDetailsHidden);
   const button=document.querySelector('#live-details');
   button.textContent=liveDetailsHidden?'상세 보기':'상세 숨기기';
@@ -84,8 +89,7 @@ function placeLivePanel(docked){
   refreshMapLayout();
 }
 document.querySelector('#live-details').addEventListener('click',()=>{
-  liveDetailsHidden=!liveDetailsHidden;
-  try{localStorage.setItem('operatorLiveDetailsHidden',String(liveDetailsHidden))}catch{}
+  liveFullscreenDetails=!liveFullscreenDetails;
   syncLiveDetails();
 });
 // Drag the live preview by its title bar anywhere inside the map.
@@ -163,8 +167,9 @@ function releaseLiveMarker(){
 }
 function liveTargetLabel(item){return item?.vehicleCode||item?.vehicleName||`Vehicle ID ${item?.vehicleId??item?.telemetry?.external_id??'unknown'}`}
 // The Vision page's "fullscreen" mode shows only the video, scaled to fit the
-// frame; it is also used while the debugging details are hidden.
-function notifyLiveFrameFullscreen(fullscreen=document.fullscreenElement===livePanel||liveDetailsHidden){
+// frame. It is used whenever details are hidden; with fullscreen details on,
+// the page shows its full information and options.
+function notifyLiveFrameFullscreen(fullscreen=liveDetailsHidden){
   if(!liveView)return;
   liveFrame.contentWindow?.postMessage({type:'operator-live-view-fullscreen',fullscreen},liveView.frameOrigin);
 }
@@ -655,7 +660,7 @@ function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement=
 if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
 else{
   liveFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===livePanel)await document.exitFullscreen();else await livePanel.requestFullscreen()}catch{document.querySelector('#live-view-diagnostic').textContent='Full-screen Live View is unavailable in this browser.'}});
-  document.addEventListener('fullscreenchange',()=>{syncLiveFullscreenButton();notifyLiveFrameFullscreen();fitLivePanelToVideo();requestAnimationFrame(()=>map.invalidateSize({pan:false}))});
+  document.addEventListener('fullscreenchange',()=>{syncLiveFullscreenButton();if(document.fullscreenElement!==livePanel)liveFullscreenDetails=false;syncLiveDetails();requestAnimationFrame(()=>map.invalidateSize({pan:false}))});
   syncLiveFullscreenButton();
 }
 document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.addEventListener('click',()=>{
