@@ -177,6 +177,13 @@
                 android:text="Trip: checking assignment…"
                 android:textColor="#FFFFFFFF"
                 android:textSize="12sp" />
+            <ProgressBar
+                android:id="@+id/tripProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:indeterminate="true"
+                android:visibility="gone" />
             <Button
                 android:id="@+id/tripButton"
                 android:layout_width="match_parent"

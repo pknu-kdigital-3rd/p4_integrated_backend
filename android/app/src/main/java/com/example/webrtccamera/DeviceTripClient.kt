@@ -28,7 +28,7 @@ data class DeviceTrip(
 
 /** The Android-facing nginx port forwards only /api/v1/device to Node. */
 class DeviceTripClient(serverUrl: String) {
-    private val http = OkHttpClient()
+    private val http = sharedHttp
     private val base = serverUrl.trim().trimEnd('/').removeSuffix("/offer/android")
     private val jsonType = "application/json".toMediaType()
 
@@ -89,6 +89,12 @@ class DeviceTripClient(serverUrl: String) {
             .put("points", points).put("totalDistanceM", distance.roundToInt())
         call("/vehicles/$vehicleId/replay-preview", "PUT", payload)
         return fingerprint
+    }
+
+    companion object {
+        // One client for all trip calls: a new OkHttpClient per request would pay a fresh
+        // HTTPS connection and TLS handshake every time, which the driver feels on Start Trip.
+        private val sharedHttp = OkHttpClient()
     }
 
     private fun parseTrip(data: JSONObject): DeviceTrip = DeviceTrip(
