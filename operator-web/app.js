@@ -11,7 +11,7 @@ const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
@@ -416,8 +416,14 @@ async function loadAssignmentPreview(){
   catch(ex){const notice=document.querySelector('#trip-preview-status');notice.textContent=`Android GPS 경로 확인 실패 · ${ex.message}`;notice.hidden=false}
 }
 document.querySelector('#trip-vehicle').addEventListener('change',()=>void loadAssignmentPreview());
+// Trips change on the phone too (Start/Stop Trip), so the list is polled; it is
+// only rebuilt when the data changed, so buttons do not flicker or lose focus.
+let tripListSignature='';
 async function loadTripAssignments(){
   const [vehicles,trips]=await Promise.all([api('/api/v1/vehicles',{},true),api('/api/v1/trips',{},true)]);
+  const signature=JSON.stringify([vehicles,trips,currentRole]);
+  if(signature===tripListSignature)return;
+  tripListSignature=signature;
   const vehicleSelect=document.querySelector('#trip-vehicle'),previousVehicle=vehicleSelect.value;
   vehicleSelect.replaceChildren(new Option(uiText('Select a vehicle'),''));
   for(const vehicle of vehicles.filter(item=>item.isActive)){
@@ -443,7 +449,11 @@ async function loadTripAssignments(){
       const cancel=document.createElement('button');cancel.type='button';cancel.textContent='운행 취소';
       cancel.onclick=async()=>{if(!window.confirm(`Trip ID ${trip.tripId} 배정을 취소할까요?`))return;
         cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);await loadTripAssignments();await refresh()}
-        catch(ex){document.querySelector('#trip-status-message').textContent=ex.message;cancel.disabled=false}};
+        catch(ex){
+          // Usually the phone already ended it (Stop Trip completes a trip); show that and refresh.
+          document.querySelector('#trip-status-message').textContent=/not active/i.test(ex.message)?`Trip ID ${trip.tripId}은(는) 이미 종료된 운행입니다.`:ex.message;
+          cancel.disabled=false;await loadTripAssignments().catch(()=>{});
+        }};
       row.append(cancel);
     }
     list.append(row);
@@ -471,6 +481,7 @@ async function start(role){
   }
   await loadTelemetryMode();
   clearInterval(telemetryModeTimer);telemetryModeTimer=setInterval(()=>void loadTelemetryMode(),5000);
+  clearInterval(tripListTimer);tripListTimer=demoMode?undefined:setInterval(()=>void loadTripAssignments().catch(ex=>console.warn('[operator trips]',ex)),5000);
   if(!refreshTimer)refreshTimer=setInterval(refresh,3000);
 }
 async function autoLogin(){
