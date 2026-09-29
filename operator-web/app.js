@@ -193,8 +193,10 @@ function clearTripLayers(){
 }
 function showTripDisplay(display){
   const card=document.querySelector('#trip-progress-card');card.hidden=false;
-  document.querySelector('#selected-origin').textContent=display.originName||'배정 시점의 차량 위치';
-  document.querySelector('#selected-destination').textContent=display.destinationName;
+  // The track shows start/end icons; the full names are their tooltip and label.
+  for(const [id,prefix,name] of [['#selected-origin','출발지',display.originName||'배정 시점의 차량 위치'],['#selected-destination','목적지',display.destinationName]]){
+    const icon=document.querySelector(id),label=`${prefix} · ${name||'—'}`;icon.title=label;icon.setAttribute('aria-label',label);
+  }
   const times=tripTimes(display);
   document.querySelector('#selected-origin-time').textContent=times.origin;
   document.querySelector('#selected-destination-time').textContent=times.destination;

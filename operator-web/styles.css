@@ -144,7 +144,10 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 .trip-track.no-progress .trip-track-vehicle { background: var(--ui-text-secondary); box-shadow: none; }
 .trip-track-stops { display: flex; justify-content: space-between; gap: 12px; }
 .trip-track-stops > div { display: grid; gap: 2px; min-width: 0; }
-.trip-track-stops strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trip-track-icon { display: inline-grid; place-items: center; width: 24px; height: 24px; }
+.trip-track-icon svg { width: 20px; height: 20px; }
+.trip-track-start { color: var(--ui-primary); }
+.trip-track-end { color: #e53955; justify-self: end; }
 .trip-track-stops small { color: var(--ui-text-secondary); font-size: 11px; }
 .trip-track-destination { text-align: right; }
 #trip-preview-status { overflow-wrap: anywhere; }
