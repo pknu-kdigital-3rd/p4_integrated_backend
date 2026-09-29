@@ -1,3 +1,4 @@
+import {uiText, applyRoadHatch, vehicleIcon} from './dashboard-ui.js';
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
@@ -24,7 +25,7 @@ let activeRouteSignature = '';
 const requestList = document.querySelector('#virtual-requests');
 const restrictionList = document.querySelector('#virtual-restrictions');
 const eventList = document.querySelector('#virtual-events');
-const normalSections = ['#login', '#details', '#telemetry-settings', '#trip-panel', '#recordings-panel', '#error'];
+const normalSections = ['#login', '#selection-empty', '#details', '#telemetry-settings', '#trip-panel', '#recordings-panel', '#error'];
 const normalSectionVisibility = createSectionVisibility(
   normalSections.map((selector) => document.querySelector(selector)).filter(Boolean),
 );
@@ -126,7 +127,7 @@ function setStatus(message, isError = false) {
   status.dataset.level = isError ? 'error' : 'info';
 }
 function idempotency(prefix) { return `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`; }
-function formatPoint(point) { return point ? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` : 'not set'; }
+function formatPoint(point) { return point ? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` : uiText('not set'); }
 function pointIcon(kind, index) {
   const variant = kind === 'origin' ? 'origin' : kind === 'destination' ? 'destination' : 'waypoint';
   const label = kind === 'origin' ? 'O' : kind === 'destination' ? 'D' : String(index + 1);
@@ -215,10 +216,10 @@ function renderPoints() {
   points.waypoints.forEach((point, index) => drawPoint('waypoint', point, index));
   document.querySelector('#virtual-origin').textContent = formatPoint(points.origin);
   document.querySelector('#virtual-destination').textContent = formatPoint(points.destination);
-  document.querySelector('#virtual-waypoints').textContent = points.waypoints.length ? points.waypoints.map(formatPoint).join(' · ') : 'none';
+  document.querySelector('#virtual-waypoints').textContent = points.waypoints.length ? points.waypoints.map(formatPoint).join(' · ') : uiText('none');
 }
 function restrictionLabel(restriction) {
-  const kind = restriction?.kind === 'HEAVY_PENALTY' ? 'Heavy penalty' : 'Blocked';
+  const kind = restriction?.kind === 'HEAVY_PENALTY' ? '혼잡 구간' : '도로 차단';
   const factor = restriction?.kind === 'HEAVY_PENALTY' && restriction?.penaltyFactor !== null && restriction?.penaltyFactor !== undefined
     ? ` · ×${Number(restriction.penaltyFactor).toFixed(1)}` : '';
   return `${kind}${factor} · revision ${restriction?.revision ?? '?'}`;
@@ -234,12 +235,13 @@ function renderRestrictions(items) {
     return;
   }
   for (const restriction of restrictions) {
-    const color = restriction.kind === 'HEAVY_PENALTY' ? '#f4a261' : '#e76f51';
+    const color = restriction.kind === 'HEAVY_PENALTY' ? '#f59a23' : '#ed3d4f';
     if (restriction.geometry) {
       const layer = L.geoJSON(restriction.geometry, {
         style: { color, weight: 2, fillColor: color, fillOpacity: 0.16 },
       });
-      layer.bindTooltip(restrictionLabel(restriction));
+      layer.bindTooltip(restrictionLabel(restriction), {permanent:true,direction:'center',className:'road-region-label'});
+      layer.on('add', () => requestAnimationFrame(() => applyRoadHatch(layer, restriction.kind, color)));
       restrictionLayerGroup.addLayer(layer);
     }
     const row = document.createElement('li');
@@ -433,11 +435,20 @@ function routeArrowGeometryExcluding(routeGeojson, excludedGeojson) {
     features: remainingLines.map((coordinates) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } })),
   };
 }
+function updateRouteSummary(route, waypointCount = points.waypoints.length) {
+  const distance=route?.distanceM ?? route?.route?.distanceM;
+  const duration=route?.durationSec ?? route?.route?.durationSec;
+  document.querySelector('#route-summary-values').textContent=route
+    ? `총 거리  ${distance==null?'—':(Number(distance)/1000).toFixed(2)+' km'}\n예상 시간  ${duration==null?'—':(Number(duration)/60).toFixed(1)+'분'}\n경유지  ${waypointCount}개`
+    : '경로를 미리 보거나 차량을 선택하세요.';
+  document.querySelector('#route-summary-revision').textContent=route?`경로 v${route.routeVersion??'미리보기'} · 도로 상태 v${route.restrictionRevision??scenarioRevision}`:'';
+}
 function renderDraft() {
+  updateRouteSummary(draft);
   if (!draft) {
     if (draftRouteSignature) clearRouteGroup(routeLayerGroup);
     draftRouteSignature = '';
-    document.querySelector('#virtual-draft-summary').textContent = 'No route draft.';
+    document.querySelector('#virtual-draft-summary').textContent = '경로 미리보기를 실행하세요.';
     document.querySelector('#virtual-dispatch').disabled = true;
     return;
   }
@@ -446,8 +457,8 @@ function renderDraft() {
   draftRouteSignature = signature;
   clearRouteGroup(routeLayerGroup);
   addRouteVisual(routeLayerGroup, draft.routeGeojson, {
-    outlineColor: '#493b5d', outlineWeight: 14, outlineOpacity: 0.78,
-    lineColor: '#7c3aed', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true,
+    outlineColor: '#ffffff', outlineWeight: 14, outlineOpacity: 0.78,
+    lineColor: '#62a9f8', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true,
   }, 'Route preview');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
   document.querySelector('#virtual-dispatch').disabled = false;
@@ -456,6 +467,7 @@ function renderActiveTripRoute(vehicle) {
   const trip = vehicle?.state?.trip;
   const routes = Array.isArray(trip?.routes) ? trip.routes.filter((route) => route?.routeGeojson) : [];
   if (!routes.length) {
+    updateRouteSummary(draft);
     if (activeRouteSignature) clearRouteGroup(activeRouteLayerGroup);
     activeRouteSignature = '';
     return;
@@ -469,6 +481,7 @@ function renderActiveTripRoute(vehicle) {
     && String(route.routeId) === String(activeRouteId))
     || routes.find((route) => route.isCurrent)
     || routes.at(-1);
+  updateRouteSummary(draft || currentRoute, draft ? (draft.waypoints?.length ?? points.waypoints.length) : (trip.waypoints?.length ?? 0));
   const previousRoute = routes
     .filter((route) => route !== currentRoute)
     .sort((a, b) => Number(b.routeVersion || 0) - Number(a.routeVersion || 0))[0];
@@ -498,7 +511,7 @@ function renderActiveTripRoute(vehicle) {
     const duplicateGeometry = !current && currentGeometry !== ''
       && routeGeometryIdentity(route.routeGeojson) === currentGeometry;
     addRouteVisual(activeRouteLayerGroup, route.routeGeojson, current
-      ? { outlineColor: '#23415f', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowOpacity: 0.98, arrowYawn: 36, showArrows: true }
+      ? { outlineColor: '#ffffff', outlineWeight: 14, outlineOpacity: 0.82, lineColor: '#0875f5', lineWeight: 11, lineOpacity: 1, arrowColor: '#ffffff', arrowOpacity: 0.98, arrowYawn: 36, showArrows: true }
       : { outlineColor: '#59452b', outlineWeight: 12, outlineOpacity: 0.62, lineColor: '#f59e0b', lineWeight: 9, lineOpacity: 0.72, arrowColor: '#ffffff', arrowOpacity: 0.62, arrowYawn: 36, showArrows: !duplicateGeometry && Boolean(previousArrowGeometry), arrowGeometry: previousArrowGeometry },
     current ? `Active route · v${route.routeVersion}` : `Previous route · v${route.routeVersion}`);
   }
@@ -509,7 +522,7 @@ map.on?.('zoomend', () => {
 function renderVehicles({ updateVehicleSelect = true } = {}) {
   const selected = selectedVehicleId;
   if (updateVehicleSelect) {
-    vehicleSelect.replaceChildren(new Option('Select a virtual vehicle', ''));
+    vehicleSelect.replaceChildren(new Option('가상 차량 선택', ''));
     for (const vehicle of vehicles) {
       const state = vehicle.state?.simStatus || vehicle.vehicleStatus || 'READY';
       vehicleSelect.add(new Option(`${vehicle.vehicleCode}${vehicle.vehicleName ? ` · ${vehicle.vehicleName}` : ''} · ${state}`, String(vehicle.vehicleId)));
@@ -539,14 +552,14 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     visibleVehicleIds.add(vehicleId);
     let marker = virtualVehicleMarkers.get(vehicleId);
     if (!marker) {
-      marker = L.circleMarker([Number(position.lat), Number(position.lon)], { radius: vehicleId === selected ? 11 : 8, color: '#6a4c93', fillColor: '#b185db', fillOpacity: 0.9 });
+      marker = L.marker([Number(position.lat), Number(position.lon)], { icon: vehicleIcon(vehicle, vehicleId === selected, true) });
       marker.bindTooltip(`Virtual · ${vehicle.vehicleCode}`);
       marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; speedControlEditing = false; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); });
       virtualVehicleMarkers.set(vehicleId, marker);
       markerLayerGroup.addLayer(marker);
     } else {
       animateVehicleMarker(vehicleId, marker, { lat: Number(position.lat), lon: Number(position.lon) });
-      marker.setStyle({ radius: vehicleId === selected ? 11 : 8 });
+      marker.setIcon(vehicleIcon(vehicle, vehicleId === selected, true));
       marker.setTooltipContent(`Virtual · ${vehicle.vehicleCode}`);
     }
   }
@@ -577,14 +590,15 @@ function noViablePathMessage() {
   return `No viable path after applying this blockage${labels ? ` for ${labels}` : ''}.`;
 }
 function renderRequests(requests) {
+  document.querySelector('#request-count').textContent=`(${requests.filter(request=>request.state==='PENDING').length})`;
   requestList.replaceChildren();
-  if (!requests.length) { requestList.append(Object.assign(document.createElement('li'), { textContent: 'No pending requests.' })); return; }
+  if (!requests.length) { requestList.append(Object.assign(document.createElement('li'), { textContent: uiText('No pending requests.') })); return; }
   for (const request of requests) {
     const row = document.createElement('li');
     row.textContent = `Request ${request.requestId} · vehicle ${request.selectedVehicleId} · ${request.state}${request.acceptAt ? ` · ${new Date(request.acceptAt).toLocaleTimeString()}` : ''}`;
     if (request.state === 'PENDING') {
-      const accept = document.createElement('button'); accept.type = 'button'; accept.textContent = 'Accept'; accept.onclick = () => decideRequest(request.requestId, 'accept');
-      const reject = document.createElement('button'); reject.type = 'button'; reject.textContent = 'Reject'; reject.onclick = () => decideRequest(request.requestId, 'reject');
+      const accept = document.createElement('button'); accept.type = 'button'; accept.textContent = uiText('Accept'); accept.onclick = () => decideRequest(request.requestId, 'accept');
+      const reject = document.createElement('button'); reject.type = 'button'; reject.textContent = uiText('Reject'); reject.onclick = () => decideRequest(request.requestId, 'reject');
       row.append(' ', accept, ' ', reject);
     }
     requestList.append(row);
@@ -606,7 +620,7 @@ async function loadScenarios() {
   scenarioRevision = Number(selectedScenario?.restrictionRevision || 0);
   scenarioSelect.value = scenarioId;
   removeScenarioButton.disabled = !scenarioId;
-  if (!scenarioId) setStatus('Create a scenario to begin.');
+  if (!scenarioId) setStatus(uiText('Create a scenario to begin.'));
 }
 async function loadScenarioData() {
   if (!scenarioId) {
@@ -644,7 +658,7 @@ async function decideRequest(requestId, action) {
   catch (error) { setStatus(error.message, true); }
 }
 async function previewRoute() {
-  if (!scenarioId || !selectedVehicleId || !points.origin || !points.destination) { setStatus('Select a virtual vehicle and pick origin and destination.', true); return; }
+  if (!scenarioId || !selectedVehicleId || !points.origin || !points.destination) { setStatus(uiText('Select a virtual vehicle and pick origin and destination.'), true); return; }
   try {
     draft = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/preview`, { method: 'POST', body: JSON.stringify({ selectedVehicleId, origin: points.origin, destination: points.destination, waypoints: points.waypoints, expectedRestrictionRevision: scenarioRevision }) });
     renderDraft(); setStatus(`Route preview ready for vehicle ${selectedVehicleId}.`);
@@ -652,15 +666,15 @@ async function previewRoute() {
 }
 async function generateRequest() {
   if (!draft) return;
-  try { await api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`, { method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), selectedVehicleId, idempotencyKey: idempotency('dispatch') }) }); setStatus('Simulated driver request generated.'); await loadScenarioData(); }
+  try { await api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`, { method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), selectedVehicleId, idempotencyKey: idempotency('dispatch') }) }); setStatus(uiText('Simulated driver request generated.')); await loadScenarioData(); }
   catch (error) { setStatus(error.message, true); }
 }
 async function createScenario() {
-  try { const scenario = await api('/api/v1/virtual/scenarios', { method: 'POST', body: JSON.stringify({ name: `Scenario ${new Date().toLocaleString()}`, autoAcceptAfterSeconds: 30 }) }); scenarioId = String(scenario.scenarioId); await loadScenarios(); await loadScenarioData(); setStatus('Scenario created.'); }
+  try { const scenario = await api('/api/v1/virtual/scenarios', { method: 'POST', body: JSON.stringify({ name: `Scenario ${new Date().toLocaleString()}`, autoAcceptAfterSeconds: 30 }) }); scenarioId = String(scenario.scenarioId); await loadScenarios(); await loadScenarioData(); setStatus(uiText('Scenario created.')); }
   catch (error) { setStatus(error.message, true); }
 }
 async function removeScenario() {
-  if (!scenarioId) { setStatus('Select a scenario first.', true); return; }
+  if (!scenarioId) { setStatus(uiText('Select a scenario first.'), true); return; }
   const label = scenarioSelect.selectedOptions[0]?.textContent || `Scenario ${scenarioId}`;
   if (!window.confirm(`Remove ${label}? Active trips must be cancelled first.`)) return;
   removeScenarioButton.disabled = true;
@@ -691,7 +705,7 @@ async function removeScenario() {
 }
 async function createVehicle() {
   if (!scenarioId) { setStatus('Create or select a scenario first.', true); return; }
-  try { const vehicle = await api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`, { method: 'POST', body: JSON.stringify({ vehicleCode: `SIM-${Date.now()}`, vehicleName: 'Virtual vehicle', vehicleProfile: 'small', autoFollowEnabled: true }) }); selectedVehicleId = String(vehicle.vehicleId); await loadScenarioData(); setStatus('Virtual vehicle added.'); if (points.origin && points.destination) await refreshPreviewAfterPointChange('Vehicle added.'); }
+  try { const vehicle = await api(`/api/v1/virtual/scenarios/${scenarioId}/vehicles`, { method: 'POST', body: JSON.stringify({ vehicleCode: `SIM-${Date.now()}`, vehicleName: uiText('Virtual vehicle'), vehicleProfile: 'small', autoFollowEnabled: true }) }); selectedVehicleId = String(vehicle.vehicleId); await loadScenarioData(); setStatus('Virtual vehicle added.'); if (points.origin && points.destination) await refreshPreviewAfterPointChange('Vehicle added.'); }
   catch (error) { setStatus(error.message, true); }
 }
 async function removeVehicle() {
@@ -761,14 +775,14 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
 }
 function selectRestrictionPoint(point) {
   restrictionCorners.push(point);
-  if (restrictionCorners.length < 2) { setStatus('Pick the opposite corner of the restriction region.'); return; }
+  if (restrictionCorners.length < 2) { setStatus('영역의 반대쪽 모서리를 선택하세요.'); return; }
   const [a, b] = restrictionCorners;
   const west = Math.min(a.lon, b.lon), east = Math.max(a.lon, b.lon), south = Math.min(a.lat, b.lat), north = Math.max(a.lat, b.lat);
   restrictionGeometry = { type: 'Polygon', coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]] };
   restrictionDraftLayerGroup.clearLayers();
   L.rectangle([[south, west], [north, east]], { color: '#e76f51', weight: 2, fillOpacity: 0.15 }).addTo(restrictionDraftLayerGroup);
   document.querySelector('#virtual-restriction-commit').disabled = false;
-  restrictionCorners = []; pickMode = null; map.getContainer().style.cursor = ''; setStatus('Restriction region ready to activate.');
+  restrictionCorners = []; pickMode = null; map.getContainer().style.cursor = ''; setStatus('영역 활성화 버튼으로 도로 상태를 적용하세요.');
 }
 async function refreshAfterRestrictionChange(message) {
   draft = null;
@@ -812,7 +826,7 @@ async function removeRestriction(restriction) {
       method: 'PATCH',
       body: JSON.stringify({ isActive: false, expectedRestrictionRevision: scenarioRevision }),
     });
-    await refreshAfterRestrictionChange('Road region removed.');
+    await refreshAfterRestrictionChange('도로 구간을 해제했습니다.');
   } catch (error) { setStatus(error.message, true); }
 }
 async function switchMode(next) {
@@ -828,13 +842,14 @@ async function switchMode(next) {
     // display:none. Left behind, it keeps the whole sidebar invisible after the
     // switch back, however the individual sections are set.
     window.__operatorStopLiveView?.();
+    window.__operatorCancelMapPick?.();
     normalSectionVisibility.hide();
     // Ask the normal workspace to take its own layers off the map. Sweeping
     // them off from here removed markers this module cannot put back: they are
     // cached by external_id and only ever added to the map on creation, so the
     // fleet never reappeared after switching back.
     window.__operatorDetachMapLayers?.();
-    try { await loadScenarios(); await loadScenarioData(); setStatus('Virtual workspace ready.'); } catch (error) { setStatus(error.message, true); }
+    try { await loadScenarios(); await loadScenarioData(); setStatus('가상 경로·배차 준비 완료'); } catch (error) { setStatus(error.message, true); }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
     if (!vehiclePollTimer) vehiclePollTimer = setInterval(() => void refreshVehiclePositions().catch((error) => setStatus(error.message, true)), 250);
   } else {
@@ -881,7 +896,7 @@ document.querySelector('#virtual-following').addEventListener('change', (event) 
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => { speedControlEditing = true; renderSpeedControl(); });
 document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
-document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; map.getContainer().style.cursor = 'crosshair'; setStatus('Click two opposite corners on the map.'); });
+document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; map.getContainer().style.cursor = 'crosshair'; setStatus('지도에서 영역의 두 모서리를 선택하세요.'); });
 document.querySelector('#virtual-place-origin').addEventListener('click', () => beginRoutePointPick('origin'));
 document.querySelector('#virtual-place-destination').addEventListener('click', () => beginRoutePointPick('destination'));
 document.querySelector('#virtual-add-waypoint').addEventListener('click', () => beginRoutePointPick('waypoint'));

@@ -1,154 +1,675 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ITS Operator Dashboard</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <header><h1>ITS Operator Dashboard</h1><nav id="workspace-nav" aria-label="Workspace"><button id="normal-workspace" type="button" aria-pressed="true">Normal monitoring</button><button id="virtual-workspace-tab" type="button" aria-pressed="false">Virtual routing &amp; dispatch</button></nav><span id="connection">Signed out</span></header>
+<!DOCTYPE html>
+<html lang="ko">
+ <head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width,initial-scale=1" name="viewport"/>
+  <title>
+   부산시 ITS 통합 관제시스템
+  </title>
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
+  <link href="styles.css" rel="stylesheet"/>
+ </head>
+ <body>
+  <header class="app-header">
+   <div class="brand">
+    <span class="brand-mark">
+     ITS
+    </span>
+    <div>
+     <h1>
+      부산시 ITS 통합 관제시스템
+     </h1>
+     <p>
+      스마트한 교통 운영
+     </p>
+    </div>
+   </div>
+   <nav aria-label="작업 공간" id="workspace-nav">
+    <button aria-pressed="true" id="normal-workspace" type="button">
+     일반 모니터링
+    </button>
+    <button aria-pressed="false" id="virtual-workspace-tab" type="button">
+     가상 경로·배차
+    </button>
+   </nav>
+   <div class="header-status">
+    <span class="ui-chip" id="connection">
+     로그인 대기
+    </span>
+    <time id="local-clock">
+    </time>
+    <span aria-label="운영자" class="account-avatar">
+     관제
+    </span>
+   </div>
+  </header>
   <main id="operator-layout">
-    <section id="map"></section>
-    <div id="layout-splitter" role="separator" aria-label="Resize map and menu" aria-controls="map" aria-orientation="vertical" aria-valuemin="25" aria-valuemax="65" aria-valuenow="50" tabindex="0"></div>
-    <aside id="operator-sidebar">
-      <form id="login"><h2>Operator login</h2><input name="loginId" placeholder="Login ID" required><input name="password" type="password" placeholder="Password" required><button>Sign in</button></form>
-      <section id="details" hidden><h2>Selected Vehicle</h2><dl id="fields"></dl><button id="live-view" type="button" disabled>Live View</button><p id="route-label">Planned Route: unavailable</p></section>
-      <section id="telemetry-settings" hidden aria-labelledby="telemetry-settings-title">
-        <h2 id="telemetry-settings-title">Bus telemetry source</h2>
-        <label for="telemetry-mode">Source</label>
-        <select id="telemetry-mode">
-          <option value="playback">Replay dataset</option>
-          <option value="live">Live BIMS</option>
-        </select>
-        <button id="telemetry-mode-apply" type="button">Apply source</button>
-        <p id="telemetry-mode-status" role="status" aria-live="polite">Loading source…</p>
-      </section>
-      <section id="trip-panel" hidden aria-labelledby="trip-title">
-        <h2 id="trip-title">Make and assign a trip</h2>
-        <form id="trip-form">
-          <label for="trip-vehicle">Vehicle</label>
-          <select id="trip-vehicle" required><option value="">Loading vehicles…</option></select>
-          <label for="trip-origin-name">Origin name (optional)</label>
-          <input id="trip-origin-name" maxlength="150" placeholder="Depot or pickup point">
-          <div class="trip-coordinate-heading"><span>Origin coordinates (optional)</span><button type="button" data-trip-map-pick="origin" aria-pressed="false">Pick on map</button></div>
-          <div class="trip-coordinate-grid">
-            <input id="trip-origin-latitude" type="number" min="-90" max="90" step="any" placeholder="Latitude" aria-label="Origin latitude">
-            <input id="trip-origin-longitude" type="number" min="-180" max="180" step="any" placeholder="Longitude" aria-label="Origin longitude">
-          </div>
-          <label for="trip-destination-name">Destination name</label>
-          <input id="trip-destination-name" maxlength="150" placeholder="Destination" required>
-          <div class="trip-coordinate-heading"><span>Destination coordinates</span><button type="button" data-trip-map-pick="destination" aria-pressed="false">Pick on map</button></div>
-          <div class="trip-coordinate-grid">
-            <input id="trip-destination-latitude" type="number" min="-90" max="90" step="any" placeholder="Latitude" aria-label="Destination latitude" required>
-            <input id="trip-destination-longitude" type="number" min="-180" max="180" step="any" placeholder="Longitude" aria-label="Destination longitude" required>
-          </div>
-          <label for="trip-destination-address">Destination address (optional)</label>
-          <input id="trip-destination-address" maxlength="2000" placeholder="Street address">
-          <label for="trip-status">Initial status</label>
-          <select id="trip-status"><option value="IN_PROGRESS" selected>Start now</option><option value="READY">Ready for dispatch</option></select>
-          <label for="trip-planned-start">Planned start (optional)</label>
-          <input id="trip-planned-start" type="datetime-local">
-          <button id="create-trip" type="submit">Create trip and assign vehicle</button>
-        </form>
-        <p id="trip-status-message" role="status" aria-live="polite">Choose a vehicle and destination.</p>
-        <h3>Recent trips</h3>
-        <ul id="trips-list" aria-label="Recent trips"></ul>
-      </section>
-      <section id="recordings-panel" aria-labelledby="recordings-title">
-        <h2 id="recordings-title">Trip recordings</h2>
-        <form id="recordings-form">
-          <label for="recording-trip-id">Trip ID</label>
-          <input id="recording-trip-id" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="Select a vehicle or enter a trip ID" required>
-          <button type="submit">Load trip</button>
-        </form>
-        <p id="recordings-status" role="status">Select a vehicle to load its trip recordings.</p>
-        <div id="recording-delete-tools" hidden>
-          <button id="recording-delete-toggle" type="button">Delete segments</button>
-          <div id="recording-delete-mode" hidden>
-            <p>Drag across the replay timeline to select a continuous segment range. Home or End starts at an endpoint; Left/Right extends the range, and Shift+Left/Right adjusts its start.</p>
-            <p id="recording-delete-selection-status" role="status">No segments selected.</p>
-            <button id="recording-delete-selected" type="button" disabled>Delete selected range</button>
-            <button id="recording-delete-cancel" type="button">Cancel</button>
-          </div>
-        </div>
-        <div id="recording-player-panel" hidden>
-          <div id="recording-stage">
-            <video id="recording-player" playsinline preload="metadata" referrerpolicy="no-referrer"></video>
-            <canvas id="recording-overlay" aria-hidden="true"></canvas>
-          </div>
-          <div id="recording-controls" aria-label="Trip playback controls">
-            <button id="recording-play" type="button" aria-label="Play trip">Play</button>
-            <button id="recording-back" type="button" aria-label="Back 10 seconds">−10s</button>
-            <button id="recording-forward" type="button" aria-label="Forward 10 seconds">+10s</button>
-            <button id="recording-fullscreen" type="button" aria-label="View replay full screen">Full screen</button>
-            <div id="recording-timeline">
-              <input id="recording-seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Seek through trip recording">
-              <div id="recording-break-markers" aria-hidden="true"></div>
-              <div id="recording-delete-range" hidden tabindex="0" role="group" aria-label="Contiguous segment deletion range" aria-describedby="recording-delete-selection-status">
-                <div id="recording-delete-segments" aria-hidden="true"></div>
-                <div id="recording-delete-selection" hidden aria-hidden="true"></div>
-              </div>
-            </div>
-            <output id="recording-time" for="recording-seek">0:00 / 0:00</output>
-          </div>
-          <p id="recording-overlay-status" role="status"></p>
-          <button id="stop-recording" type="button">Stop playback</button>
-        </div>
-      </section>
-      <section id="virtual-workspace" hidden aria-labelledby="virtual-title">
-        <h2 id="virtual-title">Virtual routing &amp; dispatch</h2>
-        <p id="virtual-status" role="status">Choose a scenario and virtual vehicle.</p>
-        <div class="virtual-toolbar">
-          <label for="virtual-scenario">Scenario</label><select id="virtual-scenario"></select><button id="virtual-new-scenario" type="button">New</button>
-          <button id="virtual-remove-scenario" type="button" disabled>Remove scenario</button>
-          <label for="virtual-vehicle">Virtual vehicle</label><select id="virtual-vehicle"></select><span class="virtual-toolbar-actions"><button id="virtual-new-vehicle" type="button">Add</button><button id="virtual-remove-vehicle" type="button" disabled>Remove</button></span>
-        </div>
-        <div class="virtual-coordinates">
-          <div><strong>Origin</strong><output id="virtual-origin">not set</output></div>
-          <div><strong>Destination</strong><output id="virtual-destination">not set</output></div>
-          <div><strong>Waypoints</strong><output id="virtual-waypoints">none</output></div>
-        </div>
-        <div class="virtual-point-actions"><button id="virtual-place-origin" type="button">Place origin</button><button id="virtual-place-destination" type="button">Place destination</button><button id="virtual-add-waypoint" type="button">Add waypoint</button></div>
-        <p class="virtual-map-hint">Choose a route point, then click the map. Points snap to the nearest road; drag a flag to reposition it.</p>
-        <div class="virtual-actions"><button id="virtual-preview" type="button">Preview optimal path</button><button id="virtual-dispatch" type="button" disabled>Generate driver request</button></div>
-        <p id="virtual-draft-summary" role="status">No route draft.</p>
-        <h3>Assignment inbox</h3><ul id="virtual-requests"></ul>
-        <div id="virtual-trip-controls" hidden>
-          <h3>Selected vehicle controls</h3>
-          <label><input id="virtual-following" type="checkbox" checked> Follow optimal route</label>
-          <button type="button" data-virtual-command="PAUSE">Pause</button><button type="button" data-virtual-command="RESUME">Resume</button><button type="button" data-virtual-command="CANCEL_TRIP">Cancel</button>
-          <label for="virtual-speed">Vehicle speed: <output id="virtual-speed-value">50 km/h</output></label>
-          <input id="virtual-speed" type="range" min="0" max="3" step="1" value="1" list="virtual-speed-presets">
-          <datalist id="virtual-speed-presets"><option value="0" label="25"></option><option value="1" label="50"></option><option value="2" label="100"></option><option value="3" label="200"></option></datalist>
-          <button id="virtual-speed-apply" type="button">Apply speed</button>
-        </div>
-        <h3>Road state</h3>
-        <p>Pick two corners on the map to mark a region.</p>
-        <select id="virtual-restriction-kind"><option value="BLOCKED">Blocked</option><option value="HEAVY_PENALTY">Heavy penalty</option></select><input id="virtual-penalty" type="number" min="1.01" max="100" step="0.1" value="5" placeholder="Penalty factor"><button id="virtual-restriction-pick" type="button">Pick region</button><button id="virtual-restriction-commit" type="button" disabled>Activate region</button>
-        <h4 id="virtual-restrictions-title">Active regions</h4><ul id="virtual-restrictions"></ul>
-        <h3>Events</h3><ul id="virtual-events"></ul>
-      </section>
-      <p id="error" role="alert"></p>
-    </aside>
-    <section id="live-view-panel" hidden aria-labelledby="live-view-title">
-      <header class="live-view-header">
-        <h2 id="live-view-title">Live View</h2>
-        <div class="live-view-actions">
-          <button id="live-recenter" type="button" hidden>Recenter vehicle</button>
-          <button id="live-fullscreen" type="button">Full screen</button>
-          <button id="close-live-view" type="button">Close</button>
-        </div>
-      </header>
-      <p id="live-view-diagnostic" role="status"></p>
-      <p id="live-telemetry-status" role="status" data-level="idle">Live telemetry: waiting</p>
-      <iframe id="live-view-frame" title="Vehicle live view" loading="eager" allow="autoplay; camera; microphone; fullscreen"></iframe>
+   <nav aria-label="관제 메뉴" id="navigation-rail">
+    <button aria-pressed="true" data-icon="map" data-rail="map" type="button">
+     지도
+    </button>
+    <button aria-pressed="false" data-icon="bus" data-rail="fleet" type="button">
+     차량 목록
+    </button>
+    <button data-icon="bell" disabled="" title="알림 데이터 미연결" type="button">
+     알림
+    </button>
+    <button data-icon="chart" disabled="" title="통계 데이터 미연결" type="button">
+     통계
+    </button>
+    <button aria-pressed="false" data-icon="settings" data-rail="settings" type="button">
+     설정
+    </button>
+   </nav>
+   <section aria-labelledby="virtual-title" hidden="" id="virtual-workspace">
+    <h2 id="virtual-title">
+     가상 경로·배차
+    </h2>
+    <p id="virtual-status" role="status">
+     시나리오와 가상 차량을 선택하세요.
+    </p>
+    <section class="virtual-step ui-card">
+     <h3>
+      <b>
+       1
+      </b>
+      시나리오 설정
+     </h3>
+     <label for="virtual-scenario">
+      시나리오
+     </label>
+     <select id="virtual-scenario">
+     </select>
+     <button id="virtual-new-scenario" type="button">
+      새로 만들기
+     </button>
+     <button disabled="" id="virtual-remove-scenario" type="button">
+      시나리오 삭제
+     </button>
     </section>
+    <section class="virtual-step ui-card">
+     <h3>
+      <b>
+       2
+      </b>
+      가상 차량 설정
+     </h3>
+     <label for="virtual-vehicle">
+      가상 차량
+     </label>
+     <select id="virtual-vehicle">
+     </select>
+     <span class="virtual-toolbar-actions">
+      <button id="virtual-new-vehicle" type="button">
+       추가
+      </button>
+      <button disabled="" id="virtual-remove-vehicle" type="button">
+       삭제
+      </button>
+     </span>
+    </section>
+    <section class="virtual-step ui-card">
+     <h3>
+      <b>
+       3
+      </b>
+      경로 및 제어
+     </h3>
+     <div class="virtual-coordinates">
+      <div>
+       <strong>
+        출발지
+       </strong>
+       <output id="virtual-origin">
+        미지정
+       </output>
+      </div>
+      <div>
+       <strong>
+        목적지
+       </strong>
+       <output id="virtual-destination">
+        미지정
+       </output>
+      </div>
+      <div>
+       <strong>
+        경유지
+       </strong>
+       <output id="virtual-waypoints">
+        없음
+       </output>
+      </div>
+     </div>
+     <div class="virtual-point-actions">
+      <button id="virtual-place-origin" type="button">
+       출발지 지정
+      </button>
+      <button id="virtual-place-destination" type="button">
+       목적지 지정
+      </button>
+      <button id="virtual-add-waypoint" type="button">
+       경유지 추가
+      </button>
+     </div>
+     <p class="virtual-map-hint">
+      지정할 지점을 선택한 뒤 지도를 클릭하세요. 도로에 맞춰진 깃발을 드래그하여 위치를 조정할 수 있습니다.
+     </p>
+     <div class="virtual-actions">
+      <button id="virtual-preview" type="button">
+       경로 미리보기
+      </button>
+      <button disabled="" id="virtual-dispatch" type="button">
+       배차 요청
+      </button>
+     </div>
+     <p id="virtual-draft-summary" role="status">
+      경로 미리보기를 실행하세요.
+     </p>
+     <div hidden="" id="virtual-trip-controls">
+      <h3>
+       차량 제어
+      </h3>
+      <label>
+       <input checked="" id="virtual-following" type="checkbox"/>
+       경로 추종
+      </label>
+      <button data-virtual-command="PAUSE" type="button">
+       일시정지
+      </button>
+      <button data-virtual-command="RESUME" type="button">
+       재개
+      </button>
+      <button data-virtual-command="CANCEL_TRIP" type="button">
+       취소
+      </button>
+      <label for="virtual-speed">
+       차량 속도:
+       <output id="virtual-speed-value">
+        50 km/h
+       </output>
+      </label>
+      <input id="virtual-speed" list="virtual-speed-presets" max="3" min="0" step="1" type="range" value="1"/>
+      <datalist id="virtual-speed-presets">
+       <option label="25" value="0">
+       </option>
+       <option label="50" value="1">
+       </option>
+       <option label="100" value="2">
+       </option>
+       <option label="200" value="3">
+       </option>
+      </datalist>
+      <button id="virtual-speed-apply" type="button">
+       속도 적용
+      </button>
+     </div>
+    </section>
+    <section class="virtual-step ui-card">
+     <h3>
+      <b>
+       4
+      </b>
+      도로 상태 설정
+     </h3>
+     <p>
+      차단 구간은 통행 불가, 혼잡 구간은 통행 비용이 증가합니다.
+     </p>
+     <div class="ui-segmented" id="road-mode-buttons">
+      <button aria-pressed="true" data-road-kind="BLOCKED" type="button">
+       도로 차단
+      </button>
+      <button aria-pressed="false" data-road-kind="HEAVY_PENALTY" type="button">
+       혼잡 구간
+      </button>
+     </div>
+     <select aria-label="도로 상태" id="virtual-restriction-kind">
+      <option value="BLOCKED">
+       도로 차단
+      </option>
+      <option value="HEAVY_PENALTY">
+       혼잡 구간
+      </option>
+     </select>
+     <input aria-label="혼잡 통행 비용 배수" id="virtual-penalty" max="100" min="1.01" placeholder="Penalty factor" step="0.1" type="number" value="5"/>
+     <button id="virtual-restriction-pick" type="button">
+      영역 선택
+     </button>
+     <button disabled="" id="virtual-restriction-commit" type="button">
+      영역 활성화
+     </button>
+     <h4 id="virtual-restrictions-title">
+      활성 도로 구간
+     </h4>
+     <ul id="virtual-restrictions">
+     </ul>
+    </section>
+    <details class="ui-card" open="">
+     <summary>
+      배차 요청
+      <span id="request-count">
+      </span>
+     </summary>
+     <ul id="virtual-requests">
+     </ul>
+    </details>
+    <details class="ui-card">
+     <summary>
+      운행 이벤트
+     </summary>
+     <ul id="virtual-events">
+     </ul>
+    </details>
+   </section>
+   <section aria-label="관제 지도" id="map-surface">
+    <section id="map">
+    </section>
+    <div id="map-commands">
+     <label class="map-search" for="fleet-search">
+      <span data-icon="search">
+      </span>
+      <input autocomplete="off" id="fleet-search" placeholder="차량번호, 차량명, 외부 ID 검색" type="search"/>
+     </label>
+     <div aria-label="차량 상태 필터" class="filter-chips" id="fleet-filters">
+     </div>
+     <section class="ui-card" hidden="" id="fleet-drawer">
+      <h2>
+       차량 목록
+      </h2>
+      <ul id="fleet-results">
+      </ul>
+     </section>
+    </div>
+    <p hidden="" id="map-pick-banner" role="status">
+    </p>
+    <div class="ui-card" id="map-legend">
+     <strong>
+      차량 상태
+     </strong>
+     <div id="fleet-legend">
+     </div>
+    </div>
+    <div class="ui-card" id="virtual-legend">
+     <strong>
+      지도 범례
+     </strong>
+     <span>
+      <i class="legend-dot running">
+      </i>
+      가상 차량 · 경로
+     </span>
+     <span>
+      <i class="legend-dot maintenance">
+      </i>
+      도로 차단
+     </span>
+     <span>
+      <i class="legend-dot congestion">
+      </i>
+      혼잡 구간
+     </span>
+     <small>
+      초록 출발 · 빨강 도착 · 주황 경유
+     </small>
+    </div>
+    <section class="ui-card" id="virtual-route-summary">
+     <h2>
+      경로 정보
+     </h2>
+     <p id="route-summary-values">
+      경로를 미리 보거나 차량을 선택하세요.
+     </p>
+     <small id="route-summary-revision">
+     </small>
+    </section>
+    <section aria-labelledby="live-view-title" hidden="" id="live-view-panel">
+     <header class="live-view-header">
+      <h2 id="live-view-title">
+       실시간 전방 영상
+      </h2>
+      <div class="live-view-actions">
+       <button hidden="" id="live-recenter" type="button">
+        차량 중심으로
+       </button>
+       <button id="live-fullscreen" type="button">
+        전체 화면
+       </button>
+       <button id="close-live-view" type="button">
+        닫기
+       </button>
+      </div>
+     </header>
+     <p id="live-view-diagnostic" role="status">
+     </p>
+     <p data-level="idle" id="live-telemetry-status" role="status">
+      Live telemetry: waiting
+     </p>
+     <iframe allow="autoplay; camera; microphone; fullscreen" id="live-view-frame" loading="eager" title="Vehicle live view">
+     </iframe>
+    </section>
+    <section class="ui-card" hidden="" id="settings-drawer">
+     <div class="ui-card-header">
+      <h2>
+       데이터 소스
+      </h2>
+      <button aria-label="설정 닫기" id="close-settings" type="button">
+       닫기
+      </button>
+     </div>
+     <section aria-labelledby="telemetry-settings-title" hidden="" id="telemetry-settings">
+      <h2 id="telemetry-settings-title">
+       데이터 소스
+      </h2>
+      <label for="telemetry-mode">
+       소스
+      </label>
+      <select id="telemetry-mode">
+       <option value="playback">
+        저장된 GPS
+       </option>
+       <option value="live">
+        실시간 BIMS
+       </option>
+      </select>
+      <button id="telemetry-mode-apply" type="button">
+       소스 적용
+      </button>
+      <p aria-live="polite" id="telemetry-mode-status" role="status">
+       데이터 소스 불러오는 중…
+      </p>
+     </section>
+    </section>
+   </section>
+   <aside id="operator-sidebar">
+    <section class="ui-card ui-empty-state" id="selection-empty">
+     <span data-icon="bus">
+     </span>
+     <h2>
+      차량을 선택하세요
+     </h2>
+     <p>
+      지도 또는 차량 검색에서 운행 정보를 확인하세요.
+     </p>
+    </section>
+    <section class="ui-card" hidden="" id="details">
+     <h2>
+      선택 차량
+     </h2>
+     <span class="ui-chip" id="selected-status">
+     </span>
+     <p class="metadata" id="selected-updated">
+     </p>
+     <div class="vehicle-identity">
+      <span data-icon="bus">
+      </span>
+      <div>
+       <h3 id="selected-name">
+        —
+       </h3>
+       <p id="selected-source">
+       </p>
+      </div>
+     </div>
+     <div class="vehicle-metrics">
+      <div>
+       현재 속도
+       <strong id="selected-speed">
+        —
+       </strong>
+      </div>
+      <div>
+       운행 상태
+       <strong id="selected-state">
+        —
+       </strong>
+      </div>
+      <div>
+       운행 ID
+       <strong id="selected-trip">
+        —
+       </strong>
+      </div>
+     </div>
+     <details class="vehicle-metadata">
+      <summary>
+       차량 상세 정보
+      </summary>
+      <dl id="fields">
+      </dl>
+     </details>
+     <button disabled="" id="live-view" type="button">
+      실시간 전방 영상
+     </button>
+     <p id="route-label">
+      계획 경로 · 경로 없음
+     </p>
+    </section>
+    <section aria-labelledby="trip-title" class="ui-card" hidden="" id="trip-panel">
+     <h2 id="trip-title">
+      운행 생성·배정
+     </h2>
+     <form id="trip-form">
+      <label for="trip-vehicle">
+       차량 선택
+      </label>
+      <select id="trip-vehicle" required="">
+       <option value="">
+        차량 불러오는 중…
+       </option>
+      </select>
+      <label for="trip-destination-name">
+       운행 목적지
+      </label>
+      <input id="trip-destination-name" maxlength="150" placeholder="목적지" required=""/>
+      <div class="trip-coordinate-heading">
+       <span>
+        목적지 좌표
+       </span>
+       <button aria-pressed="false" data-trip-map-pick="destination" type="button">
+        지도에서 선택
+       </button>
+      </div>
+      <div class="trip-coordinate-grid">
+       <input aria-label="Destination latitude" id="trip-destination-latitude" max="90" min="-90" placeholder="위도" required="" step="any" type="number"/>
+       <input aria-label="Destination longitude" id="trip-destination-longitude" max="180" min="-180" placeholder="경도" required="" step="any" type="number"/>
+      </div>
+      <label for="trip-planned-start">
+       출발 예정 일시
+      </label>
+      <input id="trip-planned-start" type="datetime-local"/>
+      <details id="trip-advanced">
+       <summary>
+        고급 설정 · 출발지 / 주소 / 초기 상태
+       </summary>
+       <label for="trip-origin-name">
+        출발지 이름
+       </label>
+       <input id="trip-origin-name" maxlength="150" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="차고지 또는 출발지"/>
+       <div class="trip-coordinate-heading">
+        <span>
+         출발지 좌표
+        </span>
+        <button aria-pressed="false" data-trip-map-pick="origin" type="button">
+         지도에서 선택
+        </button>
+       </div>
+       <div class="trip-coordinate-grid">
+        <input aria-label="Origin latitude" id="trip-origin-latitude" max="90" min="-90" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="위도" step="any" type="number"/>
+        <input aria-label="Origin longitude" id="trip-origin-longitude" max="180" min="-180" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="경도" step="any" type="number"/>
+       </div>
+       <label for="trip-destination-address">
+        목적지 주소
+       </label>
+       <input id="trip-destination-address" maxlength="2000" oninvalid="document.getElementById('trip-advanced').open = true" placeholder="주소"/>
+       <label for="trip-status">
+        초기 운행 상태
+       </label>
+       <select id="trip-status">
+        <option selected="" value="IN_PROGRESS">
+         즉시 출발
+        </option>
+        <option value="READY">
+         배차 대기
+        </option>
+       </select>
+      </details>
+      <button id="create-trip" type="submit">
+       운행 생성 및 배정
+      </button>
+     </form>
+     <p aria-live="polite" id="trip-status-message" role="status">
+      차량과 목적지를 선택하세요.
+     </p>
+     <h3>
+      최근 운행
+     </h3>
+     <ul aria-label="Recent trips" id="trips-list">
+     </ul>
+    </section>
+    <section aria-labelledby="recordings-title" class="ui-card" id="recordings-panel">
+     <h2 id="recordings-title">
+      운행 녹화
+     </h2>
+     <div aria-label="영상 모드" class="ui-segmented">
+      <button aria-pressed="false" id="recording-live-tab" type="button">
+       실시간 영상
+      </button>
+      <button aria-pressed="true" id="recording-saved-tab" type="button">
+       저장된 녹화
+      </button>
+     </div>
+     <div hidden="" id="recording-live-content">
+      <p>
+       선택 차량의 실시간 전방 영상을 지도 위에서 확인하세요.
+      </p>
+      <button id="recording-open-live" type="button">
+       실시간 영상 열기
+      </button>
+      <p id="recording-live-status" role="status">
+      </p>
+     </div>
+     <div id="recording-saved-content">
+      <form id="recordings-form">
+       <label for="recording-trip-id">
+        운행 ID
+       </label>
+       <input id="recording-trip-id" inputmode="numeric" pattern="[1-9][0-9]*" placeholder="차량 선택 또는 운행 ID 입력" required=""/>
+       <button type="submit">
+        녹화 불러오기
+       </button>
+      </form>
+      <p id="recordings-status" role="status">
+       차량을 선택하여 운행 녹화를 불러오세요.
+      </p>
+      <details class="recording-management">
+       <summary>
+        녹화 관리
+       </summary>
+       <div hidden="" id="recording-delete-tools">
+        <button id="recording-delete-toggle" type="button">
+         구간 삭제
+        </button>
+        <div hidden="" id="recording-delete-mode">
+         <p>
+          타임라인을 드래그하여 연속 구간을 선택하세요. Home/End로 끝 지점을 선택하고, 좌우 방향키로 범위를 확장합니다. Shift+방향키로 시작 지점을 조정합니다.
+         </p>
+         <p id="recording-delete-selection-status" role="status">
+          선택한 구간이 없습니다.
+         </p>
+         <button disabled="" id="recording-delete-selected" type="button">
+          선택 구간 삭제
+         </button>
+         <button id="recording-delete-cancel" type="button">
+          취소
+         </button>
+        </div>
+       </div>
+      </details>
+      <div hidden="" id="recording-player-panel">
+       <div id="recording-stage">
+        <video id="recording-player" playsinline="" preload="metadata" referrerpolicy="no-referrer">
+        </video>
+        <canvas aria-hidden="true" id="recording-overlay">
+        </canvas>
+       </div>
+       <div aria-label="Trip playback controls" id="recording-controls">
+        <button aria-label="Play trip" id="recording-play" type="button">
+         재생
+        </button>
+        <button aria-label="Back 10 seconds" id="recording-back" type="button">
+         −10s
+        </button>
+        <button aria-label="Forward 10 seconds" id="recording-forward" type="button">
+         +10s
+        </button>
+        <button aria-label="View replay full screen" id="recording-fullscreen" type="button">
+         전체 화면
+        </button>
+        <div id="recording-timeline">
+         <input aria-label="Seek through trip recording" id="recording-seek" max="1" min="0" step="0.1" type="range" value="0"/>
+         <div aria-hidden="true" id="recording-break-markers">
+         </div>
+         <div aria-describedby="recording-delete-selection-status" aria-label="Contiguous segment deletion range" hidden="" id="recording-delete-range" role="group" tabindex="0">
+          <div aria-hidden="true" id="recording-delete-segments">
+          </div>
+          <div aria-hidden="true" hidden="" id="recording-delete-selection">
+          </div>
+         </div>
+        </div>
+        <output for="recording-seek" id="recording-time">
+         0:00 / 0:00
+        </output>
+        <label class="replay-speed">
+         재생 속도
+         <select id="recording-speed">
+          <option value="0.5">
+           0.5×
+          </option>
+          <option selected="" value="1">
+           1×
+          </option>
+          <option value="1.5">
+           1.5×
+          </option>
+          <option value="2">
+           2×
+          </option>
+         </select>
+        </label>
+       </div>
+       <p id="recording-overlay-status" role="status">
+       </p>
+       <button id="stop-recording" type="button">
+        재생 종료
+       </button>
+      </div>
+     </div>
+    </section>
+    <p id="error" role="alert">
+    </p>
+   </aside>
+   <form aria-label="운영자 로그인" id="login">
+    <h2>
+     운영자 로그인
+    </h2>
+    <input aria-label="로그인 ID" name="loginId" placeholder="로그인 ID" required=""/>
+    <input aria-label="비밀번호" name="password" placeholder="비밀번호" required="" type="password"/>
+    <button>
+     로그인
+    </button>
+    <p id="login-error" role="alert">
+    </p>
+   </form>
   </main>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet-geometryutil@0.10.3/src/leaflet.geometryutil.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js"></script>
-  <script type="module" src="app.js"></script>
-  <script type="module" src="virtual-dispatch.js"></script>
-</body>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet-geometryutil@0.10.3/src/leaflet.geometryutil.js">
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js">
+  </script>
+  <script src="app.js" type="module">
+  </script>
+  <script src="virtual-dispatch.js" type="module">
+  </script>
+ </body>
 </html>

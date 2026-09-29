@@ -1,3 +1,4 @@
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon} from './dashboard-ui.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
@@ -7,13 +8,13 @@ window.__operatorMap=map;
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
-const operatorLayout=document.querySelector('#operator-layout'),layoutSplitter=document.querySelector('#layout-splitter'),stackedLayout=window.matchMedia('(max-width: 1000px)');
+const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
 function createMarkerEntry(item,position,{liveOnly=false}={}){
-  const androidGps=isAndroidGpsItem(item),marker=L.circleMarker(position,{radius:liveOnly||androidGps?10:8,...(liveOnly?LIVE_MARKER_STYLE:fleetMarkerStyle(item))}).addTo(map);
+  const androidGps=isAndroidGpsItem(item),marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const entry={marker,item,liveOnly};
   marker.on('click',()=>selectVehicle(entry.item));
-  marker.bindTooltip(androidGps?`Android GPS · ${item?.vehicleCode||item?.telemetry?.external_id||'vehicle'}`:item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle');
+  const label=document.createElement('span');label.textContent=androidGps?`Android GPS · ${item?.vehicleCode||item?.telemetry?.external_id||'vehicle'}`:item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle';marker.bindTooltip(label,{direction:'top',className:'vehicle-label'});
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
   return entry;
 }
@@ -27,7 +28,7 @@ function normalMapLayers(){
 }
 // Used by the virtual workspace, which takes the map over while it is open.
 window.__operatorDetachMapLayers=()=>{for(const layer of normalMapLayers())map.removeLayer(layer)};
-window.__operatorAttachMapLayers=()=>{for(const layer of normalMapLayers())layer.addTo(map)};
+window.__operatorAttachMapLayers=()=>{for(const layer of normalMapLayers())layer.addTo(map);dashboard.updateVisibility()};
 const liveMapFollower=createLiveMapFollower({
   map,markers,
   createEntry:(item,position)=>createMarkerEntry(item,position,{liveOnly:true}),
@@ -35,58 +36,9 @@ const liveMapFollower=createLiveMapFollower({
 });
 const revealAndroidMarker=createAndroidMarkerRevealer({map});
 map.on('dragstart',()=>liveMapFollower.pause());
-const splitStorageKey=()=>`itsOperatorSplit:${stackedLayout.matches?'stacked':'columns'}`;
-const readSplitRatio=()=>{const saved=Number(localStorage.getItem(splitStorageKey()));return Number.isFinite(saved)&&saved>0?saved:(stackedLayout.matches ? 0.46 : 0.5)};
-let mapSplitRatio=readSplitRatio(),resizingLayout=false;
-function splitRatioBounds(){
-  if(stackedLayout.matches){const available=Math.max(1,window.innerHeight-64);return [Math.min(.7,240/available),.8]}
-  const width=operatorLayout.clientWidth,minPane=liveView?320:380;return [Math.max(.25,320/width),Math.min(.72,(width-minPane)/width)];
-}
-function applyLayoutSplit(save=false){
-  const [minimum,maximum]=splitRatioBounds();mapSplitRatio=Math.max(minimum,Math.min(maximum,mapSplitRatio));
-  operatorLayout.style.setProperty('--map-width',`${mapSplitRatio*100}%`);
-  operatorLayout.style.setProperty('--map-height',`${Math.round((window.innerHeight-64)*mapSplitRatio)}px`);
-  const orientation=stackedLayout.matches?'horizontal':'vertical';
-  layoutSplitter.setAttribute('aria-label',liveView?'Resize map and Live View':'Resize map and menu');
-  layoutSplitter.setAttribute('aria-orientation',orientation);
-  layoutSplitter.setAttribute('aria-valuemin',String(Math.round(minimum*100)));
-  layoutSplitter.setAttribute('aria-valuemax',String(Math.round(maximum*100)));
-  layoutSplitter.setAttribute('aria-valuenow',String(Math.round(mapSplitRatio*100)));
-  if(save)localStorage.setItem(splitStorageKey(),String(mapSplitRatio));
-  requestAnimationFrame(()=>map.invalidateSize({pan:false}));
-}
-function moveLayoutSplit(event){
-  const rect=operatorLayout.getBoundingClientRect();
-  mapSplitRatio=stackedLayout.matches?(event.clientY-rect.top)/Math.max(1,window.innerHeight-64):(event.clientX-rect.left)/rect.width;
-  applyLayoutSplit();
-}
-layoutSplitter.addEventListener('pointerdown',event=>{
-  if(event.button!==0)return;
-  resizingLayout=true;layoutSplitter.setPointerCapture(event.pointerId);document.body.classList.add('resizing-layout');event.preventDefault();
-});
-layoutSplitter.addEventListener('pointermove',event=>{if(resizingLayout)moveLayoutSplit(event)});
-function finishLayoutResize(event){
-  if(!resizingLayout)return;
-  resizingLayout=false;document.body.classList.remove('resizing-layout');
-  if(layoutSplitter.hasPointerCapture(event.pointerId))layoutSplitter.releasePointerCapture(event.pointerId);
-  applyLayoutSplit(true);
-}
-layoutSplitter.addEventListener('pointerup',finishLayoutResize);
-layoutSplitter.addEventListener('pointercancel',finishLayoutResize);
-layoutSplitter.addEventListener('keydown',event=>{
-  const [minimum,maximum]=splitRatioBounds(),step=event.shiftKey ? 0.05 : 0.02;
-  if(event.key==='Home')mapSplitRatio=minimum;
-  else if(event.key==='End')mapSplitRatio=maximum;
-  else if(stackedLayout.matches&&event.key==='ArrowDown')mapSplitRatio+=step;
-  else if(stackedLayout.matches&&event.key==='ArrowUp')mapSplitRatio-=step;
-  else if(!stackedLayout.matches&&event.key==='ArrowRight')mapSplitRatio+=step;
-  else if(!stackedLayout.matches&&event.key==='ArrowLeft')mapSplitRatio-=step;
-  else return;
-  event.preventDefault();applyLayoutSplit(true);
-});
-stackedLayout.addEventListener('change',()=>{mapSplitRatio=readSplitRatio();applyLayoutSplit()});
-window.addEventListener('resize',()=>applyLayoutSplit());
-applyLayoutSplit();
+function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:false}));}
+new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
+const dashboard=initializeDashboard({map,markers,selectVehicle});
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)&&liveTarget?.tripId===(item?.tripId!=null?String(item.tripId):null)}
 function matchesLiveTarget(item){
@@ -123,41 +75,52 @@ function retargetLiveView(item){
   liveView=createLiveView(item,frameOrigin);
   lastLiveMessage=null;
   liveMapFollower.begin(liveView);
-  document.querySelector('#live-view-title').textContent=`Live View · ${liveTargetLabel(item)}`;
+  document.querySelector('#live-view-title').textContent=`실시간 영상 · ${liveTargetLabel(item)}`;
   renderLiveTelemetryStatus();
 }
 function selectVehicle(item){
   selected=item;
   syncLiveViewButton(item);
   details.hidden=false;
+  renderVehicleDetails(item);
+  for(const entry of markers.values()){
+    const active=entry.item.telemetry?.external_id===item.telemetry?.external_id;
+    entry.marker.setIcon(vehicleIcon(entry.item,active));
+    entry.marker.setZIndexOffset(active?1000:0);
+    if(entry.marker.getTooltip())entry.marker.getTooltip().options.permanent=active;
+    if(active)entry.marker.openTooltip();else entry.marker.closeTooltip();
+  }
   const t=item.telemetry,r=item.plannedRoute;
   fields.replaceChildren();
-  for(const [label,value] of [['Vehicle',item.vehicleName||item.vehicleCode||t.external_id],['Source',`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],['Status',item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],['Speed',`${t.speed_kmh??'—'} km/h`],['Observed',t.observed_at_utc||'—'],['Trip ID',item.tripId??'—']]){
+  for(const [label,value] of [[uiText('Vehicle'),item.vehicleName||item.vehicleCode||t.external_id],[uiText('Source'),`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],[uiText('Status'),item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],[uiText('Speed'),`${t.speed_kmh??'—'} km/h`],[uiText('Observed'),t.observed_at_utc||'—'],[uiText('Trip ID'),item.tripId??'—']]){
     const term=document.createElement('dt'),description=document.createElement('dd');
     term.textContent=label;description.textContent=String(value);fields.append(term,description);
   }
-  document.querySelector('#route-label').textContent=`Planned Route: ${r?.routeSource||'unavailable'}`;
+  document.querySelector('#route-label').textContent=`계획 경로 · ${r?.routeSource||'경로 없음'}`;
   if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}
-  if(r?.routeGeojson)routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#ffb703',weight:5}}).addTo(map);
+  if(r?.routeGeojson)routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#0868dd',weight:6}}).addTo(map);
   document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';
   if(item.tripId)void loadTripRecordings(String(item.tripId));
   retargetLiveView(item);
 }
+window.__operatorCancelMapPick=()=>{tripMapPick=undefined;document.querySelector('#map-pick-banner').hidden=true;document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.setAttribute('aria-pressed','false'));};
 function render(snapshot){
   if(window.__virtualMode)return;
+  const keys=new Set(snapshot.vehicles.map(item=>item.telemetry?.external_id));
+  for(const [key,entry] of markers){if(!keys.has(key)&&key!==liveView?.markerKey){map.removeLayer(entry.marker);markers.delete(key);}}
   if(selected&&!snapshot.vehicles.some(item=>item.telemetry?.external_id===selected.telemetry?.external_id))syncLiveViewButton(null);
   for(const item of snapshot.vehicles){
     const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
-    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton()}
+    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton();renderVehicleDetails(item)}
     // A new Android stream reuses device:<vehicleId>; reveal it again when its
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
     const liveSelected=liveView?.markerKey===key;
-    entry.marker.setStyle(liveSelected?LIVE_MARKER_STYLE:fleetMarkerStyle(item));
-    entry.marker.setRadius(liveSelected||isAndroidGpsItem(item)?10:8);
+    entry.marker.setIcon(vehicleIcon(item,liveSelected||selected?.telemetry?.external_id===key));
+    entry.marker.setZIndexOffset(liveSelected||selected?.telemetry?.external_id===key?1000:0);
     // Live frames own the selected marker between successful fleet polls.
     if(!isLiveOverride(liveView,key,Date.now())){
       entry.marker.setLatLng(pos);
@@ -166,10 +129,11 @@ function render(snapshot){
     const session=t.source_metadata?.recordingSessionId;
     // A new stream session supersedes the old one; reject its late frames.
     if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
-    entry.marker.bindTooltip(isAndroidGpsItem(item)?`Android GPS · ${item.vehicleCode||key}`:item.vehicleCode||key);
+    const label=document.createElement('span');label.textContent=isAndroidGpsItem(item)?`Android GPS · ${item.vehicleCode||key}`:item.vehicleCode||key;entry.marker.setTooltipContent(label);
   }
+  dashboard.update(snapshot.vehicles);
 }
-async function refresh(){try{render(await api('/api/v1/tracking/vehicles'));error.textContent='';document.querySelector('#connection').textContent='Tracking connected'}catch(e){error.textContent=e.message;document.querySelector('#connection').textContent='Tracking unavailable'}}
+async function refresh(){try{render(await api('/api/v1/tracking/vehicles'));error.textContent='';document.querySelector('#connection').textContent='관제 연결됨'}catch(e){error.textContent=e.message;document.querySelector('#connection').textContent='연결 확인 필요'}}
 const telemetryModeSelect=document.querySelector('#telemetry-mode'),telemetryModeApply=document.querySelector('#telemetry-mode-apply'),telemetryModeStatus=document.querySelector('#telemetry-mode-status'),telemetrySettings=document.querySelector('#telemetry-settings');
 const telemetryModeLabel=mode=>mode==='live'?'Live BIMS':'Replay dataset';
 function canChangeTelemetryMode(){return !demoMode&&['ADMIN','OPERATOR'].includes(currentRole)}
@@ -199,7 +163,7 @@ async function applyTelemetryMode(){
 async function loadTripAssignments(){
   const [vehicles,trips]=await Promise.all([api('/api/v1/vehicles',{},true),api('/api/v1/trips',{},true)]);
   const vehicleSelect=document.querySelector('#trip-vehicle'),previousVehicle=vehicleSelect.value;
-  vehicleSelect.replaceChildren(new Option('Select a vehicle',''));
+  vehicleSelect.replaceChildren(new Option(uiText('Select a vehicle'),''));
   for(const vehicle of vehicles.filter(item=>item.isActive)){
     const label=[`Vehicle ${vehicle.vehicleId}`,vehicle.vehicleCode,vehicle.vehicleName,vehicle.vehicleStatus].filter(Boolean).join(' · ');
     vehicleSelect.add(new Option(label,String(vehicle.vehicleId)));
@@ -214,8 +178,8 @@ async function loadTripAssignments(){
     status.textContent=`${trip.tripStatus}${trip.plannedStartAt?` · planned ${new Date(trip.plannedStartAt).toLocaleString()}`:''}`;
     row.append(title,vehicle,destination,status);list.append(row);
   }
-  if(!vehicles.some(item=>item.isActive))vehicleSelect.replaceChildren(new Option('No active vehicles available',''));
-  if(!trips.length){const empty=document.createElement('li');empty.textContent='No trips created yet.';list.append(empty)}
+  if(!vehicles.some(item=>item.isActive))vehicleSelect.replaceChildren(new Option(uiText('No active vehicles available'),''));
+  if(!trips.length){const empty=document.createElement('li');empty.textContent=uiText('No trips created yet.');list.append(empty)}
 }
 async function start(role){
   currentRole=demoMode?'':(role||'');
@@ -226,7 +190,7 @@ async function start(role){
   document.querySelector('#trip-panel').hidden=demoMode;
   if(!demoMode){
     document.querySelector('#trip-form').hidden=!['ADMIN','OPERATOR'].includes(role);
-    document.querySelector('#trip-status-message').textContent=['ADMIN','OPERATOR'].includes(role)?'Choose a vehicle and destination.':'You can review recent trips; an operator or admin can create one.';
+    document.querySelector('#trip-status-message').textContent=['ADMIN','OPERATOR'].includes(role)?uiText('Choose a vehicle and destination.'):'You can review recent trips; an operator or admin can create one.';
     await loadTripAssignments();
   }
   await refresh();
@@ -257,13 +221,13 @@ function replayPlayer(){return document.querySelector('#recording-player')}
 function replayCurrentTime(){const entry=replayTimeline[replayIndex];return entry?entry.start+replayPlayer().currentTime:0}
 function formatReplayTime(value){const seconds=Math.max(0,Math.floor(Number(value)||0)),hours=Math.floor(seconds/3600),minutes=Math.floor((seconds%3600)/60),remainder=seconds%60;return hours?`${hours}:${String(minutes).padStart(2,'0')}:${String(remainder).padStart(2,'0')}`:`${minutes}:${String(remainder).padStart(2,'0')}`}
 function clearReplayOverlay(){const canvas=document.querySelector('#recording-overlay'),context=canvas.getContext('2d');context.clearRect(0,0,canvas.width,canvas.height)}
-function stopRecordingPlayback(){const player=replayPlayer();replayGeneration++;replaySeekGeneration++;replayScrubbing=false;replayScrubWasPlaying=false;replaySeekPending=false;player.pause();player.removeAttribute('src');player.load();replayIndex=-1;clearReplayOverlay();document.querySelector('#recording-play').textContent='Play';document.querySelector('#recording-time').textContent=`0:00 / ${formatReplayTime(replayDuration)}`;document.querySelector('#recording-seek').value='0'}
+function stopRecordingPlayback(){const player=replayPlayer();replayGeneration++;replaySeekGeneration++;replayScrubbing=false;replayScrubWasPlaying=false;replaySeekPending=false;player.pause();player.removeAttribute('src');player.load();replayIndex=-1;clearReplayOverlay();document.querySelector('#recording-play').textContent='재생';document.querySelector('#recording-time').textContent=`0:00 / ${formatReplayTime(replayDuration)}`;document.querySelector('#recording-seek').value='0'}
 function setReplayPosition(value){const position=Math.max(0,Math.min(replayDuration,Number(value)||0));document.querySelector('#recording-seek').value=String(position);document.querySelector('#recording-time').textContent=`${formatReplayTime(position)} / ${formatReplayTime(replayDuration)}`}
 function renderReplayBreakMarkers(){const markers=document.querySelector('#recording-break-markers');markers.replaceChildren();for(const entry of replayTimeline){if(entry.breakBefore){const marker=document.createElement('span');marker.style.left=`${replayDuration?entry.start/replayDuration*100:0}%`;marker.title=`Recording break before segment ${entry.video.segmentIndex}`;markers.append(marker)}}}
 function updateRecordingDeleteTools(){document.querySelector('#recording-delete-tools').hidden=!['ADMIN','OPERATOR'].includes(currentRole)||!replayTimeline.length}
-function clearRecordingDeleteSelection(){document.querySelector('#recording-delete-selection').hidden=true;document.querySelector('#recording-delete-selected').disabled=true;document.querySelector('#recording-delete-selection-status').textContent='No segments selected.';recordingDeleteRange=null;recordingDeleteDrag=null}
-function openRecordingDeleteMode(){if(!replayTimeline.length)return;renderRecordingDeleteTimeline();document.querySelector('#recording-delete-mode').hidden=false;document.querySelector('#recording-timeline').classList.add('is-delete-mode');document.querySelector('#recording-seek').disabled=true;document.querySelector('#recording-delete-range').hidden=false;replayPlayer().pause();document.querySelector('#recording-delete-toggle').textContent='Exit delete mode';document.querySelector('#recording-delete-range').focus()}
-function closeRecordingDeleteMode(){document.querySelector('#recording-delete-mode').hidden=true;document.querySelector('#recording-delete-toggle').textContent='Delete segments';document.querySelector('#recording-timeline').classList.remove('is-delete-mode');document.querySelector('#recording-seek').disabled=false;document.querySelector('#recording-delete-range').hidden=true;document.querySelector('#recording-delete-segments').replaceChildren();clearRecordingDeleteSelection()}
+function clearRecordingDeleteSelection(){document.querySelector('#recording-delete-selection').hidden=true;document.querySelector('#recording-delete-selected').disabled=true;document.querySelector('#recording-delete-selection-status').textContent=uiText('No segments selected.');recordingDeleteRange=null;recordingDeleteDrag=null}
+function openRecordingDeleteMode(){if(!replayTimeline.length)return;renderRecordingDeleteTimeline();document.querySelector('#recording-delete-mode').hidden=false;document.querySelector('#recording-timeline').classList.add('is-delete-mode');document.querySelector('#recording-seek').disabled=true;document.querySelector('#recording-delete-range').hidden=false;replayPlayer().pause();document.querySelector('#recording-delete-toggle').textContent=uiText('Exit delete mode');document.querySelector('#recording-delete-range').focus()}
+function closeRecordingDeleteMode(){document.querySelector('#recording-delete-mode').hidden=true;document.querySelector('#recording-delete-toggle').textContent=uiText('Delete segments');document.querySelector('#recording-timeline').classList.remove('is-delete-mode');document.querySelector('#recording-seek').disabled=false;document.querySelector('#recording-delete-range').hidden=true;document.querySelector('#recording-delete-segments').replaceChildren();clearRecordingDeleteSelection()}
 function renderRecordingDeleteTimeline(){const segments=document.querySelector('#recording-delete-segments');segments.replaceChildren();for(const entry of replayTimeline){const marker=document.createElement('span');marker.style.left=`${entry.start/replayDuration*100}%`;marker.style.width=`${entry.duration/replayDuration*100}%`;marker.title=`Segment ${entry.video.segmentIndex} · ${formatReplayTime(entry.start)}–${formatReplayTime(entry.end)}`;segments.append(marker)}}
 function setRecordingDeleteRange(firstIndex,lastIndex){if(!replayTimeline.length)return;const first=Math.max(0,Math.min(replayTimeline.length-1,Math.min(firstIndex,lastIndex))),last=Math.max(first,Math.min(replayTimeline.length-1,Math.max(firstIndex,lastIndex)));recordingDeleteRange={first,last};const firstEntry=replayTimeline[first],lastEntry=replayTimeline[last],selection=document.querySelector('#recording-delete-selection'),left=firstEntry.start/replayDuration*100,right=lastEntry.end/replayDuration*100;selection.style.left=`${left}%`;selection.style.width=`${Math.max(0,right-left)}%`;selection.hidden=false;document.querySelector('#recording-delete-selected').disabled=false;document.querySelector('#recording-delete-selection-status').textContent=`${last-first+1} contiguous segment${last===first?'':'s'} selected · segments ${firstEntry.video.segmentIndex}–${lastEntry.video.segmentIndex} · ${formatReplayTime(firstEntry.start)}–${formatReplayTime(lastEntry.end)}.`}
 function recordingDeleteIndexAt(clientX){const range=document.querySelector('#recording-delete-range').getBoundingClientRect(),ratio=Math.max(0,Math.min(1,(clientX-range.left)/Math.max(1,range.width))),position=ratio*replayDuration;let index=replayTimeline.findIndex((entry,current)=>position>=entry.start&&(position<entry.end||(current===replayTimeline.length-1&&position<=entry.end)));if(index<0)index=position>=replayDuration?replayTimeline.length-1:0;return index}
@@ -296,7 +260,7 @@ function startReplayOverlayFrameLoop(){stopReplayOverlayFrameLoop();const player
 function beginReplayScrub(){if(replayScrubbing)return;replayScrubbing=true;replayScrubWasPlaying=!replayPlayer().paused;if(replayScrubWasPlaying)replayPlayer().pause()}
 async function commitReplayScrub(value){if(!replayScrubbing)beginReplayScrub();const autoplay=replayScrubWasPlaying,generation=++replaySeekGeneration;replayScrubbing=false;replayScrubWasPlaying=false;replaySeekPending=true;try{await seekReplay(value,autoplay,1)}finally{if(generation===replaySeekGeneration)replaySeekPending=false}}
 const replayFullscreenButton=document.querySelector('#recording-fullscreen'),replayPanel=document.querySelector('#recording-player-panel');
-function syncReplayFullscreenButton(){const isFullscreen=document.fullscreenElement===replayPanel;replayFullscreenButton.textContent=isFullscreen?'Exit full screen':'Full screen';replayFullscreenButton.setAttribute('aria-label',isFullscreen?'Exit full-screen replay':'View replay full screen')}
+function syncReplayFullscreenButton(){const isFullscreen=document.fullscreenElement===replayPanel;replayFullscreenButton.textContent=isFullscreen?'전체 화면 종료':'전체 화면';replayFullscreenButton.setAttribute('aria-label',isFullscreen?'Exit full-screen replay':'View replay full screen')}
 if(!document.fullscreenEnabled||typeof replayPanel.requestFullscreen!=='function')replayFullscreenButton.hidden=true;
 else{replayFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===replayPanel)await document.exitFullscreen();else await replayPanel.requestFullscreen()}catch{document.querySelector('#recordings-status').textContent='Full-screen replay is unavailable in this browser.'}});document.addEventListener('fullscreenchange',()=>{syncReplayFullscreenButton();requestAnimationFrame(()=>drawReplayOverlay())});syncReplayFullscreenButton()}
 window.addEventListener('resize',()=>drawReplayOverlay());
@@ -305,8 +269,8 @@ replayPlayer().addEventListener('loadedmetadata',()=>drawReplayOverlay());
 replayPlayer().addEventListener('seeked',()=>drawReplayOverlay());
 replayPlayer().addEventListener('ended',()=>{stopReplayOverlayFrameLoop();if(replayIndex<0)return;const next=replayTimeline.findIndex((entry,index)=>index>replayIndex&&!entry.unavailable);if(next>=0)void seekReplay(replayTimeline[next].start,true,1,next);else document.querySelector('#recordings-status').textContent='Trip replay finished.'});
 replayPlayer().addEventListener('error',()=>{if(replayIndex<0||replayPlayer().readyState<1)return;const failedIndex=replayIndex,entry=replayTimeline[failedIndex];entry.unavailable=true;renderReplayBreakMarkers();document.querySelector('#recordings-status').textContent=`Playback failed for segment ${entry.video.segmentIndex}; skipping to the next segment.`;const next=replayTimeline.findIndex((item,index)=>index>failedIndex&&!item.unavailable);if(next>=0)void seekReplay(replayTimeline[next].start,true,1,next)});
-replayPlayer().addEventListener('play',()=>{document.querySelector('#recording-play').textContent='Pause';startReplayOverlayFrameLoop()});
-replayPlayer().addEventListener('pause',()=>{document.querySelector('#recording-play').textContent='Play';stopReplayOverlayFrameLoop();drawReplayOverlay()});
+replayPlayer().addEventListener('play',()=>{document.querySelector('#recording-play').textContent='일시정지';startReplayOverlayFrameLoop()});
+replayPlayer().addEventListener('pause',()=>{document.querySelector('#recording-play').textContent='재생';stopReplayOverlayFrameLoop();drawReplayOverlay()});
 document.querySelector('#recording-play').addEventListener('click',()=>{const player=replayPlayer();if(!replayTimeline.length)return;if(!player.paused){player.pause();return}if(replayIndex<0)void seekReplay(0,true);else void player.play()});
 document.querySelector('#recording-back').addEventListener('click',()=>void seekReplay(replayCurrentTime()-10,true,-1));
 document.querySelector('#recording-forward').addEventListener('click',()=>void seekReplay(replayCurrentTime()+10,true,1));
@@ -323,7 +287,7 @@ recordingDeleteRangeElement.addEventListener('pointermove',moveRecordingDeleteRa
 recordingDeleteRangeElement.addEventListener('pointerup',finishRecordingDeleteRange);
 recordingDeleteRangeElement.addEventListener('pointercancel',finishRecordingDeleteRange);
 recordingDeleteRangeElement.addEventListener('keydown',adjustRecordingDeleteRange);
-document.querySelector('#login').addEventListener('submit',async e=>{e.preventDefault();try{const f=new FormData(e.currentTarget),result=await api('/api/v1/auth/login',{method:'POST',body:JSON.stringify(Object.fromEntries(f))},true);token=result.accessToken;sessionStorage.setItem('itsToken',token);demoMode=false;await start(result.user.role)}catch(ex){error.textContent=ex.message}});
+document.querySelector('#login').addEventListener('submit',async e=>{e.preventDefault();try{const f=new FormData(e.currentTarget),result=await api('/api/v1/auth/login',{method:'POST',body:JSON.stringify(Object.fromEntries(f))},true);token=result.accessToken;sessionStorage.setItem('itsToken',token);demoMode=false;await start(result.user.role)}catch(ex){error.textContent=ex.message;document.querySelector('#login-error').textContent=ex.message}});
 telemetryModeApply.addEventListener('click',()=>void applyTelemetryMode());
 function browserReachableUrl(configuredUrl){
   const url=new URL(configuredUrl,window.location.href);
@@ -348,10 +312,10 @@ function stopLiveView(){
   operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
   liveView=null;lastLiveMessage=null;
-  document.querySelector('#live-view-title').textContent='Live View';
+  document.querySelector('#live-view-title').textContent='실시간 전방 영상';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
-  applyLayoutSplit();
-  document.querySelector('#live-view').focus({preventScroll:true});
+  refreshMapLayout();
+  if(!document.querySelector('#details').hidden)document.querySelector('#live-view').focus({preventScroll:true});
   renderLiveTelemetryStatus();
 }
 // The virtual workspace takes over the map and the sidebar, so it closes Live
@@ -380,12 +344,12 @@ document.querySelector('#live-view').addEventListener('click',()=>{
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
   liveView=createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
   liveMapFollower.begin(liveView);
-  document.querySelector('#live-view-title').textContent=`Live View · ${liveTargetLabel(selected)}`;
+  document.querySelector('#live-view-title').textContent=`실시간 영상 · ${liveTargetLabel(selected)}`;
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
   operatorLayout.classList.add('live-view-open');
   livePanel.hidden=false;
-  applyLayoutSplit();
+  refreshMapLayout();
   document.querySelector('#close-live-view').focus({preventScroll:true});
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
@@ -404,7 +368,7 @@ liveFrame.addEventListener('load',event=>{
 document.querySelector('#close-live-view').addEventListener('click',stopLiveView);
 liveRecenterButton.addEventListener('click',()=>liveMapFollower.recenter());
 const liveFullscreenButton=document.querySelector('#live-fullscreen');
-function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.textContent=fullscreen?'Exit full screen':'Full screen';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
+function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.textContent=fullscreen?'전체 화면 종료':'전체 화면';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
 if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
 else{
   liveFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===livePanel)await document.exitFullscreen();else await livePanel.requestFullscreen()}catch{document.querySelector('#live-view-diagnostic').textContent='Full-screen Live View is unavailable in this browser.'}});
@@ -413,12 +377,13 @@ else{
 }
 document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.addEventListener('click',()=>{
   tripMapPick=button.dataset.tripMapPick;
+  const banner=document.querySelector('#map-pick-banner');banner.hidden=false;banner.textContent=`지도에서 ${tripMapPick==='origin'?'출발지':'목적지'}를 선택하세요.`;
   document.querySelectorAll('[data-trip-map-pick]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
   map.getContainer().style.cursor='crosshair';
   document.querySelector('#trip-status-message').textContent=`Click the map to set the ${tripMapPick} coordinates.`;
 }));
 map.on('click',event=>{
-  if(!tripMapPick)return;
+  if(!tripMapPick||window.__virtualMode)return;
   const kind=tripMapPick,label=kind==='origin'?'Origin':'Destination',prefix=kind==='origin'?'trip-origin':'trip-destination';
   const latitude=event.latlng.lat.toFixed(6),longitude=event.latlng.lng.toFixed(6);
   document.querySelector(`#${prefix}-latitude`).value=latitude;
@@ -434,6 +399,7 @@ map.on('click',event=>{
   document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.setAttribute('aria-pressed','false'));
   map.getContainer().style.cursor='';
   tripMapPick=undefined;
+  document.querySelector('#map-pick-banner').hidden=true;
 });
 document.querySelector('#trip-form').addEventListener('submit',async event=>{
   event.preventDefault();
@@ -464,6 +430,6 @@ async function boot(){
     try{const auth=await api('/api/v1/auth/me',{},true);await start(auth.role);return}catch{token=null;sessionStorage.removeItem('itsToken')}
   }
   demoMode=true;
-  try{await start()}catch(ex){demoMode=false;document.querySelector('#login').hidden=false;document.querySelector('#connection').textContent='Signed out';error.textContent=ex.message}
+  try{await start()}catch(ex){demoMode=false;document.querySelector('#login').hidden=false;document.querySelector('#connection').textContent='로그인 대기';error.textContent=ex.message}
 }
 boot().catch(e=>error.textContent=e.message);
