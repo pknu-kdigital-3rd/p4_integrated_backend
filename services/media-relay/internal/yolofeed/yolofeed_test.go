@@ -300,3 +300,21 @@ func TestRecordingIdentityOmitsTripWhenTrackedWithoutTrip(t *testing.T) {
 		t.Fatalf("unexpected trip-less identity: %s", body)
 	}
 }
+
+// Relabelling for a trip change keeps the live feed running instead of
+// starting a new epoch that waits for a keyframe.
+func TestRelabelRecordingIdentityDoesNotResetFeed(t *testing.T) {
+	feed := &Feed{}
+	feed.mu.Lock()
+	feed.epoch, feed.seenIDR = 4, true
+	feed.mu.Unlock()
+	feed.RelabelRecordingIdentity(&RecordingIdentity{TripID: 7, VehicleID: 3, RecordingSessionID: "S1"})
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+	if feed.epoch != 4 || !feed.seenIDR {
+		t.Fatalf("relabel reset the feed: epoch=%d seenIDR=%v", feed.epoch, feed.seenIDR)
+	}
+	if feed.recording == nil || feed.recording.TripID != 7 {
+		t.Fatalf("identity not applied: %+v", feed.recording)
+	}
+}

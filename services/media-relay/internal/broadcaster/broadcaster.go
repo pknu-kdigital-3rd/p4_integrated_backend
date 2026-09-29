@@ -35,6 +35,8 @@ type Broadcaster struct {
 	recorder    *recording.Recorder
 	telemetry   *telemetry.Service
 	onLive      func(bool)
+	// identityResolver validates in-place identity updates (see identity.go).
+	identityResolver IdentityResolver
 }
 
 func New(yolo *yolofeed.Feed, onLive func(bool), recorder *recording.Recorder) *Broadcaster {
@@ -213,7 +215,13 @@ func (b *Broadcaster) HandleDataChannel(pc *webrtc.PeerConnection, recordingCont
 			if messages.Add(1) == 1 {
 				log.Printf("Android telemetry DataChannel received first batch (bytes=%d, identity=%s)", len(message.Data), telemetryIdentityLabel(identity))
 			}
-			_ = b.HandleTelemetryMessage(pc, identity, message.Data)
+			// A trip starting or ending arrives as a control message on this
+			// channel; batches use the publisher's identity at the time they arrive.
+			if isIdentityUpdate(message.Data) {
+				b.handleIdentityUpdate(pc, channel, message.Data)
+				return
+			}
+			_ = b.HandleTelemetryMessage(pc, b.currentIdentity(pc), message.Data)
 		})
 	}
 }

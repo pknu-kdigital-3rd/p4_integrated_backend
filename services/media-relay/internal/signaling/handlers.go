@@ -72,7 +72,23 @@ type Handler struct {
 }
 
 func NewHandler(api *webrtc.API, configuration webrtc.Configuration, relay *broadcaster.Broadcaster, validator recording.ContextValidator) *Handler {
-	return &Handler{api: api, configuration: configuration, broadcaster: relay, validator: validator}
+	handler := &Handler{api: api, configuration: configuration, broadcaster: relay, validator: validator}
+	if relay != nil {
+		relay.SetIdentityResolver(handler.resolveIdentity)
+	}
+	return handler
+}
+
+// resolveIdentity validates an in-place identity update with exactly the rules
+// used for an offer, including the vehicle-only fallback for a rejected trip.
+func (h *Handler) resolveIdentity(ctx context.Context, tripID, vehicleID, recordingSessionID string) broadcaster.IdentityVerdict {
+	verdict := h.validateRecordingContext(ctx, OfferModel{TripID: tripID, VehicleID: vehicleID, RecordingSessionID: recordingSessionID})
+	status := verdict.status()
+	result := broadcaster.IdentityVerdict{Context: verdict.context, Reason: verdict.reason}
+	if status != nil {
+		result.Validated, result.TrackingOnly = status.Validated, status.TrackingOnly
+	}
+	return result
 }
 
 // SetTelemetry exposes the current-device telemetry API. Leave unset to keep

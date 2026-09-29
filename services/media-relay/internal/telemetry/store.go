@@ -193,8 +193,11 @@ func (s *Store) Snapshot() []VehicleState {
 			}
 			continue
 		}
+		// The active session is the stream that is running now (for example
+		// just after a trip started in place), so it wins over a finished one.
 		previous := newestByVehicle[current.identity.VehicleID]
-		if previous == nil || current.latestGPSAt.After(previous.latestGPSAt) {
+		if previous == nil || (current.active && !previous.active) ||
+			(current.active == previous.active && current.latestGPSAt.After(previous.latestGPSAt)) {
 			newestByVehicle[current.identity.VehicleID] = current
 		}
 	}

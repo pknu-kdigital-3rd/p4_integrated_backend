@@ -212,6 +212,21 @@ func (f *Feed) SetRecordingIdentity(identity *RecordingIdentity) {
 	f.resetLocked("recording_context_changed")
 }
 
+// RelabelRecordingIdentity changes the identity of the same publisher's stream
+// (a trip starting or ending) without resetting the feed, so the live view
+// keeps playing. Each access unit copies the identity when it is assembled, so
+// frames already retained keep their earlier label.
+func (f *Feed) RelabelRecordingIdentity(identity *RecordingIdentity) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if identity == nil {
+		f.recording = nil
+		return
+	}
+	copyIdentity := *identity
+	f.recording = &copyIdentity
+}
+
 func sameRecordingIdentity(left, right *RecordingIdentity) bool {
 	if left == nil || right == nil {
 		return left == right
