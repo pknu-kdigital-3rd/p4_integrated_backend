@@ -59,6 +59,10 @@ services:
     depends_on:
       p4-db:
         condition: service_started
+      # Seeded vehicles must exist before the BIMS feed auto-creates vehicles,
+      # so a fresh database numbers the custom trucks first.
+      p4-node-migrate:
+        condition: service_completed_successfully
     working_dir: /workspace/node
     environment:
       NODE_ENV: development
