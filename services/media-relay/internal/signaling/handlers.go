@@ -31,8 +31,11 @@ type OfferModel struct {
 // the relay drop every telemetry batch, which the publisher cannot otherwise
 // observe. Only sent when the offer actually carried identity fields.
 type StreamIdentityStatus struct {
-	Validated bool   `json:"validated"`
-	Reason    string `json:"reason,omitempty"`
+	Validated bool `json:"validated"`
+	// TrackingOnly means the trip was rejected but the vehicle is still tracked
+	// on the map; Reason explains the trip rejection.
+	TrackingOnly bool   `json:"trackingOnly,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 // AnswerModel is the SDP answer plus the identity verdict.
@@ -44,17 +47,20 @@ type AnswerModel struct {
 
 // identityVerdict is the outcome of validating one offer's stream identity.
 // reason is empty exactly when the identity was accepted.
+// A tracking-only verdict has a vehicle context but carries the trip rejection
+// as its reason, so the publisher learns why nothing is being recorded.
 type identityVerdict struct {
-	offered bool
-	context *recording.Context
-	reason  string
+	offered      bool
+	context      *recording.Context
+	reason       string
+	trackingOnly bool
 }
 
 func (v identityVerdict) status() *StreamIdentityStatus {
 	if !v.offered {
 		return nil
 	}
-	return &StreamIdentityStatus{Validated: v.context != nil, Reason: v.reason}
+	return &StreamIdentityStatus{Validated: v.context != nil && !v.trackingOnly, TrackingOnly: v.trackingOnly, Reason: v.reason}
 }
 
 type Handler struct {
@@ -192,7 +198,7 @@ func (h *Handler) validateRecordingContext(requestContext context.Context, offer
 	if tripErr != nil || vehicleErr != nil || offer.RecordingSessionID == "" {
 		const reason = "the trip, vehicle, or recording session id was missing or malformed"
 		log.Printf("recording identity is incomplete or malformed; accepting live publisher without recording")
-		return identityVerdict{offered: true, reason: reason}
+		return h.trackVehicleWithoutTrip(requestContext, offer, reason)
 	}
 	requested := recording.Context{
 		TripID:             tripID,
@@ -204,9 +210,21 @@ func (h *Handler) validateRecordingContext(requestContext context.Context, offer
 	validated, err := h.validator.ValidateRecordingContext(validationContext, requested)
 	if err != nil {
 		log.Printf("recording identity validation failed; accepting live publisher without recording: %v", err)
-		return identityVerdict{offered: true, reason: identityRejectionReason(err)}
+		return h.trackVehicleWithoutTrip(requestContext, offer, identityRejectionReason(err))
 	}
 	return identityVerdict{offered: true, context: &validated}
+}
+
+// trackVehicleWithoutTrip keeps a publisher on the operator map when its trip
+// is rejected - for example a stale saved Trip ID - but its vehicle is valid.
+// Nothing is recorded; the trip rejection still reaches the publisher.
+func (h *Handler) trackVehicleWithoutTrip(requestContext context.Context, offer OfferModel, tripReason string) identityVerdict {
+	vehicle := h.validateVehicleContext(requestContext, OfferModel{VehicleID: offer.VehicleID, RecordingSessionID: offer.RecordingSessionID})
+	if vehicle.context == nil {
+		return identityVerdict{offered: true, reason: tripReason}
+	}
+	log.Printf("trip rejected; tracking vehicle %d without recording", vehicle.context.VehicleID)
+	return identityVerdict{offered: true, context: vehicle.context, reason: tripReason, trackingOnly: true}
 }
 
 // validateVehicleContext accepts a publisher that names its vehicle but has no

@@ -107,3 +107,23 @@ func TestVehicleOnlyOfferRejectionKeepsStreamLive(t *testing.T) {
 		t.Fatalf("malformed vehicle id accepted: %+v", malformed)
 	}
 }
+
+// A stale saved Trip ID must not hide a valid vehicle from the map.
+func TestRejectedTripFallsBackToVehicleTracking(t *testing.T) {
+	validator := &rejectingTripValidator{}
+	handler := &Handler{validator: validator}
+	verdict := handler.validateRecordingContext(context.Background(), OfferModel{TripID: "7", VehicleID: "1", RecordingSessionID: "session-1"})
+	if verdict.context == nil || *verdict.context != (recording.Context{VehicleID: 1, RecordingSessionID: "session-1"}) {
+		t.Fatalf("vehicle was not tracked after the trip was rejected: %+v", verdict)
+	}
+	status := verdict.status()
+	if status == nil || status.Validated || !status.TrackingOnly || status.Reason != "Node rejected it: Trip not found" {
+		t.Fatalf("publisher must learn that recording is off and why: %+v", status)
+	}
+}
+
+type rejectingTripValidator struct{ fakeValidator }
+
+func (r *rejectingTripValidator) ValidateRecordingContext(context.Context, recording.Context) (recording.Context, error) {
+	return recording.Context{}, &recording.HTTPStatusError{Status: 404, Message: `{"error":{"code":"TRIP_NOT_FOUND","message":"Trip not found"}}`}
+}
