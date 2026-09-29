@@ -368,7 +368,7 @@ class MainActivity : AppCompatActivity() {
         }
         tripButton.setOnClickListener { toggleTrip() }
         autoStartTripSwitch = findViewById(R.id.autoStartTripSwitch)
-        autoStartTripSwitch.isChecked = getPreferences(MODE_PRIVATE).getBoolean(AUTO_START_TRIPS_KEY, false)
+        autoStartTripSwitch.isChecked = getPreferences(MODE_PRIVATE).getBoolean(AUTO_START_TRIPS_KEY, true)
         autoStartTripSwitch.setOnCheckedChangeListener { _, enabled ->
             getPreferences(MODE_PRIVATE).edit { putBoolean(AUTO_START_TRIPS_KEY, enabled) }
             if (enabled) maybeAutoStartTrip()

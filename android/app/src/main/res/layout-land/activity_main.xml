@@ -196,7 +196,7 @@
             android:id="@+id/autoStartTripSwitch"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:checked="false"
+            android:checked="true"
             android:text="Auto-start assigned trips"
             android:textColor="#FFFFFFFF" />
 
