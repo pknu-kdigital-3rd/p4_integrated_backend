@@ -49,8 +49,10 @@ type AccessUnit struct {
 
 // RecordingIdentity joins Vision results to the exact trip/session recorded
 // from the same access units. IDs are JSON strings to avoid lossy JS numbers.
+// TripID is 0 (and omitted) for a stream tracked without a trip: Vision still
+// pairs its frames with telemetry for Live View but persists nothing.
 type RecordingIdentity struct {
-	TripID             int64  `json:"trip_id,string"`
+	TripID             int64  `json:"trip_id,string,omitempty"`
 	VehicleID          int64  `json:"vehicle_id,string"`
 	RecordingSessionID string `json:"recording_session_id"`
 }

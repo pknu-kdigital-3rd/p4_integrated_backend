@@ -91,8 +91,9 @@ func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.Trac
 	}
 	if b.yolo != nil {
 		var identity *yolofeed.RecordingIdentity
-		// Detections are persisted per trip; a trip-less stream is live only.
-		if recordingContext != nil && recordingContext.TripID > 0 {
+		// A trip-less stream still gets an identity so Live View can pair frames
+		// with telemetry; Vision persists detections only when TripID is set.
+		if recordingContext != nil {
 			identity = &yolofeed.RecordingIdentity{
 				TripID:             recordingContext.TripID,
 				VehicleID:          recordingContext.VehicleID,

@@ -288,3 +288,15 @@ func TestSendFrameCarriesValidatedRecordingIdentity(t *testing.T) {
 		t.Fatalf("unexpected recording identity metadata: %+v", metadata.Recording)
 	}
 }
+
+// A stream tracked without a trip still names its vehicle and session so
+// Vision can pair Live View telemetry, but carries no trip to persist under.
+func TestRecordingIdentityOmitsTripWhenTrackedWithoutTrip(t *testing.T) {
+	body, err := json.Marshal(RecordingIdentity{VehicleID: 3, RecordingSessionID: "S-live"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != `{"vehicle_id":"3","recording_session_id":"S-live"}` {
+		t.Fatalf("unexpected trip-less identity: %s", body)
+	}
+}

@@ -39,7 +39,7 @@ type visionIMUSample struct {
 // trusted stream identity, never the Android payload fields.
 type visionBatch struct {
 	Mode               Mode              `json:"mode"`
-	TripID             string            `json:"tripId"`
+	TripID             string            `json:"tripId,omitempty"`
 	VehicleID          string            `json:"vehicleId"`
 	RecordingSessionID string            `json:"recordingSessionId"`
 	SourceClockNS      string            `json:"sourceClockNs"`

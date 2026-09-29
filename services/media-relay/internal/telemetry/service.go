@@ -82,8 +82,9 @@ func (s *Service) HandleMessage(identity *StreamIdentity, data []byte) error {
 	if s.node != nil {
 		s.node.Enqueue(accepted)
 	}
-	// Vision persists pose for trip recordings; a trip-less stream only drives the map.
-	if s.vision != nil && identity.TripID > 0 {
+	// Vision keeps telemetry in memory to pair it with live frames, so a
+	// trip-less stream is forwarded too; its batches simply carry no tripId.
+	if s.vision != nil {
 		s.vision.Enqueue(accepted)
 	}
 	return nil
