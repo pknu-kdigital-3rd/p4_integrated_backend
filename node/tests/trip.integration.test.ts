@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 import { prisma } from "../src/infrastructure/database/prisma.ts";
 import { routingInternalClient } from "../src/modules/virtual/routing-internal.client.ts";
+import { trackingClient } from "../src/modules/tracking/tracking.client.ts";
 import { replayPreviewSchema, replayPreviewService } from "../src/modules/trip/trip.preview.ts";
 import { createTripSchema } from "../src/modules/trip/trip.schema.ts";
 import { tripService } from "../src/modules/trip/trip.service.ts";
@@ -72,6 +73,31 @@ describe("trip assignment route modes", () => {
         const display = await tripService.display(String(trip!.tripId));
         expect(display.replayPreview?.fingerprint).toBe(fingerprintB);
         expect(display.destinationName).toBe("Depot");
+    });
+
+    it("uses the fix a phone is streaming for the vehicle as the dual-mode origin", async () => {
+        const route = mockRoute();
+        const vehicleId = await vehicle();
+        const lookup = vi.spyOn(trackingClient, "vehicle").mockImplementation(async externalId => {
+            if (externalId !== `device:${vehicleId}`) throw new Error("not found");
+            return { external_id: externalId, latitude: 35.15, longitude: 129.05, telemetry_source: "RECORDED_GPS",
+                // A replayed fix keeps its original recording date; freshness comes from receipt.
+                observed_at_utc: "2025-01-01T00:00:00.000Z",
+                source_metadata: { vehicleId: String(vehicleId), receivedAt: new Date().toISOString() } } as never;
+        });
+        const { originLatitude: _lat, originLongitude: _lon, ...input } = dualInput(vehicleId);
+        await tripService.createTrip(input);
+        expect(lookup).toHaveBeenCalledWith(`device:${vehicleId}`);
+        expect(route).toHaveBeenCalledWith(expect.objectContaining({ origin: { lat: 35.15, lon: 129.05 } }));
+    });
+
+    it("requires an origin when the phone's last fix is stale", async () => {
+        mockRoute();
+        const vehicleId = await vehicle();
+        vi.spyOn(trackingClient, "vehicle").mockResolvedValue({ external_id: `device:${vehicleId}`, latitude: 35.15, longitude: 129.05,
+            telemetry_source: "RECORDED_GPS", source_metadata: { receivedAt: new Date(Date.now() - 120_000).toISOString() } } as never);
+        const { originLatitude: _lat, originLongitude: _lon, ...input } = dualInput(vehicleId);
+        await expect(tripService.createTrip(input)).rejects.toMatchObject({ code: "TRIP_ORIGIN_REQUIRED" });
     });
 
     it("rejects a routing failure without creating a trip", async () => {

@@ -13,15 +13,34 @@ function profile(vehicle: Awaited<ReturnType<typeof tripRepository.findVehicle>>
     if (Number(vehicle?.widthM ?? 0) >= 2.3 || Number(vehicle?.heightM ?? 0) >= 3.5) return "semi";
     return "car";
 }
+const originMaxAgeMs = 60_000;
+function fresh(timestamp: unknown): boolean {
+    const age = Date.now() - new Date(typeof timestamp === "string" ? timestamp : "").getTime();
+    return Number.isFinite(age) && age >= 0 && age <= originMaxAgeMs;
+}
+/**
+ * The vehicle's current map position, used as a dual-mode origin when the
+ * operator picks none: a live BIMS fix, or the fix an Android phone is
+ * streaming for this vehicle. A phone's fix is aged by when the relay received
+ * it, since a replayed fix keeps its original recording date. The origin only
+ * seeds the initial optimal route; replay GPS never counts as trip progress.
+ */
 async function liveOrigin(vehicle: NonNullable<Awaited<ReturnType<typeof tripRepository.findVehicle>>>) {
-    if (!vehicle.externalId) return null;
     try {
-        const fix = await trackingClient.vehicle(vehicle.externalId);
-        const age = Date.now() - new Date(fix.observed_at_utc ?? "").getTime();
-        if (fix.telemetry_source !== "BIMS_LIVE" || fix.source_metadata?.state !== "live"
-            || !Number.isFinite(age) || age < 0 || age > 60_000) return null;
-        return { lat: fix.latitude, lon: fix.longitude };
-    } catch { return null; }
+        if (vehicle.externalId) {
+            const fix = await trackingClient.vehicle(vehicle.externalId);
+            if (fix.telemetry_source === "BIMS_LIVE" && fix.source_metadata?.state === "live" && fresh(fix.observed_at_utc)) {
+                return { lat: fix.latitude, lon: fix.longitude };
+            }
+        }
+    } catch { /* fall through to the device fix */ }
+    try {
+        const fix = await trackingClient.vehicle(`device:${vehicle.vehicleId}`);
+        if ((fix.telemetry_source === "DEVICE_GPS" || fix.telemetry_source === "RECORDED_GPS") && fresh(fix.source_metadata?.receivedAt)) {
+            return { lat: fix.latitude, lon: fix.longitude };
+        }
+    } catch { /* no phone streaming for this vehicle */ }
+    return null;
 }
 function positiveId(value: string, label: string): bigint {
     if (!/^[1-9]\d*$/.test(value)) throw new AppError(400, `${label} must be a positive integer`, "INVALID_ID");
@@ -49,7 +68,7 @@ export const tripService = {
         } else {
             const origin = input.originLatitude === undefined ? await liveOrigin(vehicle)
                 : { lat: input.originLatitude, lon: input.originLongitude! };
-            if (!origin) throw new AppError(422, "Select an origin on the map; no recent live GPS fix is available", "TRIP_ORIGIN_REQUIRED");
+            if (!origin) throw new AppError(422, "Select an origin on the map; no recent live or Android GPS fix is available", "TRIP_ORIGIN_REQUIRED");
             resolved = { ...input, replayPreviewId: undefined, originLatitude: origin.lat, originLongitude: origin.lon,
                 destinationName: input.destinationName!, destinationLatitude: input.destinationLatitude!,
                 destinationLongitude: input.destinationLongitude! };
