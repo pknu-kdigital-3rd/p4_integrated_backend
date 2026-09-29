@@ -297,7 +297,9 @@ async function loadTripAssignments(){
     vehicleSelect.add(new Option(label,String(vehicle.vehicleId)));
   }
   if(vehicles.some(item=>item.isActive&&String(item.vehicleId)===previousVehicle))vehicleSelect.value=previousVehicle;
-  activeTripByVehicle=new Map(trips.filter(trip=>['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)).map(trip=>[String(trip.vehicleId),String(trip.tripId)]));
+  // Trips arrive newest first; name the newest active one, as Android's current-trip lookup does.
+  activeTripByVehicle=new Map();
+  for(const trip of trips)if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&!activeTripByVehicle.has(String(trip.vehicleId)))activeTripByVehicle.set(String(trip.vehicleId),String(trip.tripId));
   syncTripRouteMode();
   void loadAssignmentPreview();
   const list=document.querySelector('#trips-list');list.replaceChildren();
