@@ -306,15 +306,19 @@ async function applyTelemetryMode(){
   catch(ex){telemetryModeStatus.textContent=`Could not switch telemetry source: ${ex.message}`;telemetryModeStatus.dataset.level='error';await loadTelemetryMode()}
 }
 const tripRouteMode=document.querySelector('#trip-route-mode');
-tripRouteMode.value=localStorage.getItem('operatorTripRouteMode')==='REPLAY_ONLY'?'REPLAY_ONLY':'DUAL';
+// The Android GPS path is the default; the optimal-route mode is opt-in.
+tripRouteMode.value=localStorage.getItem('operatorTripRouteMode')==='DUAL'?'DUAL':'REPLAY_ONLY';
 function syncTripRouteMode(){
   const replayOnly=tripRouteMode.value==='REPLAY_ONLY';
   document.querySelector('#trip-mode-hint').textContent=replayOnly
     ?'Android GPS 기록의 첫 위치에서 마지막 위치까지 배정합니다. 목적지는 자동 지정됩니다.'
     :'목적지를 선택하면 최적 경로와 Android GPS 재생 경로를 함께 표시합니다.';
+  // The replay path's final GPS point is the destination, so there is nothing to ask.
+  document.querySelector('#trip-destination-fields').hidden=replayOnly;
   for(const id of ['trip-destination-name','trip-destination-latitude','trip-destination-longitude']){
     const field=document.getElementById(id);field.disabled=replayOnly;field.required=!replayOnly;
   }
+  if(replayOnly&&tripMapPick==='destination')window.__operatorCancelMapPick();
   const preview=assignmentPreview,notice=document.querySelector('#trip-preview-status');
   notice.textContent=preview?`Android GPS: ${preview.datasetName} · 마지막 위치 ${preview.points.at(-1)[2].toFixed(5)}, ${preview.points.at(-1)[1].toFixed(5)}`
     :replayOnly?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'Android GPS 미수신 · 경로가 도착하면 함께 표시됩니다.';

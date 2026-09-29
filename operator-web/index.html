@@ -393,8 +393,8 @@
       <h2 id="route-mode-title">신규 운행 경로 표시</h2>
       <label for="trip-route-mode">배정 시 적용할 모드</label>
       <select id="trip-route-mode">
+       <option value="REPLAY_ONLY">Android GPS 재생 경로만 (기본)</option>
        <option value="DUAL">최적 경로 + Android GPS 재생</option>
-       <option value="REPLAY_ONLY">Android GPS 재생 경로만</option>
       </select>
       <small>선택은 새 운행에 저장됩니다. 재생 경로만 사용할 때 목적지는 GPS 기록의 마지막 위치입니다.</small>
      </section>
@@ -494,6 +494,7 @@
       </select>
       <p class="metadata" id="trip-mode-hint">설정에서 선택한 경로 표시 모드가 적용됩니다.</p>
       <p class="metadata" id="trip-preview-status">Android GPS 경로 확인 중…</p>
+      <div id="trip-destination-fields">
       <label for="trip-destination-name">
        운행 목적지
       </label>
@@ -509,6 +510,7 @@
       <div class="trip-coordinate-grid">
        <input aria-label="Destination latitude" id="trip-destination-latitude" max="90" min="-90" placeholder="위도" required="" step="any" type="number"/>
        <input aria-label="Destination longitude" id="trip-destination-longitude" max="180" min="-180" placeholder="경도" required="" step="any" type="number"/>
+      </div>
       </div>
       <label for="trip-planned-start">
        출발 예정 일시
