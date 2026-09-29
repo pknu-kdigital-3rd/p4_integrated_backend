@@ -632,7 +632,6 @@ function openLiveView(){
   livePanel.hidden=false;
   // Opens docked in the "실시간 영상" tab; "지도에 띄우기" moves it onto the map.
   placeLivePanel(true);
-  document.querySelector('#close-live-view').focus({preventScroll:true});
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
   liveFrame.src=liveViewUrl;
@@ -648,7 +647,8 @@ liveFrame.addEventListener('load',event=>{
   }
   notifyLiveFrameFullscreen();
 });
-document.querySelector('#close-live-view').addEventListener('click',stopLiveView);
+// There is no close button: the preview closes when another vehicle is
+// selected, or when "저장된 녹화" is shown while it is docked.
 liveRecenterButton.addEventListener('click',()=>liveMapFollower.recenter());
 const liveFullscreenButton=document.querySelector('#live-fullscreen');
 function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.textContent=fullscreen?'전체 화면 종료':'전체 화면';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
