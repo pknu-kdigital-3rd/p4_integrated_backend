@@ -645,7 +645,6 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
   }
   for(const [field,id] of [['originName','trip-origin-name'],['destinationAddress','trip-destination-address']])if(value(id))body[field]=value(id);
   if(originLatitude){body.originLatitude=Number(originLatitude);body.originLongitude=Number(originLongitude)}
-  if(value('trip-planned-start'))body.plannedStartAt=new Date(value('trip-planned-start')).toISOString();
   button.disabled=true;message.textContent='Creating trip…';
   try{
     const trip=await api('/api/v1/trips',{method:'POST',body:JSON.stringify(body)},true);
