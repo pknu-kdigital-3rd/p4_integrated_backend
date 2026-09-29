@@ -322,6 +322,13 @@ services:
     container_name: p4-coturn
     restart: unless-stopped
     network_mode: host
+    # Restarting or rebuilding the relay drops its peers, but their TURN
+    # allocations would keep the few relay ports busy and block new calls.
+    # Restart coturn with it so those allocations are cleared.
+    depends_on:
+      p4-relay:
+        condition: service_started
+        restart: true
     command:
       - -n
       - --log-file=stdout
@@ -334,6 +341,9 @@ services:
       - --tls-listening-port=39005
       - --min-port=39006
       - --max-port=39007
+      # Abandoned allocations (a peer that vanished without releasing) free
+      # their port within 2 minutes; live peers refresh theirs.
+      - --max-allocate-lifetime=120
       - --listening-ip=${TURN_LISTENING_IP:-0.0.0.0}
       - --relay-ip=${TLS_PUBLIC_ADDRESS:-10.174.96.119}
       - --external-ip=${TLS_PUBLIC_ADDRESS:-10.174.96.119}
