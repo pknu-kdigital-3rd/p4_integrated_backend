@@ -348,6 +348,7 @@ async def _enqueue_inference_frame(
 
     if dropped:
         state.metrics.inference_frames_dropped += len(dropped)
+        state.metrics.inference_enqueue_dropped += len(dropped)
         await _publish_skipped_frames(
             state,
             dropped,
@@ -364,6 +365,7 @@ async def _enqueue_inference_frame(
         # but keep the ownership/drop rule safe if a custom queue is injected
         # by a test or future caller.
         state.metrics.inference_frames_dropped += 1
+        state.metrics.inference_enqueue_dropped += 1
         await _publish_skipped_frames(
             state,
             [inference_frame],
@@ -910,6 +912,7 @@ async def yolo_worker(state: AppState) -> None:
                 state, inference_frame
             )
             state.metrics.inference_frames_dropped += len(dropped_frames)
+            state.metrics.inference_worker_dropped += len(dropped_frames)
             await _publish_skipped_frames(
                 state,
                 dropped_frames,

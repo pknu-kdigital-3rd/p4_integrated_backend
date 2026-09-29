@@ -525,6 +525,8 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((await state.inference_queue.get()).seq, 2)
         self.assertEqual(state.metrics.inference_frames_dropped, 1)
+        self.assertEqual(state.metrics.inference_enqueue_dropped, 1)
+        self.assertEqual(state.metrics.inference_worker_dropped, 0)
         self.assertTrue(state.result_store[(1, 1)].result["inference_skipped"])
         self.assertEqual(state.result_store[(1, 1)].encoded, b"")
 
@@ -545,6 +547,8 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((await state.inference_queue.get()).seq, 1)
         self.assertEqual(state.metrics.inference_frames_dropped, 1)
+        self.assertEqual(state.metrics.inference_enqueue_dropped, 1)
+        self.assertEqual(state.metrics.inference_worker_dropped, 0)
         self.assertTrue(state.result_store[(1, 2)].result["inference_skipped"])
 
 

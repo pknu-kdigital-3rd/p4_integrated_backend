@@ -188,6 +188,13 @@ stay aligned with the source video.
 
 ## ByteTrack versus BoT-SORT branches
 
+The periodic `[mem]` line keeps `dropped` as the total inference frames skipped
+since process start. `drop_enqueue` counts frames discarded while entering the
+inference queue (latest-policy replacement or a full bounded queue).
+`drop_worker_latest` counts frames discarded when the inference worker drains
+queued work to the newest frame. These counters are cumulative and their sum
+equals `dropped`; compare them between log lines to locate where skips occur.
+
 The two integration branches share the UniDepth and segmentation changes:
 
 - `feature/vision-unidepth-bytetrack` uses Vision's existing ByteTrack setup.

@@ -60,6 +60,8 @@ class VisionMetrics:
     started_at: float = field(default_factory=monotonic)
     decoded_frames_received: int = 0
     inference_frames_dropped: int = 0
+    inference_enqueue_dropped: int = 0
+    inference_worker_dropped: int = 0
     frames_inferred: int = 0
     playback_frames_published: int = 0
     websocket_frames_sent: int = 0
@@ -91,6 +93,8 @@ class VisionMetrics:
         return {
             "decoded_frames_received": self.decoded_frames_received,
             "inference_frames_dropped": self.inference_frames_dropped,
+            "inference_enqueue_dropped": self.inference_enqueue_dropped,
+            "inference_worker_dropped": self.inference_worker_dropped,
             "frames_inferred": self.frames_inferred,
             "playback_frames_published": self.playback_frames_published,
             "websocket_frames_sent": self.websocket_frames_sent,
