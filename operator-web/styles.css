@@ -132,7 +132,21 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 .trip-progress-card[hidden] { display: none; }
 .trip-progress-card strong { font-size: 14px; }
 .trip-progress-card p { margin: 0; color: var(--ui-text-secondary); }
-.trip-progress-card progress { width: 100%; height: 12px; accent-color: var(--ui-primary); }
+/* Origin ─── bus at the current percentage ─── destination, as in the design mockup. */
+.trip-track { --trip-progress: 0%; display: grid; gap: 8px; margin: 6px 0 2px; }
+.trip-track-rail { position: relative; height: 26px; margin: 0 10px; }
+.trip-track-rail::before,.trip-track-fill { content: ''; position: absolute; top: 11px; left: 0; height: 4px; border-radius: 2px; }
+.trip-track-rail::before { right: 0; background: var(--ui-border); }
+.trip-track-fill { width: var(--trip-progress); background: var(--ui-primary); }
+.trip-track-rail::after { content: ''; position: absolute; top: 7px; right: -6px; width: 12px; height: 12px; border-radius: 50%; background: #fff; border: 3px solid var(--ui-border); box-sizing: border-box; }
+.trip-track-vehicle { position: absolute; top: 0; left: var(--trip-progress); transform: translateX(-50%); width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; background: var(--ui-primary); color: #fff; box-shadow: 0 2px 6px #0868dd55; }
+.trip-track-vehicle svg { width: 16px; height: 16px; }
+.trip-track.no-progress .trip-track-vehicle { background: var(--ui-text-secondary); box-shadow: none; }
+.trip-track-stops { display: flex; justify-content: space-between; gap: 12px; }
+.trip-track-stops > div { display: grid; gap: 2px; min-width: 0; }
+.trip-track-stops strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trip-track-stops small { color: var(--ui-text-secondary); font-size: 11px; }
+.trip-track-destination { text-align: right; }
 #trip-preview-status { overflow-wrap: anywhere; }
 #trips-list button { justify-self: start; padding: 5px 8px; font-size: 11px; background: var(--ui-danger-soft); color: var(--ui-danger); }
 #live-view { margin-top: 12px; width: 100%; }

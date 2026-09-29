@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {plannedProgress,recordedProgress} from './trip-route-ui.js';
+import {plannedProgress,recordedProgress,tripTimes} from './trip-route-ui.js';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
@@ -136,8 +136,11 @@ function clearTripLayers(){
 }
 function showTripDisplay(display){
   const card=document.querySelector('#trip-progress-card');card.hidden=false;
-  document.querySelector('#selected-origin').textContent=`출발지 · ${display.originName||'배정 시점의 차량 위치'}`;
-  document.querySelector('#selected-destination').textContent=`목적지 · ${display.destinationName}`;
+  document.querySelector('#selected-origin').textContent=display.originName||'배정 시점의 차량 위치';
+  document.querySelector('#selected-destination').textContent=display.destinationName;
+  const times=tripTimes(display);
+  document.querySelector('#selected-origin-time').textContent=times.origin;
+  document.querySelector('#selected-destination-time').textContent=times.destination;
   const replayOnly=display.routeMode==='REPLAY_ONLY';
   document.querySelector('#selected-route-mode').textContent=`${replayOnly?'Android GPS 재생 경로':'최적 경로 + Android GPS 재생'} · ${TRIP_STATUS_LABELS[display.tripStatus]||display.tripStatus}`;
   const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}`;
@@ -168,10 +171,18 @@ function showTripDisplay(display){
       progress=plannedProgress(display.plannedRoute?.routeGeojson,fix);
       if(progress?.offRouteM>100){label=`실제 GPS가 계획 경로에서 ${progress.offRouteM} m 벗어남`;progress=null}
       else if(progress)label=`실제 GPS ${progress.percent}% · 남은 계획 경로 ${(progress.remainingM/1000).toFixed(1)} km`;
-    }else label=display.replayPreview?'실제 GPS 진행률 없음 · Android GPS는 재생 중':'실제 GPS 위치를 기다리는 중';
+    }else{
+      // Without a real fix, show how far the Android replay has come through its
+      // recorded path; it is labelled as replay, never as real trip progress.
+      const replay=recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
+      if(replay){progress=replay;label=`GPS 재생 기준 ${replay.percent}% · 남은 기록 경로 ${(replay.remainingM/1000).toFixed(1)} km`}
+      else label=display.replayPreview?'진행률 대기 중 · Android GPS 재생이 시작되면 표시됩니다':'실제 GPS 위치를 기다리는 중';
+    }
   }
   document.querySelector('#selected-progress').textContent=label;
-  const bar=document.querySelector('#selected-progress-bar');bar.value=progress?.percent??0;bar.hidden=!progress;
+  const track=document.querySelector('#trip-track');
+  track.style.setProperty('--trip-progress',`${Math.max(0,Math.min(100,progress?.percent??0))}%`);
+  track.classList.toggle('no-progress',!progress);
 }
 async function loadSelectedTrip(){
   const item=selected,request=++displayRequest;

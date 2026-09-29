@@ -464,12 +464,19 @@
       계획 경로 · 경로 없음
      </p>
      <div class="trip-progress-card" id="trip-progress-card" hidden>
-      <p id="selected-origin">출발지 —</p>
-      <p id="selected-current">현재 위치 대기 중</p>
-      <strong id="selected-destination">목적지 —</strong>
       <p id="selected-route-mode">—</p>
-      <progress id="selected-progress-bar" max="100" value="0"></progress>
-      <p id="selected-progress">진행 상태 대기 중</p>
+      <div class="trip-track" id="trip-track">
+       <div aria-hidden="true" class="trip-track-rail">
+        <span class="trip-track-fill"></span>
+        <span class="trip-track-vehicle" data-icon="bus"></span>
+       </div>
+       <div class="trip-track-stops">
+        <div><strong id="selected-origin">출발지 —</strong><small id="selected-origin-time">—</small></div>
+        <div class="trip-track-destination"><strong id="selected-destination">목적지 —</strong><small id="selected-destination-time">—</small></div>
+       </div>
+      </div>
+      <p id="selected-progress" role="status">진행 상태 대기 중</p>
+      <p id="selected-current">현재 위치 대기 중</p>
      </div>
     </section>
     <section aria-labelledby="trip-title" class="ui-card" hidden="" id="trip-panel">

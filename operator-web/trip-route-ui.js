@@ -37,3 +37,35 @@ export function recordedProgress(preview,sourceTimestampNs){
   const travelled=a[3]+fraction*(b[3]-a[3]),total=preview.totalDistanceM;
   return {percent:total?Math.round(100*travelled/total):100,remainingM:Math.round(total-travelled)};
 }
+
+/** "14:10" in the operator's local time (or `timeZone` when given). */
+export function formatClock(value,timeZone){
+  const date=value instanceof Date?value:new Date(value??'');
+  if(Number.isNaN(date.getTime()))return null;
+  return new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone}).format(date);
+}
+
+// Expected travel time: the planned route's duration, or for a replay-only
+// trip the span of the recorded GPS path.
+function tripDurationMs(display){
+  const seconds=Number(display?.plannedRoute?.durationSec);
+  if(Number.isFinite(seconds)&&seconds>0)return seconds*1000;
+  const points=display?.replayPreview?.points;
+  if(Array.isArray(points)&&points.length>1){
+    const spanNs=BigInt(points.at(-1)[0])-BigInt(points[0][0]);
+    if(spanNs>0n)return Number(spanNs/1_000_000n);
+  }
+  return null;
+}
+
+/** Departure and arrival captions for the trip progress track. */
+export function tripTimes(display,timeZone){
+  const started=formatClock(display?.startedAt,timeZone),planned=formatClock(display?.plannedStartAt,timeZone);
+  const origin=started?`${started} 출발`:planned?`${planned} 출발 예정`:'출발 대기';
+  if(display?.tripStatus==='CANCELLED')return {origin,destination:'운행 취소'};
+  const ended=formatClock(display?.endedAt,timeZone);
+  if(display?.tripStatus==='COMPLETED'&&ended)return {origin,destination:`${ended} 도착`};
+  const departure=display?.startedAt??display?.plannedStartAt,duration=tripDurationMs(display);
+  const eta=departure&&duration?formatClock(new Date(new Date(departure).getTime()+duration),timeZone):null;
+  return {origin,destination:eta?`${eta} 도착 예정`:'도착 시간 미정'};
+}
