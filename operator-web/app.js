@@ -23,15 +23,35 @@ function syncLiveDetails(){
   button.textContent=liveDetailsHidden?'상세 보기':'상세 숨기기';
   button.setAttribute('aria-pressed',String(!liveDetailsHidden));
   notifyLiveFrameFullscreen();
+  fitLivePanelToVideo();
+}
+// In video-only mode the panel takes the video's exact shape, so there are no
+// black bars; it stays at most 540px wide and inside the map. With details
+// shown (or before the video size is known) the stylesheet size applies.
+let liveVideoSize=null;
+function fitLivePanelToVideo(){
+  const fit=liveDetailsHidden&&liveVideoSize&&!livePanel.hidden&&document.fullscreenElement!==livePanel;
+  if(!fit){livePanel.style.removeProperty('width');livePanel.style.removeProperty('height')}
+  else{
+    const surface=document.querySelector('#map-surface').getBoundingClientRect(),header=48;
+    const ratio=liveVideoSize.width/liveVideoSize.height;
+    let width=Math.max(160,Math.min(540,surface.width-36)),videoHeight=width/ratio;
+    const maxVideoHeight=Math.max(90,Math.min(440,surface.height-36,surface.height*0.7)-header);
+    if(videoHeight>maxVideoHeight){videoHeight=maxVideoHeight;width=videoHeight*ratio}
+    livePanel.style.width=`${Math.round(width)}px`;livePanel.style.height=`${Math.round(videoHeight+header)}px`;
+  }
+  livePanelDrag?.apply();
 }
 document.querySelector('#live-details').addEventListener('click',()=>{
   liveDetailsHidden=!liveDetailsHidden;
   try{localStorage.setItem('operatorLiveDetailsHidden',String(liveDetailsHidden))}catch{}
   syncLiveDetails();
 });
-syncLiveDetails();
 // Drag the live preview by its title bar anywhere inside the map.
 const livePanelDrag=installPanelDrag({panel:livePanel,handle:livePanel.querySelector('.live-view-header'),container:document.querySelector('#map-surface'),storage:(()=>{try{return localStorage}catch{return null}})(),storageKey:'operatorLivePanelPosition'});
+// Declared above the drag helper it calls, so it runs only once that exists.
+syncLiveDetails();
+new ResizeObserver(()=>fitLivePanelToVideo()).observe(document.querySelector('#map-surface'));
 function createMarkerEntry(item,position,{liveOnly=false}={}){
   const androidGps=isAndroidGpsItem(item),marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const entry={marker,item,liveOnly};
@@ -481,7 +501,7 @@ function stopLiveView(){
   livePanel.hidden=true;
   operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
-  liveView=null;lastLiveMessage=null;
+  liveView=null;lastLiveMessage=null;liveVideoSize=null;fitLivePanelToVideo();
   document.querySelector('#live-view-title').textContent='실시간 전방 영상';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
   refreshMapLayout();
@@ -493,6 +513,11 @@ function stopLiveView(){
 // layout class - and with it a display:none sidebar - behind.
 window.__operatorStopLiveView=stopLiveView;
 window.addEventListener('message',event=>{
+  if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-video-size'){
+    const {width,height}=event.data;
+    if(Number.isFinite(width)&&Number.isFinite(height)&&width>0&&height>0){liveVideoSize={width,height};fitLivePanelToVideo()}
+    return;
+  }
   const message=acceptLiveTelemetry(liveView,event,liveFrame.contentWindow);
   if(!message)return;
   lastLiveMessage=message;
@@ -519,7 +544,7 @@ document.querySelector('#live-view').addEventListener('click',()=>{
   renderLiveTelemetryStatus();
   operatorLayout.classList.add('live-view-open');
   livePanel.hidden=false;
-  livePanelDrag.apply();
+  fitLivePanelToVideo();
   refreshMapLayout();
   document.querySelector('#close-live-view').focus({preventScroll:true});
   // Set the URL only after opening the panel so navigation/playback starts as
@@ -543,7 +568,7 @@ function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement=
 if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
 else{
   liveFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===livePanel)await document.exitFullscreen();else await livePanel.requestFullscreen()}catch{document.querySelector('#live-view-diagnostic').textContent='Full-screen Live View is unavailable in this browser.'}});
-  document.addEventListener('fullscreenchange',()=>{syncLiveFullscreenButton();notifyLiveFrameFullscreen();requestAnimationFrame(()=>map.invalidateSize({pan:false}))});
+  document.addEventListener('fullscreenchange',()=>{syncLiveFullscreenButton();notifyLiveFrameFullscreen();fitLivePanelToVideo();requestAnimationFrame(()=>map.invalidateSize({pan:false}))});
   syncLiveFullscreenButton();
 }
 document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.addEventListener('click',()=>{
