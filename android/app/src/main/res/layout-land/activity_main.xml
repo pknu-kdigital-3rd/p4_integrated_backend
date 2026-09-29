@@ -193,6 +193,14 @@
             android:text="Start Trip" />
 
         <Switch
+            android:id="@+id/autoStartTripSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:text="Auto-start assigned trips"
+            android:textColor="#FFFFFFFF" />
+
+        <Switch
             android:id="@+id/telemetrySwitch"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

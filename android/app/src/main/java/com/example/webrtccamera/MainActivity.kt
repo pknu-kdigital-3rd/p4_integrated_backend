@@ -124,6 +124,7 @@ private const val RECORDING_TRIP_ID_KEY = "recording_trip_id"
 // How long to wait for the relay to confirm an in-place trip switch before restarting the stream.
 private const val IDENTITY_SWITCH_TIMEOUT_MS = 5_000L
 private const val RECORDING_VEHICLE_ID_KEY = "recording_vehicle_id"
+private const val AUTO_START_TRIPS_KEY = "auto_start_trips"
 
 class MainActivity : AppCompatActivity() {
     private lateinit var viewFinder: PreviewView
@@ -142,6 +143,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var qrStatusText: TextView
     private lateinit var qrScanningSwitch: Switch
     private lateinit var telemetrySwitch: Switch
+    private lateinit var autoStartTripSwitch: Switch
+    // The trip auto-start last tried, so a failure is not retried on every poll.
+    private var autoStartAttemptedTripId: Long? = null
     private lateinit var selectDatasetButton: Button
     private lateinit var datasetSummaryText: TextView
     private lateinit var telemetryStatusText: TextView
@@ -363,6 +367,12 @@ class MainActivity : AppCompatActivity() {
             if (streaming.get()) stopStreaming() else startStreaming()
         }
         tripButton.setOnClickListener { toggleTrip() }
+        autoStartTripSwitch = findViewById(R.id.autoStartTripSwitch)
+        autoStartTripSwitch.isChecked = getPreferences(MODE_PRIVATE).getBoolean(AUTO_START_TRIPS_KEY, false)
+        autoStartTripSwitch.setOnCheckedChangeListener { _, enabled ->
+            getPreferences(MODE_PRIVATE).edit { putBoolean(AUTO_START_TRIPS_KEY, enabled) }
+            if (enabled) maybeAutoStartTrip()
+        }
 
         cameraExecutor = Executors.newSingleThreadExecutor()
         telemetryIoExecutor = Executors.newSingleThreadExecutor()
@@ -490,8 +500,26 @@ class MainActivity : AppCompatActivity() {
                     switchStreamToCurrentTrip()
                 }
                 renderTripStatus()
+                maybeAutoStartTrip()
             }
         }
+    }
+
+    /**
+     * With "Auto-start assigned trips" on, starts a newly assigned READY trip without the
+     * driver pressing Start Trip. It goes through the same server call and checks; a
+     * replay-only trip is only started when the selected dataset is the assigned one (the
+     * server would refuse it otherwise). Each trip is tried once, so a failure is not
+     * repeated every poll - Start Trip still works by hand.
+     */
+    private fun maybeAutoStartTrip() {
+        if (!::autoStartTripSwitch.isInitialized || !autoStartTripSwitch.isChecked || tripRequestBusy) return
+        val trip = assignedTrip ?: return
+        if (trip.status != "READY" || trip.tripId == autoStartAttemptedTripId) return
+        if (trip.routeMode == "REPLAY_ONLY" && trip.fingerprint != selectedDatasetFingerprint) return
+        autoStartAttemptedTripId = trip.tripId
+        setStatus("Trip ${trip.tripId}: starting automatically…")
+        toggleTrip()
     }
 
     private fun toggleTrip() {
