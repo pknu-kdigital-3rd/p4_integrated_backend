@@ -51,6 +51,11 @@ class TelemetryReplayScheduler(
     // footage; without this, every sample from the start of the dataset would be released
     // at once as one oversized backlog message.
     private var cursorsSynced = false
+    // The last GPS fix handed to the transport and when, so the vehicle's position can be
+    // held on the operator map while no replayed fix is due.
+    private var lastSentGps: GpsSample? = null
+    private var lastGpsSentElapsedMs: Long? = null
+    private var holdingReported = false
 
     val gpsSentCount = AtomicLong(0)
     val imuSentCount = AtomicLong(0)
@@ -132,13 +137,18 @@ class TelemetryReplayScheduler(
                 }
             )
         }
-        val sourceNow = sourceClock.currentSourceTimestampNs() ?: return
+        val sourceNow = sourceClock.currentSourceTimestampNs()
+        if (sourceNow == null) {
+            holdPosition(null, elapsedMillis())
+            return
+        }
         if (!cursorsSynced) {
             resyncCursors(sourceNow)
             onStatus("Telemetry: first QR anchor; replay positioned at ${sourceNow}ns")
         }
         val nowMs = elapsedMillis()
         advanceCursors(sourceNow, nowMs)
+        holdPosition(sourceNow, nowMs)
         if (clockState == SourceClockState.RUNNING && nowMs - lastProgressStatusElapsedMs >= PROGRESS_STATUS_INTERVAL_MS) {
             lastProgressStatusElapsedMs = nowMs
             val queueError = lastBatchQueueError?.let { "; last queue error: $it" }.orEmpty()
@@ -171,6 +181,39 @@ class TelemetryReplayScheduler(
         }
     }
 
+    /**
+     * Keeps the vehicle on the operator map whenever replay has no due GPS fix: before the
+     * first QR anchor, before the dataset's first fix, while the QR clock is stale, and after
+     * the last fix. Resends the last sent fix - or the dataset's first fix before any was
+     * sent - at most every [HOLD_INTERVAL_MS]. The fix keeps its original timestamp, so the
+     * relay and Node de-duplicate it rather than recording a new position.
+     */
+    internal fun holdPosition(sourceNow: Long?, nowMs: Long) {
+        val lastSentAt = lastGpsSentElapsedMs
+        if (lastSentAt != null && nowMs - lastSentAt < HOLD_INTERVAL_MS) return
+        val fix = lastSentGps ?: dataset.gps.firstOrNull() ?: return
+        val batch = TelemetryBatch(
+            mode = sessionContext.telemetryMode,
+            tripId = sessionContext.tripId,
+            vehicleId = sessionContext.vehicleId,
+            recordingSessionId = sessionContext.recordingSessionId,
+            sourceClockNs = sourceNow ?: fix.timestampNs,
+            gps = listOf(fix),
+        )
+        try {
+            onBatchReady(batch)
+            batchSentCount.incrementAndGet()
+        } catch (error: Exception) {
+            lastBatchQueueError = error.message ?: error.javaClass.simpleName
+        }
+        lastSentGps = fix
+        lastGpsSentElapsedMs = nowMs
+        if (!holdingReported) {
+            holdingReported = true
+            onStatus("Telemetry: no replayed GPS fix due; holding vehicle at ${fix.latitude}, ${fix.longitude}")
+        }
+    }
+
     private fun flush(sourceNow: Long, nowMs: Long) {
         if (pendingGps.isEmpty() && pendingImu.isEmpty()) return
         val batch = TelemetryBatch(
@@ -184,6 +227,11 @@ class TelemetryReplayScheduler(
         )
         try {
             onBatchReady(batch)
+            if (pendingGps.isNotEmpty()) {
+                lastSentGps = pendingGps.last()
+                lastGpsSentElapsedMs = nowMs
+                holdingReported = false
+            }
             gpsSentCount.addAndGet(pendingGps.size.toLong())
             imuSentCount.addAndGet(pendingImu.size.toLong())
             batchSentCount.incrementAndGet()
@@ -210,6 +258,8 @@ class TelemetryReplayScheduler(
         const val TICK_INTERVAL_MS = 10L
         const val FLUSH_INTERVAL_MS = 40L
         const val PROGRESS_STATUS_INTERVAL_MS = 1_000L
+        // Well inside the relay's 30 s current-position window.
+        const val HOLD_INTERVAL_MS = 1_000L
         const val MAX_IMU_PER_BATCH = 16
         // The relay rejects batches with more than 16 GPS fixes.
         const val MAX_GPS_PER_BATCH = 16

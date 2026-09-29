@@ -177,7 +177,52 @@ class TelemetryReplaySchedulerTest {
 
         val gpsSent = batches.flatMap { it.gps }.map { it.timestampNs / second }
         val imuSent = batches.flatMap { it.imu }.map { it.timestampNs }
-        assertEquals("only the fix at the anchor restores the position", listOf(250L), gpsSent)
+        // Before the anchor the dataset start point is held; after it, only the anchor fix is
+        // replayed (and held while the frozen clock stands still). Nothing in between is sent.
+        assertEquals("the backlog before the anchor must not be released", setOf(0L, 250L), gpsSent.toSet())
+        assertTrue("the anchor fix restores the position", 250L in gpsSent)
         assertEquals(listOf(250 * second), imuSent)
     }
+
+    @Test
+    fun `holds the dataset start point before any gps fix is due`() {
+        val dataset = TelemetryDataset("d", gps = listOf(gps(1000), gps(2000)), imu = listOf(imu(100)))
+        val batches = mutableListOf<TelemetryBatch>()
+        val scheduler = newScheduler(dataset, batches)
+
+        scheduler.holdPosition(sourceNow = null, nowMs = 0L)
+
+        assertEquals(listOf(1000L), batches.flatMap { it.gps }.map { it.timestampNs })
+        assertEquals(1000L, batches.single().sourceClockNs)
+    }
+
+    @Test
+    fun `holds at most once per interval and resends the last replayed fix`() {
+        val dataset = TelemetryDataset("d", gps = listOf(gps(100), gps(200)), imu = emptyList())
+        val batches = mutableListOf<TelemetryBatch>()
+        val scheduler = newScheduler(dataset, batches)
+        scheduler.testResync(0L)
+        scheduler.advanceCursors(sourceNow = 150L, nowMs = 100L)
+        batches.clear()
+
+        scheduler.holdPosition(sourceNow = 150L, nowMs = 100L + TelemetryReplayScheduler.HOLD_INTERVAL_MS - 1)
+        assertTrue("a fix was just replayed, so nothing is held yet", batches.isEmpty())
+
+        scheduler.holdPosition(sourceNow = 150L, nowMs = 100L + TelemetryReplayScheduler.HOLD_INTERVAL_MS)
+        assertEquals(listOf(100L), batches.flatMap { it.gps }.map { it.timestampNs })
+    }
+
+    @Test
+    fun `holding never advances replay cursors`() {
+        val dataset = TelemetryDataset("d", gps = listOf(gps(100), gps(200)), imu = emptyList())
+        val batches = mutableListOf<TelemetryBatch>()
+        val scheduler = newScheduler(dataset, batches)
+        scheduler.testResync(0L)
+
+        scheduler.holdPosition(sourceNow = 50L, nowMs = 0L)
+        scheduler.advanceCursors(sourceNow = 200L, nowMs = 100L)
+
+        assertEquals(listOf(100L, 100L, 200L), batches.flatMap { it.gps }.map { it.timestampNs })
+    }
+
 }
