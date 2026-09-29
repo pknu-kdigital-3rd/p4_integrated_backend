@@ -457,19 +457,38 @@
       <dl id="fields">
       </dl>
      </details>
-     <div aria-labelledby="recordings-title" class="vehicle-recordings" id="recordings-panel">
-      <h3 id="recordings-title">
-       운행 녹화
-      </h3>
+     <p id="route-label">
+      계획 경로 · 경로 없음
+     </p>
+     <div class="trip-progress-card" id="trip-progress-card" hidden>
+      <p id="selected-route-mode">—</p>
+      <div class="trip-track" id="trip-track">
+       <div aria-hidden="true" class="trip-track-rail">
+        <span class="trip-track-fill"></span>
+        <span class="trip-track-vehicle" data-icon="bus"></span>
+       </div>
+       <div class="trip-track-stops">
+        <div><strong id="selected-origin">출발지 —</strong><small id="selected-origin-time">—</small></div>
+        <div class="trip-track-destination"><strong id="selected-destination">목적지 —</strong><small id="selected-destination-time">—</small></div>
+       </div>
+      </div>
+      <p id="selected-progress" role="status">진행 상태 대기 중</p>
+      <p id="selected-current">현재 위치 대기 중</p>
+     </div>
+    </section>
+    <section aria-labelledby="recordings-title" class="ui-card" id="recordings-panel">
+     <h2 id="recordings-title">
+      운행 영상
+     </h2>
      <div aria-label="영상 모드" class="ui-segmented">
-      <button aria-pressed="false" id="recording-live-tab" type="button">
+      <button aria-pressed="true" id="recording-live-tab" type="button">
        실시간 영상
       </button>
-      <button aria-pressed="true" id="recording-saved-tab" type="button">
+      <button aria-pressed="false" id="recording-saved-tab" type="button">
        저장된 녹화
       </button>
      </div>
-     <div hidden="" id="recording-live-content">
+     <div id="recording-live-content">
       <p>
        선택 차량의 실시간 전방 영상을 지도 위에서 확인하세요.
       </p>
@@ -479,7 +498,7 @@
       <p id="recording-live-status" role="status">
       </p>
      </div>
-     <div id="recording-saved-content">
+     <div hidden="" id="recording-saved-content">
       <form id="recordings-form">
        <label for="recording-trip-id">
         운행 ID
@@ -574,25 +593,6 @@
         재생 종료
        </button>
       </div>
-     </div>
-     </div>
-     <p id="route-label">
-      계획 경로 · 경로 없음
-     </p>
-     <div class="trip-progress-card" id="trip-progress-card" hidden>
-      <p id="selected-route-mode">—</p>
-      <div class="trip-track" id="trip-track">
-       <div aria-hidden="true" class="trip-track-rail">
-        <span class="trip-track-fill"></span>
-        <span class="trip-track-vehicle" data-icon="bus"></span>
-       </div>
-       <div class="trip-track-stops">
-        <div><strong id="selected-origin">출발지 —</strong><small id="selected-origin-time">—</small></div>
-        <div class="trip-track-destination"><strong id="selected-destination">목적지 —</strong><small id="selected-destination-time">—</small></div>
-       </div>
-      </div>
-      <p id="selected-progress" role="status">진행 상태 대기 중</p>
-      <p id="selected-current">현재 위치 대기 중</p>
      </div>
     </section>
     <section aria-labelledby="trip-title" class="ui-card" hidden="" id="trip-panel">
