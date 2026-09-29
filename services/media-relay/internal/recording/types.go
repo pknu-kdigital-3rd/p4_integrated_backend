@@ -66,6 +66,13 @@ type ContextValidator interface {
 	ValidateRecordingContext(ctx context.Context, recordingContext Context) (Context, error)
 }
 
+// VehicleContextValidator confirms a stream identity that names a vehicle but
+// no trip. Such a stream is tracked on the map but never recorded, so the
+// returned Context always has TripID 0.
+type VehicleContextValidator interface {
+	ValidateVehicleContext(ctx context.Context, vehicleID int64, recordingSessionID string) (Context, error)
+}
+
 // Status is safe to expose through the relay's internal health endpoint.
 type Status struct {
 	Enabled          bool   `json:"enabled"`

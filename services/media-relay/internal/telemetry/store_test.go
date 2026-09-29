@@ -167,3 +167,22 @@ func TestStoreSnapshotExpiresStaleState(t *testing.T) {
 		t.Fatal("expired inactive session should be removed")
 	}
 }
+
+// A vehicle streaming without a trip is still on the map, but names no trip.
+func TestStoreSnapshotOmitsTripForVehicleOnlyStream(t *testing.T) {
+	store := NewStore(30 * time.Second)
+	now := time.Date(2026, 9, 18, 2, 40, 15, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	identity := StreamIdentity{VehicleID: 3, RecordingSessionID: "S-live"}
+	store.Activate(identity)
+	if err := store.Ingest(accepted(identity, now, []GPSSample{gpsAt(1_000_000_000, 35.1)}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	vehicles := store.Snapshot()
+	if len(vehicles) != 1 || vehicles[0].ExternalID != "device:3" {
+		t.Fatalf("vehicle-only stream missing from snapshot: %+v", vehicles)
+	}
+	if _, ok := vehicles[0].SourceMetadata["tripId"]; ok || vehicles[0].SourceMetadata["vehicleId"] != "3" {
+		t.Fatalf("unexpected vehicle-only metadata: %+v", vehicles[0].SourceMetadata)
+	}
+}

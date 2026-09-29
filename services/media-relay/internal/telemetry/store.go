@@ -223,7 +223,6 @@ func vehicleState(current *session) VehicleState {
 	}
 	metadata := map[string]any{
 		"vehicleId":           current.identity.vehicleString(),
-		"tripId":              current.identity.tripString(),
 		"recordingSessionId":  current.identity.RecordingSessionID,
 		"sourceTimestampNs":   strconv.FormatInt(fix.TimestampNS, 10),
 		"horizontalAccuracyM": fix.HorizontalAccuracyM,
@@ -231,6 +230,9 @@ func vehicleState(current *session) VehicleState {
 		"receivedAt":          formatUTC(current.latestGPSAt),
 		"mode":                string(current.mode),
 		"active":              current.active,
+	}
+	if tripID := current.identity.tripString(); tripID != "" {
+		metadata["tripId"] = tripID
 	}
 	return VehicleState{
 		ExternalID:      "device:" + current.identity.vehicleString(),

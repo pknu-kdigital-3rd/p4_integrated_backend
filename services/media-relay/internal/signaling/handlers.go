@@ -184,6 +184,9 @@ func (h *Handler) validateRecordingContext(requestContext context.Context, offer
 		log.Printf("stream identity supplied while recording and Android telemetry are disabled; accepting live publisher without identity")
 		return identityVerdict{offered: true, reason: reason}
 	}
+	if offer.TripID == "" {
+		return h.validateVehicleContext(requestContext, offer)
+	}
 	tripID, tripErr := strconv.ParseInt(offer.TripID, 10, 64)
 	vehicleID, vehicleErr := strconv.ParseInt(offer.VehicleID, 10, 64)
 	if tripErr != nil || vehicleErr != nil || offer.RecordingSessionID == "" {
@@ -201,6 +204,32 @@ func (h *Handler) validateRecordingContext(requestContext context.Context, offer
 	validated, err := h.validator.ValidateRecordingContext(validationContext, requested)
 	if err != nil {
 		log.Printf("recording identity validation failed; accepting live publisher without recording: %v", err)
+		return identityVerdict{offered: true, reason: identityRejectionReason(err)}
+	}
+	return identityVerdict{offered: true, context: &validated}
+}
+
+// validateVehicleContext accepts a publisher that names its vehicle but has no
+// active trip. The vehicle is tracked on the map like a BIMS vehicle; the
+// returned context has TripID 0, so nothing is recorded for it.
+func (h *Handler) validateVehicleContext(requestContext context.Context, offer OfferModel) identityVerdict {
+	validator, ok := h.validator.(recording.VehicleContextValidator)
+	if !ok {
+		const reason = "the relay cannot validate a vehicle without a trip"
+		log.Printf("vehicle-only stream identity is unsupported by the validator; accepting live publisher without identity")
+		return identityVerdict{offered: true, reason: reason}
+	}
+	vehicleID, err := strconv.ParseInt(offer.VehicleID, 10, 64)
+	if err != nil || offer.RecordingSessionID == "" {
+		const reason = "the vehicle or recording session id was missing or malformed"
+		log.Printf("vehicle identity is incomplete or malformed; accepting live publisher without identity")
+		return identityVerdict{offered: true, reason: reason}
+	}
+	validationContext, cancel := context.WithTimeout(requestContext, 3*time.Second)
+	defer cancel()
+	validated, err := validator.ValidateVehicleContext(validationContext, vehicleID, offer.RecordingSessionID)
+	if err != nil {
+		log.Printf("vehicle identity validation failed; accepting live publisher without identity: %v", err)
 		return identityVerdict{offered: true, reason: identityRejectionReason(err)}
 	}
 	return identityVerdict{offered: true, context: &validated}

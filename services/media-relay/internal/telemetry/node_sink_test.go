@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -125,5 +126,18 @@ func waitFor(t *testing.T, condition func() bool) {
 			t.Fatal("condition not met before timeout")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Node stores trip-less fixes with trip_id NULL, so the request must omit tripId.
+func TestNodeRequestOmitsTripForVehicleOnlyStream(t *testing.T) {
+	job := gpsJob{identity: StreamIdentity{VehicleID: 3, RecordingSessionID: "S-live"}, mode: ModeReplay,
+		receivedAt: time.Date(2026, 9, 18, 2, 40, 15, 0, time.UTC), samples: []GPSSample{gpsAt(1_000_000_000, 35.1)}}
+	body, err := json.Marshal(buildNodeRequest(job))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "tripId") || !strings.Contains(string(body), `"vehicleId":"3"`) {
+		t.Fatalf("unexpected vehicle-only Node request: %s", body)
 	}
 }

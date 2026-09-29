@@ -66,7 +66,13 @@ type StreamIdentity struct {
 	RecordingSessionID string
 }
 
-func (i StreamIdentity) tripString() string    { return strconv.FormatInt(i.TripID, 10) }
+// tripString is empty for a vehicle tracked without an active trip.
+func (i StreamIdentity) tripString() string {
+	if i.TripID == 0 {
+		return ""
+	}
+	return strconv.FormatInt(i.TripID, 10)
+}
 func (i StreamIdentity) vehicleString() string { return strconv.FormatInt(i.VehicleID, 10) }
 
 // Accepted is a validated batch bound to its trusted identity.

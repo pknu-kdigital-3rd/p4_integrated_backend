@@ -91,7 +91,8 @@ func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.Trac
 	}
 	if b.yolo != nil {
 		var identity *yolofeed.RecordingIdentity
-		if recordingContext != nil {
+		// Detections are persisted per trip; a trip-less stream is live only.
+		if recordingContext != nil && recordingContext.TripID > 0 {
 			identity = &yolofeed.RecordingIdentity{
 				TripID:             recordingContext.TripID,
 				VehicleID:          recordingContext.VehicleID,
@@ -112,6 +113,8 @@ func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.Trac
 	if b.recorder != nil {
 		if recordingContext == nil {
 			b.recorder.Stop("publisher connected without a validated recording context")
+		} else if recordingContext.TripID == 0 {
+			b.recorder.Stop("publisher is tracked without an active trip")
 		} else if err := b.recorder.Start(*recordingContext); err != nil {
 			log.Printf("recording context could not be started; live publishing continues: %v", err)
 		}

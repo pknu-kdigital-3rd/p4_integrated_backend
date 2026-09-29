@@ -1,6 +1,7 @@
 package signaling
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -57,5 +58,52 @@ func TestAnswerModelOmitsVerdictWhenNoIdentityOffered(t *testing.T) {
 	}
 	if string(body) != `{"type":"answer","sdp":"v=0"}` {
 		t.Fatalf("answer shape changed: %s", body)
+	}
+}
+
+type fakeValidator struct {
+	vehicleCalls int
+	vehicleErr   error
+}
+
+func (f *fakeValidator) ValidateRecordingContext(_ context.Context, requested recording.Context) (recording.Context, error) {
+	return requested, nil
+}
+
+func (f *fakeValidator) ValidateVehicleContext(_ context.Context, vehicleID int64, sessionID string) (recording.Context, error) {
+	f.vehicleCalls++
+	if f.vehicleErr != nil {
+		return recording.Context{}, f.vehicleErr
+	}
+	return recording.Context{VehicleID: vehicleID, RecordingSessionID: sessionID}, nil
+}
+
+// A vehicle streaming without an active trip is tracked but never recorded.
+func TestVehicleOnlyOfferIsTrackedWithoutTrip(t *testing.T) {
+	validator := &fakeValidator{}
+	handler := &Handler{validator: validator}
+	verdict := handler.validateRecordingContext(context.Background(), OfferModel{VehicleID: "7", RecordingSessionID: "session-1"})
+	if validator.vehicleCalls != 1 || verdict.context == nil {
+		t.Fatalf("vehicle-only offer was not validated: %+v", verdict)
+	}
+	if *verdict.context != (recording.Context{VehicleID: 7, RecordingSessionID: "session-1"}) {
+		t.Fatalf("unexpected vehicle-only context: %+v", *verdict.context)
+	}
+	if status := verdict.status(); status == nil || !status.Validated {
+		t.Fatalf("vehicle-only identity must be reported as validated: %+v", status)
+	}
+}
+
+func TestVehicleOnlyOfferRejectionKeepsStreamLive(t *testing.T) {
+	handler := &Handler{validator: &fakeValidator{vehicleErr: &recording.HTTPStatusError{
+		Status: 404, Message: `{"error":{"code":"VEHICLE_NOT_FOUND","message":"Active vehicle not found"}}`,
+	}}}
+	verdict := handler.validateRecordingContext(context.Background(), OfferModel{VehicleID: "7", RecordingSessionID: "session-1"})
+	if verdict.context != nil || verdict.reason != "Node rejected it: Active vehicle not found" {
+		t.Fatalf("unexpected verdict: %+v", verdict)
+	}
+	malformed := handler.validateRecordingContext(context.Background(), OfferModel{VehicleID: "x", RecordingSessionID: "session-1"})
+	if malformed.context != nil || malformed.reason == "" {
+		t.Fatalf("malformed vehicle id accepted: %+v", malformed)
 	}
 }

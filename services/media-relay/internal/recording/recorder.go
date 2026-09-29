@@ -489,8 +489,15 @@ func (r *Recorder) updateStatus() {
 }
 
 func validateRecordingContext(recordingContext Context) error {
-	if recordingContext.TripID <= 0 || recordingContext.VehicleID <= 0 {
-		return errors.New("tripId and vehicleId must be positive")
+	if recordingContext.TripID <= 0 {
+		return errors.New("tripId must be positive")
+	}
+	return validateVehicleContext(recordingContext)
+}
+
+func validateVehicleContext(recordingContext Context) error {
+	if recordingContext.VehicleID <= 0 {
+		return errors.New("vehicleId must be positive")
 	}
 	if !recordingSessionPattern.MatchString(recordingContext.RecordingSessionID) || strings.Contains(recordingContext.RecordingSessionID, "..") {
 		return errors.New("recordingSessionId must be 1-80 safe alphanumeric, dot, underscore, or hyphen characters")

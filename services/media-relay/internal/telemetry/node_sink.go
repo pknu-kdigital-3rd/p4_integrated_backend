@@ -48,7 +48,7 @@ type nodeGPSSample struct {
 
 type nodeGPSRequest struct {
 	Mode               Mode            `json:"mode"`
-	TripID             string          `json:"tripId"`
+	TripID             string          `json:"tripId,omitempty"`
 	VehicleID          string          `json:"vehicleId"`
 	RecordingSessionID string          `json:"recordingSessionId"`
 	ReceivedAt         string          `json:"receivedAt"`

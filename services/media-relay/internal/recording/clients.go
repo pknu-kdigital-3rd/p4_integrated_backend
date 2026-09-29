@@ -71,6 +71,28 @@ func (c *NodeClient) ValidateRecordingContext(ctx context.Context, recordingCont
 	return validated, nil
 }
 
+func (c *NodeClient) ValidateVehicleContext(ctx context.Context, vehicleID int64, recordingSessionID string) (Context, error) {
+	requested := Context{VehicleID: vehicleID, RecordingSessionID: recordingSessionID}
+	if err := validateVehicleContext(requested); err != nil {
+		return Context{}, err
+	}
+	body := struct {
+		VehicleID          int64  `json:"vehicleId,string"`
+		RecordingSessionID string `json:"recordingSessionId"`
+	}{vehicleID, recordingSessionID}
+	var validated struct {
+		VehicleID          int64  `json:"vehicleId,string"`
+		RecordingSessionID string `json:"recordingSessionId"`
+	}
+	if err := c.postJSON(ctx, "/internal/telemetry/validate", body, &validated); err != nil {
+		return Context{}, err
+	}
+	if validated.VehicleID != vehicleID || validated.RecordingSessionID != recordingSessionID {
+		return Context{}, fmt.Errorf("Node returned a different vehicle stream identity")
+	}
+	return requested, nil
+}
+
 func (c *NodeClient) RegisterSegment(ctx context.Context, segment Manifest) error {
 	return c.postJSON(ctx, "/internal/recordings/segments", segment, nil)
 }
