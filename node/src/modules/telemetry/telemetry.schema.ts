@@ -27,11 +27,18 @@ export const deviceGpsSampleSchema = z.object({
 
 export const deviceGpsBatchSchema = z.object({
     mode: telemetryModeSchema,
-    tripId: positiveIntegerString,
+    // Absent while the vehicle streams without an active trip: tracked, not recorded.
+    tripId: positiveIntegerString.optional(),
     vehicleId: positiveIntegerString,
     recordingSessionId,
     receivedAt: z.iso.datetime({ offset: true }),
     samples: z.array(deviceGpsSampleSchema).min(1).max(16),
+});
+
+/** A stream identity without a trip; the relay tracks it but never records it. */
+export const vehicleStreamContextSchema = z.object({
+    vehicleId: positiveIntegerString,
+    recordingSessionId,
 });
 
 export const deviceGpsResponseSchema = z.object({
@@ -46,3 +53,4 @@ export const deviceGpsResponseSchema = z.object({
 export type TelemetryMode = z.infer<typeof telemetryModeSchema>;
 export type DeviceGpsSampleBody = z.infer<typeof deviceGpsSampleSchema>;
 export type DeviceGpsBatchBody = z.infer<typeof deviceGpsBatchSchema>;
+export type VehicleStreamContextBody = z.infer<typeof vehicleStreamContextSchema>;

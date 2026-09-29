@@ -55,7 +55,7 @@ function post(body: unknown, token: string | null = internalToken) {
 }
 
 type PositionRow = {
-    vehicleId: bigint; tripId: bigint; lat: number; lng: number; speedKmh: string; headingDeg: string;
+    vehicleId: bigint; tripId: bigint | null; lat: number; lng: number; speedKmh: string; headingDeg: string;
     recordedAt: Date; receivedAt: Date; telemetrySource: string; recordingSessionId: string;
     sourceTimestampNs: bigint; altitudeM: string; horizontalAccuracyM: string;
 };
@@ -153,6 +153,31 @@ describe("POST /internal/telemetry/gps", () => {
         await post(valid()).expect(200);
         const response = await post(batch({ tripId: String(otherTrip), vehicleId: String(vehicleId) }, { sourceTimestampNs: "1445245923681115" })).expect(409);
         expect(response.body.error.code).toBe("TELEMETRY_SESSION_MISMATCH");
+    });
+
+    it("stores fixes from a vehicle streaming without a trip with no trip id", async () => {
+        const { tripId: _omitted, ...tripless } = batch({ vehicleId: String(vehicleId) });
+        await post(tripless).expect(200);
+        const [row] = await positions();
+        expect(row).toMatchObject({ vehicleId, tripId: null, recordingSessionId: "session-A" });
+        const unknown = await post({ ...tripless, vehicleId: "999999" }).expect(404);
+        expect(unknown.body.error.code).toBe("VEHICLE_NOT_FOUND");
+    });
+
+    it("keeps a trip-less session and a trip session apart", async () => {
+        const { tripId: _omitted, ...tripless } = batch({ vehicleId: String(vehicleId) });
+        await post(tripless).expect(200);
+        const response = await post(batch({ tripId: String(tripId), vehicleId: String(vehicleId) }, { sourceTimestampNs: "1445245923681115" })).expect(409);
+        expect(response.body.error.code).toBe("TELEMETRY_SESSION_MISMATCH");
+    });
+
+    it("validates a vehicle-only stream identity for the relay", async () => {
+        const body = { vehicleId: String(vehicleId), recordingSessionId: "session-live" };
+        const call = () => request(app).post("/internal/telemetry/validate").set("X-Internal-Service-Token", internalToken);
+        expect((await call().send(body).expect(200)).body).toEqual(body);
+        await call().send({ ...body, vehicleId: "999999" }).expect(404);
+        await prisma.vehicle.update({ where: { vehicleId }, data: { isActive: false } });
+        await call().send(body).expect(404);
     });
 
     it("validates coordinates, values, and 64-bit strings", async () => {

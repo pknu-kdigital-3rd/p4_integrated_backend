@@ -4,7 +4,7 @@ import { requireFeatureEnabled, requireInternalServiceToken } from "../../common
 import { validateBody } from "../../common/middleware/validate-body.ts";
 import { env } from "../../config/env.ts";
 import { telemetryController } from "./telemetry.controller.ts";
-import { deviceGpsBatchSchema } from "./telemetry.schema.ts";
+import { deviceGpsBatchSchema, vehicleStreamContextSchema } from "./telemetry.schema.ts";
 
 export const internalTelemetryRouter = Router();
 internalTelemetryRouter.use(requireInternalServiceToken);
@@ -14,3 +14,4 @@ internalTelemetryRouter.use(requireFeatureEnabled(
     "TELEMETRY_DISABLED",
 ));
 internalTelemetryRouter.post("/gps", validateBody(deviceGpsBatchSchema), telemetryController.ingestDeviceGps);
+internalTelemetryRouter.post("/validate", validateBody(vehicleStreamContextSchema), telemetryController.validateVehicleContext);

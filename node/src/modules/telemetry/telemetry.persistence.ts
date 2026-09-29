@@ -3,7 +3,7 @@ import { prisma } from "../../infrastructure/database/prisma.ts";
 
 export type DeviceGpsRow = {
     vehicleId: bigint;
-    tripId: bigint;
+    tripId: bigint | null;
     longitude: number;
     latitude: number;
     speedKmh: number | null;
@@ -25,7 +25,7 @@ export type DeviceGpsRow = {
 export async function insertDeviceGpsPositions(rows: DeviceGpsRow[]): Promise<number> {
     if (rows.length === 0) return 0;
     const values = rows.map(row => Prisma.sql`(
-        ${row.vehicleId}, ${row.tripId},
+        ${row.vehicleId}, ${row.tripId}::bigint,
         ST_SetSRID(ST_MakePoint(${row.longitude}, ${row.latitude}), 4326)::geography,
         ${row.speedKmh}, ${row.headingDeg}, ${row.recordedAt}, ${row.telemetrySource},
         ${row.recordingSessionId}, ${row.sourceTimestampNs}, ${row.altitudeM}, ${row.horizontalAccuracyM}, ${row.receivedAt}
@@ -43,16 +43,17 @@ export async function insertDeviceGpsPositions(rows: DeviceGpsRow[]): Promise<nu
 }
 
 /** True when this recording session was already bound to a different trip or vehicle. */
-export async function sessionBoundElsewhere(recordingSessionId: string, tripId: bigint, vehicleId: bigint): Promise<boolean> {
+export async function sessionBoundElsewhere(recordingSessionId: string, tripId: bigint | null, vehicleId: bigint): Promise<boolean> {
     const [position, video] = await Promise.all([
         prisma.$queryRaw<Array<{ found: number }>>(Prisma.sql`
             SELECT 1 AS found FROM vehicle_position
             WHERE recording_session_id = ${recordingSessionId}
-              AND (trip_id IS DISTINCT FROM ${tripId} OR vehicle_id <> ${vehicleId})
+              AND (trip_id IS DISTINCT FROM ${tripId}::bigint OR vehicle_id <> ${vehicleId})
             LIMIT 1
         `),
         prisma.tripVideo.findFirst({
-            where: { recordingSessionId, NOT: { tripId } },
+            // A trip-less session never records video, so any video means another binding.
+            where: tripId === null ? { recordingSessionId } : { recordingSessionId, NOT: { tripId } },
             select: { tripVideoId: true },
         }),
     ]);

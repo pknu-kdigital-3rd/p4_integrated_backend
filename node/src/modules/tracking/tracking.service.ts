@@ -26,31 +26,38 @@ function metadataId(observation: Observation, key: "vehicleId" | "tripId"): bigi
     return typeof value === "string" && positiveId.test(value) ? BigInt(value) : null;
 }
 
+const tripSelect = {
+    tripId: true, tripStatus: true, routeMode: true, destinationName: true, replayPreviewId: true, routes: routeSelect,
+} as const;
+const activeTripStatuses = ["READY", "IN_PROGRESS", "PAUSED"];
+
 /**
- * Android/device observations name an existing project vehicle and the exact
- * trip it is driving. They are resolved to that Vehicle row - never upserted as
- * a BIMS identity - and the explicit trip selects the planned route instead of
- * guessing the most recent active trip.
+ * Android/device observations name an existing project vehicle. They are
+ * resolved to that Vehicle row - never upserted as a BIMS identity. A stream
+ * recording a trip names it, and that exact trip selects the planned route; a
+ * stream without a trip is shown like a BIMS vehicle, with its newest active
+ * assignment (if any) so the operator sees what is waiting to start.
  */
 async function resolveDeviceObservation(observation: Observation) {
     const vehicleId = metadataId(observation, "vehicleId");
     const tripId = metadataId(observation, "tripId");
-    if (vehicleId === null || tripId === null) {
+    if (vehicleId === null) {
         return { warning: { code: "DEVICE_IDENTITY_MISSING", externalId: observation.external_id } };
     }
     const vehicle = await prisma.vehicle.findUnique({
         where: { vehicleId },
-        select: { ...vehicleSelect, trips: { where: { tripId }, take: 1, select: {
-            tripId: true, tripStatus: true, routeMode: true, destinationName: true, replayPreviewId: true, routes: routeSelect,
-        } } },
+        select: { ...vehicleSelect, trips: tripId === null
+            ? { where: { tripStatus: { in: activeTripStatuses } }, take: 1, orderBy: { createdAt: "desc" }, select: tripSelect }
+            : { where: { tripId }, take: 1, select: tripSelect } },
     });
     const trip = vehicle?.trips[0];
-    if (!vehicle || !trip) {
-        return { warning: { code: "DEVICE_IDENTITY_UNRESOLVED", externalId: observation.external_id, vehicleId: String(vehicleId), tripId: String(tripId) } };
+    if (!vehicle || (tripId !== null && !trip)) {
+        return { warning: { code: "DEVICE_IDENTITY_UNRESOLVED", externalId: observation.external_id, vehicleId: String(vehicleId),
+            ...(tripId === null ? {} : { tripId: String(tripId) }) } };
     }
-    return { vehicle: { ...vehicle, trips: undefined, tripId: trip.tripId, tripStatus: trip.tripStatus,
-        routeMode: trip.routeMode, destinationName: trip.destinationName, replayPreviewId: trip.replayPreviewId,
-        plannedRoute: trip.routes[0] ?? null, telemetry: observation } };
+    return { vehicle: { ...vehicle, trips: undefined, tripId: trip?.tripId, tripStatus: trip?.tripStatus,
+        routeMode: trip?.routeMode, destinationName: trip?.destinationName, replayPreviewId: trip?.replayPreviewId,
+        plannedRoute: trip?.routes[0] ?? null, telemetry: observation } };
 }
 
 export const trackingService = {
