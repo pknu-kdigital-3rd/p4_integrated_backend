@@ -171,7 +171,8 @@ function liveTargetLabel(item){return item?.vehicleCode||item?.vehicleName||`Veh
 // the page shows its full information and options.
 function notifyLiveFrameFullscreen(fullscreen=liveDetailsHidden){
   if(!liveView)return;
-  liveFrame.contentWindow?.postMessage({type:'operator-live-view-fullscreen',fullscreen},liveView.frameOrigin);
+  // showFps: the Vision page's FPS counter is only for the real fullscreen view.
+  liveFrame.contentWindow?.postMessage({type:'operator-live-view-fullscreen',fullscreen,showFps:document.fullscreenElement===livePanel},liveView.frameOrigin);
 }
 function retargetLiveView(item){
   if(!liveView||sameLiveTarget(liveView,item))return;

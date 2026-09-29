@@ -11,6 +11,8 @@
     canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     #overlay { pointer-events: none; }
     #fps-overlay { position: absolute; top: 8px; left: 8px; z-index: 2; padding: 4px 7px; color: #fff; background: #000b; border-radius: 4px; font: 13px ui-monospace, monospace; pointer-events: none; }
+    /* The operator page shows the FPS counter only while its preview is fullscreen. */
+    html.operator-live-view-hide-fps #fps-overlay { display: none; }
     #model-label { margin-top: 10px; color: #8fd3ff; font: 13px ui-monospace, monospace; }
     button { padding: 8px 14px; margin: 12px 6px 8px 0; cursor: pointer; }
     #status, #stats { color: #aaa; font-family: ui-monospace, monospace; white-space: pre-wrap; }
@@ -743,6 +745,7 @@
     if (event.source !== window.parent || !parentOrigin || event.origin !== parentOrigin) return;
     if (event.data?.type === 'operator-live-view-fullscreen') {
       document.documentElement.classList.toggle('operator-live-view-fullscreen', event.data.fullscreen === true);
+      document.documentElement.classList.toggle('operator-live-view-hide-fps', event.data.showFps === false);
       updateStageSize();
       postVideoSize();
     } else if (event.data?.type === 'operator-live-view-returned' && !document.hidden) resumeAtLive();
