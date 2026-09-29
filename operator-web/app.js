@@ -130,10 +130,13 @@ function matchesLiveTarget(item){
     &&String(metadata.vehicleId??'')===String(item.vehicleId)
     &&typeof metadata.recordingSessionId==='string'&&metadata.recordingSessionId.length>0;
 }
+// Live View opens by itself on selection (or from the "실시간 영상" tab); this
+// only tells the operator whether the selected vehicle can be watched.
 function syncLiveViewButton(item=selected){
-  const button=document.querySelector('#recording-open-live');
-  button.disabled=!bootstrap||!matchesLiveTarget(item);
-  button.title=button.disabled?"Live View is available while this vehicle's phone is streaming.":'';
+  const available=Boolean(bootstrap)&&matchesLiveTarget(item);
+  document.querySelector('#recording-live-status').textContent=available
+    ?(liveView?'':'선택 차량의 실시간 영상 연결 가능 · 실시간 영상 탭을 누르면 다시 열립니다')
+    :'실시간 영상을 보내는 차량을 선택하세요.';
 }
 function releaseLiveMarker(){
   const markerState=liveMapFollower.end();
@@ -570,7 +573,8 @@ function stopLiveView(){
   document.querySelector('#live-view-title').textContent='실시간 전방 영상';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
   refreshMapLayout();
-  if(!document.querySelector('#details').hidden)document.querySelector('#recording-open-live').focus({preventScroll:true});
+  if(!document.querySelector('#details').hidden)document.querySelector('#recording-live-tab').focus({preventScroll:true});
+  syncLiveViewButton();
   renderLiveTelemetryStatus();
 }
 // The virtual workspace takes over the map and the sidebar, so it closes Live
@@ -598,7 +602,8 @@ installForegroundResume(window,document,()=>{
   if(!liveView||document.hidden)return;
   liveFrame.contentWindow?.postMessage({type:FOREGROUND_RESUME_MESSAGE},liveView.frameOrigin);
 });
-document.querySelector('#recording-open-live').addEventListener('click',()=>openLiveView());
+// With no open button, the "실시간 영상" tab reopens a closed preview for a streaming vehicle.
+document.querySelector('#recording-live-tab').addEventListener('click',()=>{if(!liveView)openLiveView()});
 function openLiveView(){
   if(!bootstrap||!matchesLiveTarget(selected))return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
@@ -619,6 +624,7 @@ function openLiveView(){
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
   liveFrame.src=liveViewUrl;
+  syncLiveViewButton();
 }
 liveFrame.addEventListener('load',event=>{
   if(livePanel.hidden)return;
