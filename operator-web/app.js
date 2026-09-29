@@ -44,17 +44,18 @@ new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surfac
 const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)&&liveTarget?.tripId===(item?.tripId!=null?String(item.tripId):null)}
+// Any vehicle whose phone is streaming can be watched; a running trip only
+// decides whether the relay also records it.
 function matchesLiveTarget(item){
   const metadata=item?.telemetry?.source_metadata||{};
-  return item?.vehicleId!=null&&item?.tripId!=null
+  return item?.vehicleId!=null
     &&String(metadata.vehicleId??'')===String(item.vehicleId)
-    &&String(metadata.tripId??'')===String(item.tripId)
     &&typeof metadata.recordingSessionId==='string'&&metadata.recordingSessionId.length>0;
 }
 function syncLiveViewButton(item=selected){
   const button=document.querySelector('#live-view');
   button.disabled=!bootstrap||!matchesLiveTarget(item);
-  button.title=button.disabled?'Live View is available when this vehicle matches an active recording session.':'';
+  button.title=button.disabled?'Live View is available while this vehicle's phone is streaming.':'';
 }
 function releaseLiveMarker(){
   const markerState=liveMapFollower.end();

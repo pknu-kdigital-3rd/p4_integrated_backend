@@ -52,11 +52,16 @@ describe("operator live telemetry", () => {
         expect(acceptLiveTelemetry(liveView, other, frameWindow)).toBeNull();
     });
 
-    it("rejects another vehicle, trip, or recording session", () => {
+    it("rejects another vehicle or recording session", () => {
         const liveView = createLiveView(selected, origin);
         expect(acceptLiveTelemetry(liveView, message({}, { vehicleId: "4" }), frameWindow)).toBeNull();
-        expect(acceptLiveTelemetry(liveView, message({}, { tripId: "7" }), frameWindow)).toBeNull();
         expect(acceptLiveTelemetry(liveView, message({}, { recordingSessionId: "S2" }), frameWindow)).toBeNull();
+    });
+
+    it("follows the stream even when the vehicle's assigned trip is not the one being recorded", () => {
+        // A READY assignment is attached to the vehicle before the phone starts it.
+        const liveView = createLiveView({ ...selected, tripId: "999" }, origin);
+        expect(acceptLiveTelemetry(liveView, message(), frameWindow)).not.toBeNull();
     });
 
     it("locks onto the first session when the snapshot did not name one", () => {

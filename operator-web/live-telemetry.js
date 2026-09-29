@@ -17,7 +17,6 @@ export function createLiveView(item, frameOrigin) {
     // before the fleet polling endpoint has returned this vehicle.
     item,
     vehicleId: item?.vehicleId != null ? String(item.vehicleId) : null,
-    tripId: item?.tripId != null ? String(item.tripId) : null,
     // Unknown until the tracking snapshot or the first accepted frame names it.
     recordingSessionId: typeof metadata.recordingSessionId === 'string' ? metadata.recordingSessionId : null,
     frameOrigin,
@@ -30,7 +29,9 @@ export function createLiveView(item, frameOrigin) {
  * Returns the telemetry payload when the message is a presented-frame update
  * for this live view, or null when it must be ignored.
  * Checks: exact iframe origin, the iframe window itself, message type, and the
- * vehicle/trip/session identity of the currently selected live view.
+ * vehicle/session identity of the currently selected live view. A session
+ * belongs to exactly one trip (or none), so the trip needs no separate check;
+ * the fleet poll moves the view to a new session when the stream enters a trip.
  */
 export function acceptLiveTelemetry(liveView, event, frameWindow) {
   if (!liveView || !event || !frameWindow) return null;
@@ -41,7 +42,6 @@ export function acceptLiveTelemetry(liveView, event, frameWindow) {
   const recording = data.recording;
   if (!recording || typeof recording !== 'object') return null;
   if (!liveView.vehicleId || String(recording.vehicleId) !== liveView.vehicleId) return null;
-  if (liveView.tripId && String(recording.tripId) !== liveView.tripId) return null;
   if (liveView.recordingSessionId && recording.recordingSessionId !== liveView.recordingSessionId) return null;
   if (!liveView.recordingSessionId && typeof recording.recordingSessionId !== 'string') return null;
   return data.telemetry && typeof data.telemetry === 'object' ? data : null;
