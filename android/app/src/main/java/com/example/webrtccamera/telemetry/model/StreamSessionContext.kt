@@ -11,7 +11,8 @@ enum class TelemetryMode {
  * same context so the server sees one continuous recording session.
  */
 data class StreamSessionContext(
-    val tripId: Long,
+    /** Null while the vehicle streams without an active trip: tracked on the map, never recorded. */
+    val tripId: Long?,
     val vehicleId: Long,
     val recordingSessionId: String,
     val telemetryMode: TelemetryMode,

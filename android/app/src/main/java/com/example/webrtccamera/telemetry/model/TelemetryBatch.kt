@@ -9,7 +9,7 @@ import org.json.JSONObject
  */
 data class TelemetryBatch(
     val mode: TelemetryMode,
-    val tripId: Long,
+    val tripId: Long?,
     val vehicleId: Long,
     val recordingSessionId: String,
     val sourceClockNs: Long,
@@ -77,7 +77,7 @@ data class TelemetryBatch(
             .put("type", "telemetry_batch")
             .put("version", PROTOCOL_VERSION)
             .put("mode", mode.name)
-            .put("trip_id", tripId.toString())
+            .apply { if (tripId != null) put("trip_id", tripId.toString()) }
             .put("vehicle_id", vehicleId.toString())
             .put("recording_session_id", recordingSessionId)
             .put("source_clock_ns", sourceClockNs)

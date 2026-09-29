@@ -421,10 +421,10 @@ class WebRtcPublisher(
             .put("type", local.type.canonicalForm())
         val session = sessionContext
         if (session != null) {
-            json.put("tripId", session.tripId.toString())
-                .put("vehicleId", session.vehicleId.toString())
+            session.tripId?.let { json.put("tripId", it.toString()) }
+            json.put("vehicleId", session.vehicleId.toString())
                 .put("recordingSessionId", session.recordingSessionId)
-            onStatus("Sending offer with Trip ID ${session.tripId} and Vehicle ID ${session.vehicleId}…")
+            onStatus("Sending offer with ${identityLabel(session)}…")
         } else {
             onStatus("Sending live-only offer; no recording IDs sent…")
         }
@@ -464,10 +464,7 @@ class WebRtcPublisher(
                             setSuccess = {
                                 val connectedSession = sessionContext
                                 if (connectedSession != null) {
-                                    onStatus(
-                                        "Connected to relay; sent Trip ID ${connectedSession.tripId} " +
-                                            "and Vehicle ID ${connectedSession.vehicleId}"
-                                    )
+                                    onStatus("Connected to relay; sent ${identityLabel(connectedSession)}")
                                 } else {
                                     onStatus("Connected to relay; no recording IDs sent")
                                 }
@@ -822,4 +819,8 @@ class WebRtcPublisher(
         // full PeerConnection redo is heavy enough that this is not too aggressive.
         private const val RECONNECT_DELAY_MS = 2000L
     }
+
+    private fun identityLabel(session: StreamSessionContext): String = session.tripId
+        ?.let { "Trip ID $it and Vehicle ID ${session.vehicleId}" }
+        ?: "Vehicle ID ${session.vehicleId} (tracking only, no trip)"
 }

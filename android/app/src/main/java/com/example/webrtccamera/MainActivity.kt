@@ -406,7 +406,7 @@ class MainActivity : AppCompatActivity() {
         tripButton.isEnabled = !tripRequestBusy && trip != null && trip.status in listOf("READY", "IN_PROGRESS", "MANUAL")
         tripButton.text = if (trip?.status == "IN_PROGRESS") "Stop Trip" else "Start Trip"
         tripStatusText.text = when {
-            trip == null -> "Trip: no assignment · streaming can remain live-only"
+            trip == null -> "Trip: no assignment · streaming tracks this vehicle without recording"
             trip.status == "MANUAL" -> "Trip ${trip.tripId}: saved manual ID · confirm on server"
             trip.routeMode == "REPLAY_ONLY" && trip.status == "READY" && trip.fingerprint != selectedDatasetFingerprint ->
                 "Trip ${trip.tripId}: READY · select GPS dataset ${trip.datasetName ?: "assigned by the operator"} to start"
@@ -525,9 +525,11 @@ class MainActivity : AppCompatActivity() {
                         (it.routeMode != "REPLAY_ONLY" || it.fingerprint == selectedDatasetFingerprint)
                 }
                 if (assignedTrip?.routeMode == "REPLAY_ONLY" && assignedTrip?.status == "IN_PROGRESS" && context == null) {
-                    setStatus("Assigned GPS dataset does not match; streaming live-only")
+                    setStatus("Assigned GPS dataset does not match; tracking without the trip")
                 }
-                beginStreaming(endpoint, context?.tripId, context?.vehicleId)
+                // The Vehicle ID alone keeps this phone on the operator map; only a
+                // running trip adds a Trip ID, which is what enables recording.
+                beginStreaming(endpoint, context?.tripId, context?.vehicleId ?: vehicleId)
             }
         }
     }
@@ -570,7 +572,7 @@ class MainActivity : AppCompatActivity() {
         selectDatasetButton.isEnabled = false
         streamButton.setText(R.string.stop_streaming)
         setStatus("Starting WebRTC…")
-        val sessionContext = if (recordingTripId != null && recordingVehicleId != null) {
+        val sessionContext = if (recordingVehicleId != null) {
             StreamSessionContext(
                 tripId = recordingTripId,
                 vehicleId = recordingVehicleId,
@@ -1194,13 +1196,19 @@ class MainActivity : AppCompatActivity() {
         if(assigned!=null&&assigned.status!="MANUAL"){
             recordingContextText.text=if(assigned.status=="IN_PROGRESS")
                 "Assigned Trip ID ${assigned.tripId} · Vehicle ID ${assigned.vehicleId} · recording when streaming"
-            else "Assigned Trip ID ${assigned.tripId} · ${assigned.status} · streaming is live-only"
+            else "Assigned Trip ID ${assigned.tripId} · ${assigned.status} · Vehicle ID ${assigned.vehicleId} tracked, not recorded"
             return
         }
         val tripText = recordingTripIdInput.text.toString().trim()
         val vehicleText = recordingVehicleIdInput.text.toString().trim()
         if (tripText.isEmpty() && vehicleText.isEmpty()) {
-            recordingContextText.text = "No recording IDs. This stream will be live-only."
+            recordingContextText.text = "No Vehicle ID. This stream will be live video only."
+            return
+        }
+        if (tripText.isEmpty()) {
+            recordingContextText.text = vehicleText.toLongOrNull()?.takeIf { it > 0 }
+                ?.let { "Vehicle ID $it tracked on the map; no trip, so nothing is recorded" }
+                ?: "Enter a positive Vehicle ID to appear on the operator map."
             return
         }
         val tripId = tripText.toLongOrNull()?.takeIf { it > 0 }

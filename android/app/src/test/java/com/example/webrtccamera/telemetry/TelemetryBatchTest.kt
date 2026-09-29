@@ -40,6 +40,14 @@ class TelemetryBatchTest {
     }
 
     @Test
+    fun `batch from a vehicle without a trip omits trip_id`() {
+        val batch = TelemetryBatch(TelemetryMode.REPLAY, null, 4L, "session-1", 0L, gps = listOf(gpsSample))
+        val json = JSONObject(String(batch.toJsonBytes()))
+        assertFalse(json.has("trip_id"))
+        assertEquals("4", json.getString("vehicle_id"))
+    }
+
+    @Test
     fun `gps-only batch is not empty`() {
         val batch = TelemetryBatch(TelemetryMode.REPLAY, 1L, 1L, "s", 0L, gps = listOf(gpsSample))
         assertFalse(batch.isEmpty)
