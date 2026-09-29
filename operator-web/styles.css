@@ -87,6 +87,8 @@ form { display: grid; gap: 10px; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .filter-chips button { background: white; color: var(--ui-text); padding: 9px 12px; font-size: 12px; box-shadow: var(--ui-shadow-card); }
 .filter-chips button[aria-pressed=true] { color: white; background: #123e7a; }
+#show-fleet,#fleet-source { margin-top: 8px; padding: 7px 12px; background: white; color: var(--ui-primary); font-size: 12px; }
+#fleet-status { margin-top: 8px; padding: 10px; border-radius: 8px; background: var(--ui-warning-soft); color: #855111; font-size: 12px; overflow-wrap: anywhere; }
 #fleet-drawer { margin-top: 10px; max-height: min(48vh,420px); overflow: auto; }
 #fleet-results { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 6px; }
 #fleet-results button { width: 100%; text-align: left; color: var(--ui-text); background: var(--ui-surface-soft); font-size: 12px; }

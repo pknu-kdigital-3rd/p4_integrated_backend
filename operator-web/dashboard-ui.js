@@ -84,7 +84,7 @@ export function renderVehicleDetails(item) {
   write('selected-status', STATUS_LABELS[state]);
   document.querySelector('#selected-status').className = `ui-chip ui-chip--${state === 'running' || state === 'ready' ? 'success' : state === 'maintenance' ? 'danger' : 'neutral'}`;
 }
-export function initializeDashboard({ map, markers, selectVehicle }) {
+export function initializeDashboard({ map, markers, selectVehicle, showFleet }) {
   let fleet = [], filter = 'all', query = '', drawerOpen = false;
   const filters = document.querySelector('#fleet-filters'), results = document.querySelector('#fleet-results');
   const search = document.querySelector('#fleet-search'), drawer = document.querySelector('#fleet-drawer');
@@ -126,6 +126,8 @@ export function initializeDashboard({ map, markers, selectVehicle }) {
     updateVisibility();
   }
   search.addEventListener('input', () => { query = search.value; render(); });
+  document.querySelector('#show-fleet').onclick=()=>{filter='all';query='';search.value='';render();showFleet(fleet);};
+  document.querySelector('#fleet-source').onclick=()=>document.querySelector('[data-rail=settings]').click();
   search.addEventListener('keydown', e => { if(e.key==='Escape'){query='';search.value='';drawerOpen=false;render();} });
   document.querySelectorAll('[data-rail]').forEach(button => button.onclick = () => {
     const view=button.dataset.rail;

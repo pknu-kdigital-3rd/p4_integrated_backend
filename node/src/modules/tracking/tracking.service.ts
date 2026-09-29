@@ -2,6 +2,7 @@ import { prisma } from "../../infrastructure/database/prisma.ts";
 import { AppError } from "../../common/errors/app-error.ts";
 import { trackingClient, type TelemetryMode, type TrackingSnapshot } from "./tracking.client.ts";
 import { persistAuthoritativeObservations } from "./tracking.persistence.ts";
+import { logger } from "../../config/logger.ts";
 
 type Observation = TrackingSnapshot["vehicles"][number];
 
@@ -85,6 +86,12 @@ export const trackingService = {
         const resolved = await Promise.all(deviceObservations.map(resolveDeviceObservation));
         const deviceVehicles = resolved.flatMap(item => item.vehicle ? [item.vehicle] : []);
         const deviceWarnings = resolved.flatMap(item => item.warning ? [item.warning] : []);
+        logger.debug({
+            received: snapshot.vehicles.length,
+            bimsVehicles: bimsVehicles.length,
+            deviceVehicles: deviceVehicles.length,
+            warningCount: snapshot.warnings.length + deviceWarnings.length,
+        }, "Tracking fleet snapshot");
         return {
             ...snapshot,
             vehicles: [...bimsVehicles, ...deviceVehicles],

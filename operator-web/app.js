@@ -1,10 +1,12 @@
 import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon} from './dashboard-ui.js';
+import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
+const fleetViewport=createFleetViewport(map);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
@@ -27,8 +29,8 @@ function normalMapLayers(){
     .concat([...tripMapMarkers.values()],routeLayer?[routeLayer]:[]);
 }
 // Used by the virtual workspace, which takes the map over while it is open.
-window.__operatorDetachMapLayers=()=>{for(const layer of normalMapLayers())map.removeLayer(layer)};
-window.__operatorAttachMapLayers=()=>{for(const layer of normalMapLayers())layer.addTo(map);dashboard.updateVisibility()};
+window.__operatorDetachMapLayers=()=>{fleetViewport.save();for(const layer of normalMapLayers())map.removeLayer(layer)};
+window.__operatorAttachMapLayers=()=>{for(const layer of normalMapLayers())layer.addTo(map);dashboard.updateVisibility();fleetViewport.restore()};
 const liveMapFollower=createLiveMapFollower({
   map,markers,
   createEntry:(item,position)=>createMarkerEntry(item,position,{liveOnly:true}),
@@ -38,7 +40,7 @@ const revealAndroidMarker=createAndroidMarkerRevealer({map});
 map.on('dragstart',()=>liveMapFollower.pause());
 function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:false}));}
 new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
-const dashboard=initializeDashboard({map,markers,selectVehicle});
+const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)&&liveTarget?.tripId===(item?.tripId!=null?String(item.tripId):null)}
 function matchesLiveTarget(item){
@@ -106,11 +108,15 @@ function selectVehicle(item){
 window.__operatorCancelMapPick=()=>{tripMapPick=undefined;document.querySelector('#map-pick-banner').hidden=true;document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.setAttribute('aria-pressed','false'));};
 function render(snapshot){
   if(window.__virtualMode)return;
+  if(!Array.isArray(snapshot?.vehicles))throw new Error('차량 응답 형식이 올바르지 않습니다.');
+  let invalidPositions=0;
   const keys=new Set(snapshot.vehicles.map(item=>item.telemetry?.external_id));
   for(const [key,entry] of markers){if(!keys.has(key)&&key!==liveView?.markerKey){map.removeLayer(entry.marker);markers.delete(key);}}
   if(selected&&!snapshot.vehicles.some(item=>item.telemetry?.external_id===selected.telemetry?.external_id))syncLiveViewButton(null);
   for(const item of snapshot.vehicles){
-    const t=item.telemetry,key=t.external_id,pos=[t.latitude,t.longitude];
+    const pos=fleetPosition(item);
+    if(!pos){invalidPositions++;const invalidEntry=markers.get(item.telemetry?.external_id);if(invalidEntry){map.removeLayer(invalidEntry.marker);markers.delete(item.telemetry.external_id);}continue;}
+    const t=item.telemetry,key=t.external_id;
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
@@ -132,14 +138,21 @@ function render(snapshot){
     const label=document.createElement('span');label.textContent=isAndroidGpsItem(item)?`Android GPS · ${item.vehicleCode||key}`:item.vehicleCode||key;entry.marker.setTooltipContent(label);
   }
   dashboard.update(snapshot.vehicles);
+  if(!liveView&&!snapshot.vehicles.some(isAndroidGpsItem))fleetViewport.fit(snapshot.vehicles,{initial:true});
+  const warnings=snapshot.warnings||[];
+  const notice=document.querySelector('#fleet-status');
+  notice.hidden=Boolean(snapshot.vehicles.length)&&!invalidPositions&&!warnings.length;
+  notice.textContent=[!snapshot.vehicles.length?'수신된 차량이 없습니다. 설정에서 데이터 소스를 확인하세요.':'',invalidPositions?`위치가 없는 차량 ${invalidPositions}대`:'',...warnings.map(warning=>typeof warning==='string'?warning:warning.message||warning.code||'차량 데이터 소스 경고')].filter(Boolean).join(' · ');
+  if(invalidPositions||warnings.length)console.warn('[operator fleet]',{received:snapshot.vehicles.length,invalidPositions,warnings});
 }
-async function refresh(){try{render(await api('/api/v1/tracking/vehicles'));error.textContent='';document.querySelector('#connection').textContent='관제 연결됨'}catch(e){error.textContent=e.message;document.querySelector('#connection').textContent='연결 확인 필요'}}
+async function refresh(){try{const snapshot=await api('/api/v1/tracking/vehicles');render(snapshot);error.textContent='';document.querySelector('#connection').textContent=`관제 연결됨 · ${snapshot.vehicles.length}대`}catch(e){console.error('[operator fleet] Fetch or render failed',e);error.textContent=e.message;document.querySelector('#connection').textContent='연결 확인 필요';const notice=document.querySelector('#fleet-status');notice.hidden=false;notice.textContent=`차량을 표시할 수 없습니다: ${e.message}`}}
 const telemetryModeSelect=document.querySelector('#telemetry-mode'),telemetryModeApply=document.querySelector('#telemetry-mode-apply'),telemetryModeStatus=document.querySelector('#telemetry-mode-status'),telemetrySettings=document.querySelector('#telemetry-settings');
 const telemetryModeLabel=mode=>mode==='live'?'Live BIMS':'Replay dataset';
 function canChangeTelemetryMode(){return !demoMode&&['ADMIN','OPERATOR'].includes(currentRole)}
 function renderTelemetryMode(result){
   if(!result||!telemetryModeSelect)return;
   telemetryModeSelect.value=result.mode;
+  document.querySelector('#fleet-source').textContent=result.mode==='live'?'소스: 실시간 BIMS':'소스: 저장된 GPS';
   telemetryModeStatus.textContent=`Active source: ${telemetryModeLabel(result.mode)}${result.available?'':' · routing is starting'}`;
   telemetryModeStatus.dataset.level=result.available?'ok':'warn';
   telemetryModeApply.disabled=!canChangeTelemetryMode();
@@ -191,7 +204,8 @@ async function start(role){
   if(!demoMode){
     document.querySelector('#trip-form').hidden=!['ADMIN','OPERATOR'].includes(role);
     document.querySelector('#trip-status-message').textContent=['ADMIN','OPERATOR'].includes(role)?uiText('Choose a vehicle and destination.'):'You can review recent trips; an operator or admin can create one.';
-    await loadTripAssignments();
+    // Trip assignment is independent of fleet tracking; its failure must not stop polling.
+    void loadTripAssignments().catch(ex=>{document.querySelector('#trip-status-message').textContent=`운행 목록을 불러올 수 없습니다: ${ex.message}`;console.error('[operator trips]',ex)});
   }
   await refresh();
   await loadTelemetryMode();
