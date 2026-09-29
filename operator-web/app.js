@@ -199,7 +199,6 @@ function showTripDisplay(display){
   document.querySelector('#selected-origin-time').textContent=times.origin;
   document.querySelector('#selected-destination-time').textContent=times.destination;
   const replayOnly=display.routeMode==='REPLAY_ONLY';
-  document.querySelector('#selected-route-mode').textContent=`${replayOnly?'Android GPS 재생 경로':'최적 경로 + Android GPS 재생'} · ${TRIP_STATUS_LABELS[display.tripStatus]||display.tripStatus}`;
   const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}`;
   if(key!==displayedRouteKey){
     clearTripLayers();displayedRouteKey=key;

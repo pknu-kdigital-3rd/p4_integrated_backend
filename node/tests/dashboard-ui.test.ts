@@ -37,3 +37,11 @@ describe('vehicle speed format', () => {
     expect(formatSpeed('')).toBe('— km/h');
   });
 });
+
+describe('vehicle status with a running trip', () => {
+  it('shows a vehicle with a trip in progress as running even if its stored status is READY', () => {
+    expect(vehicleStatus({ vehicleStatus: 'READY', tripStatus: 'IN_PROGRESS' })).toBe('running');
+    expect(vehicleStatus({ vehicleStatus: 'READY', tripStatus: 'READY' })).toBe('ready');
+    expect(vehicleStatus({ vehicleStatus: 'READY', tripStatus: 'IN_PROGRESS', telemetry: { source_metadata: { state: 'stale' } } })).toBe('stale');
+  });
+});

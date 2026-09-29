@@ -44,6 +44,9 @@ export function applyRoadHatch(layer, kind, color) {
 }
 export function vehicleStatus(item) {
   if(item?.telemetry?.source_metadata?.state==='stale')return 'stale';
+  // A trip in progress means the vehicle is driving, whatever its stored
+  // status says (phone-tracked vehicles keep their seeded READY).
+  if(item?.tripStatus==='IN_PROGRESS')return 'running';
   const status = String(item?.vehicleStatus || item?.telemetry?.source_metadata?.state || '').toUpperCase();
   if (['DRIVING', 'IN_PROGRESS', 'ACTIVE', 'RUNNING'].includes(status)) return 'running';
   if (['READY', 'STOPPED', 'IDLE', 'AVAILABLE'].includes(status)) return 'ready';
