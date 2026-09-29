@@ -1,5 +1,6 @@
 // Presentation labels and helpers. Backend enum values remain unchanged.
 export const STATUS_LABELS = { all: '전체', running: '운행중', ready: '대기', maintenance: '점검', offline: '오프라인', stale: 'GPS 지연', unknown: '미확인' };
+export const TRIP_STATUS_LABELS = { READY:'출발 대기', IN_PROGRESS:'운행 중', PAUSED:'일시정지', COMPLETED:'완료', CANCELLED:'취소' };
 export const UI_LABELS = {
   'Scenario': '시나리오', 'Virtual vehicle': '가상 차량', 'not set': '미지정', 'none': '없음',
   'Vehicle': '차량', 'Source': '데이터 소스', 'Status': '상태', 'Speed': '속도', 'Observed': '관측 시각', 'Trip ID': '운행 ID',
@@ -68,6 +69,7 @@ const paths = {
 export const icon = name => `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.bus}</svg>`;
 export function vehicleIcon(item, selected = false, virtual = false) {
   const state = vehicleStatus(item);
+  if(item?.telemetry?.telemetry_source==='RECORDED_GPS')return L.divIcon({className:'vehicle-map-icon',html:`<span class="replay-cursor${selected?' selected':''}">▶</span>`,iconSize:[28,28],iconAnchor:[14,14],tooltipAnchor:[0,-18]});
   const android = ['DEVICE_GPS','RECORDED_GPS'].includes(item?.telemetry?.telemetry_source);
   const colors = { running: '#0868dd', ready: '#13ad72', maintenance: '#ed3d4f', offline: '#8995a5', stale: '#b86b08', unknown: '#65758b' };
   return L.divIcon({ className: 'vehicle-map-icon', html: `<span class="vehicle-symbol${selected ? ' selected' : ''}${android ? ' android' : ''}" style="--vehicle-color:${android ? '#16a5c8' : virtual ? '#0868dd' : colors[state]}">${icon('bus')}</span>`, iconSize: [32,36], iconAnchor: [16,18], tooltipAnchor: [0,-22] });
@@ -77,9 +79,9 @@ export function renderVehicleDetails(item) {
   const write = (id, text) => { document.getElementById(id).textContent = text; };
   document.querySelector('#selection-empty').hidden = true;
   write('selected-name', item.vehicleCode || item.vehicleName || t.external_id || '차량');
-  write('selected-source', [item.vehicleName, item.vehicleSource, t.telemetry_source].filter(Boolean).join(' · '));
+  write('selected-source', [item.vehicleName, item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?'Android GPS 재생':t.telemetry_source].filter(Boolean).join(' · '));
   write('selected-speed', `${t.speed_kmh ?? '—'} km/h`);
-  write('selected-state', STATUS_LABELS[state]); write('selected-trip', item.tripId ?? '—');
+  write('selected-state', TRIP_STATUS_LABELS[item.tripStatus]||STATUS_LABELS[state]); write('selected-trip', item.tripId ?? '—');
   const observed = new Date(t.observed_at_utc);
   write('selected-updated', `최근 업데이트 ${Number.isNaN(observed.getTime()) ? '미확인' : observed.toLocaleTimeString('ko-KR', {hour12:false})}`);
   write('selected-status', STATUS_LABELS[state]);

@@ -386,6 +386,7 @@ export type VehicleWhereInput = {
   updatedAt?: Prisma.DateTimeFilter<"Vehicle"> | Date | string
   positions?: Prisma.VehiclePositionListRelationFilter
   trips?: Prisma.TripListRelationFilter
+  replayPreviews?: Prisma.ReplayPreviewListRelationFilter
   detectionEvents?: Prisma.DetectionEventListRelationFilter
   routeDeviations?: Prisma.RouteDeviationListRelationFilter
   alerts?: Prisma.AlertListRelationFilter
@@ -421,6 +422,7 @@ export type VehicleOrderByWithRelationInput = {
   updatedAt?: Prisma.SortOrder
   positions?: Prisma.VehiclePositionOrderByRelationAggregateInput
   trips?: Prisma.TripOrderByRelationAggregateInput
+  replayPreviews?: Prisma.ReplayPreviewOrderByRelationAggregateInput
   detectionEvents?: Prisma.DetectionEventOrderByRelationAggregateInput
   routeDeviations?: Prisma.RouteDeviationOrderByRelationAggregateInput
   alerts?: Prisma.AlertOrderByRelationAggregateInput
@@ -460,6 +462,7 @@ export type VehicleWhereUniqueInput = Prisma.AtLeast<{
   updatedAt?: Prisma.DateTimeFilter<"Vehicle"> | Date | string
   positions?: Prisma.VehiclePositionListRelationFilter
   trips?: Prisma.TripListRelationFilter
+  replayPreviews?: Prisma.ReplayPreviewListRelationFilter
   detectionEvents?: Prisma.DetectionEventListRelationFilter
   routeDeviations?: Prisma.RouteDeviationListRelationFilter
   alerts?: Prisma.AlertListRelationFilter
@@ -551,6 +554,7 @@ export type VehicleCreateInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -586,6 +590,7 @@ export type VehicleUncheckedCreateInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -621,6 +626,7 @@ export type VehicleUpdateInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -656,6 +662,7 @@ export type VehicleUncheckedUpdateInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -934,6 +941,20 @@ export type VehicleUpdateOneWithoutTransportGoalsNestedInput = {
   update?: Prisma.XOR<Prisma.XOR<Prisma.VehicleUpdateToOneWithWhereWithoutTransportGoalsInput, Prisma.VehicleUpdateWithoutTransportGoalsInput>, Prisma.VehicleUncheckedUpdateWithoutTransportGoalsInput>
 }
 
+export type VehicleCreateNestedOneWithoutReplayPreviewsInput = {
+  create?: Prisma.XOR<Prisma.VehicleCreateWithoutReplayPreviewsInput, Prisma.VehicleUncheckedCreateWithoutReplayPreviewsInput>
+  connectOrCreate?: Prisma.VehicleCreateOrConnectWithoutReplayPreviewsInput
+  connect?: Prisma.VehicleWhereUniqueInput
+}
+
+export type VehicleUpdateOneRequiredWithoutReplayPreviewsNestedInput = {
+  create?: Prisma.XOR<Prisma.VehicleCreateWithoutReplayPreviewsInput, Prisma.VehicleUncheckedCreateWithoutReplayPreviewsInput>
+  connectOrCreate?: Prisma.VehicleCreateOrConnectWithoutReplayPreviewsInput
+  upsert?: Prisma.VehicleUpsertWithoutReplayPreviewsInput
+  connect?: Prisma.VehicleWhereUniqueInput
+  update?: Prisma.XOR<Prisma.XOR<Prisma.VehicleUpdateToOneWithWhereWithoutReplayPreviewsInput, Prisma.VehicleUpdateWithoutReplayPreviewsInput>, Prisma.VehicleUncheckedUpdateWithoutReplayPreviewsInput>
+}
+
 export type VehicleCreateNestedOneWithoutVirtualSettingsInput = {
   create?: Prisma.XOR<Prisma.VehicleCreateWithoutVirtualSettingsInput, Prisma.VehicleUncheckedCreateWithoutVirtualSettingsInput>
   connectOrCreate?: Prisma.VehicleCreateOrConnectWithoutVirtualSettingsInput
@@ -1027,6 +1048,7 @@ export type VehicleCreateWithoutTripsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -1061,6 +1083,7 @@ export type VehicleUncheckedCreateWithoutTripsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -1111,6 +1134,7 @@ export type VehicleUpdateWithoutTripsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -1145,6 +1169,7 @@ export type VehicleUncheckedUpdateWithoutTripsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -1179,6 +1204,7 @@ export type VehicleCreateWithoutPositionsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -1213,6 +1239,7 @@ export type VehicleUncheckedCreateWithoutPositionsInput = {
   createdAt?: Date | string
   updatedAt?: Date | string
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -1263,6 +1290,7 @@ export type VehicleUpdateWithoutPositionsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -1297,6 +1325,7 @@ export type VehicleUncheckedUpdateWithoutPositionsInput = {
   createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -1332,6 +1361,7 @@ export type VehicleCreateWithoutRouteDeviationsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
   transportGoals?: Prisma.TransportGoalCreateNestedManyWithoutAssignedVehicleInput
@@ -1366,6 +1396,7 @@ export type VehicleUncheckedCreateWithoutRouteDeviationsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
   transportGoals?: Prisma.TransportGoalUncheckedCreateNestedManyWithoutAssignedVehicleInput
@@ -1416,6 +1447,7 @@ export type VehicleUpdateWithoutRouteDeviationsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedVehicleNestedInput
@@ -1450,6 +1482,7 @@ export type VehicleUncheckedUpdateWithoutRouteDeviationsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedVehicleNestedInput
@@ -1484,6 +1517,7 @@ export type VehicleCreateWithoutDetectionEventsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
   transportGoals?: Prisma.TransportGoalCreateNestedManyWithoutAssignedVehicleInput
@@ -1518,6 +1552,7 @@ export type VehicleUncheckedCreateWithoutDetectionEventsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
   transportGoals?: Prisma.TransportGoalUncheckedCreateNestedManyWithoutAssignedVehicleInput
@@ -1568,6 +1603,7 @@ export type VehicleUpdateWithoutDetectionEventsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedVehicleNestedInput
@@ -1602,6 +1638,7 @@ export type VehicleUncheckedUpdateWithoutDetectionEventsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedVehicleNestedInput
@@ -1636,6 +1673,7 @@ export type VehicleCreateWithoutAlertsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   transportGoals?: Prisma.TransportGoalCreateNestedManyWithoutAssignedVehicleInput
@@ -1670,6 +1708,7 @@ export type VehicleUncheckedCreateWithoutAlertsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   transportGoals?: Prisma.TransportGoalUncheckedCreateNestedManyWithoutAssignedVehicleInput
@@ -1720,6 +1759,7 @@ export type VehicleUpdateWithoutAlertsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedVehicleNestedInput
@@ -1754,6 +1794,7 @@ export type VehicleUncheckedUpdateWithoutAlertsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedVehicleNestedInput
@@ -1788,6 +1829,7 @@ export type VehicleCreateWithoutTransportGoalsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -1822,6 +1864,7 @@ export type VehicleUncheckedCreateWithoutTransportGoalsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -1872,6 +1915,7 @@ export type VehicleUpdateWithoutTransportGoalsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -1906,9 +1950,166 @@ export type VehicleUncheckedUpdateWithoutTransportGoalsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
+  virtualSettings?: Prisma.VirtualVehicleSettingsUncheckedUpdateOneWithoutVehicleNestedInput
+  virtualState?: Prisma.VirtualVehicleStateUncheckedUpdateOneWithoutVehicleNestedInput
+  virtualDrafts?: Prisma.VirtualRouteDraftUncheckedUpdateManyWithoutSelectedVehicleNestedInput
+  virtualRequests?: Prisma.VirtualDispatchRequestUncheckedUpdateManyWithoutSelectedVehicleNestedInput
+  virtualTrips?: Prisma.VirtualTripUncheckedUpdateManyWithoutVehicleNestedInput
+}
+
+export type VehicleCreateWithoutReplayPreviewsInput = {
+  vehicleId?: bigint | number
+  vehicleCode: string
+  plateNumber?: string | null
+  vehicleName?: string | null
+  vehicleSource?: string
+  externalId?: string | null
+  maxLoadKg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  heightM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  widthM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  lengthM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  vehicleStatus: string
+  streamUrl?: string | null
+  cameraHeightM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraPitchDeg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraRollDeg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraYawDeg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  focalLengthMm?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  sensorWidthMm?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
+  trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
+  routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
+  alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
+  transportGoals?: Prisma.TransportGoalCreateNestedManyWithoutAssignedVehicleInput
+  virtualSettings?: Prisma.VirtualVehicleSettingsCreateNestedOneWithoutVehicleInput
+  virtualState?: Prisma.VirtualVehicleStateCreateNestedOneWithoutVehicleInput
+  virtualDrafts?: Prisma.VirtualRouteDraftCreateNestedManyWithoutSelectedVehicleInput
+  virtualRequests?: Prisma.VirtualDispatchRequestCreateNestedManyWithoutSelectedVehicleInput
+  virtualTrips?: Prisma.VirtualTripCreateNestedManyWithoutVehicleInput
+}
+
+export type VehicleUncheckedCreateWithoutReplayPreviewsInput = {
+  vehicleId?: bigint | number
+  vehicleCode: string
+  plateNumber?: string | null
+  vehicleName?: string | null
+  vehicleSource?: string
+  externalId?: string | null
+  maxLoadKg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  heightM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  widthM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  lengthM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  vehicleStatus: string
+  streamUrl?: string | null
+  cameraHeightM?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraPitchDeg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraRollDeg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraYawDeg?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  focalLengthMm?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  sensorWidthMm?: runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  isActive?: boolean
+  createdAt?: Date | string
+  updatedAt?: Date | string
+  positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
+  trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
+  routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
+  alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
+  transportGoals?: Prisma.TransportGoalUncheckedCreateNestedManyWithoutAssignedVehicleInput
+  virtualSettings?: Prisma.VirtualVehicleSettingsUncheckedCreateNestedOneWithoutVehicleInput
+  virtualState?: Prisma.VirtualVehicleStateUncheckedCreateNestedOneWithoutVehicleInput
+  virtualDrafts?: Prisma.VirtualRouteDraftUncheckedCreateNestedManyWithoutSelectedVehicleInput
+  virtualRequests?: Prisma.VirtualDispatchRequestUncheckedCreateNestedManyWithoutSelectedVehicleInput
+  virtualTrips?: Prisma.VirtualTripUncheckedCreateNestedManyWithoutVehicleInput
+}
+
+export type VehicleCreateOrConnectWithoutReplayPreviewsInput = {
+  where: Prisma.VehicleWhereUniqueInput
+  create: Prisma.XOR<Prisma.VehicleCreateWithoutReplayPreviewsInput, Prisma.VehicleUncheckedCreateWithoutReplayPreviewsInput>
+}
+
+export type VehicleUpsertWithoutReplayPreviewsInput = {
+  update: Prisma.XOR<Prisma.VehicleUpdateWithoutReplayPreviewsInput, Prisma.VehicleUncheckedUpdateWithoutReplayPreviewsInput>
+  create: Prisma.XOR<Prisma.VehicleCreateWithoutReplayPreviewsInput, Prisma.VehicleUncheckedCreateWithoutReplayPreviewsInput>
+  where?: Prisma.VehicleWhereInput
+}
+
+export type VehicleUpdateToOneWithWhereWithoutReplayPreviewsInput = {
+  where?: Prisma.VehicleWhereInput
+  data: Prisma.XOR<Prisma.VehicleUpdateWithoutReplayPreviewsInput, Prisma.VehicleUncheckedUpdateWithoutReplayPreviewsInput>
+}
+
+export type VehicleUpdateWithoutReplayPreviewsInput = {
+  vehicleId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  vehicleCode?: Prisma.StringFieldUpdateOperationsInput | string
+  plateNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  vehicleName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  vehicleSource?: Prisma.StringFieldUpdateOperationsInput | string
+  externalId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  maxLoadKg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  heightM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  widthM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  lengthM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  vehicleStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  streamUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cameraHeightM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraPitchDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraRollDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraYawDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  focalLengthMm?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  sensorWidthMm?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
+  trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
+  routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
+  alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
+  transportGoals?: Prisma.TransportGoalUpdateManyWithoutAssignedVehicleNestedInput
+  virtualSettings?: Prisma.VirtualVehicleSettingsUpdateOneWithoutVehicleNestedInput
+  virtualState?: Prisma.VirtualVehicleStateUpdateOneWithoutVehicleNestedInput
+  virtualDrafts?: Prisma.VirtualRouteDraftUpdateManyWithoutSelectedVehicleNestedInput
+  virtualRequests?: Prisma.VirtualDispatchRequestUpdateManyWithoutSelectedVehicleNestedInput
+  virtualTrips?: Prisma.VirtualTripUpdateManyWithoutVehicleNestedInput
+}
+
+export type VehicleUncheckedUpdateWithoutReplayPreviewsInput = {
+  vehicleId?: Prisma.BigIntFieldUpdateOperationsInput | bigint | number
+  vehicleCode?: Prisma.StringFieldUpdateOperationsInput | string
+  plateNumber?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  vehicleName?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  vehicleSource?: Prisma.StringFieldUpdateOperationsInput | string
+  externalId?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  maxLoadKg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  heightM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  widthM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  lengthM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  vehicleStatus?: Prisma.StringFieldUpdateOperationsInput | string
+  streamUrl?: Prisma.NullableStringFieldUpdateOperationsInput | string | null
+  cameraHeightM?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraPitchDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraRollDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  cameraYawDeg?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  focalLengthMm?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  sensorWidthMm?: Prisma.NullableDecimalFieldUpdateOperationsInput | runtime.Decimal | runtime.DecimalJsLike | number | string | null
+  isActive?: Prisma.BoolFieldUpdateOperationsInput | boolean
+  createdAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
+  positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
+  trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
+  routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
+  alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
+  transportGoals?: Prisma.TransportGoalUncheckedUpdateManyWithoutAssignedVehicleNestedInput
   virtualSettings?: Prisma.VirtualVehicleSettingsUncheckedUpdateOneWithoutVehicleNestedInput
   virtualState?: Prisma.VirtualVehicleStateUncheckedUpdateOneWithoutVehicleNestedInput
   virtualDrafts?: Prisma.VirtualRouteDraftUncheckedUpdateManyWithoutSelectedVehicleNestedInput
@@ -1940,6 +2141,7 @@ export type VehicleCreateWithoutVirtualSettingsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -1974,6 +2176,7 @@ export type VehicleUncheckedCreateWithoutVirtualSettingsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -2024,6 +2227,7 @@ export type VehicleUpdateWithoutVirtualSettingsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -2058,6 +2262,7 @@ export type VehicleUncheckedUpdateWithoutVirtualSettingsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -2092,6 +2297,7 @@ export type VehicleCreateWithoutVirtualDraftsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -2126,6 +2332,7 @@ export type VehicleUncheckedCreateWithoutVirtualDraftsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -2176,6 +2383,7 @@ export type VehicleUpdateWithoutVirtualDraftsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -2210,6 +2418,7 @@ export type VehicleUncheckedUpdateWithoutVirtualDraftsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -2244,6 +2453,7 @@ export type VehicleCreateWithoutVirtualRequestsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -2278,6 +2488,7 @@ export type VehicleUncheckedCreateWithoutVirtualRequestsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -2328,6 +2539,7 @@ export type VehicleUpdateWithoutVirtualRequestsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -2362,6 +2574,7 @@ export type VehicleUncheckedUpdateWithoutVirtualRequestsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -2396,6 +2609,7 @@ export type VehicleCreateWithoutVirtualTripsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -2430,6 +2644,7 @@ export type VehicleUncheckedCreateWithoutVirtualTripsInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -2480,6 +2695,7 @@ export type VehicleUpdateWithoutVirtualTripsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -2514,6 +2730,7 @@ export type VehicleUncheckedUpdateWithoutVirtualTripsInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -2548,6 +2765,7 @@ export type VehicleCreateWithoutVirtualStateInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertCreateNestedManyWithoutVehicleInput
@@ -2582,6 +2800,7 @@ export type VehicleUncheckedCreateWithoutVirtualStateInput = {
   updatedAt?: Date | string
   positions?: Prisma.VehiclePositionUncheckedCreateNestedManyWithoutVehicleInput
   trips?: Prisma.TripUncheckedCreateNestedManyWithoutVehicleInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedCreateNestedManyWithoutVehicleInput
   detectionEvents?: Prisma.DetectionEventUncheckedCreateNestedManyWithoutVehicleInput
   routeDeviations?: Prisma.RouteDeviationUncheckedCreateNestedManyWithoutVehicleInput
   alerts?: Prisma.AlertUncheckedCreateNestedManyWithoutVehicleInput
@@ -2632,6 +2851,7 @@ export type VehicleUpdateWithoutVirtualStateInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUpdateManyWithoutVehicleNestedInput
@@ -2666,6 +2886,7 @@ export type VehicleUncheckedUpdateWithoutVirtualStateInput = {
   updatedAt?: Prisma.DateTimeFieldUpdateOperationsInput | Date | string
   positions?: Prisma.VehiclePositionUncheckedUpdateManyWithoutVehicleNestedInput
   trips?: Prisma.TripUncheckedUpdateManyWithoutVehicleNestedInput
+  replayPreviews?: Prisma.ReplayPreviewUncheckedUpdateManyWithoutVehicleNestedInput
   detectionEvents?: Prisma.DetectionEventUncheckedUpdateManyWithoutVehicleNestedInput
   routeDeviations?: Prisma.RouteDeviationUncheckedUpdateManyWithoutVehicleNestedInput
   alerts?: Prisma.AlertUncheckedUpdateManyWithoutVehicleNestedInput
@@ -2684,6 +2905,7 @@ export type VehicleUncheckedUpdateWithoutVirtualStateInput = {
 export type VehicleCountOutputType = {
   positions: number
   trips: number
+  replayPreviews: number
   detectionEvents: number
   routeDeviations: number
   alerts: number
@@ -2696,6 +2918,7 @@ export type VehicleCountOutputType = {
 export type VehicleCountOutputTypeSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   positions?: boolean | VehicleCountOutputTypeCountPositionsArgs
   trips?: boolean | VehicleCountOutputTypeCountTripsArgs
+  replayPreviews?: boolean | VehicleCountOutputTypeCountReplayPreviewsArgs
   detectionEvents?: boolean | VehicleCountOutputTypeCountDetectionEventsArgs
   routeDeviations?: boolean | VehicleCountOutputTypeCountRouteDeviationsArgs
   alerts?: boolean | VehicleCountOutputTypeCountAlertsArgs
@@ -2727,6 +2950,13 @@ export type VehicleCountOutputTypeCountPositionsArgs<ExtArgs extends runtime.Typ
  */
 export type VehicleCountOutputTypeCountTripsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   where?: Prisma.TripWhereInput
+}
+
+/**
+ * VehicleCountOutputType without action
+ */
+export type VehicleCountOutputTypeCountReplayPreviewsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  where?: Prisma.ReplayPreviewWhereInput
 }
 
 /**
@@ -2803,6 +3033,7 @@ export type VehicleSelect<ExtArgs extends runtime.Types.Extensions.InternalArgs 
   updatedAt?: boolean
   positions?: boolean | Prisma.Vehicle$positionsArgs<ExtArgs>
   trips?: boolean | Prisma.Vehicle$tripsArgs<ExtArgs>
+  replayPreviews?: boolean | Prisma.Vehicle$replayPreviewsArgs<ExtArgs>
   detectionEvents?: boolean | Prisma.Vehicle$detectionEventsArgs<ExtArgs>
   routeDeviations?: boolean | Prisma.Vehicle$routeDeviationsArgs<ExtArgs>
   alerts?: boolean | Prisma.Vehicle$alertsArgs<ExtArgs>
@@ -2891,6 +3122,7 @@ export type VehicleOmit<ExtArgs extends runtime.Types.Extensions.InternalArgs = 
 export type VehicleInclude<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
   positions?: boolean | Prisma.Vehicle$positionsArgs<ExtArgs>
   trips?: boolean | Prisma.Vehicle$tripsArgs<ExtArgs>
+  replayPreviews?: boolean | Prisma.Vehicle$replayPreviewsArgs<ExtArgs>
   detectionEvents?: boolean | Prisma.Vehicle$detectionEventsArgs<ExtArgs>
   routeDeviations?: boolean | Prisma.Vehicle$routeDeviationsArgs<ExtArgs>
   alerts?: boolean | Prisma.Vehicle$alertsArgs<ExtArgs>
@@ -2910,6 +3142,7 @@ export type $VehiclePayload<ExtArgs extends runtime.Types.Extensions.InternalArg
   objects: {
     positions: Prisma.$VehiclePositionPayload<ExtArgs>[]
     trips: Prisma.$TripPayload<ExtArgs>[]
+    replayPreviews: Prisma.$ReplayPreviewPayload<ExtArgs>[]
     detectionEvents: Prisma.$DetectionEventPayload<ExtArgs>[]
     routeDeviations: Prisma.$RouteDeviationPayload<ExtArgs>[]
     alerts: Prisma.$AlertPayload<ExtArgs>[]
@@ -3338,6 +3571,7 @@ export interface Prisma__VehicleClient<T, Null = never, ExtArgs extends runtime.
   readonly [Symbol.toStringTag]: "PrismaPromise"
   positions<T extends Prisma.Vehicle$positionsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Vehicle$positionsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$VehiclePositionPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   trips<T extends Prisma.Vehicle$tripsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Vehicle$tripsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$TripPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+  replayPreviews<T extends Prisma.Vehicle$replayPreviewsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Vehicle$replayPreviewsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$ReplayPreviewPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   detectionEvents<T extends Prisma.Vehicle$detectionEventsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Vehicle$detectionEventsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$DetectionEventPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   routeDeviations<T extends Prisma.Vehicle$routeDeviationsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Vehicle$routeDeviationsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$RouteDeviationPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
   alerts<T extends Prisma.Vehicle$alertsArgs<ExtArgs> = {}>(args?: Prisma.Subset<T, Prisma.Vehicle$alertsArgs<ExtArgs>>): Prisma.PrismaPromise<runtime.Types.Result.GetResult<Prisma.$AlertPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
@@ -3835,6 +4069,30 @@ export type Vehicle$tripsArgs<ExtArgs extends runtime.Types.Extensions.InternalA
   take?: number
   skip?: number
   distinct?: Prisma.TripScalarFieldEnum | Prisma.TripScalarFieldEnum[]
+}
+
+/**
+ * Vehicle.replayPreviews
+ */
+export type Vehicle$replayPreviewsArgs<ExtArgs extends runtime.Types.Extensions.InternalArgs = runtime.Types.Extensions.DefaultArgs> = {
+  /**
+   * Select specific fields to fetch from the ReplayPreview
+   */
+  select?: Prisma.ReplayPreviewSelect<ExtArgs> | null
+  /**
+   * Omit specific fields from the ReplayPreview
+   */
+  omit?: Prisma.ReplayPreviewOmit<ExtArgs> | null
+  /**
+   * Choose, which related nodes to fetch as well
+   */
+  include?: Prisma.ReplayPreviewInclude<ExtArgs> | null
+  where?: Prisma.ReplayPreviewWhereInput
+  orderBy?: Prisma.ReplayPreviewOrderByWithRelationInput | Prisma.ReplayPreviewOrderByWithRelationInput[]
+  cursor?: Prisma.ReplayPreviewWhereUniqueInput
+  take?: number
+  skip?: number
+  distinct?: Prisma.ReplayPreviewScalarFieldEnum | Prisma.ReplayPreviewScalarFieldEnum[]
 }
 
 /**

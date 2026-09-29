@@ -383,6 +383,15 @@
        데이터 소스 불러오는 중…
       </p>
      </section>
+     <section class="route-mode-settings" aria-labelledby="route-mode-title">
+      <h2 id="route-mode-title">신규 운행 경로 표시</h2>
+      <label for="trip-route-mode">배정 시 적용할 모드</label>
+      <select id="trip-route-mode">
+       <option value="DUAL">최적 경로 + Android GPS 재생</option>
+       <option value="REPLAY_ONLY">Android GPS 재생 경로만</option>
+      </select>
+      <small>선택은 새 운행에 저장됩니다. 재생 경로만 사용할 때 목적지는 GPS 기록의 마지막 위치입니다.</small>
+     </section>
     </section>
    </section>
    <aside id="operator-sidebar">
@@ -448,6 +457,14 @@
      <p id="route-label">
       계획 경로 · 경로 없음
      </p>
+     <div class="trip-progress-card" id="trip-progress-card" hidden>
+      <p id="selected-origin">출발지 —</p>
+      <p id="selected-current">현재 위치 대기 중</p>
+      <strong id="selected-destination">목적지 —</strong>
+      <p id="selected-route-mode">—</p>
+      <progress id="selected-progress-bar" max="100" value="0"></progress>
+      <p id="selected-progress">진행 상태 대기 중</p>
+     </div>
     </section>
     <section aria-labelledby="trip-title" class="ui-card" hidden="" id="trip-panel">
      <h2 id="trip-title">
@@ -462,6 +479,8 @@
         차량 불러오는 중…
        </option>
       </select>
+      <p class="metadata" id="trip-mode-hint">설정에서 선택한 경로 표시 모드가 적용됩니다.</p>
+      <p class="metadata" id="trip-preview-status">Android GPS 경로 확인 중…</p>
       <label for="trip-destination-name">
        운행 목적지
       </label>
@@ -510,10 +529,7 @@
         초기 운행 상태
        </label>
        <select id="trip-status">
-        <option selected="" value="IN_PROGRESS">
-         즉시 출발
-        </option>
-        <option value="READY">
+        <option selected="" value="READY">
          배차 대기
         </option>
        </select>

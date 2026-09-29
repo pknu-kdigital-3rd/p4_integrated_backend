@@ -169,6 +169,20 @@
                 android:layout_marginTop="12dp"
                 android:text="@string/start_streaming" />
 
+            <TextView
+                android:id="@+id/tripStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Trip: checking assignment…"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+            <Button
+                android:id="@+id/tripButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Start Trip" />
+
             <Switch
                 android:id="@+id/telemetrySwitch"
                 android:layout_width="match_parent"

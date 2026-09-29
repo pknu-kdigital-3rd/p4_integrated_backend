@@ -117,6 +117,11 @@ export type TransportGoal = Prisma.TransportGoalModel
  */
 export type VirtualScenario = Prisma.VirtualScenarioModel
 /**
+ * Model ReplayPreview
+ *
+ */
+export type ReplayPreview = Prisma.ReplayPreviewModel
+/**
  * Model VirtualVehicleSettings
  *
  */

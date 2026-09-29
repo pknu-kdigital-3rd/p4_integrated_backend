@@ -1,14 +1,15 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon} from './dashboard-ui.js';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS} from './dashboard-ui.js';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
+import {plannedProgress,recordedProgress} from './trip-route-ui.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
@@ -16,7 +17,7 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
   const androidGps=isAndroidGpsItem(item),marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const entry={marker,item,liveOnly};
   marker.on('click',()=>selectVehicle(entry.item));
-  const label=document.createElement('span');label.textContent=androidGps?`Android GPS · ${item?.vehicleCode||item?.telemetry?.external_id||'vehicle'}`:item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle';marker.bindTooltip(label,{direction:'top',className:'vehicle-label'});
+  const label=document.createElement('span');label.textContent=item?.telemetry?.telemetry_source==='RECORDED_GPS'?`Android GPS 재생 · ${item?.vehicleCode||'vehicle'}`:androidGps?`Android GPS · ${item?.vehicleCode||item?.telemetry?.external_id||'vehicle'}`:item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle';marker.bindTooltip(label,{direction:'top',className:'vehicle-label'});
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
   return entry;
 }
@@ -26,7 +27,7 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
 // a detached marker would never reappear for the rest of the session.
 function normalMapLayers(){
   return [...markers.values()].map(entry=>entry.marker)
-    .concat([...tripMapMarkers.values()],routeLayer?[routeLayer]:[]);
+    .concat([...tripMapMarkers.values()],[routeLayer,replayRouteLayer,destinationMarker].filter(Boolean));
 }
 // Used by the virtual workspace, which takes the map over while it is open.
 window.__operatorDetachMapLayers=()=>{fleetViewport.save();for(const layer of normalMapLayers())map.removeLayer(layer)};
@@ -80,8 +81,71 @@ function retargetLiveView(item){
   document.querySelector('#live-view-title').textContent=`실시간 영상 · ${liveTargetLabel(item)}`;
   renderLiveTelemetryStatus();
 }
+function clearTripLayers(){
+  for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
+  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';
+}
+function showTripDisplay(display){
+  const card=document.querySelector('#trip-progress-card');card.hidden=false;
+  document.querySelector('#selected-origin').textContent=`출발지 · ${display.originName||'배정 시점의 차량 위치'}`;
+  document.querySelector('#selected-destination').textContent=`목적지 · ${display.destinationName}`;
+  const replayOnly=display.routeMode==='REPLAY_ONLY';
+  document.querySelector('#selected-route-mode').textContent=`${replayOnly?'Android GPS 재생 경로':'최적 경로 + Android GPS 재생'} · ${TRIP_STATUS_LABELS[display.tripStatus]||display.tripStatus}`;
+  const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}`;
+  if(key!==displayedRouteKey){
+    clearTripLayers();displayedRouteKey=key;
+    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.geoJSON(display.plannedRoute.routeGeojson,{style:{color:'#0868dd',weight:6}}).addTo(map);
+    const points=display.replayPreview?.points;
+    if(Array.isArray(points)&&points.length>1){
+      replayRouteLayer=L.polyline(points.map(point=>[point[2],point[1]]),{color:'#e78328',weight:4,dashArray:replayOnly?undefined:'10 8'}).addTo(map);
+      replayRouteLayer.bindTooltip('Android GPS 재생 경로');
+    }
+    const target=replayOnly?points?.at(-1)?.slice(1,3):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
+    if(target)destinationMarker=L.circleMarker([target[1],target[0]],{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map).bindTooltip(display.destinationName);
+  }
+  document.querySelector('#route-label').textContent=replayOnly?'Android GPS 재생 경로':`최적 경로${display.replayPreview?' + Android GPS 재생 경로':''}`;
+  let progress=null,label='진행 상태 대기 중';
+  if(replayOnly){
+    progress=recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
+    const replayFix=latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='RECORDED_GPS')?.telemetry;
+    document.querySelector('#selected-current').textContent=replayFix?`GPS 재생 위치 · ${replayFix.latitude.toFixed(5)}, ${replayFix.longitude.toFixed(5)}`:'GPS 재생 위치 대기 중';
+    label=progress?`GPS 재생 ${progress.percent}% · 남은 기록 경로 ${(progress.remainingM/1000).toFixed(1)} km`:'GPS 재생 대기 중 · 실제 운행 진행률 아님';
+  }else{
+    const live=latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='BIMS_LIVE'&&item.telemetry?.source_metadata?.state==='live')
+      ||latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='DEVICE_GPS');
+    const fix=live?.telemetry,age=Date.now()-new Date(fix?.observed_at_utc??'').getTime();
+    document.querySelector('#selected-current').textContent=fix&&age>=0&&age<=60000?`실제 GPS 위치 · ${fix.latitude.toFixed(5)}, ${fix.longitude.toFixed(5)}`:'실제 GPS 위치 대기 중';
+    if(fix&&age>=0&&age<=60000){
+      progress=plannedProgress(display.plannedRoute?.routeGeojson,fix);
+      if(progress?.offRouteM>100){label=`실제 GPS가 계획 경로에서 ${progress.offRouteM} m 벗어남`;progress=null}
+      else if(progress)label=`실제 GPS ${progress.percent}% · 남은 계획 경로 ${(progress.remainingM/1000).toFixed(1)} km`;
+    }else label=display.replayPreview?'실제 GPS 진행률 없음 · Android GPS는 재생 중':'실제 GPS 위치를 기다리는 중';
+  }
+  document.querySelector('#selected-progress').textContent=label;
+  const bar=document.querySelector('#selected-progress-bar');bar.value=progress?.percent??0;bar.hidden=!progress;
+}
+async function loadSelectedTrip(){
+  const item=selected,request=++displayRequest;
+  if(demoMode){
+    clearTripLayers();
+    if(item?.plannedRoute?.routeGeojson)routeLayer=L.geoJSON(item.plannedRoute.routeGeojson,{style:{color:'#0868dd',weight:6}}).addTo(map);
+    document.querySelector('#trip-progress-card').hidden=true;
+    document.querySelector('#route-label').textContent=`계획 경로 · ${item?.plannedRoute?.routeSource||'경로 없음'}`;
+    return;
+  }
+  if(!item?.tripId){clearTripLayers();document.querySelector('#trip-progress-card').hidden=true;return}
+  try{
+    const display=await api(`/api/v1/trips/${item.tripId}/display`,{},true);
+    if(request!==displayRequest||String(selected?.tripId)!==String(display.tripId))return;
+    showTripDisplay(display);
+  }catch(ex){if(request===displayRequest)document.querySelector('#route-label').textContent=`운행 경로 확인 실패 · ${ex.message}`}
+}
 function selectVehicle(item){
   selected=item;
+  const assignmentVehicle=document.querySelector('#trip-vehicle');
+  if(assignmentVehicle&&[...assignmentVehicle.options].some(option=>option.value===String(item.vehicleId))){
+    assignmentVehicle.value=String(item.vehicleId);void loadAssignmentPreview();
+  }
   syncLiveViewButton(item);
   details.hidden=false;
   renderVehicleDetails(item);
@@ -92,15 +156,13 @@ function selectVehicle(item){
     if(entry.marker.getTooltip())entry.marker.getTooltip().options.permanent=active;
     if(active)entry.marker.openTooltip();else entry.marker.closeTooltip();
   }
-  const t=item.telemetry,r=item.plannedRoute;
+  const t=item.telemetry;
   fields.replaceChildren();
   for(const [label,value] of [[uiText('Vehicle'),item.vehicleName||item.vehicleCode||t.external_id],[uiText('Source'),`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],[uiText('Status'),item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],[uiText('Speed'),`${t.speed_kmh??'—'} km/h`],[uiText('Observed'),t.observed_at_utc||'—'],[uiText('Trip ID'),item.tripId??'—']]){
     const term=document.createElement('dt'),description=document.createElement('dd');
     term.textContent=label;description.textContent=String(value);fields.append(term,description);
   }
-  document.querySelector('#route-label').textContent=`계획 경로 · ${r?.routeSource||'경로 없음'}`;
-  if(routeLayer){map.removeLayer(routeLayer);routeLayer=null}
-  if(r?.routeGeojson)routeLayer=L.geoJSON(r.routeGeojson,{style:{color:'#0868dd',weight:6}}).addTo(map);
+  void loadSelectedTrip();
   document.querySelector('#recording-trip-id').value=item.tripId?String(item.tripId):'';
   if(item.tripId)void loadTripRecordings(String(item.tripId));
   retargetLiveView(item);
@@ -109,6 +171,7 @@ window.__operatorCancelMapPick=()=>{tripMapPick=undefined;document.querySelector
 function render(snapshot){
   if(window.__virtualMode)return;
   if(!Array.isArray(snapshot?.vehicles))throw new Error('차량 응답 형식이 올바르지 않습니다.');
+  latestFleet=snapshot.vehicles;
   let invalidPositions=0;
   const keys=new Set(snapshot.vehicles.map(item=>item.telemetry?.external_id));
   for(const [key,entry] of markers){if(!keys.has(key)&&key!==liveView?.markerKey){map.removeLayer(entry.marker);markers.delete(key);}}
@@ -120,7 +183,7 @@ function render(snapshot){
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
-    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton();renderVehicleDetails(item)}
+    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton();renderVehicleDetails(item);void loadSelectedTrip()}
     // A new Android stream reuses device:<vehicleId>; reveal it again when its
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
@@ -135,7 +198,7 @@ function render(snapshot){
     const session=t.source_metadata?.recordingSessionId;
     // A new stream session supersedes the old one; reject its late frames.
     if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
-    const label=document.createElement('span');label.textContent=isAndroidGpsItem(item)?`Android GPS · ${item.vehicleCode||key}`:item.vehicleCode||key;entry.marker.setTooltipContent(label);
+    const label=document.createElement('span');label.textContent=t.telemetry_source==='RECORDED_GPS'?`Android GPS 재생 · ${item.vehicleCode||key}`:isAndroidGpsItem(item)?`Android GPS · ${item.vehicleCode||key}`:item.vehicleCode||key;entry.marker.setTooltipContent(label);
   }
   dashboard.update(snapshot.vehicles);
   if(!liveView&&!snapshot.vehicles.some(isAndroidGpsItem))fleetViewport.fit(snapshot.vehicles,{initial:true});
@@ -145,7 +208,7 @@ function render(snapshot){
   notice.textContent=[!snapshot.vehicles.length?'수신된 차량이 없습니다. 설정에서 데이터 소스를 확인하세요.':'',invalidPositions?`위치가 없는 차량 ${invalidPositions}대`:'',...warnings.map(warning=>typeof warning==='string'?warning:warning.message||warning.code||'차량 데이터 소스 경고')].filter(Boolean).join(' · ');
   if(invalidPositions||warnings.length)console.warn('[operator fleet]',{received:snapshot.vehicles.length,invalidPositions,warnings});
 }
-async function refresh(){try{const snapshot=await api('/api/v1/tracking/vehicles');render(snapshot);error.textContent='';document.querySelector('#connection').textContent=`관제 연결됨 · ${snapshot.vehicles.length}대`}catch(e){console.error('[operator fleet] Fetch or render failed',e);error.textContent=e.message;document.querySelector('#connection').textContent='연결 확인 필요';const notice=document.querySelector('#fleet-status');notice.hidden=false;notice.textContent=`차량을 표시할 수 없습니다: ${e.message}`}}
+async function refresh(){try{const snapshot=await api('/api/v1/tracking/vehicles');render(snapshot);if(document.querySelector('#trip-vehicle').value)void loadAssignmentPreview();error.textContent='';document.querySelector('#connection').textContent=`관제 연결됨 · ${snapshot.vehicles.length}대`}catch(e){console.error('[operator fleet] Fetch or render failed',e);error.textContent=e.message;document.querySelector('#connection').textContent='연결 확인 필요';const notice=document.querySelector('#fleet-status');notice.hidden=false;notice.textContent=`차량을 표시할 수 없습니다: ${e.message}`}}
 const telemetryModeSelect=document.querySelector('#telemetry-mode'),telemetryModeApply=document.querySelector('#telemetry-mode-apply'),telemetryModeStatus=document.querySelector('#telemetry-mode-status'),telemetrySettings=document.querySelector('#telemetry-settings');
 const telemetryModeLabel=mode=>mode==='live'?'Live BIMS':'Replay dataset';
 const historyCompensation=document.querySelector('#history-compensation');
@@ -178,6 +241,32 @@ async function applyTelemetryMode(){
   try{const result=await api('/api/v1/tracking/telemetry-mode',{method:'PUT',body:JSON.stringify({mode,historyCompensationEnabled:historyCompensation.checked})},true);telemetrySettingsEditing=false;renderTelemetryMode(result);await refresh()}
   catch(ex){telemetryModeStatus.textContent=`Could not switch telemetry source: ${ex.message}`;telemetryModeStatus.dataset.level='error';await loadTelemetryMode()}
 }
+const tripRouteMode=document.querySelector('#trip-route-mode');
+tripRouteMode.value=localStorage.getItem('operatorTripRouteMode')==='REPLAY_ONLY'?'REPLAY_ONLY':'DUAL';
+function syncTripRouteMode(){
+  const replayOnly=tripRouteMode.value==='REPLAY_ONLY';
+  document.querySelector('#trip-mode-hint').textContent=replayOnly
+    ?'Android GPS 기록의 첫 위치에서 마지막 위치까지 배정합니다. 목적지는 자동 지정됩니다.'
+    :'목적지를 선택하면 최적 경로와 Android GPS 재생 경로를 함께 표시합니다.';
+  for(const id of ['trip-destination-name','trip-destination-latitude','trip-destination-longitude']){
+    const field=document.getElementById(id);field.disabled=replayOnly;field.required=!replayOnly;
+  }
+  const preview=assignmentPreview,notice=document.querySelector('#trip-preview-status');
+  notice.textContent=preview?`Android GPS: ${preview.datasetName} · 마지막 위치 ${preview.points.at(-1)[2].toFixed(5)}, ${preview.points.at(-1)[1].toFixed(5)}`
+    :replayOnly?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'Android GPS 미수신 · 경로가 도착하면 함께 표시됩니다.';
+  document.querySelector('#create-trip').disabled=replayOnly&&!preview;
+}
+tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripRouteMode',tripRouteMode.value);syncTripRouteMode()});
+syncTripRouteMode();
+async function loadAssignmentPreview(){
+  const vehicleId=document.querySelector('#trip-vehicle').value;
+  if(vehicleId!==assignmentPreviewVehicleId){assignmentPreviewVehicleId=vehicleId;assignmentPreview=null;syncTripRouteMode()}
+  if(!vehicleId)return;
+  try{const preview=await api(`/api/v1/trips/vehicles/${vehicleId}/replay-preview`,{},true);
+    if(document.querySelector('#trip-vehicle').value===vehicleId){assignmentPreview=preview;syncTripRouteMode()}}
+  catch(ex){document.querySelector('#trip-preview-status').textContent=`Android GPS 경로 확인 실패 · ${ex.message}`}
+}
+document.querySelector('#trip-vehicle').addEventListener('change',()=>void loadAssignmentPreview());
 async function loadTripAssignments(){
   const [vehicles,trips]=await Promise.all([api('/api/v1/vehicles',{},true),api('/api/v1/trips',{},true)]);
   const vehicleSelect=document.querySelector('#trip-vehicle'),previousVehicle=vehicleSelect.value;
@@ -187,6 +276,7 @@ async function loadTripAssignments(){
     vehicleSelect.add(new Option(label,String(vehicle.vehicleId)));
   }
   if(vehicles.some(item=>item.isActive&&String(item.vehicleId)===previousVehicle))vehicleSelect.value=previousVehicle;
+  void loadAssignmentPreview();
   const list=document.querySelector('#trips-list');list.replaceChildren();
   for(const trip of trips){
     const row=document.createElement('li'),title=document.createElement('strong'),vehicle=document.createElement('span'),destination=document.createElement('span'),status=document.createElement('span');
@@ -194,7 +284,15 @@ async function loadTripAssignments(){
     vehicle.textContent=`Vehicle ID ${trip.vehicleId} · ${trip.vehicle.vehicleCode}${trip.vehicle.vehicleName?` · ${trip.vehicle.vehicleName}`:''}`;
     destination.textContent=`${trip.originName?`${trip.originName} → `:''}${trip.destinationName}`;
     status.textContent=`${trip.tripStatus}${trip.plannedStartAt?` · planned ${new Date(trip.plannedStartAt).toLocaleString()}`:''}`;
-    row.append(title,vehicle,destination,status);list.append(row);
+    row.append(title,vehicle,destination,status);
+    if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&['ADMIN','OPERATOR'].includes(currentRole)){
+      const cancel=document.createElement('button');cancel.type='button';cancel.textContent='운행 취소';
+      cancel.onclick=async()=>{if(!window.confirm(`Trip ID ${trip.tripId} 배정을 취소할까요?`))return;
+        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);await loadTripAssignments();await refresh()}
+        catch(ex){document.querySelector('#trip-status-message').textContent=ex.message;cancel.disabled=false}};
+      row.append(cancel);
+    }
+    list.append(row);
   }
   if(!vehicles.some(item=>item.isActive))vehicleSelect.replaceChildren(new Option(uiText('No active vehicles available'),''));
   if(!trips.length){const empty=document.createElement('li');empty.textContent=uiText('No trips created yet.');list.append(empty)}
@@ -209,10 +307,12 @@ async function start(role){
   if(!demoMode){
     document.querySelector('#trip-form').hidden=!['ADMIN','OPERATOR'].includes(role);
     document.querySelector('#trip-status-message').textContent=['ADMIN','OPERATOR'].includes(role)?uiText('Choose a vehicle and destination.'):'You can review recent trips; an operator or admin can create one.';
-    // Trip assignment is independent of fleet tracking; its failure must not stop polling.
-    void loadTripAssignments().catch(ex=>{document.querySelector('#trip-status-message').textContent=`운행 목록을 불러올 수 없습니다: ${ex.message}`;console.error('[operator trips]',ex)});
   }
   await refresh();
+  if(!demoMode){
+    // BIMS vehicle identities are populated by the fleet snapshot before the assignment list loads.
+    void loadTripAssignments().catch(ex=>{document.querySelector('#trip-status-message').textContent=`운행 목록을 불러올 수 없습니다: ${ex.message}`;console.error('[operator trips]',ex)});
+  }
   await loadTelemetryMode();
   clearInterval(telemetryModeTimer);telemetryModeTimer=setInterval(()=>void loadTelemetryMode(),5000);
   if(!refreshTimer)refreshTimer=setInterval(refresh,3000);
@@ -426,16 +526,24 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
   const value=id=>document.querySelector(`#${id}`).value.trim();
   const originLatitude=value('trip-origin-latitude'),originLongitude=value('trip-origin-longitude');
   if(Boolean(originLatitude)!==Boolean(originLongitude)){message.textContent='Enter both origin coordinates, or leave both empty.';return}
-  const body={vehicleId:value('trip-vehicle'),destinationName:value('trip-destination-name'),destinationLatitude:Number(value('trip-destination-latitude')),destinationLongitude:Number(value('trip-destination-longitude')),tripStatus:value('trip-status')};
+  const mode=tripRouteMode.value;
+  if(mode==='REPLAY_ONLY'&&!assignmentPreview){message.textContent='Android GPS 경로를 먼저 받아야 합니다.';return}
+  const body={vehicleId:value('trip-vehicle'),routeMode:mode,tripStatus:'READY'};
+  if(mode==='REPLAY_ONLY'&&assignmentPreview)body.replayPreviewId=String(assignmentPreview.replayPreviewId);
+  if(mode==='DUAL'){
+    body.destinationName=value('trip-destination-name');
+    body.destinationLatitude=Number(value('trip-destination-latitude'));
+    body.destinationLongitude=Number(value('trip-destination-longitude'));
+  }
   for(const [field,id] of [['originName','trip-origin-name'],['destinationAddress','trip-destination-address']])if(value(id))body[field]=value(id);
   if(originLatitude){body.originLatitude=Number(originLatitude);body.originLongitude=Number(originLongitude)}
   if(value('trip-planned-start'))body.plannedStartAt=new Date(value('trip-planned-start')).toISOString();
   button.disabled=true;message.textContent='Creating trip…';
   try{
     const trip=await api('/api/v1/trips',{method:'POST',body:JSON.stringify(body)},true);
-    message.textContent=`Created Trip ID ${trip.tripId} for Vehicle ID ${trip.vehicleId}. Enter both IDs in the Android app.`;
+    message.textContent=`Trip ID ${trip.tripId} 배정 완료 · Android에서 운행 시작을 누르세요.`;
     document.querySelector('#recording-trip-id').value=String(trip.tripId);
-    await Promise.all([loadTripAssignments(),loadTripRecordings(String(trip.tripId))]);
+    await Promise.all([loadTripAssignments(),loadTripRecordings(String(trip.tripId)),refresh()]);
   }catch(ex){message.textContent=ex.message}
   finally{button.disabled=false;form.querySelector('#trip-destination-name').focus()}
 });

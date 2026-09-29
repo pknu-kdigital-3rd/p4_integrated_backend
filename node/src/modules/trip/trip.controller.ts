@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import type { CreateTripBody } from "./trip.schema.ts";
 import { tripService } from "./trip.service.ts";
+import { parseVehicleId, replayPreviewService } from "./trip.preview.ts";
 
 export const tripController = {
     async getAll(_req: Request, res: Response) {
@@ -10,5 +11,14 @@ export const tripController = {
     async create(req: Request<{}, {}, CreateTripBody>, res: Response) {
         const trip = await tripService.createTrip(req.body);
         res.status(201).json({ data: trip });
+    },
+    async display(req: Request, res: Response) {
+        res.json({ data: await tripService.display(String(req.params.tripId)) });
+    },
+    async cancel(req: Request, res: Response) {
+        res.json({ data: await tripService.cancel(String(req.params.tripId)) });
+    },
+    async latestPreview(req: Request, res: Response) {
+        res.json({ data: await replayPreviewService.latest(parseVehicleId(String(req.params.vehicleId))) });
     },
 };

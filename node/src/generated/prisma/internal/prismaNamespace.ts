@@ -412,6 +412,7 @@ export const ModelName = {
   Alert: 'Alert',
   TransportGoal: 'TransportGoal',
   VirtualScenario: 'VirtualScenario',
+  ReplayPreview: 'ReplayPreview',
   VirtualVehicleSettings: 'VirtualVehicleSettings',
   VirtualRouteDraft: 'VirtualRouteDraft',
   VirtualDispatchRequest: 'VirtualDispatchRequest',
@@ -436,7 +437,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "platformAccount" | "vehicle" | "driver" | "trip" | "tripVideo" | "tripVideoDetectionSample" | "route" | "vehiclePosition" | "routeDeviation" | "objectClass" | "detectionEvent" | "eventImage" | "alert" | "transportGoal" | "virtualScenario" | "virtualVehicleSettings" | "virtualRouteDraft" | "virtualDispatchRequest" | "virtualTrip" | "virtualRoute" | "virtualTripWaypoint" | "virtualVehicleState" | "virtualRoadRestriction" | "virtualOperatorEvent"
+    modelProps: "platformAccount" | "vehicle" | "driver" | "trip" | "tripVideo" | "tripVideoDetectionSample" | "route" | "vehiclePosition" | "routeDeviation" | "objectClass" | "detectionEvent" | "eventImage" | "alert" | "transportGoal" | "virtualScenario" | "replayPreview" | "virtualVehicleSettings" | "virtualRouteDraft" | "virtualDispatchRequest" | "virtualTrip" | "virtualRoute" | "virtualTripWaypoint" | "virtualVehicleState" | "virtualRoadRestriction" | "virtualOperatorEvent"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -1502,6 +1503,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    ReplayPreview: {
+      payload: Prisma.$ReplayPreviewPayload<ExtArgs>
+      fields: Prisma.ReplayPreviewFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.ReplayPreviewFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.ReplayPreviewFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>
+        }
+        findFirst: {
+          args: Prisma.ReplayPreviewFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.ReplayPreviewFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>
+        }
+        findMany: {
+          args: Prisma.ReplayPreviewFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>[]
+        }
+        create: {
+          args: Prisma.ReplayPreviewCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>
+        }
+        createMany: {
+          args: Prisma.ReplayPreviewCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.ReplayPreviewCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>[]
+        }
+        delete: {
+          args: Prisma.ReplayPreviewDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>
+        }
+        update: {
+          args: Prisma.ReplayPreviewUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>
+        }
+        deleteMany: {
+          args: Prisma.ReplayPreviewDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.ReplayPreviewUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.ReplayPreviewUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>[]
+        }
+        upsert: {
+          args: Prisma.ReplayPreviewUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$ReplayPreviewPayload>
+        }
+        aggregate: {
+          args: Prisma.ReplayPreviewAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateReplayPreview>
+        }
+        groupBy: {
+          args: Prisma.ReplayPreviewGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ReplayPreviewGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.ReplayPreviewCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.ReplayPreviewCountAggregateOutputType> | number
+        }
+      }
+    }
     VirtualVehicleSettings: {
       payload: Prisma.$VirtualVehicleSettingsPayload<ExtArgs>
       fields: Prisma.VirtualVehicleSettingsFieldRefs
@@ -2274,6 +2349,8 @@ export const TripScalarFieldEnum = {
   destinationName: 'destinationName',
   destinationAddress: 'destinationAddress',
   tripStatus: 'tripStatus',
+  routeMode: 'routeMode',
+  replayPreviewId: 'replayPreviewId',
   plannedStartAt: 'plannedStartAt',
   startedAt: 'startedAt',
   endedAt: 'endedAt',
@@ -2486,6 +2563,19 @@ export const VirtualScenarioScalarFieldEnum = {
 } as const
 
 export type VirtualScenarioScalarFieldEnum = (typeof VirtualScenarioScalarFieldEnum)[keyof typeof VirtualScenarioScalarFieldEnum]
+
+
+export const ReplayPreviewScalarFieldEnum = {
+  replayPreviewId: 'replayPreviewId',
+  vehicleId: 'vehicleId',
+  fingerprint: 'fingerprint',
+  datasetName: 'datasetName',
+  points: 'points',
+  totalDistanceM: 'totalDistanceM',
+  createdAt: 'createdAt'
+} as const
+
+export type ReplayPreviewScalarFieldEnum = (typeof ReplayPreviewScalarFieldEnum)[keyof typeof ReplayPreviewScalarFieldEnum]
 
 
 export const VirtualVehicleSettingsScalarFieldEnum = {
@@ -2985,6 +3075,7 @@ export type GlobalOmitConfig = {
   alert?: Prisma.AlertOmit
   transportGoal?: Prisma.TransportGoalOmit
   virtualScenario?: Prisma.VirtualScenarioOmit
+  replayPreview?: Prisma.ReplayPreviewOmit
   virtualVehicleSettings?: Prisma.VirtualVehicleSettingsOmit
   virtualRouteDraft?: Prisma.VirtualRouteDraftOmit
   virtualDispatchRequest?: Prisma.VirtualDispatchRequestOmit

@@ -66,6 +66,7 @@ export const ModelName = {
   Alert: 'Alert',
   TransportGoal: 'TransportGoal',
   VirtualScenario: 'VirtualScenario',
+  ReplayPreview: 'ReplayPreview',
   VirtualVehicleSettings: 'VirtualVehicleSettings',
   VirtualRouteDraft: 'VirtualRouteDraft',
   VirtualDispatchRequest: 'VirtualDispatchRequest',
@@ -156,6 +157,8 @@ export const TripScalarFieldEnum = {
   destinationName: 'destinationName',
   destinationAddress: 'destinationAddress',
   tripStatus: 'tripStatus',
+  routeMode: 'routeMode',
+  replayPreviewId: 'replayPreviewId',
   plannedStartAt: 'plannedStartAt',
   startedAt: 'startedAt',
   endedAt: 'endedAt',
@@ -368,6 +371,19 @@ export const VirtualScenarioScalarFieldEnum = {
 } as const
 
 export type VirtualScenarioScalarFieldEnum = (typeof VirtualScenarioScalarFieldEnum)[keyof typeof VirtualScenarioScalarFieldEnum]
+
+
+export const ReplayPreviewScalarFieldEnum = {
+  replayPreviewId: 'replayPreviewId',
+  vehicleId: 'vehicleId',
+  fingerprint: 'fingerprint',
+  datasetName: 'datasetName',
+  points: 'points',
+  totalDistanceM: 'totalDistanceM',
+  createdAt: 'createdAt'
+} as const
+
+export type ReplayPreviewScalarFieldEnum = (typeof ReplayPreviewScalarFieldEnum)[keyof typeof ReplayPreviewScalarFieldEnum]
 
 
 export const VirtualVehicleSettingsScalarFieldEnum = {

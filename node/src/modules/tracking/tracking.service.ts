@@ -40,13 +40,17 @@ async function resolveDeviceObservation(observation: Observation) {
     }
     const vehicle = await prisma.vehicle.findUnique({
         where: { vehicleId },
-        select: { ...vehicleSelect, trips: { where: { tripId }, take: 1, select: { tripId: true, routes: routeSelect } } },
+        select: { ...vehicleSelect, trips: { where: { tripId }, take: 1, select: {
+            tripId: true, tripStatus: true, routeMode: true, destinationName: true, replayPreviewId: true, routes: routeSelect,
+        } } },
     });
     const trip = vehicle?.trips[0];
     if (!vehicle || !trip) {
         return { warning: { code: "DEVICE_IDENTITY_UNRESOLVED", externalId: observation.external_id, vehicleId: String(vehicleId), tripId: String(tripId) } };
     }
-    return { vehicle: { ...vehicle, trips: undefined, tripId: trip.tripId, plannedRoute: trip.routes[0] ?? null, telemetry: observation } };
+    return { vehicle: { ...vehicle, trips: undefined, tripId: trip.tripId, tripStatus: trip.tripStatus,
+        routeMode: trip.routeMode, destinationName: trip.destinationName, replayPreviewId: trip.replayPreviewId,
+        plannedRoute: trip.routes[0] ?? null, telemetry: observation } };
 }
 
 export const trackingService = {
@@ -68,7 +72,8 @@ export const trackingService = {
                 ...vehicleSelect,
                 trips: {
                     where: { tripStatus: { in: ["READY", "IN_PROGRESS", "PAUSED"] } }, take: 1, orderBy: { createdAt: "desc" },
-                    select: { tripId: true, routes: routeSelect },
+                    select: { tripId: true, tripStatus: true, routeMode: true, destinationName: true,
+                        replayPreviewId: true, routes: routeSelect },
                 },
             },
         })));
@@ -81,7 +86,9 @@ export const trackingService = {
         const bimsVehicles = bimsObservations.map(telemetry => {
             const identity = byExternalId.get(telemetry.external_id);
             const trip = identity?.trips[0];
-            return { ...identity, trips: undefined, tripId: trip?.tripId, plannedRoute: trip?.routes[0] ?? null, telemetry };
+            return { ...identity, trips: undefined, tripId: trip?.tripId, tripStatus: trip?.tripStatus,
+                routeMode: trip?.routeMode, destinationName: trip?.destinationName,
+                replayPreviewId: trip?.replayPreviewId, plannedRoute: trip?.routes[0] ?? null, telemetry };
         });
         const resolved = await Promise.all(deviceObservations.map(resolveDeviceObservation));
         const deviceVehicles = resolved.flatMap(item => item.vehicle ? [item.vehicle] : []);

@@ -15,6 +15,7 @@ import { authRouter } from "./modules/auth/auth.router.ts";
 import { bootstrapRouter } from "./modules/bootstrap/bootstrap.router.ts";
 import { trackingRouter } from "./modules/tracking/tracking.router.ts";
 import { tripRouter } from "./modules/trip/trip.router.ts";
+import { deviceTripRouter } from "./modules/trip/device-trip.router.ts";
 import { demoRouter } from "./modules/demo/demo.router.ts";
 import { internalRecordingRouter, recordingRouter } from "./modules/recording/recording.router.ts";
 import { internalTelemetryRouter } from "./modules/telemetry/telemetry.router.ts";
@@ -60,6 +61,7 @@ export function createApp() {
 	app.use("/api/v1/bootstrap", bootstrapRouter);
 	app.use("/api/v1/tracking", trackingRouter);
 	app.use("/api/v1/trips", tripRouter);
+	app.use("/api/v1/device", deviceTripRouter);
 	app.use("/api/v1/demo", demoRouter);
 	app.use("/internal/recordings", internalRecordingRouter);
 	app.use("/internal/telemetry", internalTelemetryRouter);

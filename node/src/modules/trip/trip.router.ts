@@ -21,3 +21,6 @@ tripRouter.post(
     validateBody(createTripSchema),
     tripController.create,
 );
+tripRouter.get("/:tripId/display", authenticate, requireRole("ADMIN", "OPERATOR", "VIEWER"), tripController.display);
+tripRouter.post("/:tripId/cancel", authenticate, requireRole("ADMIN", "OPERATOR"), tripController.cancel);
+tripRouter.get("/vehicles/:vehicleId/replay-preview", authenticate, requireRole("ADMIN", "OPERATOR", "VIEWER"), tripController.latestPreview);

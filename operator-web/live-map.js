@@ -31,7 +31,7 @@ export function fleetMarkerStyle(item) {
 export function createAndroidMarkerRevealer({ map, minimumZoom = 15 }) {
   const revealedSessions = new Set();
   return (item, position) => {
-    if (!isAndroidGpsItem(item)) return false;
+    if (item?.telemetry?.telemetry_source !== 'DEVICE_GPS') return false;
     if (!Array.isArray(position) || !position.every(Number.isFinite)) return false;
     const telemetry = item.telemetry;
     const markerKey = telemetry.external_id || 'android-device';

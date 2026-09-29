@@ -100,6 +100,8 @@ form { display: grid; gap: 10px; }
 #settings-drawer { position: absolute; top: 20px; left: 20px; z-index: 900; width: min(340px,calc(100% - 40px)); }
 #telemetry-settings { display: grid; gap: 10px; margin-top: 18px; }
 #telemetry-settings h2 { display: none; }
+.route-mode-settings { display: grid; gap: 8px; margin-top: 18px; border-top: 1px solid var(--ui-border); padding-top: 14px; font-size: 12px; }
+.route-mode-settings h2 { font-size: 14px; }
 #map-pick-banner { position: absolute; z-index: 800; top: 126px; left: 20px; right: 20px; padding: 10px 16px; background: #fff0dd; border: 1px solid #f59a23; border-radius: 8px; color: #855111; }
 .leaflet-top.leaflet-left { left: auto; right: 12px; top: 10px; }
 .leaflet-control-zoom { border: 1px solid var(--ui-border)!important; box-shadow: var(--ui-shadow-card)!important; }
@@ -107,6 +109,8 @@ form { display: grid; gap: 10px; }
 .vehicle-symbol { display: grid; place-items: center; width: 32px; height: 36px; border-radius: 12px 12px 12px 3px; color: white; background: var(--vehicle-color,#0868dd); border: 2px solid white; box-shadow: 0 3px 8px #29466550; }
 .vehicle-symbol.selected { box-shadow: 0 0 0 8px #0868dd30,0 3px 8px #29466550; transform: scale(1.15); }
 .vehicle-symbol.android { border-style: double; border-width: 4px; }
+.replay-cursor { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #e78328; color: #fff; border: 2px solid #fff; box-shadow: 0 2px 8px #73420e80; font-size: 13px; }
+.replay-cursor.selected { box-shadow: 0 0 0 6px #e7832840,0 2px 8px #73420e80; }
 .leaflet-tooltip.vehicle-label { color: white; background: var(--ui-primary); border: 0; font-weight: 700; }
 .leaflet-tooltip.trip-point-label { background: white; color: var(--ui-text); font-weight: 700; }
 
@@ -124,6 +128,13 @@ form { display: grid; gap: 10px; }
 .vehicle-metadata { margin-top: 14px; }
 dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-size: 12px; } dt { color: var(--ui-text-secondary); } dd { margin: 0; overflow-wrap: anywhere; }
 #route-label { border-top: 1px solid var(--ui-border); padding-top: 12px; margin-top: 12px; font-size: 12px; color: var(--ui-primary); }
+.trip-progress-card { display: grid; gap: 5px; margin-top: 10px; padding: 12px; background: var(--ui-surface-soft); border-radius: 8px; font-size: 12px; }
+.trip-progress-card[hidden] { display: none; }
+.trip-progress-card strong { font-size: 14px; }
+.trip-progress-card p { margin: 0; color: var(--ui-text-secondary); }
+.trip-progress-card progress { width: 100%; height: 12px; accent-color: var(--ui-primary); }
+#trip-preview-status { overflow-wrap: anywhere; }
+#trips-list button { justify-self: start; padding: 5px 8px; font-size: 11px; background: var(--ui-danger-soft); color: var(--ui-danger); }
 #live-view { margin-top: 12px; width: 100%; }
 #trip-panel h2,#recordings-panel h2 { margin-bottom: 16px; }
 #trip-form label { color: var(--ui-text-secondary); font-size: 12px; }

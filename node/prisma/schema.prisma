@@ -78,6 +78,7 @@ model Vehicle {
 
     positions       VehiclePosition[]
     trips           Trip[]
+    replayPreviews  ReplayPreview[]
     detectionEvents DetectionEvent[]
     routeDeviations RouteDeviation[]
     alerts          Alert[]
@@ -125,6 +126,8 @@ model Trip {
     destinationLocation Unsupported("geography(Point, 4326)") @map("destination_location")
 
     tripStatus      String    @map("trip_status") @db.VarChar(30) // CHECK: READY|IN_PROGRESS|PAUSED|COMPLETED|CANCELLED
+    routeMode       String    @default("DUAL") @map("route_mode") @db.VarChar(20)
+    replayPreviewId BigInt?   @map("replay_preview_id")
     plannedStartAt  DateTime? @map("planned_start_at") @db.Timestamptz(6)
     startedAt       DateTime? @map("started_at") @db.Timestamptz(6)
     endedAt         DateTime? @map("ended_at") @db.Timestamptz(6)
@@ -137,6 +140,7 @@ model Trip {
     updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
     vehicle         Vehicle           @relation(fields: [vehicleId], references: [vehicleId])
+    replayPreview   ReplayPreview?    @relation(fields: [replayPreviewId], references: [replayPreviewId])
     driver          Driver?           @relation(fields: [driverId], references: [driverId])
     routes          Route[]
     positions       VehiclePosition[]
@@ -433,6 +437,23 @@ model VirtualScenario {
 
   @@index([state, updatedAt], map: "idx_virtual_scenario_state")
   @@map("virtual_scenario")
+}
+
+model ReplayPreview {
+    replayPreviewId BigInt   @id @default(autoincrement()) @map("replay_preview_id")
+    vehicleId       BigInt   @map("vehicle_id")
+    fingerprint     String   @db.VarChar(64)
+    datasetName     String   @map("dataset_name") @db.VarChar(150)
+    points          Json     @db.JsonB
+    totalDistanceM  Int      @map("total_distance_m")
+    createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+    vehicle Vehicle @relation(fields: [vehicleId], references: [vehicleId])
+    trips   Trip[]
+
+    @@unique([vehicleId, fingerprint])
+    @@index([vehicleId, createdAt])
+    @@map("replay_preview")
 }
 
 model VirtualVehicleSettings {

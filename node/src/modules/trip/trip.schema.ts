@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { routeModeSchema } from "./trip.preview.ts";
 
 const optionalText = z.string().trim().max(150).optional();
 const optionalAddress = z.string().trim().max(2000).optional();
@@ -17,13 +18,21 @@ export const createTripSchema = z.object({
     originAddress: optionalAddress,
     originLatitude: z.number().finite().min(-90).max(90).optional(),
     originLongitude: z.number().finite().min(-180).max(180).optional(),
-    destinationName: z.string().trim().min(1).max(150),
+    routeMode: routeModeSchema.default("DUAL"),
+    replayPreviewId: z.string().regex(/^[1-9]\d*$/).optional(),
+    destinationName: z.string().trim().min(1).max(150).optional(),
     destinationAddress: optionalAddress,
-    destinationLatitude: z.number().finite().min(-90).max(90),
-    destinationLongitude: z.number().finite().min(-180).max(180),
+    destinationLatitude: z.number().finite().min(-90).max(90).optional(),
+    destinationLongitude: z.number().finite().min(-180).max(180).optional(),
     tripStatus: z.enum(["READY", "IN_PROGRESS"]).default("READY"),
     plannedStartAt: z.iso.datetime({ offset: true }).optional(),
 }).superRefine((input, context) => {
+    if (input.routeMode === "DUAL" && (input.destinationName === undefined || input.destinationLatitude === undefined || input.destinationLongitude === undefined)) {
+        context.addIssue({ code: "custom", path: ["destinationLatitude"], message: "Dual mode requires a destination name and coordinates" });
+    }
+    if (input.routeMode === "REPLAY_ONLY" && !input.replayPreviewId) {
+        context.addIssue({ code: "custom", path: ["replayPreviewId"], message: "Replay-only mode requires an Android GPS preview" });
+    }
     if ((input.originLatitude === undefined) !== (input.originLongitude === undefined)) {
         context.addIssue({
             code: "custom",

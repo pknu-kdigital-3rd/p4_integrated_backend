@@ -8,8 +8,11 @@ export const tripSummarySchema = z.object({
     originName: z.string().nullable(),
     destinationName: z.string(),
     tripStatus: tripStatusSchema,
+    routeMode: z.enum(["DUAL", "REPLAY_ONLY"]),
+    replayPreviewId: bigintIdSchema.nullable(),
     plannedStartAt: dateTimeSchema.nullable(),
     startedAt: dateTimeSchema.nullable(),
+    endedAt: dateTimeSchema.nullable(),
     createdAt: dateTimeSchema,
     vehicle: z.object({
         vehicleId: bigintIdSchema,
