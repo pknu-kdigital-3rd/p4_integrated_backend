@@ -294,18 +294,16 @@ estimate total latency. Compare `inference_ms` and `infer_fps` on the live feed.
 
 ## GMC work budget
 
-BoT-SORT now defaults to `BOTSORT_GMC_DOWNSCALE=4` and
-`BOTSORT_GMC_MAX_CORNERS=200`. The previous settings were 2 and 400.
-For a 640x360 inference image, optical flow now operates at 160x90 instead
-of 320x180. GMC's existing translation rescaling converts the warp back to
-inference-image coordinates.
+BoT-SORT defaults to `BOTSORT_GMC_DOWNSCALE=2` and
+`BOTSORT_GMC_MAX_CORNERS=400`. The trial with downscale 4 and 200 corners
+was reported worse during deployment and the previous defaults were restored.
+The cause has not been established; fewer pixels and corners do not guarantee
+lower end-to-end latency or better tracking.
 
-The startup log prints both settings. Compare `gmc_ms`, `gmc_wait_ms`,
-and tracking stability on the same moving-camera feed. Fewer corners and smaller
-images can reduce accuracy on low-texture scenes or rapid motion. To restore
-the previous budget, set the two variables to 2 and 400.
+The settings remain configurable and are printed at startup. Explicit shell
+or .env values override Compose defaults. Compare identical feed segments and
+inspect `gmc_ms`, `gmc_wait_ms`, `tracking_ms`, and `inference_ms`.
 
 After updating the checkout, apply Compose settings without building:
 `docker compose -f docker-compose.dev.yml up -d --no-build --no-deps --force-recreate p4-vision`.
-No dependency changes are required. Live performance and tracking quality must
-be checked on the deployment; static checks do not establish either.
+The concurrent GMC and association scheduling remains enabled.
