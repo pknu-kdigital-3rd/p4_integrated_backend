@@ -23,6 +23,7 @@ data class DeviceTrip(
     val routeMode: String,
     val destinationName: String,
     val fingerprint: String?,
+    val datasetName: String?,
 )
 
 /** The Android-facing nginx port forwards only /api/v1/device to Node. */
@@ -97,5 +98,6 @@ class DeviceTripClient(serverUrl: String) {
         routeMode = data.optString("routeMode", "DUAL"),
         destinationName = data.optString("destinationName"),
         fingerprint = data.optJSONObject("replayPreview")?.optString("fingerprint"),
+        datasetName = data.optJSONObject("replayPreview")?.optString("datasetName"),
     )
 }

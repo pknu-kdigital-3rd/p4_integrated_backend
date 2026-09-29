@@ -408,13 +408,15 @@ class MainActivity : AppCompatActivity() {
         tripStatusText.text = when {
             trip == null -> "Trip: no assignment · streaming can remain live-only"
             trip.status == "MANUAL" -> "Trip ${trip.tripId}: saved manual ID · confirm on server"
+            trip.routeMode == "REPLAY_ONLY" && trip.status == "READY" && trip.fingerprint != selectedDatasetFingerprint ->
+                "Trip ${trip.tripId}: READY · select GPS dataset ${trip.datasetName ?: "assigned by the operator"} to start"
             else -> "Trip ${trip.tripId}: ${trip.status} · ${trip.destinationName}"
         }
         updateRecordingContextText()
     }
 
     private fun fallbackManualTrip(vehicleId: Long): DeviceTrip? = manualTripId()?.let {
-        DeviceTrip(it, vehicleId, "MANUAL", "DUAL", "Manual Trip ID", null)
+        DeviceTrip(it, vehicleId, "MANUAL", "DUAL", "Manual Trip ID", null, null)
     }
 
     private fun uploadSelectedPreview() {
@@ -447,10 +449,14 @@ class MainActivity : AppCompatActivity() {
                 if (vehicleIdInput() != vehicleId) return@runOnUiThread
                 val previous = assignedTrip
                 if (result.isFailure && previous != null) return@runOnUiThread
-                assignedTrip = result.getOrNull() ?: fallbackManualTrip(vehicleId)
-                if (result.isSuccess && previous?.status == "IN_PROGRESS" && assignedTrip?.tripId != previous.tripId) {
+                val current = result.getOrNull()
+                // A server trip that disappeared was completed or cancelled; never
+                // resurrect it through the saved manual Trip ID fallback.
+                if (result.isSuccess && previous != null && previous.status != "MANUAL" && current?.tripId != previous.tripId) {
                     suppressedManualTripId = previous.tripId
-                    assignedTrip = result.getOrNull() ?: fallbackManualTrip(vehicleId)
+                }
+                assignedTrip = current ?: fallbackManualTrip(vehicleId)
+                if (result.isSuccess && previous?.status == "IN_PROGRESS" && assignedTrip?.tripId != previous.tripId) {
                     if (streaming.get()) reconnectStreamForTrip()
                 } else if (result.isSuccess && previous?.status == "READY" && assignedTrip?.status == "IN_PROGRESS" && streaming.get()) {
                     reconnectStreamForTrip()

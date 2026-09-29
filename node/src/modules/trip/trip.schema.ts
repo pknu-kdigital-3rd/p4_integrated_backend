@@ -33,6 +33,10 @@ export const createTripSchema = z.object({
     if (input.routeMode === "REPLAY_ONLY" && !input.replayPreviewId) {
         context.addIssue({ code: "custom", path: ["replayPreviewId"], message: "Replay-only mode requires an Android GPS preview" });
     }
+    // Android's start transition is where the selected dataset is checked against the pin.
+    if (input.routeMode === "REPLAY_ONLY" && input.tripStatus === "IN_PROGRESS") {
+        context.addIssue({ code: "custom", path: ["tripStatus"], message: "Replay-only trips start from Android" });
+    }
     if ((input.originLatitude === undefined) !== (input.originLongitude === undefined)) {
         context.addIssue({
             code: "custom",

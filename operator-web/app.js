@@ -9,7 +9,7 @@ const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
 L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
@@ -27,7 +27,7 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
 // a detached marker would never reappear for the rest of the session.
 function normalMapLayers(){
   return [...markers.values()].map(entry=>entry.marker)
-    .concat([...tripMapMarkers.values()],[routeLayer,replayRouteLayer,destinationMarker].filter(Boolean));
+    .concat([...tripMapMarkers.values()],[routeLayer,replayRouteLayer,destinationMarker,assignmentPreviewLayer].filter(Boolean));
 }
 // Used by the virtual workspace, which takes the map over while it is open.
 window.__operatorDetachMapLayers=()=>{fleetViewport.save();for(const layer of normalMapLayers())map.removeLayer(layer)};
@@ -254,7 +254,28 @@ function syncTripRouteMode(){
   const preview=assignmentPreview,notice=document.querySelector('#trip-preview-status');
   notice.textContent=preview?`Android GPS: ${preview.datasetName} · 마지막 위치 ${preview.points.at(-1)[2].toFixed(5)}, ${preview.points.at(-1)[1].toFixed(5)}`
     :replayOnly?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'Android GPS 미수신 · 경로가 도착하면 함께 표시됩니다.';
-  document.querySelector('#create-trip').disabled=replayOnly&&!preview;
+  // The server rejects a second active assignment; say so before the operator submits.
+  const activeTripId=activeTripByVehicle.get(document.querySelector('#trip-vehicle').value);
+  if(activeTripId)notice.textContent=`Trip ID ${activeTripId}이(가) 이미 배정되어 있습니다. 취소하거나 완료한 뒤 새로 배정하세요.`;
+  document.querySelector('#create-trip').disabled=Boolean(activeTripId)||(replayOnly&&!preview);
+  showAssignmentPreview(replayOnly&&!activeTripId&&!document.querySelector('#trip-form').hidden?preview:null);
+}
+// Before a replay-only assignment, draw the exact path and endpoint the server
+// will pin, so the operator never assigns a destination they have not seen.
+function showAssignmentPreview(preview){
+  const key=preview?`${assignmentPreviewVehicleId}:${preview.fingerprint}`:'';
+  if(key===assignmentPreviewKey)return;
+  if(assignmentPreviewLayer)map.removeLayer(assignmentPreviewLayer);
+  assignmentPreviewLayer=null;assignmentPreviewKey=key;
+  const points=preview?.points;
+  if(!Array.isArray(points)||points.length<2)return;
+  const path=points.map(point=>[point[2],point[1]]);
+  assignmentPreviewLayer=L.layerGroup([
+    L.polyline(path,{color:'#e78328',weight:4,opacity:0.75,dashArray:'4 6'}).bindTooltip(`배정 예정 Android GPS 경로 · ${preview.datasetName}`),
+    L.circleMarker(path.at(-1),{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).bindTooltip('배정 예정 목적지 · GPS 기록 마지막 위치',{direction:'top'}),
+  ]);
+  // The virtual workspace owns the map while open; the layer is re-added when it closes.
+  if(!window.__virtualMode)assignmentPreviewLayer.addTo(map);
 }
 tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripRouteMode',tripRouteMode.value);syncTripRouteMode()});
 syncTripRouteMode();
@@ -276,6 +297,8 @@ async function loadTripAssignments(){
     vehicleSelect.add(new Option(label,String(vehicle.vehicleId)));
   }
   if(vehicles.some(item=>item.isActive&&String(item.vehicleId)===previousVehicle))vehicleSelect.value=previousVehicle;
+  activeTripByVehicle=new Map(trips.filter(trip=>['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)).map(trip=>[String(trip.vehicleId),String(trip.tripId)]));
+  syncTripRouteMode();
   void loadAssignmentPreview();
   const list=document.querySelector('#trips-list');list.replaceChildren();
   for(const trip of trips){
@@ -283,7 +306,7 @@ async function loadTripAssignments(){
     title.textContent=`Trip ID ${trip.tripId}`;
     vehicle.textContent=`Vehicle ID ${trip.vehicleId} · ${trip.vehicle.vehicleCode}${trip.vehicle.vehicleName?` · ${trip.vehicle.vehicleName}`:''}`;
     destination.textContent=`${trip.originName?`${trip.originName} → `:''}${trip.destinationName}`;
-    status.textContent=`${trip.tripStatus}${trip.plannedStartAt?` · planned ${new Date(trip.plannedStartAt).toLocaleString()}`:''}`;
+    status.textContent=`${TRIP_STATUS_LABELS[trip.tripStatus]||trip.tripStatus} · ${trip.routeMode==='REPLAY_ONLY'?'Android GPS 재생 경로만':'최적 경로 + Android GPS 재생'}${trip.plannedStartAt?` · planned ${new Date(trip.plannedStartAt).toLocaleString()}`:''}`;
     row.append(title,vehicle,destination,status);
     if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&['ADMIN','OPERATOR'].includes(currentRole)){
       const cancel=document.createElement('button');cancel.type='button';cancel.textContent='운행 취소';
