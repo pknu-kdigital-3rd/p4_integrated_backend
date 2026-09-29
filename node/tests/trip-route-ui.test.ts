@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { plannedProgress, recordedProgress, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { plannedProgress, recordedProgress, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -68,5 +68,23 @@ describe("trip progress track times", () => {
     it("says what is unknown instead of guessing", () => {
         expect(tripTimes({ tripStatus: "READY" }, seoul)).toEqual({ origin: "출발 대기", destination: "도착 시간 미정" });
         expect(tripTimes({ tripStatus: "CANCELLED", startedAt: "2026-09-29T05:10:00Z" }, seoul).destination).toBe("운행 취소");
+    });
+});
+
+describe("replay progress on the operator's planned route", () => {
+    it("measures the replay position along the planned route toward the operator's destination", () => {
+        const progress = replayProgressOnRoute(line, { latitude: 35.01, longitude: 129.0 })!;
+        expect(progress.percent).toBe(50);
+        expect(progress.label).toMatch(/^GPS 재생 위치 기준 50% · 남은 계획 경로 1\.1 km$/);
+    });
+
+    it("keeps a percentage for a replay path that runs beside the route and says how far off it is", () => {
+        const progress = replayProgressOnRoute(line, { latitude: 35.015, longitude: 129.01 })!;
+        expect(progress.percent).toBe(75);
+        expect(progress.label).toContain("계획 경로에서");
+    });
+
+    it("has nothing to show without a planned route", () => {
+        expect(replayProgressOnRoute(null, { latitude: 35, longitude: 129 })).toBeNull();
     });
 });

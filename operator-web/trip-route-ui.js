@@ -69,3 +69,17 @@ export function tripTimes(display,timeZone){
   const eta=departure&&duration?formatClock(new Date(new Date(departure).getTime()+duration),timeZone):null;
   return {origin,destination:eta?`${eta} 도착 예정`:'도착 시간 미정'};
 }
+
+/**
+ * Progress of an Android replay position along the operator's planned route,
+ * so the percentage matches the route's destination and arrival time. The
+ * replay path may differ from that route, so a far position still gets a
+ * percentage (its nearest route point) plus how far off the route it is.
+ * Labelled as replay: it is never real trip progress.
+ */
+export function replayProgressOnRoute(geometry,fix,offRouteNoticeM=100){
+  const progress=plannedProgress(geometry,fix);
+  if(!progress)return null;
+  const off=progress.offRouteM>offRouteNoticeM?` · 계획 경로에서 ${progress.offRouteM} m 떨어짐`:'';
+  return {...progress,label:`GPS 재생 위치 기준 ${progress.percent}% · 남은 계획 경로 ${(progress.remainingM/1000).toFixed(1)} km${off}`};
+}

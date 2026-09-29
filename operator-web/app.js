@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {plannedProgress,recordedProgress,tripTimes} from './trip-route-ui.js';
+import {plannedProgress,recordedProgress,replayProgressOnRoute,tripTimes} from './trip-route-ui.js';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
@@ -172,10 +172,14 @@ function showTripDisplay(display){
       if(progress?.offRouteM>100){label=`실제 GPS가 계획 경로에서 ${progress.offRouteM} m 벗어남`;progress=null}
       else if(progress)label=`실제 GPS ${progress.percent}% · 남은 계획 경로 ${(progress.remainingM/1000).toFixed(1)} km`;
     }else{
-      // Without a real fix, show how far the Android replay has come through its
-      // recorded path; it is labelled as replay, never as real trip progress.
-      const replay=recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
-      if(replay){progress=replay;label=`GPS 재생 기준 ${replay.percent}% · 남은 기록 경로 ${(replay.remainingM/1000).toFixed(1)} km`}
+      // Without a real fix, place the Android replay's current position on the
+      // operator's planned route, so the percentage, the destination and the
+      // arrival time all describe the same route. The replay path may differ
+      // from that route, so the distance from it is shown rather than hidden.
+      // It is labelled as replay, never as real trip progress.
+      const replayFix=latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='RECORDED_GPS')?.telemetry;
+      const replay=replayFix?replayProgressOnRoute(display.plannedRoute?.routeGeojson,replayFix):null;
+      if(replay){progress=replay;label=replay.label}
       else label=display.replayPreview?'진행률 대기 중 · Android GPS 재생이 시작되면 표시됩니다':'실제 GPS 위치를 기다리는 중';
     }
   }
