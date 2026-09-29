@@ -145,10 +145,10 @@ export function initializeDashboard({ map, markers, selectVehicle, showFleet }) 
     for(const tab of ['live','saved']){document.querySelector(`#recording-${tab}-content`).hidden=tab!==name;document.querySelector(`#recording-${tab}-tab`).setAttribute('aria-pressed',String(tab===name));}
     if(name==='live')document.querySelector('#recording-player').pause();
   };
-  const liveButton=document.querySelector('#live-view'),openLive=document.querySelector('#recording-open-live');
-  const syncLive=()=>{openLive.disabled=liveButton.disabled;document.querySelector('#recording-live-status').textContent=liveButton.disabled?'활성 녹화 세션이 있는 차량을 선택하세요.':'선택 차량의 실시간 영상 연결 가능';};
-  new MutationObserver(syncLive).observe(liveButton,{attributes:true,attributeFilter:['disabled']}); syncLive();
-  openLive.onclick=()=>liveButton.click();
+  // "실시간 영상 열기" is the Live View control itself; app.js enables it per vehicle.
+  const openLive=document.querySelector('#recording-open-live');
+  const syncLive=()=>{document.querySelector('#recording-live-status').textContent=openLive.disabled?'실시간 영상을 보내는 차량을 선택하세요.':'선택 차량의 실시간 영상 연결 가능';};
+  new MutationObserver(syncLive).observe(openLive,{attributes:true,attributeFilter:['disabled']}); syncLive();
   const player=document.querySelector('#recording-player'),speed=document.querySelector('#recording-speed');
   speed.onchange=()=>{player.playbackRate=Number(speed.value);};player.addEventListener('loadedmetadata',()=>{player.playbackRate=Number(speed.value);});
   const kind=document.querySelector('#virtual-restriction-kind');

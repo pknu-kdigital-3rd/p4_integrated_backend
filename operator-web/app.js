@@ -96,7 +96,7 @@ function matchesLiveTarget(item){
     &&typeof metadata.recordingSessionId==='string'&&metadata.recordingSessionId.length>0;
 }
 function syncLiveViewButton(item=selected){
-  const button=document.querySelector('#live-view');
+  const button=document.querySelector('#recording-open-live');
   button.disabled=!bootstrap||!matchesLiveTarget(item);
   button.title=button.disabled?"Live View is available while this vehicle's phone is streaming.":'';
 }
@@ -532,7 +532,7 @@ function stopLiveView(){
   document.querySelector('#live-view-title').textContent='실시간 전방 영상';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
   refreshMapLayout();
-  if(!document.querySelector('#details').hidden)document.querySelector('#live-view').focus({preventScroll:true});
+  if(!document.querySelector('#details').hidden)document.querySelector('#recording-open-live').focus({preventScroll:true});
   renderLiveTelemetryStatus();
 }
 // The virtual workspace takes over the map and the sidebar, so it closes Live
@@ -560,7 +560,7 @@ installForegroundResume(window,document,()=>{
   if(!liveView||document.hidden)return;
   liveFrame.contentWindow?.postMessage({type:FOREGROUND_RESUME_MESSAGE},liveView.frameOrigin);
 });
-document.querySelector('#live-view').addEventListener('click',()=>{
+document.querySelector('#recording-open-live').addEventListener('click',()=>{
   if(!bootstrap||!matchesLiveTarget(selected))return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
   liveViewUrlObject.searchParams.set('autostart','1');

@@ -457,78 +457,10 @@
       <dl id="fields">
       </dl>
      </details>
-     <button disabled="" id="live-view" type="button">
-      실시간 전방 영상
-     </button>
-     <p id="route-label">
-      계획 경로 · 경로 없음
-     </p>
-     <div class="trip-progress-card" id="trip-progress-card" hidden>
-      <p id="selected-route-mode">—</p>
-      <div class="trip-track" id="trip-track">
-       <div aria-hidden="true" class="trip-track-rail">
-        <span class="trip-track-fill"></span>
-        <span class="trip-track-vehicle" data-icon="bus"></span>
-       </div>
-       <div class="trip-track-stops">
-        <div><strong id="selected-origin">출발지 —</strong><small id="selected-origin-time">—</small></div>
-        <div class="trip-track-destination"><strong id="selected-destination">목적지 —</strong><small id="selected-destination-time">—</small></div>
-       </div>
-      </div>
-      <p id="selected-progress" role="status">진행 상태 대기 중</p>
-      <p id="selected-current">현재 위치 대기 중</p>
-     </div>
-    </section>
-    <section aria-labelledby="trip-title" class="ui-card" hidden="" id="trip-panel">
-     <h2 id="trip-title">
-      운행 생성·배정
-     </h2>
-     <form id="trip-form">
-      <label for="trip-vehicle">
-       차량 선택
-      </label>
-      <select id="trip-vehicle" required="">
-       <option value="">
-        차량 불러오는 중…
-       </option>
-      </select>
-      <p class="metadata" id="trip-mode-hint">설정에서 선택한 경로 표시 모드가 적용됩니다.</p>
-      <p class="metadata" id="trip-preview-status">Android GPS 경로 확인 중…</p>
-      <div id="trip-destination-fields">
-      <label for="trip-destination-name">
-       운행 목적지
-      </label>
-      <input id="trip-destination-name" maxlength="150" placeholder="목적지" required=""/>
-      <div class="trip-coordinate-heading">
-       <span>
-        목적지 좌표
-       </span>
-       <button aria-pressed="false" data-trip-map-pick="destination" type="button">
-        지도에서 선택
-       </button>
-      </div>
-      <div class="trip-coordinate-grid">
-       <input aria-label="Destination latitude" id="trip-destination-latitude" max="90" min="-90" placeholder="위도" required="" step="any" type="number"/>
-       <input aria-label="Destination longitude" id="trip-destination-longitude" max="180" min="-180" placeholder="경도" required="" step="any" type="number"/>
-      </div>
-      </div>
-      <button id="create-trip" type="submit">
-       운행 생성 및 배정
-      </button>
-     </form>
-     <p aria-live="polite" id="trip-status-message" role="status">
-      차량과 목적지를 선택하세요.
-     </p>
-     <h3>
-      최근 운행
-     </h3>
-     <ul aria-label="Recent trips" id="trips-list">
-     </ul>
-    </section>
-    <section aria-labelledby="recordings-title" class="ui-card" id="recordings-panel">
-     <h2 id="recordings-title">
-      운행 녹화
-     </h2>
+     <div aria-labelledby="recordings-title" class="vehicle-recordings" id="recordings-panel">
+      <h3 id="recordings-title">
+       운행 녹화
+      </h3>
      <div aria-label="영상 모드" class="ui-segmented">
       <button aria-pressed="false" id="recording-live-tab" type="button">
        실시간 영상
@@ -541,7 +473,7 @@
       <p>
        선택 차량의 실시간 전방 영상을 지도 위에서 확인하세요.
       </p>
-      <button id="recording-open-live" type="button">
+      <button disabled="" id="recording-open-live" type="button">
        실시간 영상 열기
       </button>
       <p id="recording-live-status" role="status">
@@ -643,6 +575,71 @@
        </button>
       </div>
      </div>
+     </div>
+     <p id="route-label">
+      계획 경로 · 경로 없음
+     </p>
+     <div class="trip-progress-card" id="trip-progress-card" hidden>
+      <p id="selected-route-mode">—</p>
+      <div class="trip-track" id="trip-track">
+       <div aria-hidden="true" class="trip-track-rail">
+        <span class="trip-track-fill"></span>
+        <span class="trip-track-vehicle" data-icon="bus"></span>
+       </div>
+       <div class="trip-track-stops">
+        <div><strong id="selected-origin">출발지 —</strong><small id="selected-origin-time">—</small></div>
+        <div class="trip-track-destination"><strong id="selected-destination">목적지 —</strong><small id="selected-destination-time">—</small></div>
+       </div>
+      </div>
+      <p id="selected-progress" role="status">진행 상태 대기 중</p>
+      <p id="selected-current">현재 위치 대기 중</p>
+     </div>
+    </section>
+    <section aria-labelledby="trip-title" class="ui-card" hidden="" id="trip-panel">
+     <h2 id="trip-title">
+      운행 생성·배정
+     </h2>
+     <form id="trip-form">
+      <label for="trip-vehicle">
+       차량 선택
+      </label>
+      <select id="trip-vehicle" required="">
+       <option value="">
+        차량 불러오는 중…
+       </option>
+      </select>
+      <p class="metadata" id="trip-mode-hint">설정에서 선택한 경로 표시 모드가 적용됩니다.</p>
+      <p class="metadata" id="trip-preview-status">Android GPS 경로 확인 중…</p>
+      <div id="trip-destination-fields">
+      <label for="trip-destination-name">
+       운행 목적지
+      </label>
+      <input id="trip-destination-name" maxlength="150" placeholder="목적지" required=""/>
+      <div class="trip-coordinate-heading">
+       <span>
+        목적지 좌표
+       </span>
+       <button aria-pressed="false" data-trip-map-pick="destination" type="button">
+        지도에서 선택
+       </button>
+      </div>
+      <div class="trip-coordinate-grid">
+       <input aria-label="Destination latitude" id="trip-destination-latitude" max="90" min="-90" placeholder="위도" required="" step="any" type="number"/>
+       <input aria-label="Destination longitude" id="trip-destination-longitude" max="180" min="-180" placeholder="경도" required="" step="any" type="number"/>
+      </div>
+      </div>
+      <button id="create-trip" type="submit">
+       운행 생성 및 배정
+      </button>
+     </form>
+     <p aria-live="polite" id="trip-status-message" role="status">
+      차량과 목적지를 선택하세요.
+     </p>
+     <h3>
+      최근 운행
+     </h3>
+     <ul aria-label="Recent trips" id="trips-list">
+     </ul>
     </section>
     <p id="error" role="alert">
     </p>

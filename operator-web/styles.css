@@ -150,7 +150,10 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #trip-preview-status { overflow-wrap: anywhere; }
 #trips-list button { justify-self: start; padding: 5px 8px; font-size: 11px; background: var(--ui-danger-soft); color: var(--ui-danger); }
 #live-view { margin-top: 12px; width: 100%; }
-#trip-panel h2,#recordings-panel h2 { margin-bottom: 16px; }
+#trip-panel h2 { margin-bottom: 16px; }
+/* Trip recordings live inside the selected-vehicle card. */
+.vehicle-recordings { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ui-border); }
+.vehicle-recordings h3 { font-size: 14px; }
 #trip-form label { color: var(--ui-text-secondary); font-size: 12px; }
 .trip-coordinate-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
 .trip-coordinate-heading button { padding: 6px 8px; background: var(--ui-primary-soft); color: var(--ui-primary); }
