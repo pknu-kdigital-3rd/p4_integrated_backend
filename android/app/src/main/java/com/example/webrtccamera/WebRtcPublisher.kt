@@ -647,8 +647,8 @@ class WebRtcPublisher(
         }
         val reason = status.optString("reason").takeIf { it.isNotBlank() } ?: "the relay did not say why"
         val message = if (status.optBoolean("trackingOnly", false))
-            "Relay rejected Trip ID: $reason - recording is off; the vehicle is still tracked on the map"
-        else "Relay rejected Trip/Vehicle ID: $reason - telemetry and recording are off"
+            "Shown on the map without recording - the trip could not be used ($reason)"
+        else "Not shown on the map and not recording - the Vehicle ID was not accepted ($reason)"
         Log.w(TAG, message)
         onStreamIdentity(message)
     }

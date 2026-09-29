@@ -455,7 +455,9 @@ class MainActivity : AppCompatActivity() {
                 if (result.isSuccess && previous != null && previous.status != "MANUAL" && current?.tripId != previous.tripId) {
                     suppressedManualTripId = previous.tripId
                 }
-                assignedTrip = current ?: fallbackManualTrip(vehicleId)
+                // The saved manual Trip ID only stands in when the server cannot be asked;
+                // when it answers "no active trip", the relay would reject that ID anyway.
+                assignedTrip = if (result.isSuccess) current else fallbackManualTrip(vehicleId)
                 if (result.isSuccess && previous?.status == "IN_PROGRESS" && assignedTrip?.tripId != previous.tripId) {
                     if (streaming.get()) reconnectStreamForTrip()
                 } else if (result.isSuccess && previous?.status == "READY" && assignedTrip?.status == "IN_PROGRESS" && streaming.get()) {
@@ -515,10 +517,15 @@ class MainActivity : AppCompatActivity() {
         }
         setStatus("Checking assigned trip…")
         telemetryIoExecutor.execute {
-            val current = if (vehicleId == null) null else runCatching { DeviceTripClient(endpoint).current(vehicleId) }.getOrNull()
+            val lookup = if (vehicleId == null) null else runCatching { DeviceTripClient(endpoint).current(vehicleId) }
             runOnUiThread {
                 if (streaming.get() || vehicleIdInput() != vehicleId) return@runOnUiThread
-                assignedTrip = current ?: vehicleId?.let(::fallbackManualTrip)
+                assignedTrip = when {
+                    lookup == null -> null
+                    lookup.isSuccess -> lookup.getOrNull()
+                    // Server unreachable: fall back to the saved manual Trip ID.
+                    else -> vehicleId?.let(::fallbackManualTrip)
+                }
                 renderTripStatus()
                 val context = assignedTrip?.takeIf {
                     (it.status == "IN_PROGRESS" || it.status == "MANUAL") &&
