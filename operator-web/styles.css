@@ -146,7 +146,7 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 .trip-track-stops > div { display: grid; gap: 2px; min-width: 0; }
 .trip-track-icon { display: inline-grid; place-items: center; width: 24px; height: 24px; }
 .trip-track-icon svg { width: 20px; height: 20px; }
-.trip-track-start { color: var(--ui-primary); }
+.trip-track-start { color: #2fb344; }
 .trip-track-end { color: #e53955; justify-self: end; }
 .trip-track-stops small { color: var(--ui-text-secondary); font-size: 11px; }
 .trip-track-destination { text-align: right; }
