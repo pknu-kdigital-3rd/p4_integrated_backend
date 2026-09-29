@@ -212,6 +212,8 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 /* A dragged position is inline left/top; fullscreen must still cover the screen. */
 #live-view-panel:fullscreen { position: fixed; inset: 0 !important; width: 100vw; height: 100dvh; border-radius: 0; grid-template-rows: 48px minmax(0,1fr) 30px; }
 #live-view-panel:fullscreen #live-view-diagnostic,#live-view-panel:fullscreen #live-telemetry-status { display: none; }
+/* Docking/floating and the details toggle do not apply to fullscreen. */
+#live-view-panel:fullscreen #live-float,#live-view-panel:fullscreen #live-details { display: none; }
 
 /* Dedicated virtual dispatch workspace */
 body.virtual-mode #operator-layout { grid-template-columns: 310px minmax(0,1fr); }
