@@ -544,7 +544,19 @@
       const className = String(item.class || 'object').toLowerCase();
       const drawBox = overlayMode === 'all' || overlayMode === 'boxes' || (overlayMode === 'person_box_other_segmentation' && className === 'person');
       const drawMask = overlayMode === 'all' || overlayMode === 'segmentation' || (overlayMode === 'person_box_other_segmentation' && className !== 'person');
-      if (boxesEl.checked && drawBox) { overlayCtx.strokeStyle = color; overlayCtx.lineWidth = ghost ? 1 : 2; overlayCtx.setLineDash(ghost ? [5, 4] : []); overlayCtx.strokeRect(x, y, w, h); overlayCtx.setLineDash([]); if (!ghost) { overlayCtx.fillStyle = color; overlayCtx.font = '14px sans-serif'; const skipped = item.distance_status === 'inference_skipped'; const rawDistance = skipped ? item.held_distance_m : item.distance_m; const distance = Number(rawDistance); const distanceLabel = rawDistance != null && Number.isFinite(distance) ? ` · ${Math.round(distance)}m` : (!skipped && item.distance_status ? ` · no-dist:${item.distance_status}` : ''); overlayCtx.fillText(`${item.class || 'object'} ${(confidence * 100).toFixed(0)}%${distanceLabel}`, x + 3, Math.max(14, y - 4)); } }
+      const showBox = boxesEl.checked && drawBox;
+      if (showBox) { overlayCtx.strokeStyle = color; overlayCtx.lineWidth = ghost ? 1 : 2; overlayCtx.setLineDash(ghost ? [5, 4] : []); overlayCtx.strokeRect(x, y, w, h); overlayCtx.setLineDash([]); }
+      if (!ghost) {
+        const skipped = item.distance_status === 'inference_skipped';
+        const rawDistance = skipped ? item.held_distance_m : item.distance_m;
+        const distance = Number(rawDistance);
+        const distanceLabel = rawDistance != null && Number.isFinite(distance) ? `${Math.round(distance)}m` : '';
+        const statusLabel = !skipped && item.distance_status ? `no-dist:${item.distance_status}` : '';
+        overlayCtx.fillStyle = color;
+        overlayCtx.font = '14px sans-serif';
+        if (showBox) overlayCtx.fillText(`${item.class || 'object'} ${(confidence * 100).toFixed(0)}%${distanceLabel ? ` · ${distanceLabel}` : statusLabel ? ` · ${statusLabel}` : ''}`, x + 3, Math.max(14, y - 4));
+        else if (distanceLabel) overlayCtx.fillText(distanceLabel, x + 3, Math.max(14, y - 4));
+      }
       if (masksEl.checked && drawMask && item.mask && item.mask.length > 2) { overlayCtx.beginPath(); item.mask.forEach((point, i) => { const px = point[0] * overlayCanvas.width, py = point[1] * overlayCanvas.height; i ? overlayCtx.lineTo(px, py) : overlayCtx.moveTo(px, py); }); overlayCtx.closePath(); overlayCtx.fillStyle = color + '44'; overlayCtx.fill(); overlayCtx.strokeStyle = color; overlayCtx.stroke(); }
       overlayCtx.globalAlpha = 1;
     }
