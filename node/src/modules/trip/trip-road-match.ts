@@ -72,11 +72,14 @@ type TimedPosition = { sourceTimestampNs: string; position: number };
  * recording actually was. Without skips the matched route is kept as is.
  */
 export function spliceSkippedStretches(points: PreviewPoint[], indices: number[], coordinates: number[][],
-    anchorPositions: number[], skippedSlots: number[]): { coordinates: number[][]; timing: TimedPosition[] } {
+    anchorPositions: number[], skippedSlots: number[], recordedSlots: number[] = []): { coordinates: number[][]; timing: TimedPosition[] } {
     const skipped = new Set(skippedSlots);
+    // Matched anchors reached by a road detour (see roadDetourSlots): the
+    // stretch up to them follows the recording like a skipped one.
+    const recorded = new Set(recordedSlots);
     const matched = indices.map((_, slot) => slot).filter(slot => !skipped.has(slot));
     const timeOf = (slot: number) => points[indices[slot]!]![0];
-    if (!skipped.size) {
+    if (!skipped.size && !recorded.size) {
         return { coordinates, timing: matched.map(slot => ({ sourceTimestampNs: timeOf(slot), position: anchorPositions[slot]! })) };
     }
     const out: number[][] = [];
@@ -98,12 +101,40 @@ export function spliceSkippedStretches(points: PreviewPoint[], indices: number[]
     addAnchor(first);
     for (let step = 1; step < matched.length; step++) {
         const from = matched[step - 1]!, to = matched[step]!;
-        if (to - from > 1) addRecorded(indices[from]! + 1, indices[to]! - 1);
+        if (to - from > 1 || recorded.has(to)) addRecorded(indices[from]! + 1, indices[to]! - 1);
         else for (let position = anchorPositions[from]! + 1; position < anchorPositions[to]!; position++) add(coordinates[position]!);
         addAnchor(to);
     }
     if (last < indices.length - 1) addRecorded(indices[last]! + 1, indices.at(-1)!);
     return { coordinates: out, timing };
+}
+
+// A road section this much longer than the recording between the same two
+// anchors is a detour the vehicle did not drive.
+const detourFactor = 1.5;
+const detourSlackM = 40;
+
+/**
+ * Matched anchors whose road section from the previous matched anchor is far
+ * longer than the recorded GPS between them. Typically a U-turn where the map
+ * has no connection between the carriageways: the car turned where the median
+ * ends, the road graph only at the next opening, and the matched path runs on
+ * to that opening and back.
+ */
+export function roadDetourSlots(points: PreviewPoint[], indices: number[], coordinates: number[][],
+    anchorPositions: number[], skippedSlots: number[]): number[] {
+    const skipped = new Set(skippedSlots);
+    const matched = indices.map((_, slot) => slot).filter(slot => !skipped.has(slot));
+    const roadM = cumulativeDistances(coordinates);
+    const detours: number[] = [];
+    for (let step = 1; step < matched.length; step++) {
+        const from = matched[step - 1]!, to = matched[step]!;
+        if (to - from > 1) continue;
+        const gpsM = points[indices[to]!]![3] - points[indices[from]!]![3];
+        const sectionM = roadM[anchorPositions[to]!]! - roadM[anchorPositions[from]!]!;
+        if (sectionM > detourFactor * gpsM + detourSlackM) detours.push(to);
+    }
+    return detours;
 }
 
 export async function matchReplayPreview(preview: { fingerprint: string; points: unknown }): Promise<RoadMatch | null> {
@@ -120,7 +151,9 @@ export async function matchReplayPreview(preview: { fingerprint: string; points:
         for (const position of route.anchorPositions) {
             if (!Number.isInteger(position) || position < 0 || position >= coordinates.length) throw new Error("Invalid road match anchor position");
         }
-        const spliced = spliceSkippedStretches(points, indices, coordinates, route.anchorPositions, route.skippedAnchors ?? []);
+        const skipped = route.skippedAnchors ?? [];
+        const detours = roadDetourSlots(points, indices, coordinates, route.anchorPositions, skipped);
+        const spliced = spliceSkippedStretches(points, indices, coordinates, route.anchorPositions, skipped, detours);
         const coordinateDistancesM = cumulativeDistances(spliced.coordinates);
         const anchors = spliced.timing.map(({ sourceTimestampNs, position }) => ({
             sourceTimestampNs, routePosition: position, routeDistanceM: coordinateDistancesM[position]!,

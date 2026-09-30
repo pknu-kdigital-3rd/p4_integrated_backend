@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { roadAnchorIndices, matchReplayPreview, spliceSkippedStretches } from "../src/modules/trip/trip-road-match.ts";
+import { roadAnchorIndices, roadDetourSlots, matchReplayPreview, spliceSkippedStretches } from "../src/modules/trip/trip-road-match.ts";
 import { routingInternalClient } from "../src/modules/virtual/routing-internal.client.ts";
 
 describe("recorded GPS road matching", () => {
@@ -75,3 +75,26 @@ describe("splicing recorded GPS into skipped road-match stretches", () => {
     });
 });
 
+describe("following the recording where the road match detours", () => {
+    // East along lat 35 for ~180 m, U-turn at 129.002 where the median ends, back west.
+    const points: Array<[string, number, number, number]> = [
+        ["1", 129.000, 35.00000, 0], ["2", 129.001, 35.00000, 91], ["3", 129.002, 35.00005, 183],
+        ["4", 129.001, 35.00009, 275],
+    ];
+    const indices = [0, 2, 3];
+    // The map connects the carriageways only at an opening 91 m further east.
+    const road = [[129.000, 35], [129.002, 35], [129.003, 35], [129.003, 35.00009], [129.002, 35.00009], [129.001, 35.00009]];
+
+    it("flags an anchor reached by a much longer road section than the recording", () => {
+        expect(roadDetourSlots(points, indices, road, [0, 4, 5], [])).toEqual([1]);
+        const followsGps = [[129.000, 35], [129.002, 35.00005], [129.001, 35.00009]];
+        expect(roadDetourSlots(points, indices, followsGps, [0, 1, 2], [])).toEqual([]);
+    });
+
+    it("draws that stretch from the recorded fixes instead of the road detour", () => {
+        const result = spliceSkippedStretches(points, indices, road, [0, 4, 5], [], [1]);
+        expect(result.coordinates).toEqual([[129.000, 35], [129.001, 35], [129.002, 35.00009], [129.001, 35.00009]]);
+        expect(result.coordinates.some(([lon]) => lon === 129.003)).toBe(false);
+        expect(result.timing.map(entry => entry.sourceTimestampNs)).toEqual(["1", "2", "3", "4"]);
+    });
+});
