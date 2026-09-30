@@ -849,12 +849,16 @@ def internal_route(req: InternalRouteRequest):
     return _internal_route(req)
 
 
+# Node sends an anchor about every 150 m (up to 600) so bridges stay short.
+MAX_MATCH_ANCHORS = 1000
+
+
 @app.post("/internal/routing/match-preview")
 def internal_match_preview(req: MatchPreviewRequest):
     if match_graph is None or _match_edge_index is None:
         raise HTTPException(status_code=503, detail="Road matching graph is not ready")
-    if not 2 <= len(req.points) <= 64:
-        raise HTTPException(status_code=422, detail="Expected 2 to 64 GPS anchors")
+    if not 2 <= len(req.points) <= MAX_MATCH_ANCHORS:
+        raise HTTPException(status_code=422, detail=f"Expected 2 to {MAX_MATCH_ANCHORS} GPS anchors")
     if any(not math.isfinite(point.lat) or not math.isfinite(point.lon)
            or abs(point.lat) > 90 or abs(point.lon) > 180 for point in req.points):
         raise HTTPException(status_code=422, detail="Invalid GPS anchor coordinates")

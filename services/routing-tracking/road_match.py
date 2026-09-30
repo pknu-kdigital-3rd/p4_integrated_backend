@@ -142,7 +142,7 @@ def _edge_after(candidate):
 MAX_SKIPPED_ANCHOR_SHARE = 0.25
 
 
-def _match_anchors(graph, points, rows, matched):
+def _match_anchors(graph, points, rows, matched, bridges=None):
     """Build the road path through the ``matched`` anchors, in order.
 
     Returns {"path", "positions", "chosen"} or a failure dict naming the rule
@@ -164,7 +164,15 @@ def _match_anchors(graph, points, rows, matched):
         else:
             _append(path, _edge_after(previous))
             if previous["end"] != current["start"]:
-                bridge = graph.route(previous["end"], current["start"])
+                # Retries after a dropped anchor rebuild the whole path; most
+                # bridges between the same road ends are unchanged, so reuse them.
+                key = (previous["end"], current["start"])
+                if bridges is not None and key in bridges:
+                    bridge = bridges[key]
+                else:
+                    bridge = graph.route(previous["end"], current["start"])
+                    if bridges is not None:
+                        bridges[key] = bridge
                 if bridge is None:
                     return {"reason": "no_connection", **pair}
                 _append(path, bridge.coords)
@@ -213,9 +221,10 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
     # by that pair's earlier anchor, so they can be restored if the earlier
     # anchor turns out to be the bad one.
     dropped_after = {}
+    bridges = {}
     while True:
         matched = [index for index in range(len(points)) if index not in skipped]
-        outcome = _match_anchors(graph, points, rows, matched)
+        outcome = _match_anchors(graph, points, rows, matched, bridges)
         if "path" in outcome:
             break
         anchor, previous = outcome.pop("anchor"), outcome.pop("previous")

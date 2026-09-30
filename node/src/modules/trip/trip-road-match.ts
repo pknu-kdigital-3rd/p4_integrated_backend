@@ -9,7 +9,11 @@ type RoadMatch = {
 };
 
 const cache = new Map<string, Promise<RoadMatch | null>>();
-const maxAnchors = 48;
+// Anchors about every 150 m (more for long recordings, up to maxAnchors): with
+// sparse anchors the matcher bridges long stretches with the fastest route,
+// which can leave by a different exit or road than the vehicle took.
+const maxAnchors = 600;
+const anchorSpacingM = 150;
 
 function deviationM(point: PreviewPoint, first: PreviewPoint, last: PreviewPoint): number {
     const latScale = 111_195;
@@ -24,7 +28,7 @@ function deviationM(point: PreviewPoint, first: PreviewPoint, last: PreviewPoint
 export function roadAnchorIndices(points: PreviewPoint[]): number[] {
     const indices = [0, points.length - 1];
     const totalM = points.at(-1)![3];
-    const spacingM = Math.max(400, totalM / (maxAnchors - 1));
+    const spacingM = Math.max(anchorSpacingM, totalM / (maxAnchors - 1));
     for (let distance = spacingM; distance < totalM && indices.length < maxAnchors; distance += spacingM) {
         let low = 0, high = points.length - 1;
         while (low < high) { const middle = (low + high) >> 1; if (points[middle]![3] < distance) low = middle + 1; else high = middle; }
