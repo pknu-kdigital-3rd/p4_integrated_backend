@@ -67,6 +67,7 @@ let applyingSpeedChange = false;
 let vehicles = [];
 let restrictions = [];
 let draft = null;
+let dispatchSubmitting = false;
 let points = { origin: null, destination: null, waypoints: [] };
 let pickMode = null;
 let endpointDrag = null;
@@ -621,7 +622,7 @@ function renderDraft() {
     lineColor: '#62a9f8', lineWeight: 11, lineOpacity: 0.98, arrowColor: '#ffffff', arrowYawn: 36, showArrows: true,
   }, 'Route preview');
   document.querySelector('#virtual-draft-summary').textContent = `Draft ${draft.draftId} · ${(Number(draft.distanceM || draft.route?.distanceM || 0) / 1000).toFixed(2)} km · ${(Number(draft.durationSec || draft.route?.durationSec || 0) / 60).toFixed(1)} min · restriction revision ${draft.restrictionRevision}`;
-  document.querySelector('#virtual-dispatch').disabled = false;
+  document.querySelector('#virtual-dispatch').disabled = dispatchSubmitting;
 }
 function renderActiveTripRoute(vehicle) {
   const trip = vehicle?.state?.trip;
@@ -825,8 +826,28 @@ async function previewRoute() {
   } catch (error) { draft = null; renderDraft(); setStatus(error.message, true); }
 }
 async function generateRequest() {
-  if (!draft) return;
-  try { await api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`, { method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), selectedVehicleId, idempotencyKey: idempotency('dispatch') }) }); setStatus(uiText('Simulated driver request generated.')); await loadScenarioData(); }
+  if (!draft || dispatchSubmitting) return;
+  dispatchSubmitting = true;
+  renderDraft();
+  let request;
+  try {
+    request = await api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`, {
+      method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), selectedVehicleId, idempotencyKey: idempotency('dispatch') }),
+    });
+    // Once created, use the request's identity for acceptance; never create a
+    // second request from the same draft if acceptance needs to be retried.
+    draft = null;
+    if (request.state !== 'ACCEPTED') {
+      await api(`/api/v1/virtual/dispatch-requests/${encodeURIComponent(request.requestId)}/accept`, { method: 'POST', body: '{}' });
+    }
+    setStatus('배차 요청이 즉시 수락되었습니다. 차량이 출발합니다.');
+  } catch (error) {
+    setStatus(request ? `배차 요청 ${request.requestId}의 자동 수락에 실패했습니다: ${error.message}` : error.message, true);
+  } finally {
+    dispatchSubmitting = false;
+    renderDraft();
+  }
+  try { await loadScenarioData(); }
   catch (error) { setStatus(error.message, true); }
 }
 async function createScenario() {
