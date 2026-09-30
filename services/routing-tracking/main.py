@@ -840,17 +840,20 @@ def internal_match_preview(req: MatchPreviewRequest):
         # Say which rule rejected which anchor: Node logs this message, and it is the
         # only way to tell off-graph GPS from a one-way conflict or a detour.
         explanations = {
-            "no_road_nearby": "no road within {radius_m} m of GPS anchor {anchor} ({lat}, {lon})",
+            "no_road_nearby": "no road within {radius_m} m of GPS anchor {anchor} ({lat}, {lon}); {unmatched} of {anchors} anchors unmatched, more than the skippable share",
             "no_connection": "no directed road connection reaches GPS anchor {anchor} ({lat}, {lon})",
             "detour_too_long": "road path to GPS anchor {anchor} ({lat}, {lon}) is {road_m} m for {gps_m} m of GPS travel",
         }
         message = explanations.get(failure.get("reason"), "road match not found").format(**failure) if failure else "road match not found"
         print(f"road match rejected: {message} ({len(req.points)} anchors)", flush=True)
         raise HTTPException(status_code=422, detail={"code": "ROAD_MATCH_NOT_FOUND", "message": message, **failure})
+    if result["skippedAnchors"]:
+        print(f"road match skipped {len(result['skippedAnchors'])} of {len(req.points)} GPS anchors with no road nearby: {result['skippedAnchors']}", flush=True)
     return {"graphVersion": _graph_version(),
             "routeGeojson": {"type": "LineString", "coordinates": result["coordinates"]},
             "anchorPositions": result["anchorPositions"],
-            "snapDistancesM": result["snapDistancesM"]}
+            "snapDistancesM": result["snapDistancesM"],
+            "skippedAnchors": result["skippedAnchors"]}
 
 
 @app.post("/internal/routing/road-restrictions/resolve")

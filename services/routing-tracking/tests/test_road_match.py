@@ -90,3 +90,27 @@ class RoadMatchFailureReasonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoadMatchSkippedAnchorTests(unittest.TestCase):
+    def test_bridges_over_an_anchor_with_no_road_nearby(self):
+        graph = FakeGraph({1: (35, 129), 2: (35, 129.01)})
+        points = [(35.00005, 129.001), (35.00005, 129.003), (35.01, 129.005),
+                  (35.00005, 129.007), (35.00005, 129.009)]
+        result = match(graph, [(1, 2, [(35, 129), (35, 129.01)])], points)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["skippedAnchors"], [2])
+        positions = result["anchorPositions"]
+        self.assertEqual(len(positions), len(points))
+        self.assertEqual(positions[2], positions[1], "a skipped anchor keeps the preceding position")
+        self.assertEqual(positions, sorted(positions))
+        self.assertIsNone(result["snapDistancesM"][2])
+
+    def test_fails_when_too_many_anchors_have_no_road(self):
+        graph = FakeGraph({1: (35, 129), 2: (35, 129.01)})
+        failure = {}
+        points = [(35.00005, 129.001), (35.01, 129.003), (35.01, 129.005), (35.00005, 129.009)]
+        result = match(graph, [(1, 2, [(35, 129), (35, 129.01)])], points, failure)
+        self.assertIsNone(result)
+        self.assertEqual((failure["reason"], failure["anchor"], failure["unmatched"], failure["anchors"]),
+                         ("no_road_nearby", 1, 2, 4))

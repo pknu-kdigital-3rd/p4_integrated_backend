@@ -136,12 +136,21 @@ def _edge_after(candidate):
     return [candidate["snap"]] + candidate["geometry"][candidate["segment"]:]
 
 
+# At most this share of GPS anchors may lack a nearby road (for example a
+# campus road the routing graph leaves out) before the whole match fails.
+MAX_SKIPPED_ANCHOR_SHARE = 0.25
+
+
 def match_preview(graph, records, spatial_index, long_records, bucket_size, points, failure=None):
     """Return road geometry and each GPS anchor's index on it, or None.
 
-    When it returns None and ``failure`` is a dict, the dict is filled with why:
-    ``reason`` plus the anchor index and coordinates involved, so an operator can
-    see which part of the recording could not be placed on the road graph.
+    An anchor with no road within reach is skipped and bridged over, up to
+    MAX_SKIPPED_ANCHOR_SHARE of them; it takes the preceding matched anchor's
+    position so positions stay non-decreasing, and is listed in
+    ``skippedAnchors``. When it returns None and ``failure`` is a dict, the
+    dict is filled with why: ``reason`` plus the anchor index and coordinates
+    involved, so an operator can see which part of the recording could not be
+    placed on the road graph.
     """
     def fail(reason, anchor, **extra):
         if failure is not None:
@@ -152,13 +161,15 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
     if len(points) < 2:
         return None
     rows = [_candidates(graph, point, records, spatial_index, long_records, bucket_size) for point in points]
-    for anchor, row in enumerate(rows):
-        if not row:
-            return fail("no_road_nearby", anchor, radius_m=120)
-    chosen = _choose_sequence(points, rows)
+    matched = [index for index, row in enumerate(rows) if row]
+    skipped = [index for index, row in enumerate(rows) if not row]
+    if len(matched) < 2 or len(skipped) > len(points) * MAX_SKIPPED_ANCHOR_SHARE:
+        return fail("no_road_nearby", skipped[0], radius_m=120, unmatched=len(skipped), anchors=len(points))
+    matched_points = [points[index] for index in matched]
+    chosen = _choose_sequence(matched_points, [rows[index] for index in matched])
     path = [list(chosen[0]["snap"])]
-    positions = [0]
-    for point_index, (previous, current) in enumerate(zip(chosen, chosen[1:])):
+    matched_positions = [0]
+    for step, (previous, current) in enumerate(zip(chosen, chosen[1:])):
         section_start = len(path) - 1
         if previous["id"] == current["id"] and current["progress"] >= previous["progress"]:
             if previous["segment"] == current["segment"]:
@@ -171,14 +182,23 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
             if previous["end"] != current["start"]:
                 bridge = graph.route(previous["end"], current["start"])
                 if bridge is None:
-                    return fail("no_connection", point_index + 1)
+                    return fail("no_connection", matched[step + 1])
                 _append(path, bridge.coords)
             _append(path, _edge_before(current))
         road_m = sum(haversine_m(*path[index - 1], *path[index])
                      for index in range(section_start + 1, len(path)))
-        gps_m = haversine_m(*points[point_index], *points[point_index + 1])
+        # Across a skipped anchor this is the GPS distance between the matched
+        # anchors on either side, so a bridged gap is held to the same limit.
+        gps_m = haversine_m(*matched_points[step], *matched_points[step + 1])
         if road_m > max(250, 4 * gps_m + 150):
-            return fail("detour_too_long", point_index + 1, road_m=round(road_m), gps_m=round(gps_m))
-        positions.append(len(path) - 1)
+            return fail("detour_too_long", matched[step + 1], road_m=round(road_m), gps_m=round(gps_m))
+        matched_positions.append(len(path) - 1)
+    position_by_anchor = dict(zip(matched, matched_positions))
+    snap_by_anchor = {anchor: round(candidate["distance"], 1) for anchor, candidate in zip(matched, chosen)}
+    positions, snaps, last_position = [], [], 0
+    for anchor in range(len(points)):
+        last_position = position_by_anchor.get(anchor, last_position)
+        positions.append(last_position)
+        snaps.append(snap_by_anchor.get(anchor))
     return {"coordinates": [[lon, lat] for lat, lon in path], "anchorPositions": positions,
-            "snapDistancesM": [round(candidate["distance"], 1) for candidate in chosen]}
+            "snapDistancesM": snaps, "skippedAnchors": skipped}
