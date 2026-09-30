@@ -9,6 +9,33 @@ import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
 const map=L.map('map').setView([35.1796,129.0756],12);
+const mapContainer=map.getContainer();
+let rightButtonPan=null;
+mapContainer.addEventListener('mousedown',event=>{
+  if(event.target.closest('.leaflet-control'))return;
+  if(event.button===0){event.stopPropagation();return;}
+  if(event.button!==2)return;
+  event.preventDefault();
+  event.stopPropagation();
+  rightButtonPan={x:event.clientX,y:event.clientY};
+  mapContainer.classList.add('right-button-panning');
+},true);
+mapContainer.addEventListener('contextmenu',event=>event.preventDefault());
+document.addEventListener('mousemove',event=>{
+  if(!rightButtonPan)return;
+  const dx=event.clientX-rightButtonPan.x,dy=event.clientY-rightButtonPan.y;
+  rightButtonPan={x:event.clientX,y:event.clientY};
+  if(dx||dy)map.panBy([-dx,-dy],{animate:false});
+});
+document.addEventListener('mouseup',event=>{
+  if(event.button!==2||!rightButtonPan)return;
+  rightButtonPan=null;
+  mapContainer.classList.remove('right-button-panning');
+});
+window.addEventListener('blur',()=>{
+  rightButtonPan=null;
+  mapContainer.classList.remove('right-button-panning');
+});
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
 const fallbackBasemap=L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);

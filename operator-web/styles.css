@@ -80,6 +80,7 @@ form { display: grid; gap: 10px; }
 /* Map surfaces and commands */
 #map-surface { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 #map { height: 100%; width: 100%; background: #f7f8f4; }
+#map.right-button-panning { cursor: grabbing; }
 #map-commands { position: absolute; z-index: 700; top: 20px; left: 20px; width: min(510px,calc(100% - 85px)); }
 .map-search { background: white; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--ui-border); border-radius: 24px; box-shadow: var(--ui-shadow-card); }
 .map-search input { border: 0; padding: 14px 4px; flex: 1; background: transparent; }
