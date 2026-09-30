@@ -4,6 +4,7 @@ import { trackingClient } from "../tracking/tracking.client.ts";
 import { routingInternalClient } from "../virtual/routing-internal.client.ts";
 import { previewPoints } from "./trip.preview.ts";
 import { matchReplayPreview } from "./trip-road-match.ts";
+import { cleanReplayPreviewPoints } from "./trip-preview-clean.ts";
 import { tripRepository, tripSelect, type ResolvedTripInput } from "./trip.repository.ts";
 import type { CreateTripBody } from "./trip.schema.ts";
 
@@ -129,13 +130,14 @@ export const tripService = {
             FROM vehicle_position WHERE trip_id = ${tripId} AND telemetry_source = 'RECORDED_GPS'
             ORDER BY received_at DESC, position_id DESC LIMIT 1`;
         const roadMatch = preview ? await matchReplayPreview(preview) : null;
+        const displayPoints = preview ? cleanReplayPreviewPoints(previewPoints(preview.points)) : null;
         return { tripId: trip.tripId, vehicleId: trip.vehicleId, tripStatus: trip.tripStatus,
             routeMode: trip.routeMode, originName: trip.originName, destinationName: trip.destinationName,
             plannedStartAt: trip.plannedStartAt, startedAt: trip.startedAt, endedAt: trip.endedAt,
             plannedRoute: trip.routes[0] ?? null,
             replayPreview: preview && { replayPreviewId: preview.replayPreviewId,
                 fingerprint: preview.fingerprint, datasetName: preview.datasetName,
-                points: preview.points, totalDistanceM: preview.totalDistanceM, roadMatch },
+                points: displayPoints, totalDistanceM: Math.round(displayPoints!.at(-1)![3]), roadMatch },
             replayPosition: latestReplay[0] ?? null };
     },
 };

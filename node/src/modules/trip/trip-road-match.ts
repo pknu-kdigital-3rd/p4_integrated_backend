@@ -1,5 +1,6 @@
 import { routingInternalClient } from "../virtual/routing-internal.client.ts";
 import { previewPoints, type PreviewPoint } from "./trip.preview.ts";
+import { cleanReplayPreviewPoints } from "./trip-preview-clean.ts";
 
 type RoadMatch = {
     routeGeojson: { type: "LineString"; coordinates: number[][] };
@@ -110,7 +111,7 @@ export async function matchReplayPreview(preview: { fingerprint: string; points:
     const cached = cache.get(key);
     if (cached) return cached;
     const match = (async () => {
-        const points = previewPoints(preview.points);
+        const points = cleanReplayPreviewPoints(previewPoints(preview.points));
         const indices = roadAnchorIndices(points);
         const stops = indices.map(index => ({ lat: points[index]![2], lon: points[index]![1] }));
         const route = await routingInternalClient.matchPreview(stops);
