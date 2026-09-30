@@ -1,5 +1,6 @@
 package com.example.webrtccamera
 
+import com.example.webrtccamera.telemetry.model.GpsSample
 import com.example.webrtccamera.telemetry.model.TelemetryDataset
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -59,7 +60,7 @@ class DeviceTripClient(serverUrl: String) {
     }
 
     fun uploadPreview(vehicleId: Long, dataset: TelemetryDataset): String {
-        val gps = dataset.gps
+        val gps = previewFixes(dataset.gps)
         if (gps.size < 2) throw IllegalStateException("GPS dataset needs at least two fixes")
         val digest = MessageDigest.getInstance("SHA-256")
         var distance = 0.0
@@ -95,6 +96,20 @@ class DeviceTripClient(serverUrl: String) {
         // One client for all trip calls: a new OkHttpClient per request would pay a fresh
         // HTTPS connection and TLS handshake every time, which the driver feels on Start Trip.
         private val sharedHttp = OkHttpClient()
+
+        // In a tunnel or under a road the phone keeps reporting its last position or a
+        // network fix (hundreds of metres of accuracy) instead of nothing. Left in the
+        // preview they hold the replayed vehicle still at the entrance and hide the gap
+        // the operator map estimates across on the road. The fingerprint covers only
+        // the kept fixes, so a changed filter gives a new preview rather than reusing
+        // the stored one.
+        const val MAX_PREVIEW_ACCURACY_M = 50.0
+
+        /** Fixes for the replay preview: all but those too inaccurate to place the vehicle. */
+        fun previewFixes(gps: List<GpsSample>): List<GpsSample> {
+            val kept = gps.filter { (it.horizontalAccuracyM ?: 0.0) <= MAX_PREVIEW_ACCURACY_M }
+            return if (kept.size >= 2) kept else gps
+        }
     }
 
     private fun parseTrip(data: JSONObject): DeviceTrip = DeviceTrip(
