@@ -12,11 +12,10 @@ describe("recorded GPS road matching", () => {
     });
 
     it("uses road geometry between GPS anchors and preserves their timestamps", async () => {
-        const route = vi.spyOn(routingInternalClient, "route").mockResolvedValueOnce({
+        const route = vi.spyOn(routingInternalClient, "matchPreview").mockResolvedValueOnce({
             graphVersion: "test-graph",
             routeGeojson: { type: "LineString", coordinates: [[129, 35], [129.0005, 35.0005], [129.001, 35]] },
-            directedItinerary: [], snappedStops: [{ lat: 35, lon: 129 }, { lat: 35, lon: 129.001 }],
-            distanceM: 100, durationSec: 10, warnings: [],
+            anchorPositions: [0, 2], snapDistancesM: [0, 0],
         });
         const result = await matchReplayPreview({
             fingerprint: "road-match-test",

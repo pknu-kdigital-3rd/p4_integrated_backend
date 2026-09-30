@@ -9,7 +9,7 @@ type RoadMatch = {
 };
 
 const cache = new Map<string, Promise<RoadMatch | null>>();
-const maxAnchors = 32;
+const maxAnchors = 48;
 
 function deviationM(point: PreviewPoint, first: PreviewPoint, last: PreviewPoint): number {
     const latScale = 111_195;
@@ -45,22 +45,6 @@ export function roadAnchorIndices(points: PreviewPoint[]): number[] {
     return indices;
 }
 
-function nearestPosition(coordinates: number[][], stop: { lat: number; lon: number }, start: number): number {
-    let best = Number.POSITIVE_INFINITY, position = start;
-    const lonScale = 111_195 * Math.cos(stop.lat * Math.PI / 180), latScale = 111_195;
-    for (let index = Math.max(1, Math.floor(start)); index < coordinates.length; index++) {
-        const a = coordinates[index - 1]!, b = coordinates[index]!;
-        const dx = (b[0]! - a[0]!) * lonScale, dy = (b[1]! - a[1]!) * latScale;
-        const x = (stop.lon - a[0]!) * lonScale, y = (stop.lat - a[1]!) * latScale;
-        const fraction = dx * dx + dy * dy ? Math.max(0, Math.min(1, (x * dx + y * dy) / (dx * dx + dy * dy))) : 0;
-        const candidate = index - 1 + fraction;
-        if (candidate < start - 0.01) continue;
-        const distance = Math.hypot(x - fraction * dx, y - fraction * dy);
-        if (distance < best) { best = distance; position = candidate; }
-    }
-    return position;
-}
-
 function cumulativeDistances(coordinates: number[][]): number[] {
     const distances = [0];
     for (let index = 1; index < coordinates.length; index++) {
@@ -80,16 +64,13 @@ export async function matchReplayPreview(preview: { fingerprint: string; points:
         const points = previewPoints(preview.points);
         const indices = roadAnchorIndices(points);
         const stops = indices.map(index => ({ lat: points[index]![2], lon: points[index]![1] }));
-        const route = await routingInternalClient.route({
-            origin: stops[0]!, destination: stops.at(-1)!, waypoints: stops.slice(1, -1), vehicleProfile: "car",
-        }, 45_000);
+        const route = await routingInternalClient.matchPreview(stops);
         const coordinates = route.routeGeojson.coordinates;
-        if (coordinates.length < 2 || route.snappedStops.length !== stops.length) return null;
+        if (coordinates.length < 2 || route.anchorPositions.length !== stops.length) return null;
         const coordinateDistancesM = cumulativeDistances(coordinates);
-        let position = 0;
         const anchors = indices.map((index, slot) => {
-            position = slot === 0 ? 0 : slot === indices.length - 1 ? coordinates.length - 1
-                : nearestPosition(coordinates, route.snappedStops[slot]! as { lat: number; lon: number }, position);
+            const position = route.anchorPositions[slot]!;
+            if (!Number.isInteger(position) || position < 0 || position >= coordinates.length) throw new Error("Invalid road match anchor position");
             const segment = Math.min(coordinates.length - 2, Math.floor(position));
             const routeDistanceM = coordinateDistancesM[segment]! + (position - segment)
                 * (coordinateDistancesM[segment + 1]! - coordinateDistancesM[segment]!);

@@ -12,6 +12,13 @@ export type InternalRoute = {
     warnings: string[];
 };
 
+export type InternalRoadMatch = {
+    graphVersion: string;
+    routeGeojson: { type: "LineString"; coordinates: number[][] };
+    anchorPositions: number[];
+    snapDistancesM: number[];
+};
+
 type RouteInput = {
     origin: Coordinate;
     destination: Coordinate;
@@ -56,6 +63,9 @@ export const routingInternalClient = {
     },
     async route(input: RouteInput, timeoutMs = 8000): Promise<InternalRoute> {
         return request<InternalRoute>("/internal/routing/route", input, timeoutMs);
+    },
+    async matchPreview(points: Coordinate[]): Promise<InternalRoadMatch> {
+        return request<InternalRoadMatch>("/internal/routing/match-preview", { points }, 60_000);
     },
     async snap(input: SnapInput) {
         return request<{ graphVersion: string; nodeId: string; lat: number; lon: number; distanceM: number }>("/internal/routing/snap", input);

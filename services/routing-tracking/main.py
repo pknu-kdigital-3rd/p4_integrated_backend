@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from graph_backend import load_graph, TRUCK_PROFILES, get_override_locations
+from road_match import match_preview
 from hybrid_bus import HybridBusService, load_route_ids
 from telemetry import (
     BimsLiveSource,
@@ -243,6 +244,10 @@ class RestrictionResolveRequest(BaseModel):
 
 class SnapRequest(InternalCoordinate):
     vehicleProfile: str = "car"
+
+
+class MatchPreviewRequest(BaseModel):
+    points: list[InternalCoordinate]
 
 
 def _graph_version() -> str:
@@ -815,6 +820,27 @@ def internal_snap(req: SnapRequest):
 @app.post("/internal/routing/route")
 def internal_route(req: InternalRouteRequest):
     return _internal_route(req)
+
+
+@app.post("/internal/routing/match-preview")
+def internal_match_preview(req: MatchPreviewRequest):
+    if graph is None:
+        raise HTTPException(status_code=503, detail="Routing graph is not ready")
+    if not 2 <= len(req.points) <= 64:
+        raise HTTPException(status_code=422, detail="Expected 2 to 64 GPS anchors")
+    if any(not math.isfinite(point.lat) or not math.isfinite(point.lon)
+           or abs(point.lat) > 90 or abs(point.lon) > 180 for point in req.points):
+        raise HTTPException(status_code=422, detail="Invalid GPS anchor coordinates")
+    _ensure_edge_spatial_index()
+    result = match_preview(graph, _edge_records_cache, _edge_spatial_index,
+                           _edge_long_records, max(0.0001, EDGE_INDEX_BUCKET_DEGREES),
+                           [(point.lat, point.lon) for point in req.points])
+    if result is None:
+        raise HTTPException(status_code=422, detail={"code": "ROAD_MATCH_NOT_FOUND"})
+    return {"graphVersion": _graph_version(),
+            "routeGeojson": {"type": "LineString", "coordinates": result["coordinates"]},
+            "anchorPositions": result["anchorPositions"],
+            "snapDistancesM": result["snapDistancesM"]}
 
 
 @app.post("/internal/routing/road-restrictions/resolve")
