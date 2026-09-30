@@ -293,8 +293,9 @@ function selectVehicle(item){
     const active=entry.item.telemetry?.external_id===item.telemetry?.external_id;
     entry.marker.setIcon(vehicleIcon(entry.item,active));
     entry.marker.setZIndexOffset(active?1000:0);
-    if(entry.marker.getTooltip())entry.marker.getTooltip().options.permanent=active;
-    if(active)entry.marker.openTooltip();else entry.marker.closeTooltip();
+    const showLabel=active||entry.item?.tripStatus==='IN_PROGRESS';
+    if(entry.marker.getTooltip())entry.marker.getTooltip().options.permanent=showLabel;
+    if(showLabel)entry.marker.openTooltip();else entry.marker.closeTooltip();
   }
   const t=item.telemetry;
   fields.replaceChildren();
@@ -416,9 +417,17 @@ function showAssignmentPreview(preview){
   const points=preview?.points;
   if(!Array.isArray(points)||points.length<2)return;
   const path=points.map(point=>[point[2],point[1]]);
+  const nodeCount=Math.min(18,Math.max(0,path.length-2));
+  const routeNodes=[];
+  for(let i=1;i<=nodeCount;i++){
+    const point=path[Math.round(i*(path.length-1)/(nodeCount+1))];
+    routeNodes.push(L.circleMarker(point,{radius:3,color:'#0878f9',weight:2,fillColor:'#ffffff',fillOpacity:1,interactive:false}));
+  }
   assignmentPreviewLayer=L.layerGroup([
-    L.polyline(path,{color:'#e78328',weight:4,opacity:0.75,dashArray:'4 6'}).bindTooltip(`배정 예정 Android GPS 경로 · ${preview.datasetName}`),
-    L.circleMarker(path.at(-1),{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).bindTooltip('배정 예정 목적지 · GPS 기록 마지막 위치',{direction:'top'}),
+    L.polyline(path,{color:'#ffffff',weight:11,opacity:0.9,lineCap:'round',lineJoin:'round'}),
+    L.polyline(path,{color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).bindTooltip(`배정 예정 Android GPS 경로 · ${preview.datasetName}`),
+    ...routeNodes,
+    L.circleMarker(path.at(-1),{radius:8,color:'#fff',weight:2,fillColor:'#0878f9',fillOpacity:1}).bindTooltip('배정 예정 목적지 · GPS 기록 마지막 위치',{direction:'top'}),
   ]);
   // The virtual workspace owns the map while open; the layer is re-added when it closes.
   if(!window.__virtualMode)assignmentPreviewLayer.addTo(map);
