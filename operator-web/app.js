@@ -708,6 +708,8 @@ async function applyTelemetryMode(){
 const tripRouteMode=document.querySelector('#trip-route-mode');
 // The Android GPS path is the default; the optimal-route mode is opt-in.
 tripRouteMode.value=localStorage.getItem('operatorTripRouteMode')==='DUAL'?'DUAL':'REPLAY_ONLY';
+// Declared before syncTripRouteMode's first (top-level) call; see dismissAssignmentPreview.
+let assignmentPreviewDismissed=false;
 function syncTripRouteMode(){
   const replayOnly=tripRouteMode.value==='REPLAY_ONLY';
   // The replay path's final GPS point is the destination, so there is nothing to ask.
@@ -726,7 +728,7 @@ function syncTripRouteMode(){
     :replayOnly&&preview&&!preview.roadMatch?'도로 경로 매칭을 사용할 수 없어 경로가 표시되지 않습니다.':'';
   notice.hidden=!notice.textContent;
   document.querySelector('#create-trip').disabled=Boolean(activeTripId)||(replayOnly&&!preview);
-  showAssignmentPreview(replayOnly&&!activeTripId&&!selected?.tripId&&!document.querySelector('#trip-form').hidden?preview:null);
+  showAssignmentPreview(replayOnly&&!assignmentPreviewDismissed&&!activeTripId&&!selected?.tripId&&!document.querySelector('#trip-form').hidden?preview:null);
 }
 // Before a replay-only assignment, draw the exact path and endpoint the server
 // will pin, so the operator never assigns a destination they have not seen.
@@ -762,12 +764,9 @@ tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripR
 syncTripRouteMode();
 // The assignment form is always open, so a vehicle left chosen in it would keep
 // its path drawn as the "배정 예정" preview - after a cancel, the cancelled
-// trip's own path. Creating or cancelling a trip clears the choice; the preview
-// returns only when a vehicle is picked for a new assignment.
-function clearAssignmentVehicle(){
-  document.querySelector('#trip-vehicle').value='';
-  assignmentPreviewVehicleId='';assignmentPreview=null;syncTripRouteMode();
-}
+// trip's own path. Creating or cancelling a trip keeps the vehicle chosen but
+// stops drawing the preview until a vehicle is picked in the form again.
+function dismissAssignmentPreview(){assignmentPreviewDismissed=true;syncTripRouteMode()}
 async function loadAssignmentPreview(){
   const vehicleId=document.querySelector('#trip-vehicle').value;
   if(vehicleId!==assignmentPreviewVehicleId){assignmentPreviewVehicleId=vehicleId;assignmentPreview=null;syncTripRouteMode()}
@@ -776,7 +775,7 @@ async function loadAssignmentPreview(){
     if(document.querySelector('#trip-vehicle').value===vehicleId){assignmentPreview=preview;syncTripRouteMode()}}
   catch(ex){const notice=document.querySelector('#trip-preview-status');notice.textContent=`Android GPS 경로 확인 실패 · ${ex.message}`;notice.hidden=false}
 }
-document.querySelector('#trip-vehicle').addEventListener('change',()=>void loadAssignmentPreview());
+document.querySelector('#trip-vehicle').addEventListener('change',()=>{assignmentPreviewDismissed=false;void loadAssignmentPreview()});
 // Trips change on the phone too (Start/Stop Trip), so the list is polled; it is
 // only rebuilt when the data changed, so buttons do not flicker or lose focus.
 let tripListSignature='';
@@ -809,7 +808,7 @@ async function loadTripAssignments(){
     if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&['ADMIN','OPERATOR'].includes(currentRole)){
       const cancel=document.createElement('button');cancel.type='button';cancel.textContent='운행 취소';
       cancel.onclick=async()=>{if(!window.confirm(`Trip ID ${trip.tripId} 배정을 취소할까요?`))return;
-        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);clearAssignmentVehicle();await loadTripAssignments();await refresh()}
+        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);dismissAssignmentPreview();await loadTripAssignments();await refresh()}
         catch(ex){
           // Usually the phone already ended it (Stop Trip completes a trip); show that and refresh.
           document.querySelector('#trip-status-message').textContent=/not active/i.test(ex.message)?`Trip ID ${trip.tripId}은(는) 이미 종료된 운행입니다.`:ex.message;
@@ -1142,7 +1141,7 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
     const trip=await api('/api/v1/trips',{method:'POST',body:JSON.stringify(body)},true);
     message.textContent=`Trip ID ${trip.tripId} 배정 완료 · Android에서 운행 시작을 누르세요.`;
     selectRecordingTrip(trip.tripId);
-    clearAssignmentVehicle();
+    dismissAssignmentPreview();
     await Promise.all([loadTripAssignments(),loadTripRecordings(String(trip.tripId)),refresh()]);
   }catch(ex){message.textContent=ex.message}
   finally{button.disabled=false;form.querySelector('#trip-destination-name').focus()}
