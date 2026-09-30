@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayLineTiming,replayProgressOnRoute,remainingRoute,routeFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=7';
+import {estimatedReplayTimestamp,forwardOnlyPosition,gapAwareReplayLine,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayLineTiming,replayProgressOnRoute,remainingRoute,routeFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=8';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -121,6 +121,17 @@ document.querySelector('#live-float').addEventListener('click',async()=>{
 document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView()});
 placeLivePanel(true);
 const ROUTE_TICK_MS=500,FLEET_POLL_MS=3000;
+// How the replay line uses the road match: 'gaps' (default) follows the
+// recorded GPS and uses the road only across GPS gaps; 'always' snaps the
+// whole line to the road. Remembered per browser.
+const roadSnapSelect=document.querySelector('#road-snap-mode');
+let roadSnapMode=(()=>{try{return localStorage.getItem('operatorRoadSnapMode')==='always'?'always':'gaps'}catch{return 'gaps'}})();
+roadSnapSelect.value=roadSnapMode;
+roadSnapSelect.addEventListener('change',()=>{
+  roadSnapMode=roadSnapSelect.value==='always'?'always':'gaps';
+  try{localStorage.setItem('operatorRoadSnapMode',roadSnapMode)}catch{}
+  if(currentTripDisplay)showTripDisplay(currentTripDisplay);
+});
 // Moves a marker smoothly to its next position over one update interval
 // instead of jumping; a jump over 1 km (a new vehicle, a seek) is applied directly.
 function glideMarker(marker,target,durationMs){
@@ -368,7 +379,7 @@ function showTripDisplay(display){
   document.querySelector('#selected-origin-time').textContent=times.origin;
   document.querySelector('#selected-destination-time').textContent=times.destination;
   const replayOnly=display.routeMode==='REPLAY_ONLY';
-  const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}:${display.replayPreview?.roadMatch?.graphVersion??''}:${display.replayPosition?.recordingSessionId??''}`;
+  const key=`${roadSnapMode}:${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}:${display.replayPreview?.roadMatch?.graphVersion??''}:${display.replayPosition?.recordingSessionId??''}`;
   if(key!==displayedRouteKey){
     clearTripLayers();displayedRouteKey=key;
     // Without a road match (routing unavailable or unmatched) fall back to the
@@ -376,6 +387,9 @@ function showTripDisplay(display){
     const recordedLine=Array.isArray(display.replayPreview?.points)?display.replayPreview.points.map(point=>[point[1],point[2]]):null;
     currentRouteCoordinates=replayOnly?display.replayPreview?.roadMatch?.routeGeojson?.coordinates||recordedLine:display.plannedRoute?.routeGeojson?.coordinates;
     currentRouteTiming=replayOnly?replayLineTiming(display.replayPreview):null;
+    // Default: follow the recorded GPS, using the road only across GPS gaps.
+    const gapLine=replayOnly&&roadSnapMode==='gaps'?gapAwareReplayLine(display.replayPreview?.points,display.replayPreview?.roadMatch?.routeGeojson?.coordinates):null;
+    if(gapLine){currentRouteCoordinates=gapLine.coordinates;currentRouteTiming={anchors:gapLine.anchors,distances:gapLine.distances}}
     if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],tripRouteStyle).addTo(map);
     if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],tripRouteStyle).addTo(map);
     const target=replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
@@ -384,7 +398,8 @@ function showTripDisplay(display){
   currentTripDisplay=display;
   updateRemainingTripRoute();
   document.querySelector('#route-label').textContent=replayOnly
-    ?display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 재생 경로':'남은 GPS 재생 경로 (도로 매칭 없음)'
+    ?roadSnapMode==='gaps'?`남은 GPS 재생 경로${display.replayPreview?.roadMatch?' · GPS 없는 구간은 도로에 맞춤':''}`
+      :display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 재생 경로':'남은 GPS 재생 경로 (도로 매칭 없음)'
     :'목적지까지 남은 최적 경로';
   let progress=null,label='진행 상태 대기 중';
   if(replayOnly){

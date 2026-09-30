@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { estimatedReplayTimestamp, forwardOnlyPosition, matchedRoutePosition, replayClock, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, forwardOnlyPosition, gapAwareReplayLine, matchedRoutePosition, replayClock, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -195,5 +195,40 @@ describe("replay path drawn from the vehicle's position", () => {
         expect(routeFromPosition(line, -1)![0]).toEqual([35.0, 129.0]);
         expect(routeFromPosition(line, Number.NaN)).toBeNull();
         expect(routeFromPosition([[129, 35]], 0)).toBeNull();
+    });
+});
+
+describe("recorded GPS line with road only across GPS gaps", () => {
+    // Recording: normal fixes, then a 60 s tunnel gap between x=129.002 and x=129.008.
+    const points = [
+        ["1000000000", 129.000, 35.0000, 0], ["2000000000", 129.001, 35.0001, 90],
+        ["3000000000", 129.002, 35.0000, 180], ["63000000000", 129.008, 35.0000, 730],
+        ["64000000000", 129.009, 35.0001, 820],
+    ];
+    // Road through the tunnel curves 0.0005 deg (about 55 m) north.
+    const road = [[129.000, 35.0000], [129.002, 35.0000], [129.005, 35.0005], [129.008, 35.0000], [129.010, 35.0000]];
+
+    it("keeps the recorded fixes where GPS exists and follows the road through the gap", () => {
+        const line = gapAwareReplayLine(points, road)!;
+        const coords = line.coordinates;
+        expect(coords[0]).toEqual([129.000, 35.0000]);
+        expect(coords[1]).toEqual([129.001, 35.0001]);
+        expect(coords.some(([lon, lat]) => lon === 129.005 && lat === 35.0005)).toBe(true);
+        expect(coords.at(-1)).toEqual([129.009, 35.0001]);
+    });
+
+    it("times the road section so the vehicle is inside the tunnel halfway through the gap", () => {
+        const line = gapAwareReplayLine(points, road)!;
+        const tunnelMiddle = line.anchors.find(anchor => line.coordinates[anchor.routePosition]![0] === 129.005)!;
+        expect(Number(tunnelMiddle.sourceTimestampNs)).toBeGreaterThan(3e9);
+        expect(Number(tunnelMiddle.sourceTimestampNs)).toBeLessThan(63e9);
+        const times = line.anchors.map(anchor => BigInt(anchor.sourceTimestampNs));
+        expect(times.every((time, index) => index === 0 || time >= times[index - 1]!)).toBe(true);
+    });
+
+    it("stays straight without a road line or when the gap is too far from it", () => {
+        expect(gapAwareReplayLine(points, null)!.coordinates).toHaveLength(points.length);
+        const farRoad = road.map(([lon, lat]) => [lon, lat + 0.01]);
+        expect(gapAwareReplayLine(points, farRoad)!.coordinates).toHaveLength(points.length);
     });
 });

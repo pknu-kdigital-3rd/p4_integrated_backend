@@ -406,6 +406,12 @@
        <option value="DUAL">최적 경로 + Android GPS 재생</option>
       </select>
       <small>선택은 새 운행에 저장됩니다. 재생 경로만 사용할 때 목적지는 GPS 기록의 마지막 위치입니다.</small>
+      <label for="road-snap-mode">GPS 재생 경로의 도로 맞춤</label>
+      <select id="road-snap-mode">
+       <option value="gaps">GPS 없는 구간만 (터널·지하 등)</option>
+       <option value="always">항상</option>
+      </select>
+      <small>기본값은 기록된 GPS를 그대로 따르고, GPS가 끊긴 구간만 도로를 따라 표시합니다.</small>
      </section>
     </section>
    </section>

@@ -220,3 +220,73 @@ export function routeFromPosition(coordinates,position){
   const head=[a[0]+(b[0]-a[0])*fraction,a[1]+(b[1]-a[1])*fraction];
   return [head,...coordinates.slice(segment+1)].map(([lon,lat])=>[lat,lon]);
 }
+
+// Nearest point on a [lon, lat] polyline at or after minPosition:
+// {position (segment index + fraction), distanceM} or null.
+function projectOntoLine(coordinates,lat,lon,minPosition=0){
+  const latScale=111195,lonScale=latScale*Math.cos(lat*rad);
+  let best=null;
+  for(let i=Math.max(1,Math.floor(minPosition)+1);i<coordinates.length;i++){
+    const a=coordinates[i-1],b=coordinates[i];
+    const dx=(b[0]-a[0])*lonScale,dy=(b[1]-a[1])*latScale,denominator=dx*dx+dy*dy;
+    const fraction=denominator?Math.max(0,Math.min(1,(((lon-a[0])*lonScale)*dx+((lat-a[1])*latScale)*dy)/denominator)):0;
+    const position=i-1+fraction;
+    if(position<minPosition)continue;
+    const distanceM=Math.hypot((lon-a[0])*lonScale-fraction*dx,(lat-a[1])*latScale-fraction*dy);
+    if(!best||distanceM<best.distanceM)best={position,distanceM};
+  }
+  return best;
+}
+
+function pointAt(coordinates,position){
+  const segment=Math.min(coordinates.length-2,Math.max(0,Math.floor(position))),fraction=position-segment;
+  const a=coordinates[segment],b=coordinates[segment+1];
+  return [a[0]+(b[0]-a[0])*fraction,a[1]+(b[1]-a[1])*fraction];
+}
+
+/**
+ * The replay line built from the recorded GPS itself, with road-matched
+ * geometry used only across GPS gaps (a tunnel, an underground car park):
+ * where two consecutive fixes are more than minGapS apart, the road section
+ * between their projections onto roadCoordinates replaces the straight jump,
+ * timed by distance between the two fixes' timestamps. A gap whose fixes lie
+ * over maxSnapM from the road line, or whose road section is implausibly long,
+ * stays straight. Returns {coordinates ([lon, lat]), anchors, distances}; every
+ * coordinate is a timing anchor.
+ */
+export function gapAwareReplayLine(points,roadCoordinates,{minGapS=5,maxSnapM=150}={}){
+  if(!Array.isArray(points)||points.length<2)return null;
+  const road=Array.isArray(roadCoordinates)&&roadCoordinates.length>1?roadCoordinates:null;
+  const coordinates=[],times=[];
+  let roadPosition=0;
+  const metres=(a,b)=>{
+    const meanLat=(a[1]+b[1])*rad/2;
+    return Math.hypot((b[0]-a[0])*111195*Math.cos(meanLat),(b[1]-a[1])*111195);
+  };
+  for(let index=0;index<points.length;index++){
+    const point=points[index];
+    coordinates.push([point[1],point[2]]);times.push(BigInt(point[0]));
+    const next=points[index+1];
+    if(!next||!road||Number(BigInt(next[0])-BigInt(point[0]))/1e9<=minGapS)continue;
+    const start=projectOntoLine(road,point[2],point[1],roadPosition);
+    const end=start&&projectOntoLine(road,next[2],next[1],start.position);
+    if(!start||!end||start.distanceM>maxSnapM||end.distanceM>maxSnapM||end.position<=start.position)continue;
+    const section=[pointAt(road,start.position)];
+    for(let i=Math.floor(start.position)+1;i<=Math.floor(end.position);i++)section.push(road[i]);
+    section.push(pointAt(road,end.position));
+    let lengthM=0;const along=[0];
+    for(let i=1;i<section.length;i++){lengthM+=metres(section[i-1],section[i]);along.push(lengthM)}
+    const straightM=metres([point[1],point[2]],[next[1],next[2]]);
+    if(lengthM>3*straightM+200)continue;
+    roadPosition=end.position;
+    const t0=BigInt(point[0]),span=BigInt(next[0])-t0;
+    for(let i=0;i<section.length;i++){
+      coordinates.push(section[i]);
+      times.push(t0+(lengthM?BigInt(Math.round(Number(span)*along[i]/lengthM)):0n));
+    }
+  }
+  const distances=[0];
+  for(let i=1;i<coordinates.length;i++)distances.push(distances[i-1]+metres(coordinates[i-1],coordinates[i]));
+  const anchors=coordinates.map((_,i)=>({sourceTimestampNs:times[i].toString(),routePosition:i,routeDistanceM:distances[i]}));
+  return {coordinates,anchors,distances};
+}
