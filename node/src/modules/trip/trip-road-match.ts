@@ -56,6 +56,51 @@ function cumulativeDistances(coordinates: number[][]): number[] {
     return distances;
 }
 
+type TimedPosition = { sourceTimestampNs: string; position: number };
+
+/**
+ * Where the matcher skipped anchors (no road nearby - e.g. campus roads the
+ * routing graph leaves out - or a detour), its bridge is a guessed road the
+ * vehicle may never have used. Replace each such stretch between the matched
+ * anchors on either side with the recorded GPS points themselves, and time the
+ * route by every point it contains, so the line and the vehicle stay where the
+ * recording actually was. Without skips the matched route is kept as is.
+ */
+export function spliceSkippedStretches(points: PreviewPoint[], indices: number[], coordinates: number[][],
+    anchorPositions: number[], skippedSlots: number[]): { coordinates: number[][]; timing: TimedPosition[] } {
+    const skipped = new Set(skippedSlots);
+    const matched = indices.map((_, slot) => slot).filter(slot => !skipped.has(slot));
+    const timeOf = (slot: number) => points[indices[slot]!]![0];
+    if (!skipped.size) {
+        return { coordinates, timing: matched.map(slot => ({ sourceTimestampNs: timeOf(slot), position: anchorPositions[slot]! })) };
+    }
+    const out: number[][] = [];
+    const timing: TimedPosition[] = [];
+    const add = (coordinate: number[]) => {
+        const last = out.at(-1);
+        if (!last || last[0] !== coordinate[0] || last[1] !== coordinate[1]) out.push(coordinate);
+        return out.length - 1;
+    };
+    const addRecorded = (from: number, to: number) => {
+        for (let index = from; index <= to; index++) {
+            const point = points[index]!;
+            timing.push({ sourceTimestampNs: point[0], position: add([point[1], point[2]]) });
+        }
+    };
+    const addAnchor = (slot: number) => timing.push({ sourceTimestampNs: timeOf(slot), position: add(coordinates[anchorPositions[slot]!]!) });
+    const first = matched[0]!, last = matched.at(-1)!;
+    if (first > 0) addRecorded(indices[0]!, indices[first]! - 1);
+    addAnchor(first);
+    for (let step = 1; step < matched.length; step++) {
+        const from = matched[step - 1]!, to = matched[step]!;
+        if (to - from > 1) addRecorded(indices[from]! + 1, indices[to]! - 1);
+        else for (let position = anchorPositions[from]! + 1; position < anchorPositions[to]!; position++) add(coordinates[position]!);
+        addAnchor(to);
+    }
+    if (last < indices.length - 1) addRecorded(indices[last]! + 1, indices.at(-1)!);
+    return { coordinates: out, timing };
+}
+
 export async function matchReplayPreview(preview: { fingerprint: string; points: unknown }): Promise<RoadMatch | null> {
     const key = preview.fingerprint;
     const cached = cache.get(key);
@@ -67,19 +112,15 @@ export async function matchReplayPreview(preview: { fingerprint: string; points:
         const route = await routingInternalClient.matchPreview(stops);
         const coordinates = route.routeGeojson.coordinates;
         if (coordinates.length < 2 || route.anchorPositions.length !== stops.length) return null;
-        const coordinateDistancesM = cumulativeDistances(coordinates);
-        // A skipped anchor only repeats its neighbour's route position; leaving it
-        // out keeps the replay marker moving evenly across the bridged gap.
-        const skipped = new Set(route.skippedAnchors ?? []);
-        const anchors = indices.flatMap((index, slot) => skipped.has(slot) ? [] : [{ index, slot }]).map(({ index, slot }) => {
-            const position = route.anchorPositions[slot]!;
+        for (const position of route.anchorPositions) {
             if (!Number.isInteger(position) || position < 0 || position >= coordinates.length) throw new Error("Invalid road match anchor position");
-            const segment = Math.min(coordinates.length - 2, Math.floor(position));
-            const routeDistanceM = coordinateDistancesM[segment]! + (position - segment)
-                * (coordinateDistancesM[segment + 1]! - coordinateDistancesM[segment]!);
-            return { sourceTimestampNs: points[index]![0], routePosition: position, routeDistanceM };
-        });
-        return { routeGeojson: route.routeGeojson, anchors, coordinateDistancesM, graphVersion: route.graphVersion };
+        }
+        const spliced = spliceSkippedStretches(points, indices, coordinates, route.anchorPositions, route.skippedAnchors ?? []);
+        const coordinateDistancesM = cumulativeDistances(spliced.coordinates);
+        const anchors = spliced.timing.map(({ sourceTimestampNs, position }) => ({
+            sourceTimestampNs, routePosition: position, routeDistanceM: coordinateDistancesM[position]!,
+        }));
+        return { routeGeojson: { type: "LineString" as const, coordinates: spliced.coordinates }, anchors, coordinateDistancesM, graphVersion: route.graphVersion };
     })().catch(error => {
         setTimeout(() => { if (cache.get(key) === match) cache.delete(key); }, 30_000);
         console.warn("Replay road matching unavailable", error);
