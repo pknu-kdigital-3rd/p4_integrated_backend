@@ -1,4 +1,6 @@
-const STYLE_URL='/basemap/styles/liberty';
+const BASEMAP_ROOT=new URL('/basemap/',import.meta.url).href;
+const ASSET_ROOT=new URL('/basemap-assets/',import.meta.url).href;
+const STYLE_URL=`${BASEMAP_ROOT}styles/liberty`;
 const TILE_ORIGIN='https://tiles.openfreemap.org/';
 const ASSET_ORIGIN='https://assets.openfreemap.com/';
 
@@ -47,8 +49,8 @@ export function installOperatorBasemap(map,fallback){
   try{
     layer=L.maplibreGL({
       style:STYLE_URL,
-      transformRequest:url=>({url:url.startsWith(TILE_ORIGIN)?`/basemap/${url.slice(TILE_ORIGIN.length)}`
-        :url.startsWith(ASSET_ORIGIN)?`/basemap-assets/${url.slice(ASSET_ORIGIN.length)}`:url}),
+      transformRequest:url=>({url:url.startsWith(TILE_ORIGIN)?`${BASEMAP_ROOT}${url.slice(TILE_ORIGIN.length)}`
+        :url.startsWith(ASSET_ORIGIN)?`${ASSET_ROOT}${url.slice(ASSET_ORIGIN.length)}`:url}),
     }).addTo(map);
     const glMap=layer.getMaplibreMap();
     const useFallback=event=>{
