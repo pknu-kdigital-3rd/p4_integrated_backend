@@ -347,7 +347,11 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   routePosition=remaining.position;
   if(replayOnly&&marker){
     // The route and marker use the same timed, road-aligned replay line.
-    animateReplayRoute(layer,marker,remaining.position);
+    // A live-view time is the painted frame's own, arriving every frame: draw
+    // it as is. Gliding each one over a route tick, restarted by the next
+    // frame, kept the vehicle about half a second behind the footage.
+    if(sourceTimeOverride||liveSourceTime){cancelAnimationFrame(routeAnimationFrame);drawReplayRouteAt(layer,marker,remaining.position)}
+    else animateReplayRoute(layer,marker,remaining.position);
     const entry=markers.get(item.telemetry.external_id);
     if(entry){entry.estimated=Boolean(estimatedTime);syncVehicleMapLabel(entry)}
     return routeDisplayFromPosition(currentRouteCoordinates,remaining.position,currentRouteBreaks)?.head??null;
@@ -367,8 +371,9 @@ function drawReplayRouteAt(layer,marker,position){
     marker.setLatLng(route.head);
   });
 }
-// Moves the shown position to target over one route tick. A first draw, a
-// hidden page or a jump over 1 km (a seek in the recording) is applied at once.
+// Moves the shown position to target over one route tick (for the coarse fleet
+// and tick updates). A first draw, a hidden page or a jump over 1 km (a seek in
+// the recording) is applied at once.
 function animateReplayRoute(layer,marker,target){
   cancelAnimationFrame(routeAnimationFrame);
   const from=shownRoutePosition,distances=currentRouteTiming?.distances;
