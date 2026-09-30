@@ -182,7 +182,7 @@ const vehiclePickers=[...document.querySelectorAll('.vehicle-picker')];
 let vehiclePickerSignature='';
 function vehiclePickerLabel(item){
   const t=item.telemetry||{},name=item.vehicleCode||item.vehicleName||t.external_id;
-  return t.telemetry_source==='RECORDED_GPS'?`${name} · GPS 재생`:isAndroidGpsItem(item)?`${name} · Android GPS`:name;
+  return t.telemetry_source!=='RECORDED_GPS'&&isAndroidGpsItem(item)?`${name} · Android GPS`:name;
 }
 function renderVehiclePickers(vehicles){
   const options=vehicles.filter(item=>item.telemetry?.external_id&&fleetPosition(item))
@@ -221,7 +221,7 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
 }
 function syncVehicleMapLabel(entry){
   const item=entry.item,telemetry=item?.telemetry||{},onTrip=item?.tripStatus==='IN_PROGRESS';
-  const name=telemetry.telemetry_source==='RECORDED_GPS'?`GPS 재생 · ${item?.vehicleCode||'차량'}`:isAndroidGpsItem(item)?`Android GPS · ${item?.vehicleCode||telemetry.external_id||'차량'}`:item?.vehicleCode||telemetry.external_id||'차량';
+  const name=telemetry.telemetry_source==='RECORDED_GPS'?(item?.vehicleCode||'차량'):isAndroidGpsItem(item)?`Android GPS · ${item?.vehicleCode||telemetry.external_id||'차량'}`:item?.vehicleCode||telemetry.external_id||'차량';
   const label=document.createElement('span');label.textContent=entry.estimated?`${name} · 추정 위치`:name;
   if(entry.labelOnTrip!==onTrip){
     entry.marker.unbindTooltip();
@@ -681,7 +681,6 @@ function canChangeTelemetryMode(){return !demoMode&&['ADMIN','OPERATOR'].include
 function renderTelemetryMode(result){
   if(!result||!telemetryModeSelect)return;
   if(!telemetrySettingsEditing){telemetryModeSelect.value=result.mode;historyCompensation.checked=result.historyCompensationEnabled===true;}
-  document.querySelector('#fleet-source').textContent=result.mode==='live'?'소스: 실시간 BIMS':'소스: 저장된 GPS';
   telemetryModeStatus.textContent=`Active source: ${telemetryModeLabel(result.mode)}${result.available?'':' · routing is starting'}`;
   telemetryModeStatus.dataset.level=result.available?'ok':'warn';
   telemetryModeApply.disabled=!canChangeTelemetryMode();

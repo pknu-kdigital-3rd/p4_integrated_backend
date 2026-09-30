@@ -87,7 +87,7 @@ export function renderVehicleDetails(item) {
   const t = item.telemetry || {}, state = vehicleStatus(item);
   const write = (id, text) => { document.getElementById(id).textContent = text; };
   document.querySelector('#selection-empty').hidden = true;
-  write('selected-source', [item.vehicleName, item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?'Android GPS 재생':t.telemetry_source].filter(Boolean).join(' · '));
+  write('selected-source', [item.vehicleName, item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?null:t.telemetry_source].filter(Boolean).join(' · '));
   write('selected-speed', formatSpeed(t.speed_kmh));
   write('selected-state', TRIP_STATUS_LABELS[item.tripStatus]||STATUS_LABELS[state]); write('selected-trip', item.tripId ?? '—');
   const observed = new Date(t.observed_at_utc);
@@ -138,7 +138,6 @@ export function initializeDashboard({ map, markers, selectVehicle, showFleet }) 
   }
   search.addEventListener('input', () => { query = search.value; render(); });
   document.querySelector('#show-fleet').onclick=()=>{filter='all';query='';search.value='';render();showFleet(fleet);};
-  document.querySelector('#fleet-source').onclick=()=>document.querySelector('[data-rail=settings]').click();
   search.addEventListener('keydown', e => { if(e.key==='Escape'){query='';search.value='';drawerOpen=false;render();} });
   document.querySelectorAll('[data-rail]').forEach(button => button.onclick = () => {
     const view=button.dataset.rail;
