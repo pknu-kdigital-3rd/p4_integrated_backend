@@ -222,8 +222,7 @@ function showTripDisplay(display){
       const latLngs=points.map(point=>[point[2],point[1]]);
       replayRouteLayer=L.layerGroup().addTo(map);
       L.polyline(latLngs,{color:'#ffffff',weight:11,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
-      const gpsLine=L.polyline(latLngs,{color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
-      gpsLine.bindTooltip('Android GPS 경로');
+      L.polyline(latLngs,{color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
       const nodeCount=Math.min(18,Math.max(0,latLngs.length-2));
       for(let i=1;i<=nodeCount;i++){
         const point=latLngs[Math.round(i*(latLngs.length-1)/(nodeCount+1))];
@@ -427,7 +426,7 @@ function showAssignmentPreview(preview){
   }
   assignmentPreviewLayer=L.layerGroup([
     L.polyline(path,{color:'#ffffff',weight:11,opacity:0.9,lineCap:'round',lineJoin:'round'}),
-    L.polyline(path,{color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).bindTooltip(`배정 예정 Android GPS 경로 · ${preview.datasetName}`),
+    L.polyline(path,{color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}),
     ...routeNodes,
     L.circleMarker(path.at(-1),{radius:8,color:'#fff',weight:2,fillColor:'#0878f9',fillOpacity:1}).bindTooltip('배정 예정 목적지 · GPS 기록 마지막 위치',{direction:'top'}),
   ]);
