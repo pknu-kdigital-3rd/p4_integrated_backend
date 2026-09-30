@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=12';
+import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=13';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -318,7 +318,7 @@ function retargetLiveView(item){
 function clearTripLayers(){
   for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
   routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;currentRouteBreaks=[];routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);
-  for(const entry of markers.values())if(entry.estimated){entry.estimated=false;syncVehicleMapLabel(entry)}
+  for(const entry of markers.values())if(entry.estimated){entry.estimated=false;entry.freeEstimated=false;syncVehicleMapLabel(entry)}
 }
 // Source time of the frame the live view last painted, while it is fresh.
 let lastLiveMessageAt=0;
@@ -326,6 +326,48 @@ function presentedFrameTime(){
   if(!lastLiveMessage||Date.now()-lastLiveMessageAt>LIVE_OVERRIDE_STALE_MS)return null;
   const time=String(lastLiveMessage.telemetry?.source_timestamp_ns??lastLiveMessage.sourceTimestampNs??'');
   return /^\d+$/.test(time)?time:null;
+}
+// A GPS replay stream without a running trip follows its fixes, but where the
+// recording has none (a tunnel) the phone streams placeholder fixes (frozen,
+// then network) and nothing else. Its latest uploaded path (never drawn) places
+// the vehicle through such gaps by the replay time, labelled "추정 위치".
+let freeReplay=null,freeReplayLoading=null;
+function freeReplayWanted(item){
+  return item?.telemetry?.telemetry_source==='RECORDED_GPS'&&item?.tripStatus!=='IN_PROGRESS';
+}
+function ensureFreeReplay(vehicleId){
+  if(!vehicleId)return;
+  const fresh=freeReplay&&String(freeReplay.vehicleId)===String(vehicleId)&&Date.now()-freeReplay.loadedAt<60000;
+  if(fresh||freeReplayLoading===String(vehicleId))return;
+  freeReplayLoading=String(vehicleId);
+  void api(`/api/v1/trips/vehicles/${vehicleId}/replay-preview`,{},true).then(preview=>{
+    const line=preview?replayRouteLine(preview,roadSnapMode):null;
+    freeReplay=line?.timing?{vehicleId:String(vehicleId),points:preview.points,line,gapS:recordingGapThresholdS(preview.points),loadedAt:Date.now()}
+      :{vehicleId:String(vehicleId),points:null,line:null,loadedAt:Date.now()};
+  }).catch(()=>{}).finally(()=>{if(freeReplayLoading===String(vehicleId))freeReplayLoading=null});
+}
+// Where the uploaded path puts vehicleId at a replay time; null outside it.
+function freeReplayEstimate(vehicleId,timestampNs){
+  const replay=freeReplay;
+  if(!replay?.line||String(replay.vehicleId)!==String(vehicleId)||timestampNs==null||!/^\d+$/.test(String(timestampNs)))return null;
+  const time=withReplayGpsLead(String(timestampNs)),points=replay.points;
+  if(!Array.isArray(points)||BigInt(time)<BigInt(points[0][0])||BigInt(time)>BigInt(points.at(-1)[0]))return null;
+  const position=matchedRoutePosition(replay.line.timing.anchors,time,replay.line.timing.distances);
+  const head=position==null?null:routeDisplayFromPosition(replay.line.coordinates,position,replay.line.breaks)?.head;
+  return head?{latLng:head,inGap:recordingGapAt(points,time,replay.gapS)}:null;
+}
+// The stream's current replay time: the phone's replay clock advanced by the
+// time since it was reported (the recording plays in real time), at most 45 s.
+function streamReplayTime(item){
+  const metadata=item?.telemetry?.source_metadata,clock=replayClock(metadata);
+  const time=clock?.time??metadata?.sourceTimestampNs,at=clock?clock.at:metadata?.receivedAt;
+  if(time==null||!/^\d+$/.test(String(time)))return null;
+  const age=Date.now()-new Date(at??'').getTime();
+  return Number.isFinite(age)&&age>0?(BigInt(time)+BigInt(Math.round(Math.min(age,45000)*1e6))).toString():String(time);
+}
+function setFreeEstimated(entry,value){
+  if(!entry||Boolean(entry.freeEstimated)===value)return;
+  entry.freeEstimated=value;entry.estimated=value;syncVehicleMapLabel(entry);
 }
 function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   const display=currentTripDisplay,layer=routeLayer||replayRouteLayer;
@@ -601,7 +643,11 @@ function render(snapshot){
     entry.marker.setZIndexOffset(liveSelected||selected?.telemetry?.external_id===key?1000:0);
     // Live frames own the selected marker between successful fleet polls.
     if(!isLiveOverride(liveView,key,Date.now())){
-      if(!routeControlsMarker(item))glideMarker(entry.marker,pos,FLEET_POLL_MS);
+      if(!routeControlsMarker(item)){
+        const estimate=freeReplayWanted(item)?freeReplayEstimate(item.vehicleId,streamReplayTime(item)):null;
+        glideMarker(entry.marker,estimate?.inGap?estimate.latLng:pos,FLEET_POLL_MS);
+        setFreeEstimated(entry,Boolean(estimate?.inGap));
+      }
       // The replay vehicle is followed from its position on the route (route
       // tick); following its raw fix here would pull the camera back to it -
       // in a tunnel, to the entrance - every poll.
@@ -613,6 +659,10 @@ function render(snapshot){
     syncVehicleMapLabel(entry);
   }
   dashboard.update(snapshot.vehicles);
+  for(const item of snapshot.vehicles){
+    const watched=item.telemetry?.external_id===selected?.telemetry?.external_id||item.telemetry?.external_id===liveView?.markerKey;
+    if(watched&&freeReplayWanted(item))ensureFreeReplay(item.vehicleId);
+  }
   updateRemainingTripRoute();
   updateAssignmentPreviewRoute();
   if(!liveView&&!snapshot.vehicles.some(isAndroidGpsItem))fleetViewport.fit(snapshot.vehicles,{initial:true});
@@ -962,11 +1012,18 @@ window.addEventListener('message',event=>{
     frameTime:message.telemetry?.source_timestamp_ns??message.sourceTimestampNs??null,tripShown:currentTripDisplay?.tripId??null,
     routeMode:currentTripDisplay?.routeMode??null,sameVehicle:String(liveView?.vehicleId)===String(currentTripDisplay?.vehicleId)};
   const position=applyLiveTelemetry(liveView,message,Date.now());
-  if(!position&&currentTripDisplay?.routeMode==='REPLAY_ONLY'&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)){
+  const tripRunsHere=currentTripDisplay?.tripStatus==='IN_PROGRESS'&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId);
+  if(!position&&tripRunsHere&&currentTripDisplay.routeMode==='REPLAY_ONLY'){
     // No GPS for this frame (a tunnel): place the replay vehicle by its time.
     const snapped=presentedFrameTime()?updateRemainingTripRoute():null;
     if(snapped&&liveMapFollower.isFollowing())liveMapFollower.follow(snapped);
+  }else if(!position&&!tripRunsHere){
+    // No running trip: estimate along the vehicle's uploaded path by the frame's
+    // time, and keep the fleet poll from pulling it back to a placeholder fix.
+    const estimate=freeReplayEstimate(liveView?.vehicleId,presentedFrameTime());
+    if(estimate){liveView.lastUpdateAt=Date.now();setFreeEstimated(liveMapFollower.update(estimate.latLng),true)}
   }
+  if(position)setFreeEstimated(markers.get(liveView?.markerKey),false);
   if(position){
     const snapped=currentTripDisplay&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)
       ?updateRemainingTripRoute({latitude:position[0],longitude:position[1]},message.telemetry?.source_timestamp_ns):null;

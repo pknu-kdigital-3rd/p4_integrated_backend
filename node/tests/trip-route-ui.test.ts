@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { estimatedReplayTimestamp, forwardOnlyPosition, gapAwareReplayLine, matchedRoutePosition, replayClock, replayRouteLine, routeDisplayFromPosition, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, recordingGapAt, recordingGapThresholdS, forwardOnlyPosition, gapAwareReplayLine, matchedRoutePosition, replayClock, replayRouteLine, routeDisplayFromPosition, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -340,5 +340,23 @@ describe("recorded GPS line with road only across GPS gaps", () => {
         expect(line.coordinates).toHaveLength(4);
         expect(BigInt(line.timing!.anchors[1]!.sourceTimestampNs)).toBeGreaterThan(BigInt(tunnelFixes[0]![0]));
         expect(BigInt(line.timing!.anchors[2]!.sourceTimestampNs)).toBeLessThan(BigInt(tunnelFixes[1]![0]));
+    });
+});
+
+describe("GPS gaps in a recording", () => {
+    const points = [["1000000000", 0, 0, 0], ["2000000000", 0, 0, 0], ["3000000000", 0, 0, 0], ["63000000000", 0, 0, 0], ["64000000000", 0, 0, 0]];
+
+    it("finds a tunnel gap between two recorded fixes, not ordinary spacing or outside the recording", () => {
+        const threshold = recordingGapThresholdS(points);
+        expect(threshold).toBe(5);
+        expect(recordingGapAt(points, "30000000000", threshold)).toBe(true);
+        expect(recordingGapAt(points, "1500000000", threshold)).toBe(false);
+        expect(recordingGapAt(points, "70000000000", threshold)).toBe(false);
+    });
+
+    it("scales the threshold with a thinned path's spacing", () => {
+        const thinned = Array.from({ length: 10 }, (_, index) => [`${(index + 1) * 7}000000000`, 0, 0, 0]);
+        expect(recordingGapThresholdS(thinned)).toBe(21);
+        expect(recordingGapAt(thinned, "10000000000", recordingGapThresholdS(thinned))).toBe(false);
     });
 });

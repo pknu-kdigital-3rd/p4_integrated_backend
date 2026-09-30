@@ -1,7 +1,8 @@
 import type { Request, Response } from "express";
 import type { CreateTripBody } from "./trip.schema.ts";
 import { tripService } from "./trip.service.ts";
-import { parseVehicleId, replayPreviewService } from "./trip.preview.ts";
+import { parseVehicleId, previewPoints, replayPreviewService } from "./trip.preview.ts";
+import { cleanReplayPreviewPoints } from "./trip-preview-clean.ts";
 import { matchReplayPreview } from "./trip-road-match.ts";
 
 export const tripController = {
@@ -21,6 +22,9 @@ export const tripController = {
     },
     async latestPreview(req: Request, res: Response) {
         const preview = await replayPreviewService.latest(parseVehicleId(String(req.params.vehicleId)));
-        res.json({ data: preview ? { ...preview, roadMatch: await matchReplayPreview(preview) } : null });
+        // Points cleaned as for a trip's display, so the road match's timing (built
+        // from the cleaned points) and these points describe the same recording.
+        res.json({ data: preview ? { ...preview, points: cleanReplayPreviewPoints(previewPoints(preview.points)),
+            roadMatch: await matchReplayPreview(preview) } : null });
     },
 };

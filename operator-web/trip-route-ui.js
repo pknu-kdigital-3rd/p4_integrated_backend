@@ -92,6 +92,29 @@ export function estimatedReplayTimestamp(sourceTimestampNs,receivedAt,nowMs,spee
   return (BigInt(sourceTimestampNs)+BigInt(Math.round(elapsedMs*1e6))).toString();
 }
 
+/**
+ * Seconds between recorded fixes above which a replay time counts as a GPS gap
+ * (a tunnel): at least minGapS, and three times the path's typical spacing, as
+ * a long recording's uploaded path is thinned to a fixed number of points.
+ */
+export function recordingGapThresholdS(points,minGapS=5){
+  if(!Array.isArray(points)||points.length<3)return minGapS;
+  const spacings=[];
+  for(let index=1;index<points.length;index++)spacings.push(Number(BigInt(points[index][0])-BigInt(points[index-1][0]))/1e9);
+  spacings.sort((a,b)=>a-b);
+  return Math.max(minGapS,3*spacings[Math.floor(spacings.length/2)]);
+}
+
+/** True when a replay time lies between two recorded fixes more than thresholdS apart. */
+export function recordingGapAt(points,sourceTimestampNs,thresholdS=5){
+  if(!Array.isArray(points)||points.length<2||sourceTimestampNs==null)return false;
+  const time=BigInt(sourceTimestampNs);
+  if(time<BigInt(points[0][0])||time>BigInt(points.at(-1)[0]))return false;
+  let low=0,high=points.length-1;
+  while(high-low>1){const mid=(low+high)>>1;if(BigInt(points[mid][0])<=time)low=mid;else high=mid}
+  return Number(BigInt(points[high][0])-BigInt(points[low][0]))/1e9>thresholdS;
+}
+
 /** Fractional segment index at the current recorded playback timestamp. */
 export function recordedRoutePosition(points,sourceTimestampNs){
   if(!Array.isArray(points)||points.length<2||sourceTimestampNs==null)return null;
