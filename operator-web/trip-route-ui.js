@@ -25,15 +25,30 @@ export function plannedProgress(geometry,fix){
 }
 
 /** Keep only the route ahead of the current fix, including the fix itself. */
-export function remainingRoute(coordinates,fix,minPosition=0,snapStart=false,fixedPosition=false){
+// A snapped position may only search this far ahead of the previous one, and
+// not onto segments facing more than this away from the vehicle's heading, so
+// an intersection, a parallel road or a route that doubles back cannot pull
+// the marker far ahead.
+export const SNAP_SEARCH_AHEAD_M=300;
+const SNAP_MAX_HEADING_DIFF_DEG=100;
+
+export function remainingRoute(coordinates,fix,minPosition=0,snapStart=false,fixedPosition=false,{maxAheadM=Infinity,headingDeg=null}={}){
   if(!Array.isArray(coordinates)||coordinates.length<2||!Number.isFinite(fix?.latitude)||!Number.isFinite(fix?.longitude))return null;
   const at=[fix.longitude,fix.latitude],latScale=111195,lonScale=latScale*Math.cos(fix.latitude*rad);
-  let closest=Infinity,position=0;
+  let closest=Infinity,position=0,travelled=0;
   for(let i=Math.max(1,Math.floor(minPosition));!fixedPosition&&i<coordinates.length;i++){
+    if(travelled>maxAheadM)break;
     const a=coordinates[i-1],b=coordinates[i];
     if(!Array.isArray(a)||!Array.isArray(b)||!a.concat(b).every(Number.isFinite))continue;
     const dx=(b[0]-a[0])*lonScale,dy=(b[1]-a[1])*latScale,denominator=dx*dx+dy*dy;
     if(!denominator)continue;
+    const lengthM=Math.sqrt(denominator);
+    // Only the part of the first segment beyond minPosition counts as travel.
+    travelled+=lengthM*(i-1<minPosition?Math.max(0,1-(minPosition-(i-1))):1);
+    if(Number.isFinite(headingDeg)){
+      const bearing=(Math.atan2(dx,dy)*180/Math.PI+360)%360,diff=Math.abs(((bearing-headingDeg)%360+540)%360-180);
+      if(diff>SNAP_MAX_HEADING_DIFF_DEG)continue;
+    }
     const fraction=Math.max(0,Math.min(1,(((at[0]-a[0])*lonScale)*dx+((at[1]-a[1])*latScale)*dy)/denominator));
     const distance=Math.hypot((at[0]-a[0])*lonScale-fraction*dx,(at[1]-a[1])*latScale-fraction*dy);
     const candidate=i-1+fraction;
@@ -67,10 +82,12 @@ export function matchedRoutePosition(anchors,sourceTimestampNs,coordinateDistanc
 }
 
 /** Advance a replay fix briefly during a GPS gap; never beyond 45 seconds. */
+// Predicts from the moment the fix was received, continuously: waiting for a
+// gap to build up first and then adding all of it at once reads as a jump.
 export function estimatedReplayTimestamp(sourceTimestampNs,receivedAt,nowMs,speedKmh){
   if(sourceTimestampNs==null||!Number.isFinite(speedKmh)||speedKmh<=3)return null;
   const age=nowMs-new Date(receivedAt??'').getTime();
-  if(!Number.isFinite(age)||age<1500)return null;
+  if(!Number.isFinite(age)||age<0)return null;
   const elapsedMs=Math.min(age,45000);
   return (BigInt(sourceTimestampNs)+BigInt(Math.round(elapsedMs*1e6))).toString();
 }
@@ -145,4 +162,34 @@ export function replayProgressOnRoute(geometry,fix,offRouteNoticeM=100){
   if(!progress)return null;
   const off=progress.offRouteM>offRouteNoticeM?` · 계획 경로에서 ${progress.offRouteM} m 떨어짐`:'';
   return {...progress,label:`GPS 재생 위치 기준 ${progress.percent}% · 남은 계획 경로 ${(progress.remainingM/1000).toFixed(1)} km${off}`};
+}
+
+function distanceAtPosition(distances,position){
+  const first=Math.max(0,Math.min(distances.length-1,Math.floor(position))),next=Math.min(distances.length-1,first+1);
+  return distances[first]+(position-first)*(distances[next]-distances[first]);
+}
+
+/**
+ * Keeps a displayed route position from stepping back for a small correction
+ * (a fresh fix landing just behind a prediction), which reads as a jump back.
+ * A larger step back is a real seek in the recording and is followed.
+ */
+export function forwardOnlyPosition(previous,next,distances,toleranceM=80){
+  if(!Number.isFinite(next))return previous;
+  if(!Number.isFinite(previous)||next>=previous)return next;
+  if(!Array.isArray(distances)||distances.length<2)return previous;
+  return distanceAtPosition(distances,previous)-distanceAtPosition(distances,next)<=toleranceM?previous:next;
+}
+
+/**
+ * Timestamp anchors for a replay line: the road match's own, or - without a
+ * match - every recorded GPS point, so the replay marker's place on the line is
+ * always set by the recording's time rather than by a nearest-segment search.
+ */
+export function replayLineTiming(preview){
+  if(preview?.roadMatch?.anchors?.length>1)return {anchors:preview.roadMatch.anchors,distances:preview.roadMatch.coordinateDistancesM};
+  const points=preview?.points;
+  if(!Array.isArray(points)||points.length<2)return null;
+  return {anchors:points.map((point,index)=>({sourceTimestampNs:point[0],routePosition:index,routeDistanceM:point[3]})),
+    distances:points.map(point=>point[3])};
 }

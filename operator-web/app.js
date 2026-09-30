@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,plannedProgress,recordedProgress,matchedRoutePosition,replayProgressOnRoute,remainingRoute,tripTimes} from './trip-route-ui.js?v=4';
+import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayLineTiming,replayProgressOnRoute,remainingRoute,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=5';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -20,7 +20,7 @@ mapStyleSelect.addEventListener('change',()=>{
   localStorage.setItem('operatorMapStyle',mapStyleSelect.value);
   setMapStyle(mapStyleSelect.value);
 });
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let routePosition=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let routePosition=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.
 const tripRouteRenderer=L.svg({padding:3});
@@ -120,9 +120,37 @@ document.querySelector('#live-float').addEventListener('click',async()=>{
 // A docked preview is hidden by the saved-recordings tab; close it rather than keep a TURN port busy.
 document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView()});
 placeLivePanel(true);
+const ROUTE_TICK_MS=500,FLEET_POLL_MS=3000;
+// Moves a marker smoothly to its next position over one update interval
+// instead of jumping; a jump over 1 km (a new vehicle, a seek) is applied directly.
+function glideMarker(marker,target,durationMs){
+  const to=L.latLng(target),from=marker.getLatLng();
+  cancelAnimationFrame(marker.glideFrame);
+  if(!from||document.hidden||from.distanceTo(to)>1000){marker.setLatLng(to);return}
+  const started=performance.now();
+  const step=now=>{
+    const t=Math.min(1,(now-started)/durationMs);
+    marker.setLatLng([from.lat+(to.lat-from.lat)*t,from.lng+(to.lng-from.lng)*t]);
+    if(t<1)marker.glideFrame=requestAnimationFrame(step);
+  };
+  marker.glideFrame=requestAnimationFrame(step);
+}
+// Replacing a divIcon rebuilds its HTML and restarts the pulse animation, so
+// only replace it when it actually looks different.
+function setMarkerIcon(entry,icon){
+  const key=`${icon.options.className}|${icon.options.html}`;
+  if(entry.iconKey===key)return;
+  entry.iconKey=key;entry.marker.setIcon(icon);
+}
+// The replay vehicle's marker is placed on its trip line by the route update.
+function routeControlsMarker(item){
+  return currentTripDisplay?.routeMode==='REPLAY_ONLY'&&Array.isArray(currentRouteCoordinates)
+    &&String(item?.vehicleId)===String(currentTripDisplay.vehicleId)&&item?.telemetry?.telemetry_source==='RECORDED_GPS';
+}
 function createMarkerEntry(item,position,{liveOnly=false}={}){
   const marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
-  const entry={marker,item,liveOnly,labelOnTrip:null};
+  const icon=marker.options.icon;
+  const entry={marker,item,liveOnly,labelOnTrip:null,iconKey:icon?.options?`${icon.options.className}|${icon.options.html}`:null};
   marker.on('click',()=>selectVehicle(entry.item));
   syncVehicleMapLabel(entry);
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
@@ -212,7 +240,7 @@ function retargetLiveView(item){
 }
 function clearTripLayers(){
   for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
-  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;routePosition=0;
+  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;routePosition=0;
   for(const entry of markers.values())if(entry.estimated){entry.estimated=false;syncVehicleMapLabel(entry)}
 }
 function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
@@ -235,17 +263,25 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
     :metadata?.sourceTimestampNs?metadata.receivedAt:display.replayPosition?.receivedAt;
   const estimatedTime=replayOnly&&display.tripStatus==='IN_PROGRESS'
     ?estimatedReplayTimestamp(sourceTime,receivedAt,Date.now(),Number(item?.telemetry?.speed_kmh)):null;
-  const playbackPosition=replayOnly?matchedRoutePosition(display.replayPreview?.roadMatch?.anchors,estimatedTime||sourceTime,display.replayPreview?.roadMatch?.coordinateDistancesM):null;
-  const remaining=remainingRoute(currentRouteCoordinates,fix,Math.max(routePosition,playbackPosition??0),replayOnly,Boolean(estimatedTime));
+  // Replay: the recording's own time decides where on the line the vehicle is
+  // (road-matched or the recorded line itself), never a nearest-segment search.
+  const playbackPosition=replayOnly?matchedRoutePosition(currentRouteTiming?.anchors,estimatedTime||sourceTime,currentRouteTiming?.distances):null;
+  let remaining;
+  if(playbackPosition!=null){
+    remaining=remainingRoute(currentRouteCoordinates,fix,forwardOnlyPosition(routePosition,playbackPosition,currentRouteTiming?.distances),true,true);
+  }else{
+    // Real GPS on a planned route: search only a short way ahead, facing the heading.
+    const speed=Number(item?.telemetry?.speed_kmh),heading=Number(fix?.heading_deg??fix?.bearing_deg??item?.telemetry?.heading_deg);
+    remaining=remainingRoute(currentRouteCoordinates,fix,routePosition,replayOnly,false,
+      {maxAheadM:SNAP_SEARCH_AHEAD_M,headingDeg:Number.isFinite(speed)&&speed>5&&Number.isFinite(heading)?heading:null});
+  }
   // No current position yet (trip not started, phone not streaming): show the
   // whole route rather than nothing.
   if(!remaining){layer.setLatLngs(Array.isArray(currentRouteCoordinates)?currentRouteCoordinates.map(([lon,lat])=>[lat,lon]):[]);return}
-  // A prediction must not become confirmed progress: a returning GPS fix may
-  // correct it backward to the actual road segment.
-  if(!estimatedTime)routePosition=remaining.position;
+  routePosition=remaining.position;
   layer.setLatLngs(remaining.latLngs);
   if(replayOnly&&marker){
-    marker.setLatLng(remaining.latLngs[0]);
+    glideMarker(marker,remaining.latLngs[0],ROUTE_TICK_MS);
     const entry=markers.get(item.telemetry.external_id);
     if(entry){entry.estimated=Boolean(estimatedTime);syncVehicleMapLabel(entry)}
   }
@@ -268,6 +304,7 @@ function showTripDisplay(display){
     // recorded GPS line itself, so the replay path is never missing.
     const recordedLine=Array.isArray(display.replayPreview?.points)?display.replayPreview.points.map(point=>[point[1],point[2]]):null;
     currentRouteCoordinates=replayOnly?display.replayPreview?.roadMatch?.routeGeojson?.coordinates||recordedLine:display.plannedRoute?.routeGeojson?.coordinates;
+    currentRouteTiming=replayOnly?replayLineTiming(display.replayPreview):null;
     if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],tripRouteStyle).addTo(map);
     if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],tripRouteStyle).addTo(map);
     const target=replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
@@ -339,7 +376,7 @@ function selectVehicle(item){
   renderVehicleDetails(item);
   for(const entry of markers.values()){
     const active=entry.item.telemetry?.external_id===item.telemetry?.external_id;
-    entry.marker.setIcon(vehicleIcon(entry.item,active));
+    setMarkerIcon(entry,vehicleIcon(entry.item,active));
     entry.marker.setZIndexOffset(active?1000:0);
     const showLabel=active||entry.item?.tripStatus==='IN_PROGRESS';
     if(entry.marker.getTooltip())entry.marker.getTooltip().options.permanent=showLabel;
@@ -380,11 +417,11 @@ function render(snapshot){
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
     const liveSelected=liveView?.markerKey===key;
-    entry.marker.setIcon(vehicleIcon(item,liveSelected||selected?.telemetry?.external_id===key));
+    setMarkerIcon(entry,vehicleIcon(item,liveSelected||selected?.telemetry?.external_id===key));
     entry.marker.setZIndexOffset(liveSelected||selected?.telemetry?.external_id===key?1000:0);
     // Live frames own the selected marker between successful fleet polls.
     if(!isLiveOverride(liveView,key,Date.now())){
-      entry.marker.setLatLng(pos);
+      if(!routeControlsMarker(item))glideMarker(entry.marker,pos,FLEET_POLL_MS);
       if(liveView?.markerKey===key&&liveMapFollower.isFollowing())liveMapFollower.update(pos);
     }
     const session=t.source_metadata?.recordingSessionId;
@@ -753,7 +790,7 @@ setInterval(()=>{
   if(document.hidden||currentTripDisplay?.routeMode!=='REPLAY_ONLY'||currentTripDisplay.tripStatus!=='IN_PROGRESS')return;
   const snapped=updateRemainingTripRoute();
   if(snapped&&liveView?.vehicleId===String(currentTripDisplay.vehicleId)&&liveMapFollower.isFollowing())liveMapFollower.update(snapped);
-},500);
+},ROUTE_TICK_MS);
 // With no open button, the "실시간 영상" tab reopens a closed preview for a streaming vehicle.
 document.querySelector('#recording-live-tab').addEventListener('click',()=>{if(!liveView)openLiveView()});
 function openLiveView(){

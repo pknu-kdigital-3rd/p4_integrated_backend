@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { estimatedReplayTimestamp, matchedRoutePosition, plannedProgress, recordedProgress, remainingRoute, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, forwardOnlyPosition, matchedRoutePosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -118,5 +118,48 @@ describe("replay progress on the operator's planned route", () => {
 
     it("has nothing to show without a planned route", () => {
         expect(replayProgressOnRoute(null, { latitude: 35, longitude: 129 })).toBeNull();
+    });
+});
+
+describe("vehicle snapping stability", () => {
+    // A route that runs east, turns back west on a parallel road 20 m north, then east again.
+    const doubledBack = [[129.000, 35.0000], [129.004, 35.0000], [129.004, 35.0002], [129.000, 35.0002], [129.000, 35.0004], [129.004, 35.0004]];
+
+    it("does not jump to a much later segment of a route that doubles back", () => {
+        // Near the start, but on the far side: nearest overall is the returning leg (segment 3).
+        const fix = { latitude: 35.00015, longitude: 129.0005 };
+        expect(remainingRoute(doubledBack, fix, 0)!.position).toBeGreaterThan(2);
+        expect(remainingRoute(doubledBack, fix, 0, false, false, { maxAheadM: 300 })!.position).toBeLessThan(1);
+    });
+
+    it("ignores segments facing against the vehicle's heading", () => {
+        const fix = { latitude: 35.00012, longitude: 129.002 };
+        // Heading east: the westbound leg in between is skipped although it is nearer.
+        const east = remainingRoute(doubledBack, fix, 0, false, false, { headingDeg: 90 })!;
+        expect(Math.floor(east.position)).not.toBe(2);
+        expect([0, 4]).toContain(Math.floor(east.position));
+    });
+
+    it("predicts continuously from the moment a fix arrives", () => {
+        const receivedAt = "2026-09-30T00:00:00.000Z";
+        expect(estimatedReplayTimestamp("1000000000", receivedAt, Date.parse(receivedAt) + 200, 40)).toBe("1200000000");
+        expect(estimatedReplayTimestamp("1000000000", receivedAt, Date.parse(receivedAt) - 10, 40)).toBeNull();
+    });
+
+    it("holds position through a small backward correction but follows a real seek", () => {
+        const distances = [0, 100, 200, 300];
+        expect(forwardOnlyPosition(2, 1.7, distances)).toBe(2);
+        expect(forwardOnlyPosition(2, 0.5, distances)).toBe(0.5);
+        expect(forwardOnlyPosition(1, 2.5, distances)).toBe(2.5);
+        expect(forwardOnlyPosition(Number.NaN, 1, distances)).toBe(1);
+    });
+
+    it("times the recorded line from its own points when there is no road match", () => {
+        const preview = { points: [["100", 129, 35, 0], ["200", 129.001, 35, 90], ["300", 129.002, 35, 180]] };
+        const timing = replayLineTiming(preview)!;
+        expect(timing.distances).toEqual([0, 90, 180]);
+        expect(matchedRoutePosition(timing.anchors, "250", timing.distances)).toBeCloseTo(1.5);
+        const matched = { ...preview, roadMatch: { anchors: [{ sourceTimestampNs: "100", routePosition: 0 }, { sourceTimestampNs: "300", routePosition: 4 }], coordinateDistancesM: [0, 1, 2, 3, 4] } };
+        expect(replayLineTiming(matched)!.anchors).toBe(matched.roadMatch.anchors);
     });
 });
