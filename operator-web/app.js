@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=9';
+import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=10';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';

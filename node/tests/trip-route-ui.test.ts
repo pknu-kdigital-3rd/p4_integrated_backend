@@ -243,5 +243,52 @@ describe("recorded GPS line with road only across GPS gaps", () => {
         expect(gapAwareReplayLine(points, null)!.coordinates).toHaveLength(points.length);
         const farRoad = road.map(([lon, lat]) => [lon, lat + 0.01]);
         expect(gapAwareReplayLine(points, farRoad)!.coordinates).toHaveLength(points.length);
+        const wrongCarriageway = road.map(([lon, lat]) => [lon, lat + 0.001]);
+        expect(gapAwareReplayLine(points, wrongCarriageway)!.coordinates).toHaveLength(points.length);
+    });
+
+    it("uses the timed road section through a gap instead of a nearer earlier loop", () => {
+        const loop = [
+            [129.000, 35.0000], [129.004, 35.0000],
+            [129.004, 35.0004], [129.000, 35.0004],
+            [129.000, 35.0002], [129.004, 35.0002],
+        ];
+        const fixes = [
+            ["1000000000", 129.0005, 35.00008, 0],
+            ["61000000000", 129.0035, 35.00008, 275],
+        ];
+        const routeDistances = [0, 364, 408, 772, 794, 1158];
+        const preview = { points: fixes, roadMatch: {
+            routeGeojson: { coordinates: loop },
+            anchors: [
+                { sourceTimestampNs: fixes[0]![0], routePosition: 4.125, routeDistanceM: 839.5 },
+                { sourceTimestampNs: fixes[1]![0], routePosition: 4.875, routeDistanceM: 1112.5 },
+            ],
+            coordinateDistancesM: routeDistances,
+        } };
+        const line = replayRouteLine(preview, "gaps");
+        expect(line.coordinates!.some(([, lat]) => lat === 35.0002)).toBe(true);
+        expect(line.coordinates!.some(([, lat]) => lat === 35.0000)).toBe(false);
+    });
+
+    it("moves onto an offset tunnel road over the gap instead of jumping at its start", () => {
+        const tunnelFixes = [
+            ["1000000000", 129.09566, 35.14950, 0],
+            ["61000000000", 129.10320, 35.15880, 1150],
+        ];
+        // Bundled OSM PBF: south entrance and north exit of 번영로 광안터널.
+        const tunnelRoad = [[129.096724, 35.149529], [129.103674, 35.158260]];
+        const preview = { points: tunnelFixes, roadMatch: {
+            routeGeojson: { coordinates: tunnelRoad },
+            anchors: [
+                { sourceTimestampNs: tunnelFixes[0]![0], routePosition: 0, routeDistanceM: 0 },
+                { sourceTimestampNs: tunnelFixes[1]![0], routePosition: 1, routeDistanceM: 1150 },
+            ],
+            coordinateDistancesM: [0, 1150],
+        } };
+        const line = replayRouteLine(preview, "gaps");
+        expect(line.coordinates).toHaveLength(4);
+        expect(BigInt(line.timing!.anchors[1]!.sourceTimestampNs)).toBeGreaterThan(BigInt(tunnelFixes[0]![0]));
+        expect(BigInt(line.timing!.anchors[2]!.sourceTimestampNs)).toBeLessThan(BigInt(tunnelFixes[1]![0]));
     });
 });
