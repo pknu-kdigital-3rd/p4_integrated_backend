@@ -172,9 +172,18 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #trip-panel h2,#recordings-panel h2 { margin-bottom: 16px; }
 /* Vehicle picker in both "선택 차량" cards (empty state and details). */
 .vehicle-picker { width: 100%; margin-top: 8px; }
-.vehicle-picker-row { display: flex; gap: 6px; align-items: end; }
-.vehicle-picker-row .vehicle-picker { flex: 1; min-width: 0; }
+.vehicle-picker-row { display: flex; gap: 6px; align-items: center; }
+.vehicle-picker-row .vehicle-picker { flex: 1; min-width: 0; margin-top: 0; }
 #deselect-vehicle { flex: none; padding: 6px 10px; }
+/* In the selected-vehicle card the picker is the vehicle's title: the same size
+   and weight as the name it replaces, with a chevron; a border shows on hover
+   or keyboard focus so it still reads as a control. */
+.vehicle-identity-main { flex: 1; min-width: 0; }
+.vehicle-picker--title { appearance: none; -webkit-appearance: none; font-size: 20px; font-weight: 800; color: var(--ui-text);
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%2365758b' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 8px center;
+  border-color: transparent; padding: 4px 28px 4px 6px; margin-left: -6px; cursor: pointer; text-overflow: ellipsis; }
+.vehicle-picker--title:hover,.vehicle-picker--title:focus-visible { border-color: var(--ui-border); }
+.vehicle-picker--title option { font-size: 14px; font-weight: 400; }
 #trip-form label { color: var(--ui-text-secondary); font-size: 12px; }
 .trip-coordinate-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
 .trip-coordinate-heading button { padding: 6px 8px; background: var(--ui-primary-soft); color: var(--ui-primary); }

@@ -87,7 +87,6 @@ export function renderVehicleDetails(item) {
   const t = item.telemetry || {}, state = vehicleStatus(item);
   const write = (id, text) => { document.getElementById(id).textContent = text; };
   document.querySelector('#selection-empty').hidden = true;
-  write('selected-name', item.vehicleCode || item.vehicleName || t.external_id || '차량');
   write('selected-source', [item.vehicleName, item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?'Android GPS 재생':t.telemetry_source].filter(Boolean).join(' · '));
   write('selected-speed', formatSpeed(t.speed_kmh));
   write('selected-state', TRIP_STATUS_LABELS[item.tripStatus]||STATUS_LABELS[state]); write('selected-trip', item.tripId ?? '—');
