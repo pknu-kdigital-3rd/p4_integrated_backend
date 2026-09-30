@@ -390,6 +390,14 @@
        데이터 소스 불러오는 중…
       </p>
      </section>
+     <section class="route-mode-settings" aria-labelledby="map-style-title">
+      <h2 id="map-style-title">지도 스타일</h2>
+      <label for="map-style">기본 지도</label>
+      <select id="map-style">
+       <option value="operator">운영 지도 (벡터)</option>
+       <option value="default">기본 지도 (OpenStreetMap)</option>
+      </select>
+     </section>
      <section class="route-mode-settings" aria-labelledby="route-mode-title">
       <h2 id="route-mode-title">신규 운행 경로 표시</h2>
       <label for="trip-route-mode">배정 시 적용할 모드</label>
@@ -668,7 +676,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js">
   </script>
-  <script src="app.js?v=12" type="module">
+  <script src="app.js?v=13" type="module">
   </script>
   <script src="virtual-dispatch.js" type="module">
   </script>

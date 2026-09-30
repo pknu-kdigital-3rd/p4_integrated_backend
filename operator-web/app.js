@@ -7,12 +7,19 @@ import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-re
 import {plannedProgress,recordedProgress,recordedRoutePosition,replayProgressOnRoute,remainingRoute,tripTimes} from './trip-route-ui.js?v=2';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
-import {installOperatorBasemap} from './operator-basemap.js?v=5';
+import {installOperatorBasemap} from './operator-basemap.js?v=6';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
 const fallbackBasemap=L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
-installOperatorBasemap(map,fallbackBasemap);
+const mapStyleSelect=document.querySelector('#map-style');
+const savedMapStyle=localStorage.getItem('operatorMapStyle');
+mapStyleSelect.value=savedMapStyle==='default'?'default':'operator';
+const setMapStyle=installOperatorBasemap(map,fallbackBasemap,mapStyleSelect.value);
+mapStyleSelect.addEventListener('change',()=>{
+  localStorage.setItem('operatorMapStyle',mapStyleSelect.value);
+  setMapStyle(mapStyleSelect.value);
+});
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let routePosition=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.

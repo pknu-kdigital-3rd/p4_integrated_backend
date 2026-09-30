@@ -43,43 +43,53 @@ function colorOperatorLayers(glMap){
   }
 }
 
-export function installOperatorBasemap(map,fallback){
-  if(typeof L.maplibreGL!=='function')return;
-  let layer;
-  try{
-    // A separate lower pane guarantees WebGL tiles cannot cover Leaflet's
-    // routes, vehicles, labels, or controls, regardless of plugin CSS.
-    const pane=map.createPane('operatorBasemapPane');
-    pane.style.zIndex='100';
-    pane.style.pointerEvents='none';
-    layer=L.maplibreGL({
-      pane:'operatorBasemapPane',
-      style:STYLE_URL,
-      transformRequest:url=>({url:url.startsWith(TILE_ORIGIN)?`${BASEMAP_ROOT}${url.slice(TILE_ORIGIN.length)}`
-        :url.startsWith(ASSET_ORIGIN)?`${ASSET_ROOT}${url.slice(ASSET_ORIGIN.length)}`:url}),
-    }).addTo(map);
-    const glMap=layer.getMaplibreMap();
-    // The upstream style references a few POI sprites that it does not ship.
-    // Resolve only those missing basemap images with a transparent pixel; bus
-    // markers are Leaflet HTML icons and are unaffected.
-    const emptyIcon={width:1,height:1,data:new Uint8Array(4)};
-    glMap.on('styleimagemissing',({id})=>{
-      if(id&&!glMap.hasImage(id))glMap.addImage(id,emptyIcon);
-    });
-    const useFallback=event=>{
-      if(map.hasLayer(layer))map.removeLayer(layer);
-      console.warn('Operator vector basemap unavailable; using OSM tiles.',event?.error||event);
-    };
-    glMap.once('error',useFallback);
-    glMap.once('load',()=>{
-      glMap.off('error',useFallback);
-      try{
-        colorOperatorLayers(glMap);
-        map.removeLayer(fallback);
-      }catch(error){useFallback({error})}
-    });
-  }catch(error){
-    if(layer&&map.hasLayer(layer))map.removeLayer(layer);
-    console.warn('Operator vector basemap unavailable; using OSM tiles.',error);
-  }
+export function installOperatorBasemap(map,fallback,initialStyle='operator'){
+  let layer=null,generation=0,currentStyle=null;
+  const useFallback=()=>{if(!map.hasLayer(fallback))fallback.addTo(map)};
+  const setStyle=style=>{
+    const next=style==='default'?'default':'operator';
+    if(next===currentStyle)return;
+    currentStyle=next;
+    const request=++generation;
+    if(layer){if(map.hasLayer(layer))map.removeLayer(layer);layer=null}
+    useFallback();
+    if(next==='default')return;
+    if(typeof L.maplibreGL!=='function')return;
+    try{
+      // Keep the WebGL basemap below Leaflet routes and vehicle markers.
+      const pane=map.getPane('operatorBasemapPane')||map.createPane('operatorBasemapPane');
+      pane.style.zIndex='100';
+      pane.style.pointerEvents='none';
+      const candidate=L.maplibreGL({
+        pane:'operatorBasemapPane',
+        style:STYLE_URL,
+        transformRequest:url=>({url:url.startsWith(TILE_ORIGIN)?`${BASEMAP_ROOT}${url.slice(TILE_ORIGIN.length)}`
+          :url.startsWith(ASSET_ORIGIN)?`${ASSET_ROOT}${url.slice(ASSET_ORIGIN.length)}`:url}),
+      }).addTo(map);
+      layer=candidate;
+      const glMap=candidate.getMaplibreMap();
+      const emptyIcon={width:1,height:1,data:new Uint8Array(4)};
+      glMap.on('styleimagemissing',({id})=>{
+        if(request===generation&&id&&!glMap.hasImage(id))glMap.addImage(id,emptyIcon);
+      });
+      const failed=event=>{
+        if(request!==generation)return;
+        if(map.hasLayer(candidate))map.removeLayer(candidate);
+        if(layer===candidate)layer=null;
+        useFallback();
+        console.warn('Operator vector basemap unavailable; using OSM tiles.',event?.error||event);
+      };
+      glMap.once('error',failed);
+      glMap.once('load',()=>{
+        if(request!==generation)return;
+        glMap.off('error',failed);
+        try{colorOperatorLayers(glMap);map.removeLayer(fallback)}catch(error){failed({error})}
+      });
+    }catch(error){
+      if(request===generation){if(layer&&map.hasLayer(layer))map.removeLayer(layer);layer=null;useFallback()}
+      console.warn('Operator vector basemap unavailable; using OSM tiles.',error);
+    }
+  };
+  setStyle(initialStyle);
+  return setStyle;
 }
