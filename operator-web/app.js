@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,forwardOnlyPosition,gapAwareReplayLine,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayLineTiming,replayProgressOnRoute,remainingRoute,routeFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=8';
+import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=9';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -20,7 +20,7 @@ mapStyleSelect.addEventListener('change',()=>{
   localStorage.setItem('operatorMapStyle',mapStyleSelect.value);
   setMapStyle(mapStyleSelect.value);
 });
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let currentVehicleCoordinates=null;let currentVehicleTiming=null;let vehicleRoutePosition=0;let shownVehiclePosition=null;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.
 const tripRouteRenderer=L.svg({padding:3});
@@ -286,7 +286,7 @@ function retargetLiveView(item){
 }
 function clearTripLayers(){
   for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
-  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);currentVehicleCoordinates=null;currentVehicleTiming=null;vehicleRoutePosition=0;shownVehiclePosition=null;
+  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);
   for(const entry of markers.values())if(entry.estimated){entry.estimated=false;syncVehicleMapLabel(entry)}
 }
 function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
@@ -330,37 +330,27 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   if(!remaining){layer.setLatLngs(Array.isArray(currentRouteCoordinates)?currentRouteCoordinates.map(([lon,lat])=>[lat,lon]):[]);return}
   routePosition=remaining.position;
   if(replayOnly&&marker){
-    // The replay marker sits on its line, so animate the position along the
-    // line and draw both from it: the path is eaten away continuously with the
-    // vehicle exactly at its head, instead of the path jumping ahead first.
-    // The vehicle's own GPS-based position at the same playback time, when the
-    // line is on the road but the vehicle follows the recording.
-    let vehicleTarget=null;
-    if(currentVehicleTiming){
-      const raw=matchedRoutePosition(currentVehicleTiming.anchors,estimatedTime||sourceTime,currentVehicleTiming.distances);
-      if(raw!=null)vehicleRoutePosition=vehicleTarget=forwardOnlyPosition(vehicleRoutePosition,raw,currentVehicleTiming.distances);
-    }
-    animateReplayRoute(layer,marker,remaining.position,vehicleTarget);
+    // The route and marker must use the same timed line. In GPS mode this is
+    // the recorded path with road geometry only across gaps.
+    animateReplayRoute(layer,marker,remaining.position);
     const entry=markers.get(item.telemetry.external_id);
     if(entry){entry.estimated=Boolean(estimatedTime);syncVehicleMapLabel(entry)}
-    return vehicleTarget!=null?routeFromPosition(currentVehicleCoordinates,vehicleTarget)?.[0]??remaining.latLngs[0]:remaining.latLngs[0];
+    return remaining.latLngs[0];
   }
   layer.setLatLngs(remaining.latLngs);
   return null;
 }
-function drawReplayRouteAt(layer,marker,position,vehiclePosition=null){
+function drawReplayRouteAt(layer,marker,position){
   const latLngs=routeFromPosition(currentRouteCoordinates,position);
   if(!latLngs)return;
   shownRoutePosition=position;
   layer.setLatLngs(latLngs);
   cancelAnimationFrame(marker.glideFrame);
-  const vehicle=vehiclePosition!=null?routeFromPosition(currentVehicleCoordinates,vehiclePosition)?.[0]:null;
-  if(vehicle)shownVehiclePosition=vehiclePosition;
-  marker.setLatLng(vehicle||latLngs[0]);
+  marker.setLatLng(latLngs[0]);
 }
 // Moves the shown position to target over one route tick. A first draw, a
 // hidden page or a jump over 1 km (a seek in the recording) is applied at once.
-function animateReplayRoute(layer,marker,target,vehicleTarget=null){
+function animateReplayRoute(layer,marker,target){
   cancelAnimationFrame(routeAnimationFrame);
   const from=shownRoutePosition,distances=currentRouteTiming?.distances;
   const metresAt=position=>{
@@ -369,12 +359,11 @@ function animateReplayRoute(layer,marker,target,vehicleTarget=null){
     return distances[first]+(position-first)*(distances[next]-distances[first]);
   };
   const jumpM=from==null?null:Math.abs((metresAt(target)??0)-(metresAt(from)??0));
-  if(from==null||document.hidden||jumpM>1000){drawReplayRouteAt(layer,marker,target,vehicleTarget);return}
-  const vehicleFrom=shownVehiclePosition??vehicleTarget;
+  if(from==null||document.hidden||jumpM>1000){drawReplayRouteAt(layer,marker,target);return}
   const started=performance.now();
   const step=now=>{
     const t=Math.min(1,(now-started)/ROUTE_TICK_MS);
-    drawReplayRouteAt(layer,marker,from+(target-from)*t,vehicleTarget==null?null:vehicleFrom+(vehicleTarget-vehicleFrom)*t);
+    drawReplayRouteAt(layer,marker,from+(target-from)*t);
     if(t<1)routeAnimationFrame=requestAnimationFrame(step);
   };
   routeAnimationFrame=requestAnimationFrame(step);
@@ -394,15 +383,13 @@ function showTripDisplay(display){
     clearTripLayers();displayedRouteKey=key;
     // Without a road match (routing unavailable or unmatched) fall back to the
     // recorded GPS line itself, so the replay path is never missing.
-    const recordedLine=Array.isArray(display.replayPreview?.points)?display.replayPreview.points.map(point=>[point[1],point[2]]):null;
-    currentRouteCoordinates=replayOnly?display.replayPreview?.roadMatch?.routeGeojson?.coordinates||recordedLine:display.plannedRoute?.routeGeojson?.coordinates;
-    currentRouteTiming=replayOnly?replayLineTiming(display.replayPreview):null;
-    // Default: the line is drawn on the road, but the vehicle follows the
-    // recorded GPS (the road only across GPS gaps). Both are placed from the
-    // same playback time. Without a road match both use the GPS line.
-    const gapLine=replayOnly&&roadSnapMode==='gaps'?gapAwareReplayLine(display.replayPreview?.points,display.replayPreview?.roadMatch?.routeGeojson?.coordinates):null;
-    if(gapLine&&display.replayPreview?.roadMatch){currentVehicleCoordinates=gapLine.coordinates;currentVehicleTiming={anchors:gapLine.anchors,distances:gapLine.distances}}
-    else if(gapLine){currentRouteCoordinates=gapLine.coordinates;currentRouteTiming={anchors:gapLine.anchors,distances:gapLine.distances}}
+    // In GPS mode the remaining route and vehicle share the recorded line,
+    // with road geometry inserted only across GPS gaps. The full road match
+    // can take a different road near a fix and must not move the route head
+    // away from the vehicle.
+    const replayLine=replayOnly?replayRouteLine(display.replayPreview,roadSnapMode):null;
+    currentRouteCoordinates=replayOnly?replayLine?.coordinates:display.plannedRoute?.routeGeojson?.coordinates;
+    currentRouteTiming=replayLine?.timing??null;
     if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],tripRouteStyle).addTo(map);
     if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],tripRouteStyle).addTo(map);
     const target=replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
@@ -411,7 +398,7 @@ function showTripDisplay(display){
   currentTripDisplay=display;
   updateRemainingTripRoute();
   document.querySelector('#route-label').textContent=replayOnly
-    ?roadSnapMode==='gaps'?(display.replayPreview?.roadMatch?'도로에 맞춘 남은 경로 · 차량 위치는 GPS 기준':'남은 GPS 재생 경로 (도로 매칭 없음)')
+    ?roadSnapMode==='gaps'?(display.replayPreview?.roadMatch?'남은 GPS 경로 · GPS 공백은 도로 기준':'남은 GPS 재생 경로 (도로 매칭 없음)')
       :display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 재생 경로':'남은 GPS 재생 경로 (도로 매칭 없음)'
     :'목적지까지 남은 최적 경로';
   let progress=null,label='진행 상태 대기 중';

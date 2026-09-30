@@ -290,3 +290,15 @@ export function gapAwareReplayLine(points,roadCoordinates,{minGapS=5,maxSnapM=15
   const anchors=coordinates.map((_,i)=>({sourceTimestampNs:times[i].toString(),routePosition:i,routeDistanceM:distances[i]}));
   return {coordinates,anchors,distances};
 }
+
+/** Use one geometry and clock for both the remaining route and its vehicle. */
+export function replayRouteLine(preview,roadSnapMode){
+  const points=preview?.points;
+  const road=preview?.roadMatch?.routeGeojson?.coordinates;
+  if(roadSnapMode==='gaps'){
+    const line=gapAwareReplayLine(points,road);
+    if(line)return {coordinates:line.coordinates,timing:{anchors:line.anchors,distances:line.distances}};
+  }
+  const recorded=Array.isArray(points)?points.map(point=>[point[1],point[2]]):null;
+  return {coordinates:road||recorded,timing:replayLineTiming(preview)};
+}

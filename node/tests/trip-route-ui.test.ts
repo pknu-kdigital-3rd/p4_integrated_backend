@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { estimatedReplayTimestamp, forwardOnlyPosition, gapAwareReplayLine, matchedRoutePosition, replayClock, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, forwardOnlyPosition, gapAwareReplayLine, matchedRoutePosition, replayClock, replayRouteLine, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -207,6 +207,19 @@ describe("recorded GPS line with road only across GPS gaps", () => {
     ];
     // Road through the tunnel curves 0.0005 deg (about 55 m) north.
     const road = [[129.000, 35.0000], [129.002, 35.0000], [129.005, 35.0005], [129.008, 35.0000], [129.010, 35.0000]];
+
+    it("draws the route from the GPS vehicle, even when the road match runs elsewhere", () => {
+        const preview = { points: points.slice(0, 3), roadMatch: {
+            routeGeojson: { coordinates: [[129.000, 35.01], [129.002, 35.01]] },
+            anchors: [{ sourceTimestampNs: points[0]![0], routePosition: 0, routeDistanceM: 0 },
+                { sourceTimestampNs: points[2]![0], routePosition: 1, routeDistanceM: 180 }],
+            coordinateDistancesM: [0, 180],
+        } };
+        const gpsLine = replayRouteLine(preview, "gaps");
+        const position = matchedRoutePosition(gpsLine.timing!.anchors, points[1]![0], gpsLine.timing!.distances)!;
+        expect(routeFromPosition(gpsLine.coordinates!, position)![0]).toEqual([points[1]![2], points[1]![1]]);
+        expect(replayRouteLine(preview, "always").coordinates).toEqual(preview.roadMatch.routeGeojson.coordinates);
+    });
 
     it("keeps the recorded fixes where GPS exists and follows the road through the gap", () => {
         const line = gapAwareReplayLine(points, road)!;
