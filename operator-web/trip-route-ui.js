@@ -47,6 +47,18 @@ export function remainingRoute(coordinates,fix,minPosition=0){
   return {position,latLngs:ahead.map(([lon,lat])=>[lat,lon])};
 }
 
+/** Fractional segment index at the current recorded playback timestamp. */
+export function recordedRoutePosition(points,sourceTimestampNs){
+  if(!Array.isArray(points)||points.length<2||sourceTimestampNs==null)return null;
+  const time=BigInt(sourceTimestampNs);
+  if(time<=BigInt(points[0][0]))return 0;
+  if(time>=BigInt(points.at(-1)[0]))return points.length-1;
+  let low=0,high=points.length-1;
+  while(high-low>1){const mid=(low+high)>>1;if(BigInt(points[mid][0])<=time)low=mid;else high=mid}
+  const start=BigInt(points[low][0]),span=BigInt(points[high][0])-start;
+  return low+(span?Number(time-start)/Number(span):0);
+}
+
 export function recordedProgress(preview,sourceTimestampNs){
   const points=preview?.points;
   if(!Array.isArray(points)||points.length<2||sourceTimestampNs==null)return null;
