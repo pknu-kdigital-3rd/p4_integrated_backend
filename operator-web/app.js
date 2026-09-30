@@ -11,10 +11,17 @@ import {installOperatorBasemap} from './operator-basemap.js?v=6';
 const map=L.map('map').setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
+let leftButtonPan=null;
 mapContainer.addEventListener('mousedown',event=>{
   if(event.target.closest('.leaflet-control,.virtual-route-context-menu'))return;
   if(window.__operatorRoadBrushPointerDown?.(event)){event.preventDefault();event.stopImmediatePropagation();return;}
-  if(event.button===0){if(!event.target.closest('.virtual-point-icon'))event.stopPropagation();return;}
+  if(event.button===0){
+    if(event.target.closest('.virtual-point-icon'))return;
+    event.preventDefault();event.stopPropagation();
+    leftButtonPan={x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,moved:false};
+    mapContainer.classList.add('left-button-panning');
+    return;
+  }
   if(event.button!==2)return;
   event.preventDefault();
   event.stopPropagation();
@@ -23,23 +30,34 @@ mapContainer.addEventListener('mousedown',event=>{
 },true);
 mapContainer.addEventListener('contextmenu',event=>event.preventDefault());
 document.addEventListener('mousemove',event=>{
-  if(!rightButtonPan)return;
-  const dx=event.clientX-rightButtonPan.x,dy=event.clientY-rightButtonPan.y;
-  if(Math.hypot(event.clientX-rightButtonPan.startX,event.clientY-rightButtonPan.startY)>5)rightButtonPan.moved=true;
-  rightButtonPan.x=event.clientX;
-  rightButtonPan.y=event.clientY;
+  const pan=rightButtonPan||leftButtonPan;
+  if(!pan)return;
+  const dx=event.clientX-pan.x,dy=event.clientY-pan.y;
+  if(Math.hypot(event.clientX-pan.startX,event.clientY-pan.startY)>5)pan.moved=true;
+  pan.x=event.clientX;
+  pan.y=event.clientY;
   if(dx||dy)map.panBy([-dx,-dy],{animate:false});
 });
 document.addEventListener('mouseup',event=>{
-  if(event.button!==2||!rightButtonPan)return;
-  const wasClick=!rightButtonPan.moved;
-  rightButtonPan=null;
-  mapContainer.classList.remove('right-button-panning');
-  if(wasClick)mapContainer.dispatchEvent(new CustomEvent('operator-map-contextrequest',{detail:{clientX:event.clientX,clientY:event.clientY}}));
+  if(event.button===0&&leftButtonPan){
+    const wasDrag=leftButtonPan.moved;
+    leftButtonPan=null;
+    mapContainer.classList.remove('left-button-panning');
+    if(wasDrag)map.once('click',event=>L.DomEvent.stop(event));
+    return;
+  }
+  if(event.button===2&&rightButtonPan){
+    const wasClick=!rightButtonPan.moved;
+    rightButtonPan=null;
+    mapContainer.classList.remove('right-button-panning');
+    if(wasClick)mapContainer.dispatchEvent(new CustomEvent('operator-map-contextrequest',{detail:{clientX:event.clientX,clientY:event.clientY}}));
+  }
 });
 window.addEventListener('blur',()=>{
   rightButtonPan=null;
+  leftButtonPan=null;
   mapContainer.classList.remove('right-button-panning');
+  mapContainer.classList.remove('left-button-panning');
 });
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);

@@ -81,6 +81,7 @@ form { display: grid; gap: 10px; }
 #map-surface { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 #map { height: 100%; width: 100%; background: #f7f8f4; }
 #map.right-button-panning { cursor: grabbing; }
+#map.left-button-panning { cursor: grabbing; }
 .virtual-route-context-menu { position: absolute; z-index: 1200; min-width: 150px; padding: 5px; display: grid; gap: 3px; background: white; border: 1px solid var(--ui-border); border-radius: 10px; box-shadow: var(--ui-shadow-floating); }
 .virtual-route-context-menu[hidden] { display: none; }
 .virtual-route-context-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; color: var(--ui-text); background: white; text-align: left; }
