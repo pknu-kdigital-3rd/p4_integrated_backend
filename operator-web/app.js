@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {plannedProgress,recordedProgress,replayProgressOnRoute,tripTimes} from './trip-route-ui.js';
+import {plannedProgress,recordedProgress,replayProgressOnRoute,remainingRoute,tripTimes} from './trip-route-ui.js';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=5';
@@ -13,7 +13,10 @@ window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
 const fallbackBasemap=L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
 installOperatorBasemap(map,fallbackBasemap);
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let routePosition=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+// The default Leaflet renderer clips paths close to the viewport. A wider
+// drawing area keeps the remaining route visible immediately while dragging.
+const tripRouteRenderer=L.svg({padding:3});
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
@@ -201,7 +204,22 @@ function retargetLiveView(item){
 }
 function clearTripLayers(){
   for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
-  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';
+  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;routePosition=0;
+}
+function updateRemainingTripRoute(fixOverride=null){
+  const display=currentTripDisplay,layer=routeLayer||replayRouteLayer;
+  if(!display||!layer)return;
+  const replayOnly=display.routeMode==='REPLAY_ONLY';
+  const item=latestFleet.find(entry=>String(entry.vehicleId)===String(display.vehicleId)
+    &&(replayOnly?entry.telemetry?.telemetry_source==='RECORDED_GPS':entry.telemetry?.telemetry_source==='BIMS_LIVE'&&entry.telemetry?.source_metadata?.state==='live'))
+    ||(!replayOnly?latestFleet.find(entry=>String(entry.vehicleId)===String(display.vehicleId)&&entry.telemetry?.telemetry_source==='DEVICE_GPS'):null);
+  const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
+  const livePosition=marker&&isLiveOverride(liveView,item.telemetry?.external_id,Date.now())?marker.getLatLng():null;
+  const fix=fixOverride||livePosition&&{latitude:livePosition.lat,longitude:livePosition.lng}||item?.telemetry;
+  const remaining=remainingRoute(currentRouteCoordinates,fix,routePosition);
+  if(!remaining){layer.setLatLngs([]);return}
+  routePosition=remaining.position;
+  layer.setLatLngs(remaining.latLngs);
 }
 function showTripDisplay(display){
   const card=document.querySelector('#trip-progress-card');card.hidden=false;
@@ -216,23 +234,16 @@ function showTripDisplay(display){
   const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}`;
   if(key!==displayedRouteKey){
     clearTripLayers();displayedRouteKey=key;
-    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.geoJSON(display.plannedRoute.routeGeojson,{style:{color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round'}}).addTo(map);
+    currentRouteCoordinates=replayOnly?display.replayPreview?.points?.map(point=>[point[1],point[2]]):display.plannedRoute?.routeGeojson?.coordinates;
+    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
     const points=display.replayPreview?.points;
-    if(Array.isArray(points)&&points.length>1){
-      const latLngs=points.map(point=>[point[2],point[1]]);
-      replayRouteLayer=L.layerGroup().addTo(map);
-      L.polyline(latLngs,{color:'#ffffff',weight:11,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
-      L.polyline(latLngs,{color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
-      const nodeCount=Math.min(18,Math.max(0,latLngs.length-2));
-      for(let i=1;i<=nodeCount;i++){
-        const point=latLngs[Math.round(i*(latLngs.length-1)/(nodeCount+1))];
-        L.circleMarker(point,{radius:3,color:'#0878f9',weight:2,fillColor:'#ffffff',fillOpacity:1,interactive:false}).addTo(replayRouteLayer);
-      }
-    }
+    if(replayOnly&&Array.isArray(points)&&points.length>1)replayRouteLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
     const target=replayOnly?points?.at(-1)?.slice(1,3):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
     if(target)destinationMarker=L.circleMarker([target[1],target[0]],{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map).bindTooltip(display.destinationName);
   }
-  document.querySelector('#route-label').textContent=replayOnly?'Android GPS 재생 경로':`최적 경로${display.replayPreview?' + Android GPS 재생 경로':''}`;
+  currentTripDisplay=display;
+  updateRemainingTripRoute();
+  document.querySelector('#route-label').textContent=replayOnly?'남은 Android GPS 재생 경로':'목적지까지 남은 최적 경로';
   let progress=null,label='진행 상태 대기 중';
   if(replayOnly){
     progress=recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
@@ -346,6 +357,7 @@ function render(snapshot){
     syncVehicleMapLabel(entry);
   }
   dashboard.update(snapshot.vehicles);
+  updateRemainingTripRoute();
   if(!liveView&&!snapshot.vehicles.some(isAndroidGpsItem))fleetViewport.fit(snapshot.vehicles,{initial:true});
   const warnings=snapshot.warnings||[];
   const notice=document.querySelector('#fleet-status');
@@ -682,6 +694,7 @@ window.addEventListener('message',event=>{
   lastLiveMessage=message;
   const position=applyLiveTelemetry(liveView,message,Date.now());
   if(position)liveMapFollower.update(position);
+  if(position&&currentTripDisplay&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId))updateRemainingTripRoute({latitude:position[0],longitude:position[1]});
   renderLiveTelemetryStatus();
 });
 installForegroundResume(window,document,()=>{

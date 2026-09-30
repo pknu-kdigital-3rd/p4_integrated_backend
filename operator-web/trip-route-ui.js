@@ -24,6 +24,29 @@ export function plannedProgress(geometry,fix){
   return {percent:Math.round(100*position/total),remainingM:Math.round(total-position),offRouteM:Math.round(closest)};
 }
 
+/** Keep only the route ahead of the current fix, including the fix itself. */
+export function remainingRoute(coordinates,fix,minPosition=0){
+  if(!Array.isArray(coordinates)||coordinates.length<2||!Number.isFinite(fix?.latitude)||!Number.isFinite(fix?.longitude))return null;
+  const at=[fix.longitude,fix.latitude],latScale=111195,lonScale=latScale*Math.cos(fix.latitude*rad);
+  let closest=Infinity,position=0;
+  for(let i=Math.max(1,Math.floor(minPosition));i<coordinates.length;i++){
+    const a=coordinates[i-1],b=coordinates[i];
+    if(!Array.isArray(a)||!Array.isArray(b)||!a.concat(b).every(Number.isFinite))continue;
+    const dx=(b[0]-a[0])*lonScale,dy=(b[1]-a[1])*latScale,denominator=dx*dx+dy*dy;
+    if(!denominator)continue;
+    const fraction=Math.max(0,Math.min(1,(((at[0]-a[0])*lonScale)*dx+((at[1]-a[1])*latScale)*dy)/denominator));
+    const distance=Math.hypot((at[0]-a[0])*lonScale-fraction*dx,(at[1]-a[1])*latScale-fraction*dy);
+    const candidate=i-1+fraction;
+    if(candidate>=minPosition-0.01&&distance<closest){closest=distance;position=candidate}
+  }
+  position=Math.max(minPosition,position);
+  const segment=Math.min(coordinates.length-2,Math.floor(position));
+  const fraction=position-segment,a=coordinates[segment],b=coordinates[segment+1];
+  const join=[a[0]+(b[0]-a[0])*fraction,a[1]+(b[1]-a[1])*fraction];
+  const ahead=[at,join,...coordinates.slice(segment+1)];
+  return {position,latLngs:ahead.map(([lon,lat])=>[lat,lon])};
+}
+
 export function recordedProgress(preview,sourceTimestampNs){
   const points=preview?.points;
   if(!Array.isArray(points)||points.length<2||sourceTimestampNs==null)return null;
