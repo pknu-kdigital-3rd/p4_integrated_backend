@@ -174,14 +174,20 @@ function showRouteContextMenu({ clientX, clientY }) {
 function idempotency(prefix) { return `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`; }
 function formatPoint(point) { return point ? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` : uiText('not set'); }
 function pointIcon(kind, index) {
-  const variant = kind === 'origin' ? 'origin' : kind === 'destination' ? 'destination' : 'waypoint';
-  const endpoint = kind === 'origin' || kind === 'destination';
-  const label = kind === 'origin' ? 'O' : kind === 'destination' ? 'D' : String(index + 1);
+  if (kind === 'origin' || kind === 'destination') {
+    const label = kind === 'origin' ? '출발' : '도착';
+    return L.divIcon({
+      className: `virtual-point-icon virtual-endpoint-icon virtual-endpoint-${kind}`,
+      html: `<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="34" text-anchor="middle">${label}</text></svg>`,
+      iconSize: [60, 80],
+      iconAnchor: [30, 78],
+    });
+  }
   return L.divIcon({
     className: 'virtual-point-icon',
-    html: `<span class="virtual-flag virtual-flag-${variant}${endpoint ? ' virtual-flag-endpoint' : ''}"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${label}</span><span class="virtual-flag-base"></span></span>`,
-    iconSize: endpoint ? [58, 68] : [40, 48],
-    iconAnchor: endpoint ? [17, 65] : [12, 46],
+    html: `<span class="virtual-flag virtual-flag-waypoint"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${index + 1}</span><span class="virtual-flag-base"></span></span>`,
+    iconSize: [40, 48],
+    iconAnchor: [12, 46],
   });
 }
 function renderEndpointSnapPreview(context, snapped) {
