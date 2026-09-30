@@ -32,6 +32,7 @@ const RoadOutlineRenderer = L.Canvas.extend({
   },
 });
 const endpointRoadOutlineRenderer = new RoadOutlineRenderer({ padding: 0.5 });
+const endpointSnapCircleRenderer = L.svg({ pane: 'markerPane' });
 const restrictionLayerGroup = L.layerGroup().addTo(map);
 const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
 const routeContextMenu = document.createElement('div');
@@ -171,16 +172,19 @@ function idempotency(prefix) { return `${prefix}-${crypto.randomUUID?.() || `${D
 function formatPoint(point) { return point ? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` : uiText('not set'); }
 function pointIcon(kind, index) {
   const variant = kind === 'origin' ? 'origin' : kind === 'destination' ? 'destination' : 'waypoint';
+  const endpoint = kind === 'origin' || kind === 'destination';
   const label = kind === 'origin' ? 'O' : kind === 'destination' ? 'D' : String(index + 1);
   return L.divIcon({
     className: 'virtual-point-icon',
-    html: `<span class="virtual-flag virtual-flag-${variant}"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${label}</span><span class="virtual-flag-base"></span></span>`,
-    iconSize: [40, 48],
-    iconAnchor: [12, 46],
+    html: `<span class="virtual-flag virtual-flag-${variant}${endpoint ? ' virtual-flag-endpoint' : ''}"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${label}</span><span class="virtual-flag-base"></span></span>`,
+    iconSize: endpoint ? [58, 68] : [40, 48],
+    iconAnchor: endpoint ? [17, 65] : [12, 46],
   });
 }
 function renderEndpointSnapPreview(context, snapped) {
-  endpointSnapPreviewLayerGroup.clearLayers();
+  endpointSnapPreviewLayerGroup.eachLayer(layer => {
+    if (layer !== context.snapCircle) endpointSnapPreviewLayerGroup.removeLayer(layer);
+  });
   const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
   const nearbyRoads = snapped.nearbyRoadGeometry?.type === 'MultiLineString'
     ? snapped.nearbyRoadGeometry.coordinates
@@ -192,9 +196,14 @@ function renderEndpointSnapPreview(context, snapped) {
   if (roads.length) {
     L.polyline(roads, { renderer: endpointRoadOutlineRenderer, color, weight: 14, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
   }
-  L.circleMarker([snapped.lat, snapped.lon], {
-    radius: 9, color: '#facc15', weight: 3, fill: false, interactive: false,
-  }).addTo(endpointSnapPreviewLayerGroup);
+  if (context.snapCircle) {
+    context.snapCircle.setLatLng([snapped.lat, snapped.lon]);
+  } else {
+    context.snapCircle = L.circleMarker([snapped.lat, snapped.lon], {
+      renderer: endpointSnapCircleRenderer, className: 'snap-circle-pulse',
+      radius: 9, color: '#facc15', weight: 3, fill: false, interactive: false,
+    }).addTo(endpointSnapPreviewLayerGroup);
+  }
   document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
 }
 function queueEndpointSnapPreview(context, marker) {

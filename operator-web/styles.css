@@ -1,4 +1,4 @@
-@import url('./map-flags.css');
+@import url('./map-flags.css?v=2');
 
 /* Shared design system */
 :root {
@@ -122,6 +122,12 @@ form { display: grid; gap: 10px; }
 /* Animate paint only: Leaflet owns marker transforms and route geometry. */
 .trip-route-pulse { animation: trip-route-breathe 2.4s ease-in-out infinite; }
 @keyframes trip-route-breathe { 0%,100% { stroke-opacity: .42; } 50% { stroke-opacity: .68; } }
+.snap-circle-pulse { animation: snap-circle-pulse 1.2s ease-in-out infinite; }
+@keyframes snap-circle-pulse {
+  0%,100% { stroke: #facc15; stroke-opacity: 1; stroke-width: 3; }
+  50% { stroke: #f59e0b; stroke-opacity: .55; stroke-width: 5; }
+}
+@media (prefers-reduced-motion: reduce) { .snap-circle-pulse { animation: none; } }
 .vehicle-radiation i { position: absolute; left: 0; top: 0; width: 40px; height: 40px; margin: -20px; border: 2px solid #0878f9; background: rgb(8 120 249 / 12%); border-radius: 50%; opacity: 0; animation: vehicle-radiate 2.4s ease-out infinite; }
 .vehicle-radiation i:nth-child(2) { animation-delay: -1.2s; }
 .vehicle-radiation + .vehicle-symbol,.vehicle-radiation + .replay-cursor { animation: vehicle-glow 2.4s ease-in-out infinite; }
