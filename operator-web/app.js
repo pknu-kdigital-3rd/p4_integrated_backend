@@ -315,17 +315,35 @@ function retargetLiveView(item){
   updateLiveTitle();
   renderLiveTelemetryStatus();
 }
-// The progress card's red end flag shows the trip's destination on the map -
-// with its own marker, as a trip that has not started draws no route - and the
-// vehicle icon on the bar returns to the vehicle.
-let destinationPeekMarker=null;
-function clearDestinationPeek(){if(destinationPeekMarker){map.removeLayer(destinationPeekMarker);destinationPeekMarker=null}}
+// The progress card's red end flag frames the vehicle and the trip's destination
+// together (with its own destination marker, as a trip that has not started
+// draws no route) and keeps both in view as the vehicle moves. The vehicle
+// stays live throughout. The vehicle icon on the bar, dragging the map or
+// recentring Live View returns to following the vehicle.
+let destinationPeekMarker=null,destinationFrame=null;
+function clearDestinationPeek(){
+  destinationFrame=null;
+  if(destinationPeekMarker){map.removeLayer(destinationPeekMarker);destinationPeekMarker=null}
+}
 function tripDestination(display){
   const coordinates=display?.routeMode==='REPLAY_ONLY'
     ?display.replayPreview?.roadMatch?.routeGeojson?.coordinates??display.replayPreview?.points?.map(point=>[point[1],point[2]])
     :display?.plannedRoute?.routeGeojson?.coordinates;
   const end=Array.isArray(coordinates)?coordinates.at(-1):null;
   return Array.isArray(end)&&Number.isFinite(end[0])&&Number.isFinite(end[1])?[end[1],end[0]]:null;
+}
+function framedVehiclePosition(){
+  return markers.get(liveView?.markerKey??selected?.telemetry?.external_id)?.marker?.getLatLng()??null;
+}
+// Refits only when the vehicle or the destination nears the view's edge, so the
+// zoom does not change on every position update.
+function frameVehicleAndDestination(force=false){
+  if(!destinationFrame)return;
+  const vehicle=framedVehiclePosition();
+  if(!vehicle)return;
+  const inner=map.getBounds().pad(-0.1);
+  if(!force&&inner.contains(vehicle)&&inner.contains(destinationFrame.target))return;
+  map.fitBounds(L.latLngBounds([vehicle,destinationFrame.target]),{padding:[48,48],maxZoom:17});
 }
 function showTripDestination(){
   const target=tripDestination(currentTripDisplay);
@@ -334,14 +352,22 @@ function showTripDestination(){
   clearDestinationPeek();
   destinationPeekMarker=L.circleMarker(target,{radius:9,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map)
     .bindTooltip(`목적지 · ${currentTripDisplay.destinationName||'—'}`,{direction:'top',permanent:true});
-  map.setView(target,Math.max(map.getZoom(),16));
+  destinationFrame={target:L.latLng(target)};
+  frameVehicleAndDestination(true);
 }
 function returnToVehicle(){
   clearDestinationPeek();
   if(liveView&&String(liveView.vehicleId)===String(currentTripDisplay?.vehicleId)){liveMapFollower.recenter();return}
-  const marker=markers.get(selected?.telemetry?.external_id)?.marker;
-  if(marker)map.setView(marker.getLatLng(),Math.max(map.getZoom(),16));
+  const vehicle=framedVehiclePosition();
+  if(vehicle)map.setView(vehicle,Math.max(map.getZoom(),16));
 }
+setInterval(()=>{
+  if(!destinationFrame||document.hidden||mapZooming)return;
+  // Live View's own recenter button resumed following: it owns the camera again.
+  if(liveMapFollower.isFollowing()){clearDestinationPeek();return}
+  frameVehicleAndDestination();
+},500);
+map.on('dragstart',()=>{if(destinationFrame)destinationFrame=null});
 for(const [id,action] of [['#selected-destination',showTripDestination],['#trip-track-vehicle',returnToVehicle]]){
   const element=document.querySelector(id);
   element.addEventListener('click',action);
