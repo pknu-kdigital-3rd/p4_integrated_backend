@@ -154,9 +154,6 @@ export function initializeDashboard({ map, markers, selectVehicle, showFleet }) 
   };
   const player=document.querySelector('#recording-player'),speed=document.querySelector('#recording-speed');
   speed.onchange=()=>{player.playbackRate=Number(speed.value);};player.addEventListener('loadedmetadata',()=>{player.playbackRate=Number(speed.value);});
-  const kind=document.querySelector('#virtual-restriction-kind');
-  function syncKind(){document.querySelector('#virtual-penalty').hidden=kind.value!=='HEAVY_PENALTY';document.querySelectorAll('[data-road-kind]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.roadKind===kind.value)));}
-  document.querySelectorAll('[data-road-kind]').forEach(button=>button.onclick=()=>{kind.value=button.dataset.roadKind;kind.dispatchEvent(new Event('change',{bubbles:true}));});kind.addEventListener('change',syncKind);syncKind();
   const login=document.querySelector('#login');
   // Keep keyboard focus inside the blocking sign-in card while it is visible.
   login.addEventListener('keydown',e=>{if(e.key!=='Tab')return;const controls=[...login.querySelectorAll('input,button')];const first=controls[0],last=controls.at(-1);if(e.shiftKey&&document.activeElement===first){last.focus();e.preventDefault();}else if(!e.shiftKey&&document.activeElement===last){first.focus();e.preventDefault();}});

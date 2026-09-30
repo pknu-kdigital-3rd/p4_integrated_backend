@@ -214,25 +214,8 @@
       도로 상태 설정
      </h3>
      <p>
-      차단 구간은 통행 불가, 혼잡 구간은 통행 비용이 증가합니다.
+      선택한 영역의 도로 통행을 차단합니다.
      </p>
-     <div class="ui-segmented" id="road-mode-buttons">
-      <button aria-pressed="true" data-road-kind="BLOCKED" type="button">
-       도로 차단
-      </button>
-      <button aria-pressed="false" data-road-kind="HEAVY_PENALTY" type="button">
-       혼잡 구간
-      </button>
-     </div>
-     <select aria-label="도로 상태" id="virtual-restriction-kind">
-      <option value="BLOCKED">
-       도로 차단
-      </option>
-      <option value="HEAVY_PENALTY">
-       혼잡 구간
-      </option>
-     </select>
-     <input aria-label="혼잡 통행 비용 배수" id="virtual-penalty" max="100" min="1.01" placeholder="Penalty factor" step="0.1" type="number" value="5"/>
      <button id="virtual-restriction-pick" type="button">
       영역 선택
      </button>

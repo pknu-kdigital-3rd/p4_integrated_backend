@@ -275,9 +275,6 @@ body.virtual-mode #navigation-rail,body.virtual-mode #operator-sidebar,body.virt
 #virtual-workspace li { background: var(--ui-surface-soft); font-size: 12px; padding: 9px; border-radius: 8px; margin-top: 6px; overflow-wrap: anywhere; }
 #virtual-workspace li button { padding: 4px 7px; margin: 5px 4px 0 0; font-size: 11px; }
 #virtual-draft-summary { font-size: 12px; color: var(--ui-text-secondary); }
-#virtual-restriction-kind { display: none; }
-#road-mode-buttons button[data-road-kind=BLOCKED][aria-pressed=true] { background: var(--ui-danger); }
-#road-mode-buttons button[data-road-kind=HEAVY_PENALTY][aria-pressed=true] { background: #b86b08; }
 #virtual-route-summary { position: absolute; z-index: 600; bottom: 36px; right: 18px; width: min(260px,45%); }
 #virtual-route-summary h2 { font-size: 15px; margin-bottom: 12px; }
 #route-summary-values { font-size: 14px; line-height: 1.9; white-space: pre-line; }
