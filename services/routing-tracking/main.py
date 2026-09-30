@@ -845,6 +845,8 @@ def internal_match_preview(req: MatchPreviewRequest):
             "detour_too_long": "road path to GPS anchor {anchor} ({lat}, {lon}) is {road_m} m for {gps_m} m of GPS travel",
         }
         message = explanations.get(failure.get("reason"), "road match not found").format(**failure) if failure else "road match not found"
+        if "dropped" in failure:
+            message += f"; {failure['dropped']} of {failure['anchors']} anchors already dropped, more than the skippable share"
         print(f"road match rejected: {message} ({len(req.points)} anchors)", flush=True)
         raise HTTPException(status_code=422, detail={"code": "ROAD_MATCH_NOT_FOUND", "message": message, **failure})
     if result["skippedAnchors"]:

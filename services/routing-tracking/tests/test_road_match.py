@@ -114,3 +114,26 @@ class RoadMatchSkippedAnchorTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual((failure["reason"], failure["anchor"], failure["unmatched"], failure["anchors"]),
                          ("no_road_nearby", 1, 2, 4))
+
+
+class RoadMatchDroppedAnchorTests(unittest.TestCase):
+    # Main road 1-2-3 heading east; a separate road 5-6 about 220 m north.
+    coords = {1: (35, 129), 2: (35, 129.004), 3: (35, 129.008), 5: (35.002, 129.004), 6: (35.002, 129.005)}
+    edges = [(1, 2, [(35, 129), (35, 129.004)]), (2, 3, [(35, 129.004), (35, 129.008)]),
+             (5, 6, [(35.002, 129.004), (35.002, 129.005)])]
+
+    def test_drops_an_anchor_that_no_road_path_reaches(self):
+        points = [(35, 129.001), (35, 129.003), (35.002, 129.0045), (35, 129.006), (35, 129.0075)]
+        result = match(FakeGraph(self.coords), self.edges, points)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["skippedAnchors"], [2])
+        self.assertEqual(result["anchorPositions"], sorted(result["anchorPositions"]))
+
+    def test_drops_the_earlier_anchor_when_failures_repeat_from_it(self):
+        # Reaching the north road works, but nothing leads back from it: every
+        # failure starts at anchor 1, so anchor 1 is dropped and anchor 2 kept.
+        graph = FakeGraph(self.coords, {(2, 5): [(35, 129.004), (35.002, 129.004)]})
+        points = [(35, 129.003), (35.002, 129.0045), (35, 129.005), (35, 129.006), (35, 129.0075)]
+        result = match(graph, self.edges, points)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["skippedAnchors"], [1])

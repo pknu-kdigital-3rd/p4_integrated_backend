@@ -136,17 +136,61 @@ def _edge_after(candidate):
     return [candidate["snap"]] + candidate["geometry"][candidate["segment"]:]
 
 
-# At most this share of GPS anchors may lack a nearby road (for example a
-# campus road the routing graph leaves out) before the whole match fails.
+# At most this share of GPS anchors may be dropped - no road nearby (for
+# example a campus road the routing graph leaves out), or an impossible or far
+# too long road path to it - before the whole match fails.
 MAX_SKIPPED_ANCHOR_SHARE = 0.25
+
+
+def _match_anchors(graph, points, rows, matched):
+    """Build the road path through the ``matched`` anchors, in order.
+
+    Returns {"path", "positions", "chosen"} or a failure dict naming the rule
+    and the pair of anchors (``previous``, ``anchor``) it failed between.
+    """
+    matched_points = [points[index] for index in matched]
+    chosen = _choose_sequence(matched_points, [rows[index] for index in matched])
+    path = [list(chosen[0]["snap"])]
+    positions = [0]
+    for step, (previous, current) in enumerate(zip(chosen, chosen[1:])):
+        pair = {"previous": matched[step], "anchor": matched[step + 1]}
+        section_start = len(path) - 1
+        if previous["id"] == current["id"] and current["progress"] >= previous["progress"]:
+            if previous["segment"] == current["segment"]:
+                _append(path, [current["snap"]])
+            else:
+                _append(path, previous["geometry"][previous["segment"]:current["segment"]])
+                _append(path, [current["snap"]])
+        else:
+            _append(path, _edge_after(previous))
+            if previous["end"] != current["start"]:
+                bridge = graph.route(previous["end"], current["start"])
+                if bridge is None:
+                    return {"reason": "no_connection", **pair}
+                _append(path, bridge.coords)
+            _append(path, _edge_before(current))
+        road_m = sum(haversine_m(*path[index - 1], *path[index])
+                     for index in range(section_start + 1, len(path)))
+        # Across a skipped anchor this is the GPS distance between the matched
+        # anchors on either side, so a bridged gap is held to the same limit.
+        gps_m = haversine_m(*matched_points[step], *matched_points[step + 1])
+        if road_m > max(250, 4 * gps_m + 150):
+            return {"reason": "detour_too_long", "road_m": round(road_m), "gps_m": round(gps_m), **pair}
+        positions.append(len(path) - 1)
+    return {"path": path, "positions": positions, "chosen": chosen}
 
 
 def match_preview(graph, records, spatial_index, long_records, bucket_size, points, failure=None):
     """Return road geometry and each GPS anchor's index on it, or None.
 
-    An anchor with no road within reach is skipped and bridged over, up to
-    MAX_SKIPPED_ANCHOR_SHARE of them; it takes the preceding matched anchor's
-    position so positions stay non-decreasing, and is listed in
+    Anchors that cannot be placed are dropped and bridged over, up to
+    MAX_SKIPPED_ANCHOR_SHARE of them: those with no road within reach, and
+    those an impossible or far too long road path leads to - usually a snap
+    onto the opposite carriageway or a one-way road driven the wrong way.
+    After such a failure the later anchor is dropped first; if the retry
+    fails again from the same earlier anchor, that earlier anchor is the bad
+    one: it is dropped instead and the later anchor is restored. A dropped anchor takes the preceding matched
+    anchor's position (positions stay non-decreasing) and is listed in
     ``skippedAnchors``. When it returns None and ``failure`` is a dict, the
     dict is filled with why: ``reason`` plus the anchor index and coordinates
     involved, so an operator can see which part of the recording could not be
@@ -161,39 +205,32 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
     if len(points) < 2:
         return None
     rows = [_candidates(graph, point, records, spatial_index, long_records, bucket_size) for point in points]
-    matched = [index for index, row in enumerate(rows) if row]
-    skipped = [index for index, row in enumerate(rows) if not row]
-    if len(matched) < 2 or len(skipped) > len(points) * MAX_SKIPPED_ANCHOR_SHARE:
-        return fail("no_road_nearby", skipped[0], radius_m=120, unmatched=len(skipped), anchors=len(points))
-    matched_points = [points[index] for index in matched]
-    chosen = _choose_sequence(matched_points, [rows[index] for index in matched])
-    path = [list(chosen[0]["snap"])]
-    matched_positions = [0]
-    for step, (previous, current) in enumerate(zip(chosen, chosen[1:])):
-        section_start = len(path) - 1
-        if previous["id"] == current["id"] and current["progress"] >= previous["progress"]:
-            if previous["segment"] == current["segment"]:
-                _append(path, [current["snap"]])
-            else:
-                _append(path, previous["geometry"][previous["segment"]:current["segment"]])
-                _append(path, [current["snap"]])
+    skipped = {index for index, row in enumerate(rows) if not row}
+    budget = len(points) * MAX_SKIPPED_ANCHOR_SHARE
+    if len(points) - len(skipped) < 2 or len(skipped) > budget:
+        return fail("no_road_nearby", min(skipped), radius_m=120, unmatched=len(skipped), anchors=len(points))
+    # Anchors dropped while blaming the later anchor of a failing pair, keyed
+    # by that pair's earlier anchor, so they can be restored if the earlier
+    # anchor turns out to be the bad one.
+    dropped_after = {}
+    while True:
+        matched = [index for index in range(len(points)) if index not in skipped]
+        outcome = _match_anchors(graph, points, rows, matched)
+        if "path" in outcome:
+            break
+        anchor, previous = outcome.pop("anchor"), outcome.pop("previous")
+        reason = outcome.pop("reason")
+        if previous in dropped_after:
+            # Failing again from the same earlier anchor: it is the bad one.
+            skipped.difference_update(dropped_after.pop(previous))
+            skipped.add(previous)
         else:
-            _append(path, _edge_after(previous))
-            if previous["end"] != current["start"]:
-                bridge = graph.route(previous["end"], current["start"])
-                if bridge is None:
-                    return fail("no_connection", matched[step + 1])
-                _append(path, bridge.coords)
-            _append(path, _edge_before(current))
-        road_m = sum(haversine_m(*path[index - 1], *path[index])
-                     for index in range(section_start + 1, len(path)))
-        # Across a skipped anchor this is the GPS distance between the matched
-        # anchors on either side, so a bridged gap is held to the same limit.
-        gps_m = haversine_m(*matched_points[step], *matched_points[step + 1])
-        if road_m > max(250, 4 * gps_m + 150):
-            return fail("detour_too_long", matched[step + 1], road_m=round(road_m), gps_m=round(gps_m))
-        matched_positions.append(len(path) - 1)
-    position_by_anchor = dict(zip(matched, matched_positions))
+            dropped_after[previous] = [anchor]
+            skipped.add(anchor)
+        if len(points) - len(skipped) < 2 or len(skipped) > budget:
+            return fail(reason, anchor, dropped=len(skipped), anchors=len(points), **outcome)
+    path, chosen = outcome["path"], outcome["chosen"]
+    position_by_anchor = dict(zip(matched, outcome["positions"]))
     snap_by_anchor = {anchor: round(candidate["distance"], 1) for anchor, candidate in zip(matched, chosen)}
     positions, snaps, last_position = [], [], 0
     for anchor in range(len(points)):
@@ -201,4 +238,4 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
         positions.append(last_position)
         snaps.append(snap_by_anchor.get(anchor))
     return {"coordinates": [[lon, lat] for lat, lon in path], "anchorPositions": positions,
-            "snapDistancesM": snaps, "skippedAnchors": skipped}
+            "snapDistancesM": snaps, "skippedAnchors": sorted(skipped)}
