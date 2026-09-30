@@ -78,6 +78,8 @@ export const routingInternalClient = {
             lon: number;
             distanceM: number;
             roadGeometry: { type: "LineString"; coordinates: [number, number][] } | null;
+            nearbyRoadGeometry?: { type: "MultiLineString"; coordinates: [number, number][][] };
+            previewRadiusM?: number;
         }>("/internal/routing/snap", input);
     },
     async resolveRestriction(input: { geometry: unknown; blockedEdgeIds?: string[]; penaltyFactor?: number }) {

@@ -849,7 +849,55 @@ def internal_snap(req: SnapRequest):
         "lon": coords[1],
         "distanceM": 0.0,
         "roadGeometry": road_geometry,
+        "nearbyRoadGeometry": _nearby_road_geometry(req.lat, req.lon),
+        "previewRadiusM": 150,
     }
+
+
+def _nearby_road_geometry(lat, lon, radius_m=150):
+    """Query the existing edge grid and clip road shapes to the preview circle."""
+    _ensure_edge_spatial_index()
+    scale_x = max(1.0, 111320.0 * math.cos(math.radians(lat)))
+    scale_y = 110540.0
+    bucket = max(0.0001, EDGE_INDEX_BUCKET_DEGREES)
+    bounds = (lon - radius_m / scale_x, lat - radius_m / scale_y,
+              lon + radius_m / scale_x, lat + radius_m / scale_y)
+    candidates = set(_edge_long_records)
+    for x in range(math.floor(bounds[0] / bucket), math.floor(bounds[2] / bucket) + 1):
+        for y in range(math.floor(bounds[1] / bucket), math.floor(bounds[3] / bucket) + 1):
+            candidates.update(_edge_spatial_index.get((x, y), ()))
+    lines, seen = [], set()
+    for index in sorted(candidates):
+        _edge_id, _physical_id, coords, edge_bounds = _edge_records_cache[index]
+        if not _bounds_overlap(bounds, edge_bounds):
+            continue
+        identity = min(coords, tuple(reversed(coords)))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        line = []
+        for first, second in zip(coords, coords[1:]):
+            x, y = (first[1] - lon) * scale_x, (first[0] - lat) * scale_y
+            dx, dy = (second[1] - first[1]) * scale_x, (second[0] - first[0]) * scale_y
+            a = dx * dx + dy * dy
+            if a == 0:
+                continue
+            b = 2 * (x * dx + y * dy)
+            c = x * x + y * y - radius_m * radius_m
+            discriminant = b * b - 4 * a * c
+            if discriminant <= 0:
+                continue
+            root = math.sqrt(discriminant)
+            start, end = max(0.0, (-b - root) / (2 * a)), min(1.0, (-b + root) / (2 * a))
+            if start >= end:
+                continue
+            points = [[lon + (x + t * dx) / scale_x, lat + (y + t * dy) / scale_y] for t in (start, end)]
+            if line and line[-1] == points[0]:
+                line.append(points[1])
+            else:
+                line = points
+                lines.append(line)
+    return {"type": "MultiLineString", "coordinates": lines}
 
 
 @app.post("/internal/routing/route")

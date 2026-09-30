@@ -181,13 +181,19 @@ function pointIcon(kind, index) {
 function renderEndpointSnapPreview(context, snapped) {
   endpointSnapPreviewLayerGroup.clearLayers();
   const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
-  if (snapped.roadGeometry?.type === 'LineString' && Array.isArray(snapped.roadGeometry.coordinates)) {
-    const road = snapped.roadGeometry.coordinates.map(([lon, lat]) => [Number(lat), Number(lon)])
+  const nearbyRoads = snapped.nearbyRoadGeometry?.type === 'MultiLineString'
+    ? snapped.nearbyRoadGeometry.coordinates
+    : snapped.roadGeometry?.type === 'LineString' ? [snapped.roadGeometry.coordinates] : [];
+  for (const coordinates of nearbyRoads || []) {
+    const road = coordinates.map(([lon, lat]) => [Number(lat), Number(lon)])
       .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
     if (road.length > 1) {
       L.polyline(road, { renderer: endpointRoadOutlineRenderer, color, weight: 14, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
     }
   }
+  L.circleMarker([snapped.lat, snapped.lon], {
+    radius: 9, color, weight: 3, fill: false, interactive: false,
+  }).addTo(endpointSnapPreviewLayerGroup);
   document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
 }
 function queueEndpointSnapPreview(context, marker) {
@@ -208,7 +214,7 @@ function queueEndpointSnapPreview(context, marker) {
       const point = { lat: Number(snapped.lat), lon: Number(snapped.lon) };
       if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return;
       renderEndpointSnapPreview(context, { ...snapped, ...point });
-      if (snapped.roadGeometry?.type !== 'LineString' || !Array.isArray(snapped.roadGeometry.coordinates)) {
+      if (!snapped.nearbyRoadGeometry && !snapped.roadGeometry) {
         setStatus('스냅 위치는 표시했지만 도로 윤곽 정보를 받지 못했습니다.', true);
       }
     }).catch((error) => {
