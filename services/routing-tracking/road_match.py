@@ -68,7 +68,20 @@ def _candidates(graph, point, records, spatial_index, long_records, bucket_size,
                        "segment": segment, "fraction": fraction, "bearing": bearing,
                        "progress": segment - 1 + fraction})
     ranked.sort(key=lambda item: item["distance"])
-    return ranked[:limit]
+    # ``limit`` counts roads, not directions: a two-way road is two directed
+    # edges, and two such side streets filled all six places near 경성대 so
+    # the carriageway the vehicle drove on was never a candidate.
+    chosen = []
+    roads = set()
+    for item in ranked:
+        _start, _end, key = item["id"].split(":", 2)
+        road = (min(item["start"], item["end"]), max(item["start"], item["end"]), key)
+        if road not in roads:
+            if len(roads) == limit:
+                continue
+            roads.add(road)
+        chosen.append(item)
+    return chosen
 
 
 def _motion(points, index):
