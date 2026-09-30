@@ -20,7 +20,7 @@ mapStyleSelect.addEventListener('change',()=>{
   localStorage.setItem('operatorMapStyle',mapStyleSelect.value);
   setMapStyle(mapStyleSelect.value);
 });
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let currentRouteBreaks=[];let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let currentRouteBreaks=[];let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let activeTripByVehicle=new Map();let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.
 const tripRouteRenderer=L.svg({padding:3});
@@ -235,7 +235,7 @@ function syncVehicleMapLabel(entry){
 // a detached marker would never reappear for the rest of the session.
 function normalMapLayers(){
   return [...markers.values()].map(entry=>entry.marker)
-    .concat([...tripMapMarkers.values()],[routeLayer,replayRouteLayer,destinationMarker,assignmentPreviewLayer].filter(Boolean));
+    .concat([...tripMapMarkers.values()],[routeLayer,replayRouteLayer,destinationMarker].filter(Boolean));
 }
 // Used by the virtual workspace, which takes the map over while it is open.
 window.__operatorDetachMapLayers=()=>{fleetViewport.save();for(const layer of normalMapLayers())map.removeLayer(layer)};
@@ -587,7 +587,6 @@ document.querySelector('#deselect-vehicle').addEventListener('click',deselectVeh
 function selectVehicle(item){
   selected=item;
   syncVehiclePickers();
-  if(item.tripId)showAssignmentPreview(null);
   const assignmentVehicle=document.querySelector('#trip-vehicle');
   if(assignmentVehicle&&[...assignmentVehicle.options].some(option=>option.value===String(item.vehicleId))){
     assignmentVehicle.value=String(item.vehicleId);void loadAssignmentPreview();
@@ -634,7 +633,7 @@ function render(snapshot){
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
-    if(selected?.telemetry?.external_id===key){selected=entry.item;if(item.tripId)showAssignmentPreview(null);syncLiveViewButton();renderVehicleDetails(item);void loadSelectedTrip()}
+    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton();renderVehicleDetails(item);void loadSelectedTrip()}
     // A new Android stream reuses device:<vehicleId>; reveal it again when its
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
@@ -664,7 +663,6 @@ function render(snapshot){
     if(watched&&freeReplayWanted(item))ensureFreeReplay(item.vehicleId);
   }
   updateRemainingTripRoute();
-  updateAssignmentPreviewRoute();
   if(!liveView&&!snapshot.vehicles.some(isAndroidGpsItem))fleetViewport.fit(snapshot.vehicles,{initial:true});
   const warnings=snapshot.warnings||[];
   const notice=document.querySelector('#fleet-status');
@@ -708,8 +706,6 @@ async function applyTelemetryMode(){
 const tripRouteMode=document.querySelector('#trip-route-mode');
 // The Android GPS path is the default; the optimal-route mode is opt-in.
 tripRouteMode.value=localStorage.getItem('operatorTripRouteMode')==='DUAL'?'DUAL':'REPLAY_ONLY';
-// Declared before syncTripRouteMode's first (top-level) call; see dismissAssignmentPreview.
-let assignmentPreviewDismissed=false;
 function syncTripRouteMode(){
   const replayOnly=tripRouteMode.value==='REPLAY_ONLY';
   // The replay path's final GPS point is the destination, so there is nothing to ask.
@@ -724,49 +720,18 @@ function syncTripRouteMode(){
   // The server rejects a second active assignment; say so before the operator submits.
   const activeTripId=activeTripByVehicle.get(vehicleValue);
   notice.textContent=activeTripId?`Trip ID ${activeTripId}이(가) 이미 배정되어 있습니다. 취소하거나 완료한 뒤 새로 배정하세요.`
-    :replayOnly&&vehicleValue&&!preview?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.'
-    :replayOnly&&preview&&!preview.roadMatch?'도로 경로 매칭을 사용할 수 없어 경로가 표시되지 않습니다.':'';
+    :replayOnly&&vehicleValue&&!preview?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'';
   notice.hidden=!notice.textContent;
   document.querySelector('#create-trip').disabled=Boolean(activeTripId)||(replayOnly&&!preview);
-  showAssignmentPreview(replayOnly&&!assignmentPreviewDismissed&&!activeTripId&&!selected?.tripId&&!document.querySelector('#trip-form').hidden?preview:null);
-}
-// Before a replay-only assignment, draw the exact path and endpoint the server
-// will pin, so the operator never assigns a destination they have not seen.
-function showAssignmentPreview(preview){
-  const key=preview?`${assignmentPreviewVehicleId}:${preview.fingerprint}`:'';
-  if(key===assignmentPreviewKey)return;
-  if(assignmentPreviewLayer)map.removeLayer(assignmentPreviewLayer);
-  assignmentPreviewLayer=null;assignmentPreviewRoute=null;assignmentPreviewCoordinates=null;assignmentPreviewKey=key;
-  const points=preview?.points;
-  if(!Array.isArray(points)||points.length<2)return;
-  assignmentPreviewCoordinates=preview.roadMatch?.routeGeojson?.coordinates;
-  if(!Array.isArray(assignmentPreviewCoordinates)||assignmentPreviewCoordinates.length<2)return;
-  assignmentPreviewRoute=L.polyline([],tripRouteStyle);
-  assignmentPreviewLayer=L.layerGroup([
-    assignmentPreviewRoute,
-    L.circleMarker([assignmentPreviewCoordinates.at(-1)[1],assignmentPreviewCoordinates.at(-1)[0]],{radius:8,color:'#fff',weight:2,fillColor:'#0878f9',fillOpacity:1}).bindTooltip('배정 예정 목적지 · 도로에 맞춘 GPS 경로 끝',{direction:'top'}),
-  ]);
-  updateAssignmentPreviewRoute();
-  // The virtual workspace owns the map while open; the layer is re-added when it closes.
-  if(!window.__virtualMode)assignmentPreviewLayer.addTo(map);
-}
-function updateAssignmentPreviewRoute(fixOverride=null){
-  if(!assignmentPreviewRoute)return;
-  const item=latestFleet.find(entry=>String(entry.vehicleId)===assignmentPreviewVehicleId&&entry.telemetry?.telemetry_source==='RECORDED_GPS')
-    ||latestFleet.find(entry=>String(entry.vehicleId)===assignmentPreviewVehicleId&&entry.telemetry?.telemetry_source==='DEVICE_GPS');
-  const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
-  const at=marker?.getLatLng();
-  const remaining=remainingRoute(assignmentPreviewCoordinates,fixOverride||(at?{latitude:at.lat,longitude:at.lng}:item?.telemetry),0,true);
-  {const layer=assignmentPreviewRoute,latLngs=remaining?.latLngs||[];drawWhenNotZooming(layer,()=>layer.setLatLngs(latLngs))}
-  if(marker&&remaining)marker.setLatLng(remaining.latLngs[0]);
+  // The path the server will pin is described, not drawn: a path drawn on the
+  // map beside the always-open form read as an assigned (or cancelled) trip.
+  const summary=document.querySelector('#trip-preview-summary');
+  summary.textContent=replayOnly&&preview&&!activeTripId
+    ?`배정될 GPS 경로 · ${preview.datasetName||preview.fingerprint?.slice(0,8)||'—'} · ${((preview.totalDistanceM??0)/1000).toFixed(1)} km · 도로 매칭 ${preview.roadMatch?'완료':'불가'}`:'';
+  summary.hidden=!summary.textContent;
 }
 tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripRouteMode',tripRouteMode.value);syncTripRouteMode()});
 syncTripRouteMode();
-// The assignment form is always open, so a vehicle left chosen in it would keep
-// its path drawn as the "배정 예정" preview - after a cancel, the cancelled
-// trip's own path. Creating or cancelling a trip keeps the vehicle chosen but
-// stops drawing the preview until a vehicle is picked in the form again.
-function dismissAssignmentPreview(){assignmentPreviewDismissed=true;syncTripRouteMode()}
 async function loadAssignmentPreview(){
   const vehicleId=document.querySelector('#trip-vehicle').value;
   if(vehicleId!==assignmentPreviewVehicleId){assignmentPreviewVehicleId=vehicleId;assignmentPreview=null;syncTripRouteMode()}
@@ -775,7 +740,7 @@ async function loadAssignmentPreview(){
     if(document.querySelector('#trip-vehicle').value===vehicleId){assignmentPreview=preview;syncTripRouteMode()}}
   catch(ex){const notice=document.querySelector('#trip-preview-status');notice.textContent=`Android GPS 경로 확인 실패 · ${ex.message}`;notice.hidden=false}
 }
-document.querySelector('#trip-vehicle').addEventListener('change',()=>{assignmentPreviewDismissed=false;void loadAssignmentPreview()});
+document.querySelector('#trip-vehicle').addEventListener('change',()=>void loadAssignmentPreview());
 // Trips change on the phone too (Start/Stop Trip), so the list is polled; it is
 // only rebuilt when the data changed, so buttons do not flicker or lose focus.
 let tripListSignature='';
@@ -808,7 +773,7 @@ async function loadTripAssignments(){
     if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&['ADMIN','OPERATOR'].includes(currentRole)){
       const cancel=document.createElement('button');cancel.type='button';cancel.textContent='운행 취소';
       cancel.onclick=async()=>{if(!window.confirm(`Trip ID ${trip.tripId} 배정을 취소할까요?`))return;
-        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);dismissAssignmentPreview();await loadTripAssignments();await refresh()}
+        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);await loadTripAssignments();await refresh()}
         catch(ex){
           // Usually the phone already ended it (Stop Trip completes a trip); show that and refresh.
           document.querySelector('#trip-status-message').textContent=/not active/i.test(ex.message)?`Trip ID ${trip.tripId}은(는) 이미 종료된 운행입니다.`:ex.message;
@@ -1037,7 +1002,6 @@ window.addEventListener('message',event=>{
     // A route-placed replay vehicle: only the camera follows; the route
     // animation alone moves its marker.
     if(snapped)liveMapFollower.follow(snapped);else liveMapFollower.update(position);
-    if(String(liveView?.vehicleId)===assignmentPreviewVehicleId)updateAssignmentPreviewRoute({latitude:position[0],longitude:position[1]});
   }
   renderLiveTelemetryStatus();
 });
@@ -1141,7 +1105,6 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
     const trip=await api('/api/v1/trips',{method:'POST',body:JSON.stringify(body)},true);
     message.textContent=`Trip ID ${trip.tripId} 배정 완료 · Android에서 운행 시작을 누르세요.`;
     selectRecordingTrip(trip.tripId);
-    dismissAssignmentPreview();
     await Promise.all([loadTripAssignments(),loadTripRecordings(String(trip.tripId)),refresh()]);
   }catch(ex){message.textContent=ex.message}
   finally{button.disabled=false;form.querySelector('#trip-destination-name').focus()}
