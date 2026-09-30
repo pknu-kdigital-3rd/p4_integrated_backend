@@ -24,6 +24,7 @@ const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getIte
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.
 const tripRouteRenderer=L.svg({padding:3});
+const tripRouteStyle={renderer:tripRouteRenderer,color:'#0878f9',weight:10,opacity:0.58,lineCap:'round',lineJoin:'round',interactive:false,className:'trip-route-pulse'};
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
 const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.querySelector('#live-view-frame'),liveRecenterButton=document.querySelector('#live-recenter');
@@ -267,8 +268,8 @@ function showTripDisplay(display){
     // recorded GPS line itself, so the replay path is never missing.
     const recordedLine=Array.isArray(display.replayPreview?.points)?display.replayPreview.points.map(point=>[point[1],point[2]]):null;
     currentRouteCoordinates=replayOnly?display.replayPreview?.roadMatch?.routeGeojson?.coordinates||recordedLine:display.plannedRoute?.routeGeojson?.coordinates;
-    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
-    if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
+    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],tripRouteStyle).addTo(map);
+    if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],tripRouteStyle).addTo(map);
     const target=replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
     if(target)destinationMarker=L.circleMarker([target[1],target[0]],{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map).bindTooltip(display.destinationName);
   }
@@ -314,7 +315,7 @@ async function loadSelectedTrip(){
   if(demoMode){
     clearTripLayers();
     const remaining=remainingRoute(item?.plannedRoute?.routeGeojson?.coordinates,item?.telemetry);
-    if(remaining)routeLayer=L.polyline(remaining.latLngs,{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
+    if(remaining)routeLayer=L.polyline(remaining.latLngs,tripRouteStyle).addTo(map);
     document.querySelector('#trip-progress-card').hidden=true;
     document.querySelector('#route-label').textContent=`계획 경로 · ${item?.plannedRoute?.routeSource||'경로 없음'}`;
     return;
@@ -468,7 +469,7 @@ function showAssignmentPreview(preview){
   if(!Array.isArray(points)||points.length<2)return;
   assignmentPreviewCoordinates=preview.roadMatch?.routeGeojson?.coordinates;
   if(!Array.isArray(assignmentPreviewCoordinates)||assignmentPreviewCoordinates.length<2)return;
-  assignmentPreviewRoute=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round',interactive:false});
+  assignmentPreviewRoute=L.polyline([],tripRouteStyle);
   assignmentPreviewLayer=L.layerGroup([
     assignmentPreviewRoute,
     L.circleMarker([assignmentPreviewCoordinates.at(-1)[1],assignmentPreviewCoordinates.at(-1)[0]],{radius:8,color:'#fff',weight:2,fillColor:'#0878f9',fillOpacity:1}).bindTooltip('배정 예정 목적지 · 도로에 맞춘 GPS 경로 끝',{direction:'top'}),

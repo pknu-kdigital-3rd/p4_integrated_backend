@@ -111,10 +111,19 @@ form { display: grid; gap: 10px; }
 .vehicle-symbol.selected { box-shadow: 0 0 0 8px #0868dd30,0 3px 8px #29466550; transform: scale(1.15); }
 .vehicle-symbol.android { border-style: double; border-width: 4px; }
 .vehicle-radiation { position: absolute; inset: 50% auto auto 50%; width: 1px; height: 1px; pointer-events: none; }
-.vehicle-radiation i { position: absolute; left: 0; top: 0; width: 38px; height: 38px; margin: -19px; border: 2px solid #0878f9; border-radius: 50%; opacity: 0; animation: vehicle-radiate 2.4s ease-out infinite; }
-.vehicle-radiation i:nth-child(2) { animation-delay: 1.2s; }
-@keyframes vehicle-radiate { 0% { transform: scale(.35); opacity: .7; } 85%,100% { transform: scale(1.65); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .vehicle-radiation i { animation: none; opacity: .35; transform: scale(1.35); } }
+/* Animate paint only: Leaflet owns marker transforms and route geometry. */
+.trip-route-pulse { animation: trip-route-breathe 2.4s ease-in-out infinite; }
+@keyframes trip-route-breathe { 0%,100% { stroke-opacity: .42; } 50% { stroke-opacity: .68; } }
+.vehicle-radiation i { position: absolute; left: 0; top: 0; width: 40px; height: 40px; margin: -20px; border: 2px solid #0878f9; background: rgb(8 120 249 / 12%); border-radius: 50%; opacity: 0; animation: vehicle-radiate 2.4s ease-out infinite; }
+.vehicle-radiation i:nth-child(2) { animation-delay: -1.2s; }
+.vehicle-radiation + .vehicle-symbol,.vehicle-radiation + .replay-cursor { animation: vehicle-glow 2.4s ease-in-out infinite; }
+@keyframes vehicle-radiate { 0% { transform: scale(.65); opacity: .75; } 90%,100% { transform: scale(2); opacity: 0; } }
+@keyframes vehicle-glow { 0%,100% { box-shadow: 0 0 0 5px rgb(8 120 249 / 18%),0 3px 8px #29466550; } 50% { box-shadow: 0 0 0 11px rgb(8 120 249 / 30%),0 3px 8px #29466550; } }
+@media (prefers-reduced-motion: reduce) {
+  .trip-route-pulse { animation: none; stroke-opacity: .58; }
+  .vehicle-radiation i { animation: none; opacity: .3; transform: scale(1.35); }
+  .vehicle-radiation + .vehicle-symbol,.vehicle-radiation + .replay-cursor { animation: none; }
+}
 .replay-cursor { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #e78328; color: #fff; border: 2px solid #fff; box-shadow: 0 2px 8px #73420e80; font-size: 13px; }
 .replay-cursor.selected { box-shadow: 0 0 0 6px #e7832840,0 2px 8px #73420e80; }
 .leaflet-tooltip.vehicle-label { color: white; background: var(--ui-primary); border: 0; font-weight: 700; }
