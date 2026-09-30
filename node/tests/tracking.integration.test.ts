@@ -95,6 +95,18 @@ describe("trackingService.getVehicles", () => {
         expect(await prisma.vehicle.count({ where: { vehicleSource: "BIMS" } })).toBe(0);
     });
 
+    it("shows a stream still recording a cancelled trip with the vehicle's active assignment instead", async () => {
+        const vehicle = await prisma.vehicle.create({ data: { vehicleCode: "TRUCK-1", vehicleStatus: "DRIVING" } });
+        const cancelled = await createTrip(vehicle.vehicleId, "CANCELLED");
+        mockSnapshot([deviceObservation(vehicle.vehicleId, cancelled)]);
+        const withoutAssignment = (await trackingService.getVehicles()).vehicles.find(item => item.telemetry.external_id.startsWith("device:"));
+        expect(withoutAssignment?.tripId).toBeUndefined();
+        const ready = await createTrip(vehicle.vehicleId, "READY");
+        const device = (await trackingService.getVehicles()).vehicles.find(item => item.telemetry.external_id.startsWith("device:"));
+        expect(device?.tripId).toBe(ready);
+        expect(device?.tripStatus).toBe("READY");
+    });
+
     it("never persists device GPS as a read side effect", async () => {
         const vehicle = await prisma.vehicle.create({ data: { vehicleCode: "TRUCK-1", vehicleStatus: "DRIVING" } });
         const tripId = await createTrip(vehicle.vehicleId);

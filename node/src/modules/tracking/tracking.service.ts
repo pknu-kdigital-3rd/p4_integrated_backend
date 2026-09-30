@@ -36,7 +36,8 @@ const activeTripStatuses = ["READY", "IN_PROGRESS", "PAUSED"];
  * resolved to that Vehicle row - never upserted as a BIMS identity. A stream
  * recording a trip names it, and that exact trip selects the planned route; a
  * stream without a trip is shown like a BIMS vehicle, with its newest active
- * assignment (if any) so the operator sees what is waiting to start.
+ * assignment (if any) so the operator sees what is waiting to start. So is a
+ * stream still recording a trip that was cancelled or completed.
  */
 async function resolveDeviceObservation(observation: Observation) {
     const vehicleId = metadataId(observation, "vehicleId");
@@ -50,10 +51,17 @@ async function resolveDeviceObservation(observation: Observation) {
             ? { where: { tripStatus: { in: activeTripStatuses } }, take: 1, orderBy: { createdAt: "desc" }, select: tripSelect }
             : { where: { tripId }, take: 1, select: tripSelect } },
     });
-    const trip = vehicle?.trips[0];
+    let trip = vehicle?.trips[0];
     if (!vehicle || (tripId !== null && !trip)) {
         return { warning: { code: "DEVICE_IDENTITY_UNRESOLVED", externalId: observation.external_id, vehicleId: String(vehicleId),
             ...(tripId === null ? {} : { tripId: String(tripId) }) } };
+    }
+    // After the operator cancels (or the trip completes) the phone can keep
+    // streaming under that trip's recording; the operator would keep seeing the
+    // finished trip and its route. Show such a stream like one without a trip.
+    if (trip && !activeTripStatuses.includes(trip.tripStatus)) {
+        trip = await prisma.trip.findFirst({ where: { vehicleId, tripStatus: { in: activeTripStatuses } },
+            orderBy: { createdAt: "desc" }, select: tripSelect }) ?? undefined;
     }
     return { vehicle: { ...vehicle, trips: undefined, tripId: trip?.tripId, tripStatus: trip?.tripStatus,
         routeMode: trip?.routeMode, destinationName: trip?.destinationName, replayPreviewId: trip?.replayPreviewId,
