@@ -220,7 +220,7 @@ function showTripDisplay(display){
       const latLngs=points.map(point=>[point[2],point[1]]);
       replayRouteLayer=L.layerGroup().addTo(map);
       L.polyline(latLngs,{color:'#ffffff',weight:11,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
-      const gpsLine=L.polyline(latLngs,{color:'#0878f9',weight:6,opacity:1,dashArray:replayOnly?null:'10 8',lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
+      const gpsLine=L.polyline(latLngs,{color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
       gpsLine.bindTooltip('Android GPS 경로');
       const nodeCount=Math.min(18,Math.max(0,latLngs.length-2));
       for(let i=1;i<=nodeCount;i++){
