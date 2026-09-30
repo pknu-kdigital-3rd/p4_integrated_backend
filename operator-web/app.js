@@ -315,7 +315,40 @@ function retargetLiveView(item){
   updateLiveTitle();
   renderLiveTelemetryStatus();
 }
+// The progress card's red end flag shows the trip's destination on the map -
+// with its own marker, as a trip that has not started draws no route - and the
+// vehicle icon on the bar returns to the vehicle.
+let destinationPeekMarker=null;
+function clearDestinationPeek(){if(destinationPeekMarker){map.removeLayer(destinationPeekMarker);destinationPeekMarker=null}}
+function tripDestination(display){
+  const coordinates=display?.routeMode==='REPLAY_ONLY'
+    ?display.replayPreview?.roadMatch?.routeGeojson?.coordinates??display.replayPreview?.points?.map(point=>[point[1],point[2]])
+    :display?.plannedRoute?.routeGeojson?.coordinates;
+  const end=Array.isArray(coordinates)?coordinates.at(-1):null;
+  return Array.isArray(end)&&Number.isFinite(end[0])&&Number.isFinite(end[1])?[end[1],end[0]]:null;
+}
+function showTripDestination(){
+  const target=tripDestination(currentTripDisplay);
+  if(!target)return;
+  liveMapFollower.pause();
+  clearDestinationPeek();
+  destinationPeekMarker=L.circleMarker(target,{radius:9,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map)
+    .bindTooltip(`목적지 · ${currentTripDisplay.destinationName||'—'}`,{direction:'top',permanent:true});
+  map.setView(target,Math.max(map.getZoom(),16));
+}
+function returnToVehicle(){
+  clearDestinationPeek();
+  if(liveView&&String(liveView.vehicleId)===String(currentTripDisplay?.vehicleId)){liveMapFollower.recenter();return}
+  const marker=markers.get(selected?.telemetry?.external_id)?.marker;
+  if(marker)map.setView(marker.getLatLng(),Math.max(map.getZoom(),16));
+}
+for(const [id,action] of [['#selected-destination',showTripDestination],['#trip-track-vehicle',returnToVehicle]]){
+  const element=document.querySelector(id);
+  element.addEventListener('click',action);
+  element.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();action()}});
+}
 function clearTripLayers(){
+  clearDestinationPeek();
   for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
   routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;currentRouteBreaks=[];routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);
   for(const entry of markers.values())if(entry.estimated){entry.estimated=false;entry.freeEstimated=false;syncVehicleMapLabel(entry)}
