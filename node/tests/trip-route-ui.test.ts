@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { estimatedReplayTimestamp, forwardOnlyPosition, gapAwareReplayLine, matchedRoutePosition, replayClock, replayRouteLine, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, forwardOnlyPosition, gapAwareReplayLine, matchedRoutePosition, replayClock, replayRouteLine, routeDisplayFromPosition, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -239,12 +239,17 @@ describe("recorded GPS line with road only across GPS gaps", () => {
         expect(times.every((time, index) => index === 0 || time >= times[index - 1]!)).toBe(true);
     });
 
-    it("stays straight without a road line or when the gap is too far from it", () => {
-        expect(gapAwareReplayLine(points, null)!.coordinates).toHaveLength(points.length);
+    it("disconnects an unmatched gap instead of drawing a straight shortcut", () => {
+        const noRoad = gapAwareReplayLine(points, null)!;
+        expect(noRoad.coordinates).toHaveLength(points.length);
+        expect(noRoad.breaks).toEqual([3]);
+        const duringGap = routeDisplayFromPosition(noRoad.coordinates, 2.5, noRoad.breaks)!;
+        expect(duringGap.head).toEqual([35, 129.002]);
+        expect(duringGap.latLngs[0]![0]).toEqual([35, 129.008]);
         const farRoad = road.map(([lon, lat]) => [lon, lat + 0.01]);
-        expect(gapAwareReplayLine(points, farRoad)!.coordinates).toHaveLength(points.length);
+        expect(gapAwareReplayLine(points, farRoad)!.breaks).toEqual([3]);
         const wrongCarriageway = road.map(([lon, lat]) => [lon, lat + 0.001]);
-        expect(gapAwareReplayLine(points, wrongCarriageway)!.coordinates).toHaveLength(points.length);
+        expect(gapAwareReplayLine(points, wrongCarriageway)!.breaks).toEqual([3]);
     });
 
     it("uses the timed road section through a gap instead of a nearer earlier loop", () => {
@@ -269,6 +274,22 @@ describe("recorded GPS line with road only across GPS gaps", () => {
         const line = replayRouteLine(preview, "gaps");
         expect(line.coordinates!.some(([, lat]) => lat === 35.0002)).toBe(true);
         expect(line.coordinates!.some(([, lat]) => lat === 35.0000)).toBe(false);
+    });
+
+    it("snaps an inaccurate ordinary fix back to its timed road section", () => {
+        const fixes = [
+            ["1000000000", 129.0000, 35.0000, 0],
+            ["3000000000", 129.0010, 34.9995, 100],
+            ["5000000000", 129.0020, 35.0000, 200],
+        ];
+        const preview = { points: fixes, roadMatch: {
+            routeGeojson: { coordinates: [[129.0000, 35], [129.0010, 35], [129.0020, 35]] },
+            anchors: fixes.map((point, index) => ({sourceTimestampNs:point[0],routePosition:index,routeDistanceM:index*91})),
+            coordinateDistancesM: [0, 91, 182],
+        } };
+        const line = replayRouteLine(preview, "gaps");
+        expect(line.coordinates![1]).toEqual([129.001, 35]);
+        expect(line.coordinates!.every(([,lat])=>lat===35)).toBe(true);
     });
 
     it("moves onto an offset tunnel road over the gap instead of jumping at its start", () => {

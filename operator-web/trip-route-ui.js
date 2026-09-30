@@ -238,6 +238,26 @@ function projectOntoLine(coordinates,lat,lon,minPosition=0,maxPosition=Infinity)
   return best;
 }
 
+/** Leaflet segments for a route with gaps that could not be road matched. */
+export function routeDisplayFromPosition(coordinates,position,breaks=[]){
+  if(!Array.isArray(coordinates)||coordinates.length<2||!Number.isFinite(position))return null;
+  const broken=Array.isArray(breaks)?breaks:[];
+  const clamped=Math.max(0,Math.min(coordinates.length-1,position));
+  const segment=Math.min(coordinates.length-2,Math.floor(clamped));
+  // Never animate the marker along a missing road section.
+  const shown=broken.includes(segment+1)&&clamped>segment&&clamped<segment+1?segment:clamped;
+  const line=routeFromPosition(coordinates,shown);
+  if(!line)return null;
+  if(!broken.length)return {head:line[0],latLngs:line};
+  const first=Math.min(coordinates.length-2,Math.floor(shown));
+  const breakSet=new Set(broken),segments=[[line[0]]];
+  for(let index=first+1;index<coordinates.length;index++){
+    if(breakSet.has(index))segments.push([]);
+    segments.at(-1).push([coordinates[index][1],coordinates[index][0]]);
+  }
+  return {head:line[0],latLngs:segments.filter(part=>part.length>1)};
+}
+
 function pointAt(coordinates,position){
   const segment=Math.min(coordinates.length-2,Math.max(0,Math.floor(position))),fraction=position-segment;
   const a=coordinates[segment],b=coordinates[segment+1];
@@ -255,51 +275,68 @@ function positionAtDistance(distances,distance){
 }
 
 /**
- * The replay line built from the recorded GPS itself, with road-matched
- * geometry used only across GPS gaps (a tunnel, an underground car park):
+ * The replay line built from the recorded GPS clock, with ordinary fixes
+ * projected onto the timed road match when close enough. Across GPS gaps
+ * (a tunnel, an underground car park),
  * where two consecutive fixes are more than minGapS apart, the road section
  * between their projections onto roadCoordinates replaces the straight jump,
  * timed by distance between the two fixes' timestamps. A gap whose fixes lie
  * over maxSnapM from the road line, or whose road section is implausibly long,
- * stays straight. Returns {coordinates ([lon, lat]), anchors, distances}; every
+ * is left disconnected. Returns {coordinates ([lon, lat]), anchors, distances,
+ * breaks}; every
  * coordinate is a timing anchor.
  */
 export function gapAwareReplayLine(points,roadCoordinates,{minGapS=5,maxSnapM=45,roadTiming=null}={}){
   if(!Array.isArray(points)||points.length<2)return null;
   const road=Array.isArray(roadCoordinates)&&roadCoordinates.length>1?roadCoordinates:null;
-  const coordinates=[],times=[];
+  const coordinates=[],times=[],breaks=[];
   let roadPosition=0;
   const metres=(a,b)=>{
     const meanLat=(a[1]+b[1])*rad/2;
     return Math.hypot((b[0]-a[0])*111195*Math.cos(meanLat),(b[1]-a[1])*111195);
   };
+  const searchBounds=timestamp=>{
+    if(!Array.isArray(roadTiming?.distances)||roadTiming.distances.length!==road.length)return [roadPosition,Infinity];
+    const expected=matchedRoutePosition(roadTiming.anchors,timestamp,roadTiming.distances);
+    if(expected==null)return [roadPosition,Infinity];
+    const distance=distanceAtPosition(roadTiming.distances,expected);
+    return [Math.max(roadPosition,positionAtDistance(roadTiming.distances,distance-300)),
+      positionAtDistance(roadTiming.distances,distance+300)];
+  };
   for(let index=0;index<points.length;index++){
     const point=points[index];
-    coordinates.push([point[1],point[2]]);times.push(BigInt(point[0]));
+    // Keep ordinary fixes on the timed road too. Otherwise one inaccurate fix
+    // draws a visible V even when the road match correctly follows the lane.
+    let displayed=[point[1],point[2]];
+    if(road&&roadTiming){
+      const [min,max]=searchBounds(point[0]);
+      const projected=projectOntoLine(road,point[2],point[1],min,max);
+      if(projected&&projected.distanceM<=maxSnapM){
+        displayed=pointAt(road,projected.position);
+        roadPosition=projected.position;
+      }
+    }
+    coordinates.push(displayed);times.push(BigInt(point[0]));
     const next=points[index+1];
-    if(!next||!road||Number(BigInt(next[0])-BigInt(point[0]))/1e9<=minGapS)continue;
+    if(!next)continue;
+    const gapS=Number(BigInt(next[0])-BigInt(point[0]))/1e9;
+    const straightM=metres([point[1],point[2]],[next[1],next[2]]);
+    if(gapS<=minGapS)continue;
+    const disconnect=()=>{if(straightM>100||!gapS||straightM/gapS>45)breaks.push(coordinates.length)};
+    if(!road){disconnect();continue}
     // A loop or parallel carriageway can put a much later road segment closer
     // to a GPS fix. Restrict each search to the section timed for that fix.
-    const searchBounds=timestamp=>{
-      if(!Array.isArray(roadTiming?.distances)||roadTiming.distances.length!==road.length)return [roadPosition,Infinity];
-      const expected=matchedRoutePosition(roadTiming.anchors,timestamp,roadTiming.distances);
-      if(expected==null)return [roadPosition,Infinity];
-      const distance=distanceAtPosition(roadTiming.distances,expected);
-      return [Math.max(roadPosition,positionAtDistance(roadTiming.distances,distance-300)),
-        positionAtDistance(roadTiming.distances,distance+300)];
-    };
     const [startMin,startMax]=searchBounds(point[0]);
     const start=projectOntoLine(road,point[2],point[1],startMin,startMax);
     const [endMin,endMax]=searchBounds(next[0]);
     const end=start&&projectOntoLine(road,next[2],next[1],Math.max(start.position,endMin),endMax);
-    if(!start||!end||start.distanceM>maxSnapM||end.distanceM>maxSnapM||end.position<=start.position)continue;
+    if(!start||!end||start.distanceM>maxSnapM||end.distanceM>maxSnapM||end.position<=start.position){disconnect();continue}
     const section=[pointAt(road,start.position)];
     for(let i=Math.floor(start.position)+1;i<end.position;i++)section.push(road[i]);
     section.push(pointAt(road,end.position));
     let lengthM=0;const along=[0];
     for(let i=1;i<section.length;i++){lengthM+=metres(section[i-1],section[i]);along.push(lengthM)}
-    const straightM=metres([point[1],point[2]],[next[1],next[2]]);
-    if(lengthM>3*straightM+200)continue;
+    if(lengthM>3*straightM+200){disconnect();continue}
     roadPosition=end.position;
     const t0=BigInt(point[0]),span=BigInt(next[0])-t0;
     // Include the GPS-to-road and road-to-GPS connectors in the gap clock.
@@ -315,7 +352,7 @@ export function gapAwareReplayLine(points,roadCoordinates,{minGapS=5,maxSnapM=45
   const distances=[0];
   for(let i=1;i<coordinates.length;i++)distances.push(distances[i-1]+metres(coordinates[i-1],coordinates[i]));
   const anchors=coordinates.map((_,i)=>({sourceTimestampNs:times[i].toString(),routePosition:i,routeDistanceM:distances[i]}));
-  return {coordinates,anchors,distances};
+  return {coordinates,anchors,distances,breaks};
 }
 
 /** Use one geometry and clock for both the remaining route and its vehicle. */
@@ -327,7 +364,7 @@ export function replayRouteLine(preview,roadSnapMode){
     const line=gapAwareReplayLine(points,road,{maxSnapM:match?120:45,roadTiming:match?{
       anchors:match.anchors,distances:match.coordinateDistancesM,
     }:null});
-    if(line)return {coordinates:line.coordinates,timing:{anchors:line.anchors,distances:line.distances}};
+    if(line)return {coordinates:line.coordinates,timing:{anchors:line.anchors,distances:line.distances},breaks:line.breaks};
   }
   const recorded=Array.isArray(points)?points.map(point=>[point[1],point[2]]):null;
   return {coordinates:road||recorded,timing:replayLineTiming(preview)};
