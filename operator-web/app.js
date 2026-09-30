@@ -132,6 +132,23 @@ roadSnapSelect.addEventListener('change',()=>{
   try{localStorage.setItem('operatorRoadSnapMode',roadSnapMode)}catch{}
   if(currentTripDisplay)showTripDisplay(currentTripDisplay);
 });
+// The recorded GPS position trails the camera clock (about 0.25-0.3 s on the
+// 2026-08-27 recording, from gyro vs GPS turn rate), so a replay vehicle placed
+// at the frame's own time sits a few metres behind the footage. Place it this
+// much later on the recording. Remembered per browser.
+const DEFAULT_REPLAY_GPS_LEAD_MS=300;
+const replayGpsLeadInput=document.querySelector('#replay-gps-lead');
+const clampLeadMs=value=>Number.isFinite(value)?Math.max(-2000,Math.min(3000,Math.round(value))):DEFAULT_REPLAY_GPS_LEAD_MS;
+let replayGpsLeadMs=(()=>{try{const saved=localStorage.getItem('operatorReplayGpsLeadMs');return saved==null?DEFAULT_REPLAY_GPS_LEAD_MS:clampLeadMs(Number(saved))}catch{return DEFAULT_REPLAY_GPS_LEAD_MS}})();
+replayGpsLeadInput.value=String(replayGpsLeadMs);
+replayGpsLeadInput.addEventListener('change',()=>{
+  replayGpsLeadMs=clampLeadMs(Number(replayGpsLeadInput.value));replayGpsLeadInput.value=String(replayGpsLeadMs);
+  try{localStorage.setItem('operatorReplayGpsLeadMs',String(replayGpsLeadMs))}catch{}
+});
+function withReplayGpsLead(timestampNs){
+  if(timestampNs==null||!/^\d+$/.test(String(timestampNs)))return timestampNs;
+  return (BigInt(timestampNs)+BigInt(replayGpsLeadMs)*1_000_000n).toString();
+}
 // Moves a marker smoothly to its next position over one update interval
 // instead of jumping; a jump over 1 km (a new vehicle, a seek) is applied directly.
 function glideMarker(marker,target,durationMs){
@@ -329,7 +346,7 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
     ?estimatedReplayTimestamp(sourceTime,receivedAt,Date.now(),Number(item?.telemetry?.speed_kmh)):null;
   // Replay: the recording's own time decides where on the line the vehicle is
   // (road-matched or the recorded line itself), never a nearest-segment search.
-  const playbackPosition=replayOnly?matchedRoutePosition(currentRouteTiming?.anchors,estimatedTime||sourceTime,currentRouteTiming?.distances):null;
+  const playbackPosition=replayOnly?matchedRoutePosition(currentRouteTiming?.anchors,withReplayGpsLead(estimatedTime||sourceTime),currentRouteTiming?.distances):null;
   let remaining;
   if(playbackPosition!=null){
     remaining=remainingRoute(currentRouteCoordinates,fix,forwardOnlyPosition(routePosition,playbackPosition,currentRouteTiming?.distances),true,true);

@@ -412,6 +412,9 @@
        <option value="always">항상</option>
       </select>
       <small>기본값은 기록된 GPS를 그대로 따르고, GPS가 끊긴 구간만 도로를 따라 표시합니다.</small>
+      <label for="replay-gps-lead">GPS 재생 위치 시간 보정 (ms)</label>
+      <input id="replay-gps-lead" type="number" min="-2000" max="3000" step="50" value="300"/>
+      <small>기록된 GPS 위치는 영상보다 조금 늦습니다. 지도 차량이 영상보다 뒤처지면 값을 늘리고, 앞서면 줄이세요.</small>
      </section>
     </section>
    </section>
@@ -687,7 +690,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js">
   </script>
-  <script src="app.js?v=20" type="module">
+  <script src="app.js?v=21" type="module">
   </script>
   <script src="virtual-dispatch.js" type="module">
   </script>
