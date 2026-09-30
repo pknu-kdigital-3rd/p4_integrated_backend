@@ -230,6 +230,20 @@ const liveMapFollower=createLiveMapFollower({
 });
 const revealAndroidMarker=createAndroidMarkerRevealer({map});
 map.on('dragstart',()=>liveMapFollower.pause());
+// Leaflet switches to the new zoom's projection as soon as its zoom animation
+// starts, while the route SVG is still being scaled from the old zoom: a path
+// redrawn meanwhile lands out of place, apart from the vehicle, until the zoom
+// ends. Route redraws wait for zoomend; the latest one per layer is applied then.
+let mapZooming=false;const deferredRouteDraws=new Map();
+map.on('zoomstart',()=>{mapZooming=true});
+map.on('zoomend',()=>{
+  mapZooming=false;
+  const draws=[...deferredRouteDraws.values()];deferredRouteDraws.clear();
+  for(const draw of draws)draw();
+});
+function drawWhenNotZooming(key,draw){
+  if(mapZooming)deferredRouteDraws.set(key,draw);else draw();
+}
 function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:false}));}
 new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
 const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
@@ -327,8 +341,9 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   }
   // No current position yet (trip not started, phone not streaming): show the
   // whole route rather than nothing.
-  if(!remaining){layer.setLatLngs(replayOnly?routeDisplayFromPosition(currentRouteCoordinates,0,currentRouteBreaks)?.latLngs??[]
-    :Array.isArray(currentRouteCoordinates)?currentRouteCoordinates.map(([lon,lat])=>[lat,lon]):[]);return}
+  if(!remaining){const latLngs=replayOnly?routeDisplayFromPosition(currentRouteCoordinates,0,currentRouteBreaks)?.latLngs??[]
+    :Array.isArray(currentRouteCoordinates)?currentRouteCoordinates.map(([lon,lat])=>[lat,lon]):[];
+    drawWhenNotZooming(layer,()=>layer.setLatLngs(latLngs));return}
   routePosition=remaining.position;
   if(replayOnly&&marker){
     // The route and marker use the same timed, road-aligned replay line.
@@ -337,16 +352,20 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
     if(entry){entry.estimated=Boolean(estimatedTime);syncVehicleMapLabel(entry)}
     return routeDisplayFromPosition(currentRouteCoordinates,remaining.position,currentRouteBreaks)?.head??null;
   }
-  layer.setLatLngs(replayOnly?routeDisplayFromPosition(currentRouteCoordinates,remaining.position,currentRouteBreaks)?.latLngs??[]:remaining.latLngs);
+  const latLngs=replayOnly?routeDisplayFromPosition(currentRouteCoordinates,remaining.position,currentRouteBreaks)?.latLngs??[]:remaining.latLngs;
+  drawWhenNotZooming(layer,()=>layer.setLatLngs(latLngs));
   return null;
 }
 function drawReplayRouteAt(layer,marker,position){
   const route=routeDisplayFromPosition(currentRouteCoordinates,position,currentRouteBreaks);
   if(!route)return;
   shownRoutePosition=position;
-  layer.setLatLngs(route.latLngs);
-  cancelAnimationFrame(marker.glideFrame);
-  marker.setLatLng(route.head);
+  // Path and vehicle move together, so both wait out a zoom animation.
+  drawWhenNotZooming(layer,()=>{
+    layer.setLatLngs(route.latLngs);
+    cancelAnimationFrame(marker.glideFrame);
+    marker.setLatLng(route.head);
+  });
 }
 // Moves the shown position to target over one route tick. A first draw, a
 // hidden page or a jump over 1 km (a seek in the recording) is applied at once.
@@ -631,7 +650,7 @@ function updateAssignmentPreviewRoute(fixOverride=null){
   const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
   const at=marker?.getLatLng();
   const remaining=remainingRoute(assignmentPreviewCoordinates,fixOverride||(at?{latitude:at.lat,longitude:at.lng}:item?.telemetry),0,true);
-  assignmentPreviewRoute.setLatLngs(remaining?.latLngs||[]);
+  {const layer=assignmentPreviewRoute,latLngs=remaining?.latLngs||[];drawWhenNotZooming(layer,()=>layer.setLatLngs(latLngs))}
   if(marker&&remaining)marker.setLatLng(remaining.latLngs[0]);
 }
 tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripRouteMode',tripRouteMode.value);syncTripRouteMode()});
