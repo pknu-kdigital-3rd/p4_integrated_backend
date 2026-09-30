@@ -458,7 +458,10 @@ function render(snapshot){
     // Live frames own the selected marker between successful fleet polls.
     if(!isLiveOverride(liveView,key,Date.now())){
       if(!routeControlsMarker(item))glideMarker(entry.marker,pos,FLEET_POLL_MS);
-      if(liveView?.markerKey===key&&liveMapFollower.isFollowing())liveMapFollower.update(pos);
+      // The replay vehicle is followed from its position on the route (route
+      // tick); following its raw fix here would pull the camera back to it -
+      // in a tunnel, to the entrance - every poll.
+      if(liveView?.markerKey===key&&liveMapFollower.isFollowing()&&!routeControlsMarker(item))liveMapFollower.update(pos);
     }
     const session=t.source_metadata?.recordingSessionId;
     // A new stream session supersedes the old one; reject its late frames.
@@ -812,7 +815,9 @@ window.addEventListener('message',event=>{
   if(position){
     const snapped=currentTripDisplay&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)
       ?updateRemainingTripRoute({latitude:position[0],longitude:position[1]},message.telemetry?.source_timestamp_ns):null;
-    liveMapFollower.update(snapped||position);
+    // A route-placed replay vehicle: only the camera follows; the route
+    // animation alone moves its marker.
+    if(snapped)liveMapFollower.follow(snapped);else liveMapFollower.update(position);
     if(String(liveView?.vehicleId)===assignmentPreviewVehicleId)updateAssignmentPreviewRoute({latitude:position[0],longitude:position[1]});
   }
   renderLiveTelemetryStatus();
@@ -825,7 +830,7 @@ installForegroundResume(window,document,()=>{
 setInterval(()=>{
   if(document.hidden||currentTripDisplay?.routeMode!=='REPLAY_ONLY'||currentTripDisplay.tripStatus!=='IN_PROGRESS')return;
   const snapped=updateRemainingTripRoute();
-  if(snapped&&liveView?.vehicleId===String(currentTripDisplay.vehicleId)&&liveMapFollower.isFollowing())liveMapFollower.update(snapped);
+  if(snapped&&liveView?.vehicleId===String(currentTripDisplay.vehicleId)&&liveMapFollower.isFollowing())liveMapFollower.follow(snapped);
 },ROUTE_TICK_MS);
 // With no open button, the "실시간 영상" tab reopens a closed preview for a streaming vehicle.
 document.querySelector('#recording-live-tab').addEventListener('click',()=>{if(!liveView)openLiveView()});

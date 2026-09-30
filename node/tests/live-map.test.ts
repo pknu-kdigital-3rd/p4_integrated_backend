@@ -36,6 +36,24 @@ describe("live map follower", () => {
         expect(map.setView).toHaveBeenLastCalledWith([35.3, 129.3], 15, { animate: false });
     });
 
+    it("follows a route-placed vehicle with the camera without moving its marker", () => {
+        let timestamp = 1000;
+        const marker = { setLatLng: vi.fn(), setStyle: vi.fn() };
+        const map = { getZoom: () => 12, setView: vi.fn(), panTo: vi.fn() };
+        const markers = new Map([["device:3", { marker, item: { vehicleId: "3" }, liveOnly: false }]]);
+        const follower = createLiveMapFollower({ map, markers, createEntry: vi.fn(), onFollowingChange: vi.fn(), now: () => timestamp });
+        follower.begin({ markerKey: "device:3", item: { vehicleId: "3" } });
+
+        const inTunnel = [35.2415, 129.06];
+        follower.follow(inTunnel);
+        expect(map.setView).toHaveBeenCalledWith(inTunnel, 12, { animate: false });
+        timestamp += 250;
+        follower.follow([35.2416, 129.059]);
+        expect(map.panTo).toHaveBeenCalledWith([35.2416, 129.059], { animate: true, duration: 0.25 });
+        // The route animation alone places this marker.
+        expect(marker.setLatLng).not.toHaveBeenCalled();
+    });
+
     it("creates a marker without a fleet poll and follows live positions", () => {
         let timestamp = 1000;
         const marker = { setLatLng: vi.fn(), setStyle: vi.fn() };

@@ -103,20 +103,29 @@ export function createLiveMapFollower({
     }
     entry.marker.setStyle?.(LIVE_MARKER_STYLE);
     entry.marker.setLatLng(position);
-    lastPosition = position;
-
-    if (following) {
-      const timestamp = now();
-      if (!centered) {
-        map.setView(position, map.getZoom(), { animate: false });
-        centered = true;
-        lastPanAt = timestamp;
-      } else if (timestamp - lastPanAt >= panIntervalMs) {
-        map.panTo(position, { animate: true, duration: panIntervalMs / 1000 });
-        lastPanAt = timestamp;
-      }
-    }
+    follow(position);
     return entry;
+  }
+
+  /**
+   * Keeps the camera on position without moving the marker. For a vehicle
+   * whose marker something else places (the replay vehicle on its route), so
+   * the camera and the marker never get two different positions.
+   */
+  function follow(position) {
+    if (!liveView?.markerKey || !Array.isArray(position)
+      || position.length !== 2 || !position.every(Number.isFinite)) return;
+    lastPosition = position;
+    if (!following) return;
+    const timestamp = now();
+    if (!centered) {
+      map.setView(position, map.getZoom(), { animate: false });
+      centered = true;
+      lastPanAt = timestamp;
+    } else if (timestamp - lastPanAt >= panIntervalMs) {
+      map.panTo(position, { animate: true, duration: panIntervalMs / 1000 });
+      lastPanAt = timestamp;
+    }
   }
 
   function pause() {
@@ -151,5 +160,5 @@ export function createLiveMapFollower({
 
   map.on?.('zoomend', () => centerOnVehicle());
 
-  return { begin, update, pause, recenter, end, centerOnVehicle, isFollowing: () => following };
+  return { begin, update, follow, pause, recenter, end, centerOnVehicle, isFollowing: () => following };
 }
