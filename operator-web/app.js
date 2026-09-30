@@ -7,7 +7,7 @@ import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-re
 import {plannedProgress,recordedProgress,replayProgressOnRoute,tripTimes} from './trip-route-ui.js';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
-import {installOperatorBasemap} from './operator-basemap.js?v=4';
+import {installOperatorBasemap} from './operator-basemap.js?v=5';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);

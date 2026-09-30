@@ -10,9 +10,9 @@ export const OPERATOR_MAP_COLORS={
   water:'#B9DDF5',
   park:'#CFE8D2',
   localRoad:'#FFFFFF',
-  localRoadEdge:'#D6DEE2',
-  majorRoad:'#F3CE85',
-  majorRoadEdge:'#D7B66F',
+  localRoadEdge:'#E4E8E6',
+  majorRoad:'#E8D9BB',
+  majorRoadEdge:'#D8CCB5',
   building:'#E8EAE7',
   label:'#34465A',
 };
