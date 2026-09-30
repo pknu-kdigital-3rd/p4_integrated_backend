@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from graph_backend import load_graph, TRUCK_PROFILES, get_override_locations
+from graph_backend import load_graph, load_match_graph, TRUCK_PROFILES, get_override_locations
 from road_match import match_preview
 from hybrid_bus import HybridBusService, load_route_ids
 from telemetry import (
@@ -186,6 +186,7 @@ def startup():
     )
     _install_telemetry_mode(_load_telemetry_mode(), persist=False, history_compensation_enabled=_load_history_compensation())
     print(f"Graph loaded and ready. {len(override_locations)} manual override location(s) found.")
+    threading.Thread(target=_load_match_graph, name="road-match-graph", daemon=True).start()
 
 
 @app.on_event("shutdown")
@@ -541,24 +542,25 @@ def _make_edge_intersector(geometry):
         return intersects
 
 
-def _iter_graph_edge_records():
+def _iter_graph_edge_records(source=None):
     """Yield (raw directed id, physical id, [(lat, lon), ...]) records."""
-    if graph is None:
+    graph_ = graph if source is None else source
+    if graph_ is None:
         return
-    if hasattr(graph, "G"):
-        for u, v, key, data in graph.G.edges(keys=True, data=True):
+    if hasattr(graph_, "G"):
+        for u, v, key, data in graph_.G.edges(keys=True, data=True):
             geometry = data.get("geometry")
             if geometry is not None:
                 coords = [(float(lat), float(lon)) for lon, lat in geometry.coords]
             else:
-                coords = [(float(graph.G.nodes[u]["y"]), float(graph.G.nodes[u]["x"])), (float(graph.G.nodes[v]["y"]), float(graph.G.nodes[v]["x"]))]
+                coords = [(float(graph_.G.nodes[u]["y"]), float(graph_.G.nodes[u]["x"])), (float(graph_.G.nodes[v]["y"]), float(graph_.G.nodes[v]["x"]))]
             osmid = data.get("osmid", key)
             physical = str(osmid[0] if isinstance(osmid, list) and osmid else osmid)
             yield f"{u}:{v}:{key}", physical, coords
         return
-    for source, edges in getattr(graph, "adjacency", {}).items():
+    for source_node, edges in getattr(graph_, "adjacency", {}).items():
         for target, _distance, _speed, geometry, _restrictions, way_id in edges:
-            yield f"{source}:{target}:{way_id}", str(way_id), [(float(point[0]), float(point[1])) for point in geometry]
+            yield f"{source_node}:{target}:{way_id}", str(way_id), [(float(point[0]), float(point[1])) for point in geometry]
 
 
 def _ensure_edge_spatial_index():
@@ -573,12 +575,21 @@ def _ensure_edge_spatial_index():
         return
     if _edge_index_graph is graph:
         return
+    records, spatial_index, long_records = _build_edge_index(graph)
+    _edge_records_cache = tuple(records)
+    _edge_spatial_index = spatial_index
+    _edge_long_records = tuple(long_records)
+    _edge_index_graph = graph
+    _restriction_resolution_cache = {}
 
+
+def _build_edge_index(source):
+    """Edge records plus a uniform grid index over them for one graph."""
     bucket_size = max(0.0001, EDGE_INDEX_BUCKET_DEGREES)
     records = []
     spatial_index = {}
     long_records = []
-    for raw_id, physical_id, coords in _iter_graph_edge_records():
+    for raw_id, physical_id, coords in _iter_graph_edge_records(source):
         if len(coords) < 2:
             continue
         # Index bounds in GeoJSON order (longitude, latitude).  The exact
@@ -600,12 +611,28 @@ def _ensure_edge_spatial_index():
         for cell_x in range(min_x, max_x + 1):
             for cell_y in range(min_y, max_y + 1):
                 spatial_index.setdefault((cell_x, cell_y), []).append(record_index)
+    return records, spatial_index, long_records
 
-    _edge_records_cache = tuple(records)
-    _edge_spatial_index = spatial_index
-    _edge_long_records = tuple(long_records)
-    _edge_index_graph = graph
-    _restriction_resolution_cache = {}
+
+# Road matching uses its own graph (driving+service: campus and other service
+# roads included) so the routing graph can keep excluding them. It loads in the
+# background after startup; until then match-preview answers 503 and Node
+# falls back to the recorded GPS line.
+match_graph = None
+_match_edge_index = None
+
+
+def _load_match_graph():
+    global match_graph, _match_edge_index
+    started = time.perf_counter()
+    try:
+        loaded = load_match_graph(PBF_PATH)
+        records, spatial_index, long_records = _build_edge_index(loaded)
+        _match_edge_index = (tuple(records), spatial_index, tuple(long_records))
+        match_graph = loaded
+        print(f"Road matching graph ready: {len(records)} edges in {time.perf_counter() - started:.1f} s", flush=True)
+    except Exception as exc:  # routing keeps working without road matching
+        print(f"Road matching graph failed to load: {exc!r}", flush=True)
 
 
 def _graph_edge_records():
@@ -824,17 +851,17 @@ def internal_route(req: InternalRouteRequest):
 
 @app.post("/internal/routing/match-preview")
 def internal_match_preview(req: MatchPreviewRequest):
-    if graph is None:
-        raise HTTPException(status_code=503, detail="Routing graph is not ready")
+    if match_graph is None or _match_edge_index is None:
+        raise HTTPException(status_code=503, detail="Road matching graph is not ready")
     if not 2 <= len(req.points) <= 64:
         raise HTTPException(status_code=422, detail="Expected 2 to 64 GPS anchors")
     if any(not math.isfinite(point.lat) or not math.isfinite(point.lon)
            or abs(point.lat) > 90 or abs(point.lon) > 180 for point in req.points):
         raise HTTPException(status_code=422, detail="Invalid GPS anchor coordinates")
-    _ensure_edge_spatial_index()
+    records, spatial_index, long_records = _match_edge_index
     failure = {}
-    result = match_preview(graph, _edge_records_cache, _edge_spatial_index,
-                           _edge_long_records, max(0.0001, EDGE_INDEX_BUCKET_DEGREES),
+    result = match_preview(match_graph, records, spatial_index,
+                           long_records, max(0.0001, EDGE_INDEX_BUCKET_DEGREES),
                            [(point.lat, point.lon) for point in req.points], failure=failure)
     if result is None:
         # Say which rule rejected which anchor: Node logs this message, and it is the

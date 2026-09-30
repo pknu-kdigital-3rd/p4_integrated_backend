@@ -431,9 +431,10 @@ def _parse_float_tag(val):
 class OsmnxGraph:
     CACHE_SUFFIX = ".graph_cache.pkl"
 
-    def __init__(self, pbf_path):
+    def __init__(self, pbf_path, network_type="driving"):
         import osmnx as ox
         import networkx as nx
+        self.network_type = network_type
         self.ox = ox
         self.nx = nx
         # loaded fresh every time, independent of the graph cache below -
@@ -443,7 +444,10 @@ class OsmnxGraph:
         if self.turn_restrictions:
             print(f"Loaded {len(self.turn_restrictions)} turn restriction(s)")
 
-        cache_path = pbf_path + self.CACHE_SUFFIX
+        # Each pyrosm network type is a different graph, so each gets its own
+        # cache; the routing graph keeps its original cache file name.
+        suffix = self.CACHE_SUFFIX if network_type == "driving" else f".{network_type.replace('+', '_')}{self.CACHE_SUFFIX}"
+        cache_path = pbf_path + suffix
         if self._load_from_cache(cache_path, pbf_path):
             self._prepare_edge_metadata()
             return
@@ -459,7 +463,7 @@ class OsmnxGraph:
         # class - and route() below - can stay unchanged.
         osm = OSM(pbf_path)
         nodes, edges = osm.get_network(
-            network_type="driving",
+            network_type=network_type,
             nodes=True,
             extra_attributes=["maxheight", "maxweight", "maxwidth", "maxlength", "hgv"],
         )
@@ -949,3 +953,26 @@ def load_graph(pbf_path):
             ) from e
         print(f"{e.name} not found - using bundled pure-Python fallback")
         return PurePythonGraph(pbf_path)
+
+
+def load_match_graph(pbf_path):
+    """Road graph for GPS road matching, separate from the routing graph.
+
+    pyrosm's "driving" network (the routing graph) drops highway=service
+    roads, so recordings on campus and other service roads could not be
+    matched. "driving+service" keeps them while still excluding footways,
+    steps and cycleways. The routing graph is unchanged, so truck routes are
+    never sent through those roads. The pure-Python backend already keeps
+    service roads.
+    """
+    requested_backend = os.environ.get("ROUTING_GRAPH_BACKEND", "auto").strip().lower()
+    if requested_backend not in {"pure", "fallback"}:
+        try:
+            import osmnx  # noqa: F401
+            import pyrosm  # noqa: F401
+            print("Using osmnx (via pyrosm) driving+service graph for road matching")
+            return OsmnxGraph(pbf_path, network_type="driving+service")
+        except ImportError:
+            pass
+    print("Using pure-Python graph for road matching")
+    return PurePythonGraph(pbf_path)
