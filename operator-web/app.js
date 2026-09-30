@@ -760,6 +760,14 @@ function updateAssignmentPreviewRoute(fixOverride=null){
 }
 tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripRouteMode',tripRouteMode.value);syncTripRouteMode()});
 syncTripRouteMode();
+// The assignment form is always open, so a vehicle left chosen in it would keep
+// its path drawn as the "배정 예정" preview - after a cancel, the cancelled
+// trip's own path. Creating or cancelling a trip clears the choice; the preview
+// returns only when a vehicle is picked for a new assignment.
+function clearAssignmentVehicle(){
+  document.querySelector('#trip-vehicle').value='';
+  assignmentPreviewVehicleId='';assignmentPreview=null;syncTripRouteMode();
+}
 async function loadAssignmentPreview(){
   const vehicleId=document.querySelector('#trip-vehicle').value;
   if(vehicleId!==assignmentPreviewVehicleId){assignmentPreviewVehicleId=vehicleId;assignmentPreview=null;syncTripRouteMode()}
@@ -801,7 +809,7 @@ async function loadTripAssignments(){
     if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&['ADMIN','OPERATOR'].includes(currentRole)){
       const cancel=document.createElement('button');cancel.type='button';cancel.textContent='운행 취소';
       cancel.onclick=async()=>{if(!window.confirm(`Trip ID ${trip.tripId} 배정을 취소할까요?`))return;
-        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);await loadTripAssignments();await refresh()}
+        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);clearAssignmentVehicle();await loadTripAssignments();await refresh()}
         catch(ex){
           // Usually the phone already ended it (Stop Trip completes a trip); show that and refresh.
           document.querySelector('#trip-status-message').textContent=/not active/i.test(ex.message)?`Trip ID ${trip.tripId}은(는) 이미 종료된 운행입니다.`:ex.message;
@@ -1134,6 +1142,7 @@ document.querySelector('#trip-form').addEventListener('submit',async event=>{
     const trip=await api('/api/v1/trips',{method:'POST',body:JSON.stringify(body)},true);
     message.textContent=`Trip ID ${trip.tripId} 배정 완료 · Android에서 운행 시작을 누르세요.`;
     selectRecordingTrip(trip.tripId);
+    clearAssignmentVehicle();
     await Promise.all([loadTripAssignments(),loadTripRecordings(String(trip.tripId)),refresh()]);
   }catch(ex){message.textContent=ex.message}
   finally{button.disabled=false;form.querySelector('#trip-destination-name').focus()}
