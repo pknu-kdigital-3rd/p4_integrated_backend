@@ -1,7 +1,7 @@
 import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
-import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
+import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=12';
@@ -320,6 +320,13 @@ function clearTripLayers(){
   routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;currentRouteBreaks=[];routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);
   for(const entry of markers.values())if(entry.estimated){entry.estimated=false;syncVehicleMapLabel(entry)}
 }
+// Source time of the frame the live view last painted, while it is fresh.
+let lastLiveMessageAt=0;
+function presentedFrameTime(){
+  if(!lastLiveMessage||Date.now()-lastLiveMessageAt>LIVE_OVERRIDE_STALE_MS)return null;
+  const time=String(lastLiveMessage.telemetry?.source_timestamp_ns??lastLiveMessage.sourceTimestampNs??'');
+  return /^\d+$/.test(time)?time:null;
+}
 function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   const display=currentTripDisplay,layer=routeLayer||replayRouteLayer;
   if(!display||!layer)return;
@@ -334,7 +341,11 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   const liveGps=isLiveOverride(liveView,item?.telemetry?.external_id,Date.now())?lastLiveMessage?.telemetry?.gps:null;
   const fix=fixOverride||liveGps||item?.telemetry;
   const metadata=item?.telemetry?.source_metadata;
-  const liveSourceTime=liveGps?lastLiveMessage?.telemetry?.source_timestamp_ns:null;
+  // A replay trip's live view gives the painted frame's time even where the
+  // recording has no GPS for it (a tunnel: "GPS stale"), so the vehicle keeps
+  // moving with the footage instead of waiting on the phone's placeholder fixes.
+  const liveSourceTime=liveGps?lastLiveMessage?.telemetry?.source_timestamp_ns
+    :replayOnly&&String(liveView?.vehicleId)===String(display.vehicleId)?presentedFrameTime():null;
   // The replay clock from the phone's batches keeps advancing where the recording
   // has no GPS (a tunnel, an underground car park), so it places the vehicle by
   // how far the recording has actually played; the last fix is the fallback.
@@ -921,8 +932,13 @@ window.addEventListener('message',event=>{
   }
   const message=acceptLiveTelemetry(liveView,event,liveFrame.contentWindow);
   if(!message)return;
-  lastLiveMessage=message;
+  lastLiveMessage=message;lastLiveMessageAt=Date.now();
   const position=applyLiveTelemetry(liveView,message,Date.now());
+  if(!position&&currentTripDisplay?.routeMode==='REPLAY_ONLY'&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)){
+    // No GPS for this frame (a tunnel): place the replay vehicle by its time.
+    const snapped=presentedFrameTime()?updateRemainingTripRoute():null;
+    if(snapped&&liveMapFollower.isFollowing())liveMapFollower.follow(snapped);
+  }
   if(position){
     const snapped=currentTripDisplay&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)
       ?updateRemainingTripRoute({latitude:position[0],longitude:position[1]},message.telemetry?.source_timestamp_ns):null;
