@@ -1,4 +1,6 @@
-const STYLE_URL='https://tiles.openfreemap.org/styles/liberty';
+const STYLE_URL='/basemap/styles/liberty';
+const TILE_ORIGIN='https://tiles.openfreemap.org/';
+const ASSET_ORIGIN='https://assets.openfreemap.com/';
 
 // Keep these colors separate so map features remain distinct at every zoom.
 export const OPERATOR_MAP_COLORS={
@@ -43,7 +45,11 @@ export function installOperatorBasemap(map,fallback){
   if(typeof L.maplibreGL!=='function')return;
   let layer;
   try{
-    layer=L.maplibreGL({style:STYLE_URL}).addTo(map);
+    layer=L.maplibreGL({
+      style:STYLE_URL,
+      transformRequest:url=>({url:url.startsWith(TILE_ORIGIN)?`/basemap/${url.slice(TILE_ORIGIN.length)}`
+        :url.startsWith(ASSET_ORIGIN)?`/basemap-assets/${url.slice(ASSET_ORIGIN.length)}`:url}),
+    }).addTo(map);
     const glMap=layer.getMaplibreMap();
     const useFallback=event=>{
       if(map.hasLayer(layer))map.removeLayer(layer);
