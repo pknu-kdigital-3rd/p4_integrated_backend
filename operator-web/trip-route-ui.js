@@ -25,11 +25,11 @@ export function plannedProgress(geometry,fix){
 }
 
 /** Keep only the route ahead of the current fix, including the fix itself. */
-export function remainingRoute(coordinates,fix,minPosition=0,snapStart=false){
+export function remainingRoute(coordinates,fix,minPosition=0,snapStart=false,fixedPosition=false){
   if(!Array.isArray(coordinates)||coordinates.length<2||!Number.isFinite(fix?.latitude)||!Number.isFinite(fix?.longitude))return null;
   const at=[fix.longitude,fix.latitude],latScale=111195,lonScale=latScale*Math.cos(fix.latitude*rad);
   let closest=Infinity,position=0;
-  for(let i=Math.max(1,Math.floor(minPosition));i<coordinates.length;i++){
+  for(let i=Math.max(1,Math.floor(minPosition));!fixedPosition&&i<coordinates.length;i++){
     const a=coordinates[i-1],b=coordinates[i];
     if(!Array.isArray(a)||!Array.isArray(b)||!a.concat(b).every(Number.isFinite))continue;
     const dx=(b[0]-a[0])*lonScale,dy=(b[1]-a[1])*latScale,denominator=dx*dx+dy*dy;
@@ -48,7 +48,7 @@ export function remainingRoute(coordinates,fix,minPosition=0,snapStart=false){
 }
 
 /** Locate a replay timestamp along the road geometry's timed anchors. */
-export function matchedRoutePosition(anchors,sourceTimestampNs){
+export function matchedRoutePosition(anchors,sourceTimestampNs,coordinateDistancesM){
   if(!Array.isArray(anchors)||anchors.length<2||sourceTimestampNs==null)return null;
   const time=BigInt(sourceTimestampNs);
   if(time<=BigInt(anchors[0].sourceTimestampNs))return anchors[0].routePosition;
@@ -57,7 +57,22 @@ export function matchedRoutePosition(anchors,sourceTimestampNs){
   while(high-low>1){const mid=(low+high)>>1;if(BigInt(anchors[mid].sourceTimestampNs)<=time)low=mid;else high=mid}
   const start=BigInt(anchors[low].sourceTimestampNs),span=BigInt(anchors[high].sourceTimestampNs)-start;
   const fraction=span?Number(time-start)/Number(span):0;
-  return anchors[low].routePosition+fraction*(anchors[high].routePosition-anchors[low].routePosition);
+  if(!Array.isArray(coordinateDistancesM)||!Number.isFinite(anchors[low].routeDistanceM))
+    return anchors[low].routePosition+fraction*(anchors[high].routePosition-anchors[low].routePosition);
+  const distance=anchors[low].routeDistanceM+fraction*(anchors[high].routeDistanceM-anchors[low].routeDistanceM);
+  let first=0,last=coordinateDistancesM.length-1;
+  while(last-first>1){const middle=(first+last)>>1;if(coordinateDistancesM[middle]<=distance)first=middle;else last=middle}
+  const segmentM=coordinateDistancesM[last]-coordinateDistancesM[first];
+  return first+(segmentM?Math.max(0,Math.min(1,(distance-coordinateDistancesM[first])/segmentM)):0);
+}
+
+/** Advance a replay fix briefly during a GPS gap; never beyond 45 seconds. */
+export function estimatedReplayTimestamp(sourceTimestampNs,receivedAt,nowMs,speedKmh){
+  if(sourceTimestampNs==null||!Number.isFinite(speedKmh)||speedKmh<=3)return null;
+  const age=nowMs-new Date(receivedAt??'').getTime();
+  if(!Number.isFinite(age)||age<1500)return null;
+  const elapsedMs=Math.min(age,45000);
+  return (BigInt(sourceTimestampNs)+BigInt(Math.round(elapsedMs*1e6))).toString();
 }
 
 /** Fractional segment index at the current recorded playback timestamp. */

@@ -25,10 +25,8 @@ describe("recorded GPS road matching", () => {
         expect(route).toHaveBeenCalledOnce();
         expect(result?.routeGeojson.coordinates).toHaveLength(3);
         expect(result?.routeGeojson.coordinates[1]).toEqual([129.0005, 35.0005]);
-        expect(result?.anchors).toEqual([
-            { sourceTimestampNs: "100", routePosition: 0 },
-            { sourceTimestampNs: "200", routePosition: 2 },
-        ]);
+        expect(result?.anchors.map(anchor => [anchor.sourceTimestampNs, anchor.routePosition])).toEqual([["100", 0], ["200", 2]]);
+        expect(result?.coordinateDistancesM).toHaveLength(3);
         route.mockRestore();
     });
 });

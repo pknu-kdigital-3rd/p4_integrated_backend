@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { matchedRoutePosition, plannedProgress, recordedProgress, remainingRoute, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, matchedRoutePosition, plannedProgress, recordedProgress, remainingRoute, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -56,6 +56,23 @@ describe("road-matched replay display", () => {
             { latitude: 35.0001, longitude: 129.001 }, position, true)!;
         expect(line.latLngs[0]?.[0]).toBe(35);
         expect(line.latLngs.at(-1)).toEqual([35, 129.002]);
+    });
+    it("moves an estimated marker by road distance through a GPS gap and caps prediction", () => {
+        const anchors = [
+            { sourceTimestampNs: "1000000000", routePosition: 0, routeDistanceM: 0 },
+            { sourceTimestampNs: "11000000000", routePosition: 2, routeDistanceM: 200 },
+        ];
+        const receivedAt = "2026-09-30T00:00:00.000Z";
+        const time = estimatedReplayTimestamp("1000000000", receivedAt, Date.parse(receivedAt) + 5000, 40)!;
+        expect(time).toBe("6000000000");
+        expect(matchedRoutePosition(anchors, time, [0, 50, 200])).toBeCloseTo(1 + 50 / 150);
+        const predicted = remainingRoute([[129, 35], [129.0005, 35.0005], [129.001, 35]],
+            { latitude: 35, longitude: 129 }, 1.5, true, true)!;
+        expect(predicted.latLngs[0]?.[0]).toBeCloseTo(35.00025);
+        expect(predicted.latLngs[0]?.[1]).toBeCloseTo(129.00075);
+        expect(estimatedReplayTimestamp("1000000000", receivedAt, Date.parse(receivedAt) + 60000, 40))
+            .toBe("46000000000");
+        expect(estimatedReplayTimestamp("1000000000", receivedAt, Date.parse(receivedAt) + 5000, 0)).toBeNull();
     });
 });
 

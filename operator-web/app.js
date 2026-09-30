@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {plannedProgress,recordedProgress,matchedRoutePosition,replayProgressOnRoute,remainingRoute,tripTimes} from './trip-route-ui.js?v=3';
+import {estimatedReplayTimestamp,plannedProgress,recordedProgress,matchedRoutePosition,replayProgressOnRoute,remainingRoute,tripTimes} from './trip-route-ui.js?v=4';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -130,7 +130,7 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
 function syncVehicleMapLabel(entry){
   const item=entry.item,telemetry=item?.telemetry||{},onTrip=item?.tripStatus==='IN_PROGRESS';
   const name=telemetry.telemetry_source==='RECORDED_GPS'?`GPS 재생 · ${item?.vehicleCode||'차량'}`:isAndroidGpsItem(item)?`Android GPS · ${item?.vehicleCode||telemetry.external_id||'차량'}`:item?.vehicleCode||telemetry.external_id||'차량';
-  const label=document.createElement('span');label.textContent=name;
+  const label=document.createElement('span');label.textContent=entry.estimated?`${name} · 추정 위치`:name;
   if(entry.labelOnTrip!==onTrip){
     entry.marker.unbindTooltip();
     entry.marker.bindTooltip(label,{direction:'top',permanent:onTrip,offset:[0,-14],className:`vehicle-label${onTrip?' vehicle-label--trip':''}`,interactive:false});
@@ -212,8 +212,9 @@ function retargetLiveView(item){
 function clearTripLayers(){
   for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
   routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;routePosition=0;
+  for(const entry of markers.values())if(entry.estimated){entry.estimated=false;syncVehicleMapLabel(entry)}
 }
-function updateRemainingTripRoute(fixOverride=null){
+function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   const display=currentTripDisplay,layer=routeLayer||replayRouteLayer;
   if(!display||!layer)return;
   const replayOnly=display.routeMode==='REPLAY_ONLY';
@@ -224,13 +225,28 @@ function updateRemainingTripRoute(fixOverride=null){
       ||candidates.find(entry=>entry.telemetry?.telemetry_source==='RECORDED_GPS')
       ||candidates.find(entry=>entry.telemetry?.telemetry_source==='BIMS_LIVE'&&entry.telemetry?.source_metadata?.state==='live');
   const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
-  const markerPosition=marker?.getLatLng();
-  const fix=fixOverride||(markerPosition?{latitude:markerPosition.lat,longitude:markerPosition.lng}:item?.telemetry);
-  const playbackPosition=replayOnly?matchedRoutePosition(display.replayPreview?.roadMatch?.anchors,display.replayPosition?.sourceTimestampNs):null;
-  const remaining=remainingRoute(currentRouteCoordinates,fix,Math.max(routePosition,playbackPosition??0),replayOnly);
+  const liveGps=isLiveOverride(liveView,item?.telemetry?.external_id,Date.now())?lastLiveMessage?.telemetry?.gps:null;
+  const fix=fixOverride||liveGps||item?.telemetry;
+  const metadata=item?.telemetry?.source_metadata;
+  const liveSourceTime=liveGps?lastLiveMessage?.telemetry?.source_timestamp_ns:null;
+  const sourceTime=sourceTimeOverride||liveSourceTime||metadata?.sourceTimestampNs||display.replayPosition?.sourceTimestampNs;
+  const receivedAt=(sourceTimeOverride||liveSourceTime)?null
+    :metadata?.sourceTimestampNs?metadata.receivedAt:display.replayPosition?.receivedAt;
+  const estimatedTime=replayOnly&&display.tripStatus==='IN_PROGRESS'
+    ?estimatedReplayTimestamp(sourceTime,receivedAt,Date.now(),Number(item?.telemetry?.speed_kmh)):null;
+  const playbackPosition=replayOnly?matchedRoutePosition(display.replayPreview?.roadMatch?.anchors,estimatedTime||sourceTime,display.replayPreview?.roadMatch?.coordinateDistancesM):null;
+  const remaining=remainingRoute(currentRouteCoordinates,fix,Math.max(routePosition,playbackPosition??0),replayOnly,Boolean(estimatedTime));
   if(!remaining){layer.setLatLngs([]);return}
-  routePosition=remaining.position;
+  // A prediction must not become confirmed progress: a returning GPS fix may
+  // correct it backward to the actual road segment.
+  if(!estimatedTime)routePosition=remaining.position;
   layer.setLatLngs(remaining.latLngs);
+  if(replayOnly&&marker){
+    marker.setLatLng(remaining.latLngs[0]);
+    const entry=markers.get(item.telemetry.external_id);
+    if(entry){entry.estimated=Boolean(estimatedTime);syncVehicleMapLabel(entry)}
+  }
+  return replayOnly?remaining.latLngs[0]:null;
 }
 function showTripDisplay(display){
   const card=document.querySelector('#trip-progress-card');card.hidden=false;
@@ -456,14 +472,15 @@ function showAssignmentPreview(preview){
   // The virtual workspace owns the map while open; the layer is re-added when it closes.
   if(!window.__virtualMode)assignmentPreviewLayer.addTo(map);
 }
-function updateAssignmentPreviewRoute(){
+function updateAssignmentPreviewRoute(fixOverride=null){
   if(!assignmentPreviewRoute)return;
   const item=latestFleet.find(entry=>String(entry.vehicleId)===assignmentPreviewVehicleId&&entry.telemetry?.telemetry_source==='RECORDED_GPS')
     ||latestFleet.find(entry=>String(entry.vehicleId)===assignmentPreviewVehicleId&&entry.telemetry?.telemetry_source==='DEVICE_GPS');
   const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
   const at=marker?.getLatLng();
-  const remaining=remainingRoute(assignmentPreviewCoordinates,at?{latitude:at.lat,longitude:at.lng}:item?.telemetry,0,true);
+  const remaining=remainingRoute(assignmentPreviewCoordinates,fixOverride||(at?{latitude:at.lat,longitude:at.lng}:item?.telemetry),0,true);
   assignmentPreviewRoute.setLatLngs(remaining?.latLngs||[]);
+  if(marker&&remaining)marker.setLatLng(remaining.latLngs[0]);
 }
 tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripRouteMode',tripRouteMode.value);syncTripRouteMode()});
 syncTripRouteMode();
@@ -713,15 +730,24 @@ window.addEventListener('message',event=>{
   if(!message)return;
   lastLiveMessage=message;
   const position=applyLiveTelemetry(liveView,message,Date.now());
-  if(position)liveMapFollower.update(position);
-  if(position&&currentTripDisplay&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId))updateRemainingTripRoute({latitude:position[0],longitude:position[1]});
-  if(position&&String(liveView?.vehicleId)===assignmentPreviewVehicleId)updateAssignmentPreviewRoute();
+  if(position){
+    const snapped=currentTripDisplay&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)
+      ?updateRemainingTripRoute({latitude:position[0],longitude:position[1]},message.telemetry?.source_timestamp_ns):null;
+    liveMapFollower.update(snapped||position);
+    if(String(liveView?.vehicleId)===assignmentPreviewVehicleId)updateAssignmentPreviewRoute({latitude:position[0],longitude:position[1]});
+  }
   renderLiveTelemetryStatus();
 });
 installForegroundResume(window,document,()=>{
   if(!liveView||document.hidden)return;
   liveFrame.contentWindow?.postMessage({type:FOREGROUND_RESUME_MESSAGE},liveView.frameOrigin);
 });
+// Keep the displayed road position moving briefly through a replay GPS gap.
+setInterval(()=>{
+  if(document.hidden||currentTripDisplay?.routeMode!=='REPLAY_ONLY'||currentTripDisplay.tripStatus!=='IN_PROGRESS')return;
+  const snapped=updateRemainingTripRoute();
+  if(snapped&&liveView?.vehicleId===String(currentTripDisplay.vehicleId)&&liveMapFollower.isFollowing())liveMapFollower.update(snapped);
+},500);
 // With no open button, the "실시간 영상" tab reopens a closed preview for a streaming vehicle.
 document.querySelector('#recording-live-tab').addEventListener('click',()=>{if(!liveView)openLiveView()});
 function openLiveView(){

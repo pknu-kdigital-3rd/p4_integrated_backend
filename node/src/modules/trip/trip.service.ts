@@ -124,8 +124,8 @@ export const tripService = {
         const preview = trip.routeMode === "DUAL" ? await prisma.replayPreview.findFirst({
             where: { vehicleId: trip.vehicleId }, orderBy: [{ createdAt: "desc" }, { replayPreviewId: "desc" }],
         }) : trip.replayPreview;
-        const latestReplay = await prisma.$queryRaw<Array<{ sourceTimestampNs: bigint; recordingSessionId: string }>>`
-            SELECT source_timestamp_ns AS "sourceTimestampNs", recording_session_id AS "recordingSessionId"
+        const latestReplay = await prisma.$queryRaw<Array<{ sourceTimestampNs: bigint; recordingSessionId: string; receivedAt: Date }>>`
+            SELECT source_timestamp_ns AS "sourceTimestampNs", recording_session_id AS "recordingSessionId", received_at AS "receivedAt"
             FROM vehicle_position WHERE trip_id = ${tripId} AND telemetry_source = 'RECORDED_GPS'
             ORDER BY received_at DESC, position_id DESC LIMIT 1`;
         const roadMatch = preview ? await matchReplayPreview(preview) : null;

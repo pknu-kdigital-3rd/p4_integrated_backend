@@ -3,7 +3,8 @@ import { previewPoints, type PreviewPoint } from "./trip.preview.ts";
 
 type RoadMatch = {
     routeGeojson: { type: "LineString"; coordinates: number[][] };
-    anchors: Array<{ sourceTimestampNs: string; routePosition: number }>;
+    anchors: Array<{ sourceTimestampNs: string; routePosition: number; routeDistanceM: number }>;
+    coordinateDistancesM: number[];
     graphVersion: string;
 };
 
@@ -60,6 +61,17 @@ function nearestPosition(coordinates: number[][], stop: { lat: number; lon: numb
     return position;
 }
 
+function cumulativeDistances(coordinates: number[][]): number[] {
+    const distances = [0];
+    for (let index = 1; index < coordinates.length; index++) {
+        const a = coordinates[index - 1]!, b = coordinates[index]!;
+        const meanLat = (a[1]! + b[1]!) * Math.PI / 360;
+        const metres = Math.hypot((b[0]! - a[0]!) * 111_195 * Math.cos(meanLat), (b[1]! - a[1]!) * 111_195);
+        distances.push(distances.at(-1)! + metres);
+    }
+    return distances;
+}
+
 export async function matchReplayPreview(preview: { fingerprint: string; points: unknown }): Promise<RoadMatch | null> {
     const key = preview.fingerprint;
     const cached = cache.get(key);
@@ -73,13 +85,17 @@ export async function matchReplayPreview(preview: { fingerprint: string; points:
         }, 45_000);
         const coordinates = route.routeGeojson.coordinates;
         if (coordinates.length < 2 || route.snappedStops.length !== stops.length) return null;
+        const coordinateDistancesM = cumulativeDistances(coordinates);
         let position = 0;
         const anchors = indices.map((index, slot) => {
             position = slot === 0 ? 0 : slot === indices.length - 1 ? coordinates.length - 1
                 : nearestPosition(coordinates, route.snappedStops[slot]! as { lat: number; lon: number }, position);
-            return { sourceTimestampNs: points[index]![0], routePosition: position };
+            const segment = Math.min(coordinates.length - 2, Math.floor(position));
+            const routeDistanceM = coordinateDistancesM[segment]! + (position - segment)
+                * (coordinateDistancesM[segment + 1]! - coordinateDistancesM[segment]!);
+            return { sourceTimestampNs: points[index]![0], routePosition: position, routeDistanceM };
         });
-        return { routeGeojson: route.routeGeojson, anchors, graphVersion: route.graphVersion };
+        return { routeGeojson: route.routeGeojson, anchors, coordinateDistancesM, graphVersion: route.graphVersion };
     })().catch(error => {
         setTimeout(() => { if (cache.get(key) === match) cache.delete(key); }, 30_000);
         console.warn("Replay road matching unavailable", error);
