@@ -292,6 +292,35 @@ describe("recorded GPS line with road only across GPS gaps", () => {
         expect(line.coordinates!.every(([,lat])=>lat===35)).toBe(true);
     });
 
+    it("keeps a stopped vehicle in place when a fix jitters just behind it", () => {
+        // A long second segment: skipping the first one would jump ~90 m to its start.
+        const fixes = [
+            ["1000000000", 129.00100, 35, 0], ["2000000000", 129.00099, 35, 1],
+            ["3000000000", 129.00099, 35, 1], ["4000000000", 129.00300, 35, 183],
+        ];
+        const preview = { points: fixes, roadMatch: {
+            routeGeojson: { coordinates: [[129.000, 35], [129.002, 35], [129.004, 35]] },
+            anchors: [0.5, 0.5, 0.5, 1.5].map((routePosition, index) => ({ sourceTimestampNs: fixes[index]![0], routePosition, routeDistanceM: routePosition * 182 })),
+            coordinateDistancesM: [0, 182, 364],
+        } };
+        const line = replayRouteLine(preview, "gaps");
+        for (const [lon] of line.coordinates!.slice(0, 3)) expect(lon).toBeCloseTo(129.001, 5);
+    });
+
+    it("keeps an outbound fix off a nearer return carriageway after a U-turn", () => {
+        // Outbound east on lat 35.0, U-turn, return west 10 m north; the fixes
+        // run between the two, slightly nearer the return carriageway.
+        const road = [[129.000, 35], [129.003, 35], [129.003, 35.00009], [129.000, 35.00009]];
+        const fixes = [0.0005, 0.0010, 0.0015, 0.0020].map((offset, index) => [`${index + 1}000000000`, 129 + offset, 35.00005, offset * 91080]);
+        const preview = { points: fixes, roadMatch: {
+            routeGeojson: { coordinates: road },
+            anchors: fixes.map(point => ({ sourceTimestampNs: point[0], routePosition: (point[1] - 129) / 0.003, routeDistanceM: point[3] })),
+            coordinateDistancesM: [0, 273.2, 283.2, 556.4],
+        } };
+        const line = replayRouteLine(preview, "gaps");
+        expect(line.coordinates!.every(([, lat]) => lat === 35)).toBe(true);
+    });
+
     it("moves onto an offset tunnel road over the gap instead of jumping at its start", () => {
         const tunnelFixes = [
             ["1000000000", 129.09566, 35.14950, 0],

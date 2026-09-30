@@ -223,17 +223,36 @@ export function routeFromPosition(coordinates,position){
 
 // Nearest point on a [lon, lat] polyline at or after minPosition:
 // {position (segment index + fraction), distanceM} or null.
-function projectOntoLine(coordinates,lat,lon,minPosition=0,maxPosition=Infinity){
+// With an expected distance along the line (from the replay timing), a point
+// is ranked by its distance plus this share of how far along the line it is
+// from the expected one. Where a U-turn puts the return carriageway a few metres
+// from the outbound one, a fix between them otherwise lands on the return leg
+// ahead of time, and the vehicle waits there for the recording to catch up.
+// Near the turn itself the expected position lies between both legs, so a
+// road heading against the fix's direction of travel (expected.heading, in
+// radians from north) also costs up to 36 m, as in the server's road matcher.
+const EXPECTED_ALONG_WEIGHT=0.25;
+function projectOntoLine(coordinates,lat,lon,minPosition=0,maxPosition=Infinity,expected=null){
   const latScale=111195,lonScale=latScale*Math.cos(lat*rad);
   let best=null;
   for(let i=Math.max(1,Math.floor(minPosition)+1);i<coordinates.length&&i-1<=maxPosition;i++){
     const a=coordinates[i-1],b=coordinates[i];
     const dx=(b[0]-a[0])*lonScale,dy=(b[1]-a[1])*latScale,denominator=dx*dx+dy*dy;
-    const fraction=denominator?Math.max(0,Math.min(1,(((lon-a[0])*lonScale)*dx+((lat-a[1])*latScale)*dy)/denominator)):0;
+    // Clamp to the allowed range rather than skip the segment: a stopped
+    // vehicle's fix just behind minPosition otherwise jumps to the next
+    // vertex, possibly tens of metres ahead, and waits there.
+    const low=Math.max(0,minPosition-(i-1)),high=Math.min(1,maxPosition-(i-1));
+    if(low>high)continue;
+    const along=denominator?(((lon-a[0])*lonScale)*dx+((lat-a[1])*latScale)*dy)/denominator:0;
+    const fraction=Math.max(low,Math.min(high,along));
     const position=i-1+fraction;
-    if(position<minPosition||position>maxPosition)continue;
     const distanceM=Math.hypot((lon-a[0])*lonScale-fraction*dx,(lat-a[1])*latScale-fraction*dy);
-    if(!best||distanceM<best.distanceM)best={position,distanceM};
+    let score=distanceM;
+    if(expected){
+      score+=EXPECTED_ALONG_WEIGHT*Math.abs(distanceAtPosition(expected.distances,position)-expected.distanceM);
+      if(expected.heading!=null&&denominator)score+=18*(1-Math.cos(Math.atan2(dx,dy)-expected.heading));
+    }
+    if(!best||score<best.score)best={position,distanceM,score};
   }
   return best;
 }
@@ -296,12 +315,19 @@ export function gapAwareReplayLine(points,roadCoordinates,{minGapS=5,maxSnapM=45
     return Math.hypot((b[0]-a[0])*111195*Math.cos(meanLat),(b[1]-a[1])*111195);
   };
   const searchBounds=timestamp=>{
-    if(!Array.isArray(roadTiming?.distances)||roadTiming.distances.length!==road.length)return [roadPosition,Infinity];
+    if(!Array.isArray(roadTiming?.distances)||roadTiming.distances.length!==road.length)return [roadPosition,Infinity,null];
     const expected=matchedRoutePosition(roadTiming.anchors,timestamp,roadTiming.distances);
-    if(expected==null)return [roadPosition,Infinity];
+    if(expected==null)return [roadPosition,Infinity,null];
     const distance=distanceAtPosition(roadTiming.distances,expected);
     return [Math.max(roadPosition,positionAtDistance(roadTiming.distances,distance-300)),
-      positionAtDistance(roadTiming.distances,distance+300)];
+      positionAtDistance(roadTiming.distances,distance+300),{distances:roadTiming.distances,distanceM:distance}];
+  };
+  // Direction of travel at a fix, from its neighbours; null while (nearly) stopped.
+  const heading=index=>{
+    const before=points[Math.max(0,index-1)],after=points[Math.min(points.length-1,index+1)];
+    const meanLat=(before[2]+after[2])*rad/2;
+    const east=(after[1]-before[1])*111195*Math.cos(meanLat),north=(after[2]-before[2])*111195;
+    return Math.hypot(east,north)>5?Math.atan2(east,north):null;
   };
   for(let index=0;index<points.length;index++){
     const point=points[index];
@@ -309,8 +335,8 @@ export function gapAwareReplayLine(points,roadCoordinates,{minGapS=5,maxSnapM=45
     // draws a visible V even when the road match correctly follows the lane.
     let displayed=[point[1],point[2]];
     if(road&&roadTiming){
-      const [min,max]=searchBounds(point[0]);
-      const projected=projectOntoLine(road,point[2],point[1],min,max);
+      const [min,max,expected]=searchBounds(point[0]);
+      const projected=projectOntoLine(road,point[2],point[1],min,max,expected&&{...expected,heading:heading(index)});
       if(projected&&projected.distanceM<=maxSnapM){
         displayed=pointAt(road,projected.position);
         roadPosition=projected.position;
@@ -326,10 +352,10 @@ export function gapAwareReplayLine(points,roadCoordinates,{minGapS=5,maxSnapM=45
     if(!road){disconnect();continue}
     // A loop or parallel carriageway can put a much later road segment closer
     // to a GPS fix. Restrict each search to the section timed for that fix.
-    const [startMin,startMax]=searchBounds(point[0]);
-    const start=projectOntoLine(road,point[2],point[1],startMin,startMax);
-    const [endMin,endMax]=searchBounds(next[0]);
-    const end=start&&projectOntoLine(road,next[2],next[1],Math.max(start.position,endMin),endMax);
+    const [startMin,startMax,startExpected]=searchBounds(point[0]);
+    const start=projectOntoLine(road,point[2],point[1],startMin,startMax,startExpected);
+    const [endMin,endMax,endExpected]=searchBounds(next[0]);
+    const end=start&&projectOntoLine(road,next[2],next[1],Math.max(start.position,endMin),endMax,endExpected);
     if(!start||!end||start.distanceM>maxSnapM||end.distanceM>maxSnapM||end.position<=start.position){disconnect();continue}
     const section=[pointAt(road,start.position)];
     for(let i=Math.floor(start.position)+1;i<end.position;i++)section.push(road[i]);
