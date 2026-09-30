@@ -147,6 +147,41 @@ function routeControlsMarker(item){
   return currentTripDisplay?.routeMode==='REPLAY_ONLY'&&Array.isArray(currentRouteCoordinates)
     &&String(item?.vehicleId)===String(currentTripDisplay.vehicleId)&&item?.telemetry?.telemetry_source==='RECORDED_GPS';
 }
+// Both "선택 차량" cards (empty state and details) carry a vehicle picker.
+// Choosing a vehicle selects it and centres the map on it, two levels below
+// the map's closest zoom.
+const vehiclePickers=[...document.querySelectorAll('.vehicle-picker')];
+let vehiclePickerSignature='';
+function vehiclePickerLabel(item){
+  const t=item.telemetry||{},name=item.vehicleCode||item.vehicleName||t.external_id;
+  return t.telemetry_source==='RECORDED_GPS'?`${name} · GPS 재생`:isAndroidGpsItem(item)?`${name} · Android GPS`:name;
+}
+function renderVehiclePickers(vehicles){
+  const options=vehicles.filter(item=>item.telemetry?.external_id&&fleetPosition(item))
+    .map(item=>({value:item.telemetry.external_id,label:vehiclePickerLabel(item)}))
+    .sort((a,b)=>a.label.localeCompare(b.label,'ko'));
+  const signature=JSON.stringify(options);
+  if(signature!==vehiclePickerSignature){
+    vehiclePickerSignature=signature;
+    for(const picker of vehiclePickers){
+      picker.replaceChildren(new Option(options.length?'차량 선택':'표시할 차량 없음',''));
+      picker.options[0].disabled=true;
+      for(const option of options)picker.add(new Option(option.label,option.value));
+    }
+  }
+  syncVehiclePickers();
+}
+function syncVehiclePickers(){
+  const key=selected?.telemetry?.external_id||'';
+  for(const picker of vehiclePickers)picker.value=[...picker.options].some(option=>option.value===key)?key:'';
+}
+for(const picker of vehiclePickers)picker.addEventListener('change',()=>{
+  const item=latestFleet.find(vehicle=>vehicle.telemetry?.external_id===picker.value),position=item&&fleetPosition(item);
+  if(!position)return;
+  selectVehicle(item);
+  const maxZoom=Number.isFinite(map.getMaxZoom())?map.getMaxZoom():18;
+  map.setView(position,Math.max(map.getMinZoom(),maxZoom-2));
+});
 function createMarkerEntry(item,position,{liveOnly=false}={}){
   const marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const icon=marker.options.icon;
@@ -402,6 +437,7 @@ async function loadSelectedTrip(){
 }
 function selectVehicle(item){
   selected=item;
+  syncVehiclePickers();
   if(item.tripId)showAssignmentPreview(null);
   const assignmentVehicle=document.querySelector('#trip-vehicle');
   if(assignmentVehicle&&[...assignmentVehicle.options].some(option=>option.value===String(item.vehicleId))){
@@ -437,6 +473,7 @@ function render(snapshot){
   if(window.__virtualMode)return;
   if(!Array.isArray(snapshot?.vehicles))throw new Error('차량 응답 형식이 올바르지 않습니다.');
   latestFleet=snapshot.vehicles;
+  renderVehiclePickers(snapshot.vehicles);
   let invalidPositions=0;
   const keys=new Set(snapshot.vehicles.map(item=>item.telemetry?.external_id));
   for(const [key,entry] of markers){if(!keys.has(key)&&key!==liveView?.markerKey){map.removeLayer(entry.marker);markers.delete(key);}}

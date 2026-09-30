@@ -170,6 +170,8 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #trips-list button { justify-self: start; padding: 5px 8px; font-size: 11px; background: var(--ui-danger-soft); color: var(--ui-danger); }
 #live-view { margin-top: 12px; width: 100%; }
 #trip-panel h2,#recordings-panel h2 { margin-bottom: 16px; }
+/* Vehicle picker in both "선택 차량" cards (empty state and details). */
+.vehicle-picker { width: 100%; margin-top: 8px; }
 #trip-form label { color: var(--ui-text-secondary); font-size: 12px; }
 .trip-coordinate-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
 .trip-coordinate-heading button { padding: 6px 8px; background: var(--ui-primary-soft); color: var(--ui-primary); }
