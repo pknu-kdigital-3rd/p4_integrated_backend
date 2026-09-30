@@ -62,6 +62,8 @@ let scenarioId = '';
 let scenarioRevision = 0;
 let selectedVehicleId = '';
 let speedControlEditing = false;
+let pendingSpeedChange = null;
+let applyingSpeedChange = false;
 let vehicles = [];
 let restrictions = [];
 let draft = null;
@@ -900,6 +902,45 @@ async function command(command, extra = {}) {
   }
   catch (error) { setStatus(error.message, true); }
 }
+async function applySelectedSpeed() {
+  const activeTrip = selectedActiveTrip();
+  if (!activeTrip) {
+    setStatus('The selected virtual vehicle has no active trip.', true);
+    return;
+  }
+  speedControlEditing = true;
+  renderSpeedControl();
+  pendingSpeedChange = {
+    tripId: activeTrip.tripId, vehicleId: selectedVehicleId,
+    scenarioId, speedKmh: selectedSpeedKmh(),
+  };
+  if (applyingSpeedChange) return;
+  applyingSpeedChange = true;
+  let lastChange;
+  try {
+    // Serialize commands so rapid slider changes cannot arrive out of order.
+    // While a command is in flight, retain only the latest selected speed.
+    while (pendingSpeedChange) {
+      const change = pendingSpeedChange;
+      pendingSpeedChange = null;
+      lastChange = change;
+      try {
+        await api(`/api/v1/virtual/trips/${change.tripId}/commands`, {
+          method: 'POST', body: JSON.stringify({ command: 'SET_SPEED_KMH', speedKmh: change.speedKmh }),
+        });
+      } catch (error) {
+        if (selectedVehicleId === change.vehicleId) setStatus(error.message, true);
+      }
+    }
+  } finally {
+    applyingSpeedChange = false;
+    if (lastChange?.vehicleId === selectedVehicleId) speedControlEditing = false;
+  }
+  if (lastChange?.scenarioId === scenarioId) {
+    try { await loadScenarioData(); }
+    catch (error) { setStatus(error.message, true); }
+  }
+}
 function beginRoutePointPick(kind) {
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   pickMode = kind;
@@ -1058,8 +1099,7 @@ document.querySelector('#virtual-preview').addEventListener('click', () => void 
 document.querySelector('#virtual-dispatch').addEventListener('click', () => void generateRequest());
 document.querySelector('#virtual-following').addEventListener('change', (event) => void setFollowing(event.target.checked));
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
-document.querySelector('#virtual-speed').addEventListener('input', () => { speedControlEditing = true; renderSpeedControl(); });
-document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
+document.querySelector('#virtual-speed').addEventListener('input', () => void applySelectedSpeed());
 document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; map.getContainer().style.cursor = 'crosshair'; setStatus('지도에서 영역의 두 모서리를 선택하세요.'); });
 document.querySelector('#virtual-add-waypoint').addEventListener('click', () => beginRoutePointPick('waypoint'));
 document.querySelector('#virtual-restriction-commit').addEventListener('click', () => void commitRestriction());
