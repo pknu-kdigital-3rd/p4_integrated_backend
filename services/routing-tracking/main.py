@@ -881,7 +881,7 @@ def internal_match_preview(req: MatchPreviewRequest):
         print(f"road match rejected: {message} ({len(req.points)} anchors)", flush=True)
         raise HTTPException(status_code=422, detail={"code": "ROAD_MATCH_NOT_FOUND", "message": message, **failure})
     if result["skippedAnchors"]:
-        print(f"road match skipped {len(result['skippedAnchors'])} of {len(req.points)} GPS anchors with no road nearby: {result['skippedAnchors']}", flush=True)
+        print(f"road match skipped {len(result['skippedAnchors'])} of {len(req.points)} GPS anchors: {result['skipReasons']}", flush=True)
     return {"graphVersion": _graph_version(),
             "routeGeojson": {"type": "LineString", "coordinates": result["coordinates"]},
             "anchorPositions": result["anchorPositions"],

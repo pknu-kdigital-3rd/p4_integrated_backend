@@ -137,3 +137,23 @@ class RoadMatchDroppedAnchorTests(unittest.TestCase):
         result = match(graph, self.edges, points)
         self.assertIsNotNone(result)
         self.assertEqual(result["skippedAnchors"], [1])
+
+
+class RoadMatchRepairTests(unittest.TestCase):
+    def test_repairs_a_snap_onto_the_opposite_carriageway(self):
+        # Eastbound 1->2 on lat 35.0; westbound 4->3 about 15 m north. The second
+        # fix lands nearer the westbound road, which cannot be reached from the
+        # eastbound one; the repair switches it to the eastbound road instead.
+        graph = FakeGraph({1: (35, 129.0), 2: (35, 129.01), 3: (35.00014, 129.0), 4: (35.00014, 129.01)})
+        edges = [(1, 2, [(35, 129.0), (35, 129.01)]), (4, 3, [(35.00014, 129.01), (35.00014, 129.0)])]
+        result = match(graph, edges, [(35.00001, 129.000), (35.00012, 129.007)])
+        self.assertIsNotNone(result)
+        self.assertEqual(result["skippedAnchors"], [])
+        self.assertAlmostEqual(result["coordinates"][-1][1], 35.0, places=5)
+
+    def test_does_not_repair_onto_a_much_farther_road(self):
+        # The only other road is ~110 m away: dropping is better than misplacing.
+        graph = FakeGraph({1: (35, 129), 2: (35, 129.001), 3: (35, 129.002), 4: (35, 129.003)},
+                          {(2, 3): [(35, 129.001), (35.01, 129.0015), (35, 129.002)]})
+        edges = [(1, 2, [(35, 129), (35, 129.001)]), (3, 4, [(35, 129.002), (35, 129.003)])]
+        self.assertIsNone(match(graph, edges, [(35, 129.0008), (35, 129.0022)]))

@@ -140,6 +140,8 @@ def _edge_after(candidate):
 # example a campus road the routing graph leaves out), or an impossible or far
 # too long road path to it - before the whole match fails.
 MAX_SKIPPED_ANCHOR_SHARE = 0.25
+# A repair may swap an anchor's road for one at most this much farther away.
+REPAIR_EXTRA_SNAP_M = 30
 
 
 def _match_anchors(graph, points, rows, matched, bridges=None):
@@ -153,39 +155,54 @@ def _match_anchors(graph, points, rows, matched, bridges=None):
     path = [list(chosen[0]["snap"])]
     positions = [0]
     for step, (previous, current) in enumerate(zip(chosen, chosen[1:])):
-        pair = {"previous": matched[step], "anchor": matched[step + 1]}
-        section_start = len(path) - 1
-        if previous["id"] == current["id"] and current["progress"] >= previous["progress"]:
-            if previous["segment"] == current["segment"]:
-                _append(path, [current["snap"]])
-            else:
-                _append(path, previous["geometry"][previous["segment"]:current["segment"]])
-                _append(path, [current["snap"]])
-        else:
-            _append(path, _edge_after(previous))
-            if previous["end"] != current["start"]:
-                # Retries after a dropped anchor rebuild the whole path; most
-                # bridges between the same road ends are unchanged, so reuse them.
-                key = (previous["end"], current["start"])
-                if bridges is not None and key in bridges:
-                    bridge = bridges[key]
-                else:
-                    bridge = graph.route(previous["end"], current["start"])
-                    if bridges is not None:
-                        bridges[key] = bridge
-                if bridge is None:
-                    return {"reason": "no_connection", **pair}
-                _append(path, bridge.coords)
-            _append(path, _edge_before(current))
-        road_m = sum(haversine_m(*path[index - 1], *path[index])
-                     for index in range(section_start + 1, len(path)))
+        pair = {"previous": matched[step], "anchor": matched[step + 1],
+                "previous_candidate": previous, "anchor_candidate": current}
+        section = _section(graph, previous, current, bridges)
+        if section is None:
+            return {"reason": "no_connection", **pair}
+        road_m = _length_m(section)
         # Across a skipped anchor this is the GPS distance between the matched
         # anchors on either side, so a bridged gap is held to the same limit.
         gps_m = haversine_m(*matched_points[step], *matched_points[step + 1])
-        if road_m > max(250, 4 * gps_m + 150):
+        if road_m > _detour_limit_m(gps_m):
             return {"reason": "detour_too_long", "road_m": round(road_m), "gps_m": round(gps_m), **pair}
+        _append(path, section[1:])
         positions.append(len(path) - 1)
     return {"path": path, "positions": positions, "chosen": chosen}
+
+
+def _detour_limit_m(gps_m):
+    return max(250, 4 * gps_m + 150)
+
+
+def _length_m(section):
+    return sum(haversine_m(*section[index - 1], *section[index]) for index in range(1, len(section)))
+
+
+def _section(graph, previous, current, bridges=None):
+    """Road path from one snapped candidate to the next, or None if unreachable."""
+    section = [list(previous["snap"])]
+    if previous["id"] == current["id"] and current["progress"] >= previous["progress"]:
+        if previous["segment"] != current["segment"]:
+            _append(section, previous["geometry"][previous["segment"]:current["segment"]])
+        _append(section, [current["snap"]])
+        return section
+    _append(section, _edge_after(previous))
+    if previous["end"] != current["start"]:
+        # Retries rebuild the whole path; most bridges between the same road
+        # ends are unchanged, so reuse them.
+        key = (previous["end"], current["start"])
+        if bridges is not None and key in bridges:
+            bridge = bridges[key]
+        else:
+            bridge = graph.route(previous["end"], current["start"])
+            if bridges is not None:
+                bridges[key] = bridge
+        if bridge is None:
+            return None
+        _append(section, bridge.coords)
+    _append(section, _edge_before(current))
+    return section
 
 
 def match_preview(graph, records, spatial_index, long_records, bucket_size, points, failure=None):
@@ -214,6 +231,9 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
         return None
     rows = [_candidates(graph, point, records, spatial_index, long_records, bucket_size) for point in points]
     skipped = {index for index, row in enumerate(rows) if not row}
+    # Why each anchor was dropped, for the log: no_road_nearby,
+    # detour_too_long or no_connection.
+    reasons = {index: "no_road_nearby" for index in skipped}
     budget = len(points) * MAX_SKIPPED_ANCHOR_SHARE
     if len(points) - len(skipped) < 2 or len(skipped) > budget:
         return fail("no_road_nearby", min(skipped), radius_m=120, unmatched=len(skipped), anchors=len(points))
@@ -222,20 +242,56 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
     # anchor turns out to be the bad one.
     dropped_after = {}
     bridges = {}
+    # Before dropping an anchor, a failing pair is repaired by pinning another
+    # nearby road candidate that connects within the detour limit: first for
+    # the later anchor, then for the earlier one. Each (anchor, candidate) is
+    # tried once, so this ends.
+    pinned = {}
+    tried = set()
     while True:
         matched = [index for index in range(len(points)) if index not in skipped]
-        outcome = _match_anchors(graph, points, rows, matched, bridges)
+        view = [[pinned[index]] if index in pinned else row for index, row in enumerate(rows)]
+        outcome = _match_anchors(graph, points, view, matched, bridges)
         if "path" in outcome:
             break
         anchor, previous = outcome.pop("anchor"), outcome.pop("previous")
+        previous_candidate, anchor_candidate = outcome.pop("previous_candidate"), outcome.pop("anchor_candidate")
         reason = outcome.pop("reason")
+        limit_m = _detour_limit_m(haversine_m(*points[previous], *points[anchor]))
+
+        def fits(first, second):
+            section = _section(graph, first, second, bridges)
+            return section is not None and _length_m(section) <= limit_m
+
+        # Only a road about as close as the one chosen (for example the other
+        # carriageway) can replace it; a far one would misplace the anchor.
+        def close_to(alternative, replaced):
+            return alternative["distance"] <= replaced["distance"] + REPAIR_EXTRA_SNAP_M
+
+        repair = next(((anchor, alternative) for alternative in rows[anchor]
+                       if alternative is not anchor_candidate and close_to(alternative, anchor_candidate)
+                       and (anchor, alternative["id"]) not in tried
+                       and fits(previous_candidate, alternative)), None)
+        repair = repair or next(((previous, alternative) for alternative in rows[previous]
+                                 if alternative is not previous_candidate and close_to(alternative, previous_candidate)
+                                 and (previous, alternative["id"]) not in tried
+                                 and fits(alternative, anchor_candidate)), None)
+        if repair:
+            index, alternative = repair
+            tried.add((index, alternative["id"]))
+            pinned[index] = alternative
+            continue
         if previous in dropped_after:
             # Failing again from the same earlier anchor: it is the bad one.
-            skipped.difference_update(dropped_after.pop(previous))
+            for restored in dropped_after.pop(previous):
+                skipped.discard(restored)
+                reasons.pop(restored, None)
             skipped.add(previous)
+            reasons[previous] = reason
         else:
             dropped_after[previous] = [anchor]
             skipped.add(anchor)
+            reasons[anchor] = reason
         if len(points) - len(skipped) < 2 or len(skipped) > budget:
             return fail(reason, anchor, dropped=len(skipped), anchors=len(points), **outcome)
     path, chosen = outcome["path"], outcome["chosen"]
@@ -247,4 +303,5 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
         positions.append(last_position)
         snaps.append(snap_by_anchor.get(anchor))
     return {"coordinates": [[lon, lat] for lat, lon in path], "anchorPositions": positions,
-            "snapDistancesM": snaps, "skippedAnchors": sorted(skipped)}
+            "snapDistancesM": snaps, "skippedAnchors": sorted(skipped),
+            "skipReasons": {anchor: reasons.get(anchor, "no_road_nearby") for anchor in sorted(skipped)}}
