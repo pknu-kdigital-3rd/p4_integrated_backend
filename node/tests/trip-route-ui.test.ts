@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { plannedProgress, recordedProgress, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { matchedRoutePosition, plannedProgress, recordedProgress, remainingRoute, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -41,6 +41,21 @@ describe("recorded replay progress", () => {
 
     it("keeps partial progress when a trip completes early", () => {
         expect(recordedProgress(preview, "1500")?.percent).toBe(25);
+    });
+});
+
+describe("road-matched replay display", () => {
+    it("interpolates playback position along the matched road and starts on the road", () => {
+        const anchors = [
+            { sourceTimestampNs: "100", routePosition: 0 },
+            { sourceTimestampNs: "300", routePosition: 2 },
+        ];
+        const position = matchedRoutePosition(anchors, "200")!;
+        expect(position).toBe(1);
+        const line = remainingRoute([[129, 35], [129.001, 35], [129.002, 35]],
+            { latitude: 35.0001, longitude: 129.001 }, position, true)!;
+        expect(line.latLngs[0]?.[0]).toBe(35);
+        expect(line.latLngs.at(-1)).toEqual([35, 129.002]);
     });
 });
 

@@ -3,6 +3,7 @@ import { prisma } from "../../infrastructure/database/prisma.ts";
 import { trackingClient } from "../tracking/tracking.client.ts";
 import { routingInternalClient } from "../virtual/routing-internal.client.ts";
 import { previewPoints } from "./trip.preview.ts";
+import { matchReplayPreview } from "./trip-road-match.ts";
 import { tripRepository, tripSelect, type ResolvedTripInput } from "./trip.repository.ts";
 import type { CreateTripBody } from "./trip.schema.ts";
 
@@ -127,13 +128,14 @@ export const tripService = {
             SELECT source_timestamp_ns AS "sourceTimestampNs", recording_session_id AS "recordingSessionId"
             FROM vehicle_position WHERE trip_id = ${tripId} AND telemetry_source = 'RECORDED_GPS'
             ORDER BY received_at DESC, position_id DESC LIMIT 1`;
+        const roadMatch = preview ? await matchReplayPreview(preview) : null;
         return { tripId: trip.tripId, vehicleId: trip.vehicleId, tripStatus: trip.tripStatus,
             routeMode: trip.routeMode, originName: trip.originName, destinationName: trip.destinationName,
             plannedStartAt: trip.plannedStartAt, startedAt: trip.startedAt, endedAt: trip.endedAt,
             plannedRoute: trip.routes[0] ?? null,
             replayPreview: preview && { replayPreviewId: preview.replayPreviewId,
                 fingerprint: preview.fingerprint, datasetName: preview.datasetName,
-                points: preview.points, totalDistanceM: preview.totalDistanceM },
+                points: preview.points, totalDistanceM: preview.totalDistanceM, roadMatch },
             replayPosition: latestReplay[0] ?? null };
     },
 };

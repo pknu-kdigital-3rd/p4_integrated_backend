@@ -26,13 +26,13 @@ type RouteInput = {
 
 type SnapInput = Coordinate;
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
+async function request<T>(path: string, body?: unknown, timeoutMs = 8000): Promise<T> {
     try {
         const headers: Record<string, string> = { "content-type": "application/json" };
         const init: RequestInit = {
             method: body === undefined ? "GET" : "POST",
             headers,
-            signal: AbortSignal.timeout(8000),
+            signal: AbortSignal.timeout(timeoutMs),
         };
         if (body !== undefined) init.body = JSON.stringify(body);
         const response = await fetch(new URL(path, env.ROUTING_TRACKING_BASE_URL), init);
@@ -54,8 +54,8 @@ export const routingInternalClient = {
     async graphVersion() {
         return request<{ graphVersion: string }>("/internal/routing/graph-version");
     },
-    async route(input: RouteInput): Promise<InternalRoute> {
-        return request<InternalRoute>("/internal/routing/route", input);
+    async route(input: RouteInput, timeoutMs = 8000): Promise<InternalRoute> {
+        return request<InternalRoute>("/internal/routing/route", input, timeoutMs);
     },
     async snap(input: SnapInput) {
         return request<{ graphVersion: string; nodeId: string; lat: number; lon: number; distanceM: number }>("/internal/routing/snap", input);

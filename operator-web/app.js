@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {plannedProgress,recordedProgress,recordedRoutePosition,replayProgressOnRoute,remainingRoute,tripTimes} from './trip-route-ui.js?v=2';
+import {plannedProgress,recordedProgress,matchedRoutePosition,replayProgressOnRoute,remainingRoute,tripTimes} from './trip-route-ui.js?v=3';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -226,8 +226,8 @@ function updateRemainingTripRoute(fixOverride=null){
   const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
   const markerPosition=marker?.getLatLng();
   const fix=fixOverride||(markerPosition?{latitude:markerPosition.lat,longitude:markerPosition.lng}:item?.telemetry);
-  const playbackPosition=replayOnly?recordedRoutePosition(display.replayPreview?.points,display.replayPosition?.sourceTimestampNs):null;
-  const remaining=remainingRoute(currentRouteCoordinates,fix,Math.max(routePosition,playbackPosition??0));
+  const playbackPosition=replayOnly?matchedRoutePosition(display.replayPreview?.roadMatch?.anchors,display.replayPosition?.sourceTimestampNs):null;
+  const remaining=remainingRoute(currentRouteCoordinates,fix,Math.max(routePosition,playbackPosition??0),replayOnly);
   if(!remaining){layer.setLatLngs([]);return}
   routePosition=remaining.position;
   layer.setLatLngs(remaining.latLngs);
@@ -242,19 +242,20 @@ function showTripDisplay(display){
   document.querySelector('#selected-origin-time').textContent=times.origin;
   document.querySelector('#selected-destination-time').textContent=times.destination;
   const replayOnly=display.routeMode==='REPLAY_ONLY';
-  const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}:${display.replayPosition?.recordingSessionId??''}`;
+  const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}:${display.replayPreview?.roadMatch?.graphVersion??''}:${display.replayPosition?.recordingSessionId??''}`;
   if(key!==displayedRouteKey){
     clearTripLayers();displayedRouteKey=key;
-    currentRouteCoordinates=replayOnly?display.replayPreview?.points?.map(point=>[point[1],point[2]]):display.plannedRoute?.routeGeojson?.coordinates;
+    currentRouteCoordinates=replayOnly?display.replayPreview?.roadMatch?.routeGeojson?.coordinates:display.plannedRoute?.routeGeojson?.coordinates;
     if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
-    const points=display.replayPreview?.points;
-    if(replayOnly&&Array.isArray(points)&&points.length>1)replayRouteLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
-    const target=replayOnly?points?.at(-1)?.slice(1,3):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
+    if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
+    const target=replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
     if(target)destinationMarker=L.circleMarker([target[1],target[0]],{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map).bindTooltip(display.destinationName);
   }
   currentTripDisplay=display;
   updateRemainingTripRoute();
-  document.querySelector('#route-label').textContent=replayOnly?'남은 Android GPS 재생 경로':'목적지까지 남은 최적 경로';
+  document.querySelector('#route-label').textContent=replayOnly
+    ?display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 재생 경로':'도로 경로 매칭을 사용할 수 없습니다'
+    :'목적지까지 남은 최적 경로';
   let progress=null,label='진행 상태 대기 중';
   if(replayOnly){
     progress=recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
@@ -429,7 +430,8 @@ function syncTripRouteMode(){
   // The server rejects a second active assignment; say so before the operator submits.
   const activeTripId=activeTripByVehicle.get(vehicleValue);
   notice.textContent=activeTripId?`Trip ID ${activeTripId}이(가) 이미 배정되어 있습니다. 취소하거나 완료한 뒤 새로 배정하세요.`
-    :replayOnly&&vehicleValue&&!preview?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'';
+    :replayOnly&&vehicleValue&&!preview?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.'
+    :replayOnly&&preview&&!preview.roadMatch?'도로 경로 매칭을 사용할 수 없어 경로가 표시되지 않습니다.':'';
   notice.hidden=!notice.textContent;
   document.querySelector('#create-trip').disabled=Boolean(activeTripId)||(replayOnly&&!preview);
   showAssignmentPreview(replayOnly&&!activeTripId&&!selected?.tripId&&!document.querySelector('#trip-form').hidden?preview:null);
@@ -443,11 +445,12 @@ function showAssignmentPreview(preview){
   assignmentPreviewLayer=null;assignmentPreviewRoute=null;assignmentPreviewCoordinates=null;assignmentPreviewKey=key;
   const points=preview?.points;
   if(!Array.isArray(points)||points.length<2)return;
-  assignmentPreviewCoordinates=points.map(point=>[point[1],point[2]]);
+  assignmentPreviewCoordinates=preview.roadMatch?.routeGeojson?.coordinates;
+  if(!Array.isArray(assignmentPreviewCoordinates)||assignmentPreviewCoordinates.length<2)return;
   assignmentPreviewRoute=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round',interactive:false});
   assignmentPreviewLayer=L.layerGroup([
     assignmentPreviewRoute,
-    L.circleMarker([points.at(-1)[2],points.at(-1)[1]],{radius:8,color:'#fff',weight:2,fillColor:'#0878f9',fillOpacity:1}).bindTooltip('배정 예정 목적지 · GPS 기록 마지막 위치',{direction:'top'}),
+    L.circleMarker([assignmentPreviewCoordinates.at(-1)[1],assignmentPreviewCoordinates.at(-1)[0]],{radius:8,color:'#fff',weight:2,fillColor:'#0878f9',fillOpacity:1}).bindTooltip('배정 예정 목적지 · 도로에 맞춘 GPS 경로 끝',{direction:'top'}),
   ]);
   updateAssignmentPreviewRoute();
   // The virtual workspace owns the map while open; the layer is re-added when it closes.
@@ -459,7 +462,7 @@ function updateAssignmentPreviewRoute(){
     ||latestFleet.find(entry=>String(entry.vehicleId)===assignmentPreviewVehicleId&&entry.telemetry?.telemetry_source==='DEVICE_GPS');
   const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
   const at=marker?.getLatLng();
-  const remaining=remainingRoute(assignmentPreviewCoordinates,at?{latitude:at.lat,longitude:at.lng}:item?.telemetry);
+  const remaining=remainingRoute(assignmentPreviewCoordinates,at?{latitude:at.lat,longitude:at.lng}:item?.telemetry,0,true);
   assignmentPreviewRoute.setLatLngs(remaining?.latLngs||[]);
 }
 tripRouteMode.addEventListener('change',()=>{localStorage.setItem('operatorTripRouteMode',tripRouteMode.value);syncTripRouteMode()});

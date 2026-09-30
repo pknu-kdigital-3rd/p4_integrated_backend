@@ -3,12 +3,15 @@ import { z } from "zod";
 import { validateBody } from "../../common/middleware/validate-body.ts";
 import { parseVehicleId, replayPreviewSchema, replayPreviewService } from "./trip.preview.ts";
 import { tripService } from "./trip.service.ts";
+import { matchReplayPreview } from "./trip-road-match.ts";
 
 export const deviceTripRouter = Router();
 const stateBody = z.object({ fingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional() });
 
 deviceTripRouter.put("/vehicles/:vehicleId/replay-preview", validateBody(replayPreviewSchema), async (req, res) => {
     const preview = await replayPreviewService.upload(parseVehicleId(String(req.params.vehicleId)), req.body);
+    // Prepare the road geometry while the phone continues its upload flow.
+    void matchReplayPreview(preview);
     res.json({ data: { replayPreviewId: preview.replayPreviewId, fingerprint: preview.fingerprint } });
 });
 deviceTripRouter.get("/vehicles/:vehicleId/trip", async (req, res) => {

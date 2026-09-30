@@ -25,7 +25,7 @@ export function plannedProgress(geometry,fix){
 }
 
 /** Keep only the route ahead of the current fix, including the fix itself. */
-export function remainingRoute(coordinates,fix,minPosition=0){
+export function remainingRoute(coordinates,fix,minPosition=0,snapStart=false){
   if(!Array.isArray(coordinates)||coordinates.length<2||!Number.isFinite(fix?.latitude)||!Number.isFinite(fix?.longitude))return null;
   const at=[fix.longitude,fix.latitude],latScale=111195,lonScale=latScale*Math.cos(fix.latitude*rad);
   let closest=Infinity,position=0;
@@ -43,8 +43,21 @@ export function remainingRoute(coordinates,fix,minPosition=0){
   const segment=Math.min(coordinates.length-2,Math.floor(position));
   const fraction=position-segment,a=coordinates[segment],b=coordinates[segment+1];
   const join=[a[0]+(b[0]-a[0])*fraction,a[1]+(b[1]-a[1])*fraction];
-  const ahead=[at,join,...coordinates.slice(segment+1)];
+  const ahead=snapStart?[join,...coordinates.slice(segment+1)]:[at,join,...coordinates.slice(segment+1)];
   return {position,latLngs:ahead.map(([lon,lat])=>[lat,lon])};
+}
+
+/** Locate a replay timestamp along the road geometry's timed anchors. */
+export function matchedRoutePosition(anchors,sourceTimestampNs){
+  if(!Array.isArray(anchors)||anchors.length<2||sourceTimestampNs==null)return null;
+  const time=BigInt(sourceTimestampNs);
+  if(time<=BigInt(anchors[0].sourceTimestampNs))return anchors[0].routePosition;
+  if(time>=BigInt(anchors.at(-1).sourceTimestampNs))return anchors.at(-1).routePosition;
+  let low=0,high=anchors.length-1;
+  while(high-low>1){const mid=(low+high)>>1;if(BigInt(anchors[mid].sourceTimestampNs)<=time)low=mid;else high=mid}
+  const start=BigInt(anchors[low].sourceTimestampNs),span=BigInt(anchors[high].sourceTimestampNs)-start;
+  const fraction=span?Number(time-start)/Number(span):0;
+  return anchors[low].routePosition+fraction*(anchors[high].routePosition-anchors[low].routePosition);
 }
 
 /** Fractional segment index at the current recorded playback timestamp. */

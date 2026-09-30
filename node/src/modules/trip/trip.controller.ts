@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import type { CreateTripBody } from "./trip.schema.ts";
 import { tripService } from "./trip.service.ts";
 import { parseVehicleId, replayPreviewService } from "./trip.preview.ts";
+import { matchReplayPreview } from "./trip-road-match.ts";
 
 export const tripController = {
     async getAll(_req: Request, res: Response) {
@@ -19,6 +20,7 @@ export const tripController = {
         res.json({ data: await tripService.cancel(String(req.params.tripId)) });
     },
     async latestPreview(req: Request, res: Response) {
-        res.json({ data: await replayPreviewService.latest(parseVehicleId(String(req.params.vehicleId))) });
+        const preview = await replayPreviewService.latest(parseVehicleId(String(req.params.vehicleId)));
+        res.json({ data: preview ? { ...preview, roadMatch: await matchReplayPreview(preview) } : null });
     },
 };
