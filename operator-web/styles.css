@@ -88,7 +88,6 @@ form { display: grid; gap: 10px; }
 .route-point-menu-icon { display: inline-grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; color: white; font-size: 11px; font-weight: 800; }
 .route-point-menu-icon.origin { background: #16a34a; }
 .route-point-menu-icon.destination { background: #dc2626; }
-.route-snap-preview-tooltip { border: 2px solid var(--ui-primary); border-radius: 12px; color: var(--ui-text); font-weight: 700; box-shadow: var(--ui-shadow-card); }
 #map-commands { position: absolute; z-index: 700; top: 20px; left: 20px; width: min(510px,calc(100% - 85px)); }
 .map-search { background: white; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--ui-border); border-radius: 24px; box-shadow: var(--ui-shadow-card); }
 .map-search input { border: 0; padding: 14px 4px; flex: 1; background: transparent; }

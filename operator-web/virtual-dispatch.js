@@ -17,6 +17,20 @@ const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const endpointSnapPreviewLayerGroup = L.layerGroup().addTo(map);
+// A separate canvas lets us erase the middle of the road stroke without
+// erasing routes or the basemap underneath it.
+const RoadOutlineRenderer = L.Canvas.extend({
+  _fillStroke(ctx, layer) {
+    L.Canvas.prototype._fillStroke.call(this, ctx, layer);
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 10;
+    ctx.stroke();
+    ctx.restore();
+  },
+});
+const endpointRoadOutlineRenderer = new RoadOutlineRenderer({ padding: 0.5 });
 const restrictionLayerGroup = L.layerGroup().addTo(map);
 const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
 const routeContextMenu = document.createElement('div');
@@ -164,34 +178,17 @@ function pointIcon(kind, index) {
     iconAnchor: [12, 46],
   });
 }
-function renderEndpointSnapPreview(context, snapped, rawPoint) {
+function renderEndpointSnapPreview(context, snapped) {
   endpointSnapPreviewLayerGroup.clearLayers();
   const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
-  const rawLatLng = [rawPoint.lat, rawPoint.lon];
-  const snappedLatLng = [snapped.lat, snapped.lon];
   if (snapped.roadGeometry?.type === 'LineString' && Array.isArray(snapped.roadGeometry.coordinates)) {
     const road = snapped.roadGeometry.coordinates.map(([lon, lat]) => [Number(lat), Number(lon)])
       .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
     if (road.length > 1) {
-      L.polyline(road, { color: '#fff', weight: 14, opacity: 0.95, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
-      L.polyline(road, { color, weight: 8, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
+      L.polyline(road, { renderer: endpointRoadOutlineRenderer, color, weight: 14, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
     }
   }
-  L.polyline([rawLatLng, snappedLatLng], { color: '#26364b', weight: 2, opacity: 0.8, dashArray: '4 5', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
-  L.circleMarker(snappedLatLng, {
-    pane: 'markerPane', radius: 8, color: '#fff', weight: 3, fillColor: color, fillOpacity: 1, interactive: false,
-  }).bindTooltip('도로 스냅 위치', { permanent: true, direction: 'top', offset: [0, -8], className: 'route-snap-preview-tooltip' })
-    .addTo(endpointSnapPreviewLayerGroup);
   document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
-}
-function renderPendingEndpointSnapPreview(context) {
-  endpointSnapPreviewLayerGroup.clearLayers();
-  const position = context.marker.getLatLng();
-  const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
-  L.circleMarker(position, {
-    pane: 'markerPane', radius: 9, color: '#fff', weight: 3, fillColor: color, fillOpacity: 0.75, interactive: false,
-  }).bindTooltip('도로 스냅 위치 확인 중…', { permanent: true, direction: 'top', offset: [0, -8], className: 'route-snap-preview-tooltip' })
-    .addTo(endpointSnapPreviewLayerGroup);
 }
 function queueEndpointSnapPreview(context, marker) {
   context.latestPoint = marker.getLatLng();
@@ -210,7 +207,7 @@ function queueEndpointSnapPreview(context, marker) {
       if (endpointDrag !== context || requestId !== context.requestId) return;
       const point = { lat: Number(snapped.lat), lon: Number(snapped.lon) };
       if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return;
-      renderEndpointSnapPreview(context, { ...snapped, ...point }, rawPoint);
+      renderEndpointSnapPreview(context, { ...snapped, ...point });
       if (snapped.roadGeometry?.type !== 'LineString' || !Array.isArray(snapped.roadGeometry.coordinates)) {
         setStatus('스냅 위치는 표시했지만 도로 윤곽 정보를 받지 못했습니다.', true);
       }
@@ -229,7 +226,7 @@ function queueEndpointSnapPreview(context, marker) {
 function startEndpointDrag(kind, marker) {
   endpointDrag = { kind, marker, requestId: 0, lastRequestAt: 0, timer: null };
   marker.setOpacity(0.65);
-  renderPendingEndpointSnapPreview(endpointDrag);
+  endpointSnapPreviewLayerGroup.clearLayers();
   queueEndpointSnapPreview(endpointDrag, marker);
 }
 function finishEndpointDrag(marker) {
@@ -302,7 +299,7 @@ function drawPoint(kind, point, index = 0) {
     riseOnHover: true,
     autoPan: true,
   });
-  marker.bindTooltip(kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1));
+  if (kind === 'waypoint') marker.bindTooltip(`Waypoint ${index + 1}`);
   if (kind !== 'waypoint') {
     marker.on('dragstart', () => startEndpointDrag(kind, marker));
     marker.on('drag', () => {
