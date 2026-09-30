@@ -172,7 +172,12 @@ def _match_anchors(graph, points, rows, matched, bridges=None):
 
 
 def _detour_limit_m(gps_m):
-    return max(250, 4 * gps_m + 150)
+    # Real driving between anchors about 150 m apart is at most ~1.8x the
+    # straight distance; a U-turn loop or a snap onto another road level (an
+    # overpass above an underpass) is longer and is treated as a detour, so the
+    # repair can pick the road actually driven. The earlier 4x + 150 m allowed a
+    # 750 m loop for 150 m of travel.
+    return max(200, 1.8 * gps_m + 80)
 
 
 def _length_m(section):

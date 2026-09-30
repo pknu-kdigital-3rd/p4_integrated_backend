@@ -157,3 +157,24 @@ class RoadMatchRepairTests(unittest.TestCase):
                           {(2, 3): [(35, 129.001), (35.01, 129.0015), (35, 129.002)]})
         edges = [(1, 2, [(35, 129), (35, 129.001)]), (3, 4, [(35, 129.002), (35, 129.003)])]
         self.assertIsNone(match(graph, edges, [(35, 129.0008), (35, 129.0022)]))
+
+
+class RoadMatchLoopTests(unittest.TestCase):
+    def test_straight_road_wins_over_loops_through_another_road_level(self):
+        # Main road 1-2-7-3 runs straight east. An overpass 5-6 lies ~20 m
+        # north over its middle and joins it only through ~500 m loops. Three
+        # fixes in a row lie on the overpass, so matching them there pays loops
+        # only on entry and exit - within the old 4x + 150 m limit (drawn as in
+        # the reported screenshot), beyond the tighter one, whose repairs keep
+        # every fix on the straight road.
+        graph = FakeGraph({1: (35, 129.0), 2: (35, 129.001), 7: (35, 129.0046), 3: (35, 129.006),
+                           5: (35.00018, 129.0012), 6: (35.00018, 129.0045)},
+                          {(2, 5): [(35, 129.001), (35.002, 129.001), (35.00018, 129.0012)],
+                           (6, 7): [(35.00018, 129.0045), (35.002, 129.0045), (35, 129.0046)]})
+        edges = [(1, 2, [(35, 129.0), (35, 129.001)]), (2, 7, [(35, 129.001), (35, 129.0046)]),
+                 (7, 3, [(35, 129.0046), (35, 129.006)]), (5, 6, [(35.00018, 129.0012), (35.00018, 129.0045)])]
+        points = [(35.0, 129.0003), (35.00018, 129.0018), (35.00018, 129.0028), (35.00018, 129.0038), (35.0, 129.0048)]
+        result = match(graph, edges, points)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["skippedAnchors"], [])
+        self.assertLess(max(lat for _lon, lat in result["coordinates"]), 35.00005)
