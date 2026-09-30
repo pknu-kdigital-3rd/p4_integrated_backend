@@ -179,8 +179,8 @@ function pointIcon(kind, index) {
     return L.divIcon({
       className: `virtual-point-icon virtual-endpoint-icon virtual-endpoint-${kind}`,
       html: `<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="34" text-anchor="middle">${label}</text></svg>`,
-      iconSize: [60, 80],
-      iconAnchor: [30, 78],
+      iconSize: [42, 56],
+      iconAnchor: [21, 54.6],
     });
   }
   return L.divIcon({
@@ -217,8 +217,28 @@ function renderEndpointSnapPreview(context, snapped) {
       renderer: endpointSnapCircleRenderer, className: 'snap-circle-pulse',
       radius: 12, color: '#facc15', weight: 4, fill: false, interactive: false,
     }).addTo(endpointSnapPreviewLayerGroup);
+    animateSnapCircle(context);
   }
   document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
+}
+function animateSnapCircle(context) {
+  const startedAt = performance.now();
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const tick = (now) => {
+    if (endpointDrag !== context) return;
+    const phase = ((now - startedAt) % 1200) / 1200;
+    const pulse = (1 - Math.cos(phase * Math.PI * 2)) / 2;
+    context.snapCircle.setRadius(reducedMotion ? 11 : 9 + 4 * pulse);
+    context.snapCircle.setStyle({
+      color: `rgb(255, ${Math.round(170 + 75 * pulse)}, ${Math.round(20 + 110 * pulse)})`,
+      opacity: 0.65 + 0.35 * pulse,
+      weight: 3 + 2 * pulse,
+    });
+    context.snapRipple.setRadius(12 + 17 * phase);
+    context.snapRipple.setStyle({ opacity: reducedMotion ? 0 : 0.9 * (1 - phase) });
+    context.animationFrame = requestAnimationFrame(tick);
+  };
+  context.animationFrame = requestAnimationFrame(tick);
 }
 function queueEndpointSnapPreview(context, marker) {
   context.latestPoint = marker.getLatLng();
@@ -257,10 +277,13 @@ function startEndpointDrag(kind, marker) {
   endpointDrag = { kind, marker, requestId: 0, lastRequestAt: 0, timer: null };
   marker.setOpacity(0.65);
   endpointSnapPreviewLayerGroup.clearLayers();
+  const position = marker.getLatLng();
+  renderEndpointSnapPreview(endpointDrag, { lat: position.lat, lon: position.lng });
   queueEndpointSnapPreview(endpointDrag, marker);
 }
 function finishEndpointDrag(marker) {
   if (endpointDrag?.timer) clearTimeout(endpointDrag.timer);
+  if (endpointDrag?.animationFrame !== undefined) cancelAnimationFrame(endpointDrag.animationFrame);
   endpointDrag = null;
   endpointSnapPreviewLayerGroup.clearLayers();
   marker.setOpacity(1);
