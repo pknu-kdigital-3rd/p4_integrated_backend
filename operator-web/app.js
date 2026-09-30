@@ -335,15 +335,23 @@ function tripDestination(display){
 function framedVehiclePosition(){
   return markers.get(liveView?.markerKey??selected?.telemetry?.external_id)?.marker?.getLatLng()??null;
 }
-// Refits only when the vehicle or the destination nears the view's edge, so the
-// zoom does not change on every position update.
+// Keeps the destination at the centre, zoomed so the vehicle stays in view:
+// fitting the vehicle and its mirror image through the destination centres the
+// view on the destination. It refits only when the vehicle nears the edge or has
+// come well inside (so the view zooms in as it approaches), not on every update.
 function frameVehicleAndDestination(force=false){
   if(!destinationFrame)return;
   const vehicle=framedVehiclePosition();
   if(!vehicle)return;
-  const inner=map.getBounds().pad(-0.1);
-  if(!force&&inner.contains(vehicle)&&inner.contains(destinationFrame.target))return;
-  map.fitBounds(L.latLngBounds([vehicle,destinationFrame.target]),{padding:[48,48],maxZoom:17});
+  const target=destinationFrame.target,view=map.getBounds();
+  const nearEdge=!view.pad(-0.1).contains(vehicle),wellInside=view.pad(-0.35).contains(vehicle)&&map.getZoom()<17;
+  const offCentre=map.latLngToContainerPoint(target).distanceTo(map.getSize().divideBy(2))>24;
+  if(!force&&!nearEdge&&!wellInside&&!offCentre)return;
+  const mirror=L.latLng(2*target.lat-vehicle.lat,2*target.lng-vehicle.lng);
+  // Padding (15% of the map) lands the vehicle between the refit bands above,
+  // so a fit does not immediately trigger the next one.
+  const size=map.getSize();
+  map.fitBounds(L.latLngBounds([vehicle,mirror]),{padding:[Math.round(size.x*0.15),Math.round(size.y*0.15)],maxZoom:17});
 }
 function showTripDestination(){
   const target=tripDestination(currentTripDisplay);
