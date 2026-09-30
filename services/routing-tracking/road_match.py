@@ -71,26 +71,35 @@ def _candidates(graph, point, records, spatial_index, long_records, bucket_size,
     return ranked[:limit]
 
 
+def _motion(points, index):
+    """Direction of travel at an anchor (towards the next one), or None."""
+    if index + 1 < len(points):
+        first, second = points[index], points[index + 1]
+    elif index:
+        first, second = points[index - 1], points[index]
+    else:
+        return None
+    # Beyond 500 m the straight line says little about the road's direction.
+    return _bearing(first, second) if haversine_m(*first, *second) < 500 else None
+
+
+def _emission(candidate, motion):
+    """Snap distance plus up to 36 m for a road heading against the travel."""
+    if motion is None:
+        return candidate["distance"]
+    return candidate["distance"] + 18 * (1 - math.cos(_angle_difference(motion, candidate["bearing"])))
+
+
 def _choose_sequence(points, candidates):
     costs = []
     parents = []
     for index, row in enumerate(candidates):
         row_costs = []
         row_parents = []
-        motion = None
-        motion_m = 0
-        if index + 1 < len(points):
-            motion = _bearing(points[index], points[index + 1])
-            motion_m = haversine_m(*points[index], *points[index + 1])
-        elif index:
-            motion = _bearing(points[index - 1], points[index])
-            motion_m = haversine_m(*points[index - 1], *points[index])
+        motion = _motion(points, index)
         observation_m = haversine_m(*points[index - 1], *points[index]) if index else 0
         for candidate in row:
-            heading_penalty = 0
-            if motion is not None and motion_m < 500:
-                heading_penalty = 18 * (1 - math.cos(_angle_difference(motion, candidate["bearing"])))
-            emission = candidate["distance"] + heading_penalty
+            emission = _emission(candidate, motion)
             if index == 0:
                 row_costs.append(emission)
                 row_parents.append(-1)
@@ -273,11 +282,19 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
         def close_to(alternative, replaced):
             return alternative["distance"] <= replaced["distance"] + REPAIR_EXTRA_SNAP_M
 
-        repair = next(((anchor, alternative) for alternative in rows[anchor]
+        # Alternatives are tried in the matcher's own order - snap distance plus
+        # heading - not by distance alone: the nearest road is often the other
+        # carriageway, which still fits the limit on its own but adds a U-turn
+        # loop with the next anchor.
+        def ranked(index):
+            motion = _motion(points, index)
+            return sorted(rows[index], key=lambda alternative: _emission(alternative, motion))
+
+        repair = next(((anchor, alternative) for alternative in ranked(anchor)
                        if alternative is not anchor_candidate and close_to(alternative, anchor_candidate)
                        and (anchor, alternative["id"]) not in tried
                        and fits(previous_candidate, alternative)), None)
-        repair = repair or next(((previous, alternative) for alternative in rows[previous]
+        repair = repair or next(((previous, alternative) for alternative in ranked(previous)
                                  if alternative is not previous_candidate and close_to(alternative, previous_candidate)
                                  and (previous, alternative["id"]) not in tried
                                  and fits(alternative, anchor_candidate)), None)

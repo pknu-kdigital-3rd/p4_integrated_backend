@@ -178,3 +178,24 @@ class RoadMatchLoopTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["skippedAnchors"], [])
         self.assertLess(max(lat for _lon, lat in result["coordinates"]), 35.00005)
+
+
+class RoadMatchRepairHeadingTests(unittest.TestCase):
+    def test_repair_prefers_the_carriageway_heading_with_the_travel(self):
+        # Eastbound 1->2->3 on lat 35.0; westbound 4->5->6 about 17 m north,
+        # joined by a U-turn at the east end; an unconnected underpass 7-8 runs
+        # right under the second fix and is snapped first. The nearest repair is
+        # the westbound carriageway, which fits the detour limit only with a
+        # U-turn loop; the eastbound one, heading with the travel, is right.
+        graph = FakeGraph({1: (35, 129.0), 2: (35, 129.002), 3: (35, 129.004),
+                           4: (35.00015, 129.004), 5: (35.00015, 129.002), 6: (35.00015, 129.0),
+                           7: (35.000135, 129.0025), 8: (35.000135, 129.004)},
+                          {(2, 4): [(35, 129.002), (35, 129.004), (35.00015, 129.004)]})
+        edges = [(1, 2, [(35, 129.0), (35, 129.002)]), (2, 3, [(35, 129.002), (35, 129.004)]),
+                 (4, 5, [(35.00015, 129.004), (35.00015, 129.002)]), (5, 6, [(35.00015, 129.002), (35.00015, 129.0)]),
+                 (7, 8, [(35.000135, 129.0025), (35.000135, 129.004)]),
+                 (8, 7, [(35.000135, 129.004), (35.000135, 129.0025)])]
+        result = match(graph, edges, [(35.0, 129.0005), (35.000135, 129.003)])
+        self.assertIsNotNone(result)
+        self.assertEqual(result["skippedAnchors"], [])
+        self.assertLess(max(lat for _lon, lat in result["coordinates"]), 35.00005)
