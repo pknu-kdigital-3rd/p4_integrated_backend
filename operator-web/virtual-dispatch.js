@@ -32,7 +32,10 @@ const RoadOutlineRenderer = L.Canvas.extend({
   },
 });
 const endpointRoadOutlineRenderer = new RoadOutlineRenderer({ padding: 0.5 });
-const endpointSnapCircleRenderer = L.svg({ pane: 'markerPane' });
+const snapPreviewPane = map.createPane('snapPreviewPane');
+snapPreviewPane.style.zIndex = '640';
+snapPreviewPane.style.pointerEvents = 'none';
+const endpointSnapCircleRenderer = L.svg({ pane: 'snapPreviewPane' });
 const restrictionLayerGroup = L.layerGroup().addTo(map);
 const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
 const routeContextMenu = document.createElement('div');
@@ -183,7 +186,7 @@ function pointIcon(kind, index) {
 }
 function renderEndpointSnapPreview(context, snapped) {
   endpointSnapPreviewLayerGroup.eachLayer(layer => {
-    if (layer !== context.snapCircle) endpointSnapPreviewLayerGroup.removeLayer(layer);
+    if (layer !== context.snapCircle && layer !== context.snapRipple) endpointSnapPreviewLayerGroup.removeLayer(layer);
   });
   const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
   const nearbyRoads = snapped.nearbyRoadGeometry?.type === 'MultiLineString'
@@ -198,10 +201,15 @@ function renderEndpointSnapPreview(context, snapped) {
   }
   if (context.snapCircle) {
     context.snapCircle.setLatLng([snapped.lat, snapped.lon]);
+    context.snapRipple.setLatLng([snapped.lat, snapped.lon]);
   } else {
+    context.snapRipple = L.circleMarker([snapped.lat, snapped.lon], {
+      renderer: endpointSnapCircleRenderer, className: 'snap-circle-ripple',
+      radius: 12, color: '#facc15', weight: 3, fill: false, interactive: false,
+    }).addTo(endpointSnapPreviewLayerGroup);
     context.snapCircle = L.circleMarker([snapped.lat, snapped.lon], {
       renderer: endpointSnapCircleRenderer, className: 'snap-circle-pulse',
-      radius: 9, color: '#facc15', weight: 3, fill: false, interactive: false,
+      radius: 12, color: '#facc15', weight: 4, fill: false, interactive: false,
     }).addTo(endpointSnapPreviewLayerGroup);
   }
   document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
