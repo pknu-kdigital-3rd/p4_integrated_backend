@@ -435,6 +435,26 @@ async function loadSelectedTrip(){
     showTripDisplay(display);
   }catch(ex){if(request===displayRequest)document.querySelector('#route-label').textContent=`운행 경로 확인 실패 · ${ex.message}`}
 }
+// Clears the selection: back to the empty "선택 차량" card, without the trip
+// route, progress card, live preview (freeing its TURN port) or highlight.
+function deselectVehicle(){
+  if(!selected)return;
+  selected=null;displayRequest++;
+  if(liveView)stopLiveView();
+  clearTripLayers();
+  document.querySelector('#trip-progress-card').hidden=true;
+  details.hidden=true;
+  document.querySelector('#selection-empty').hidden=false;
+  for(const entry of markers.values()){
+    setMarkerIcon(entry,vehicleIcon(entry.item,false));
+    entry.marker.setZIndexOffset(0);
+    // Rebuild the label so only vehicles on a running trip keep a permanent one.
+    entry.labelOnTrip=null;syncVehicleMapLabel(entry);
+  }
+  syncVehiclePickers();
+  syncLiveViewButton(null);
+}
+document.querySelector('#deselect-vehicle').addEventListener('click',deselectVehicle);
 function selectVehicle(item){
   selected=item;
   syncVehiclePickers();

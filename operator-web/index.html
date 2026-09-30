@@ -425,7 +425,10 @@
      <h2>
       선택 차량
      </h2>
-     <select aria-label="차량 선택" class="vehicle-picker"><option disabled="" selected="" value="">차량 불러오는 중…</option></select>
+     <div class="vehicle-picker-row">
+      <select aria-label="차량 선택" class="vehicle-picker"><option disabled="" selected="" value="">차량 불러오는 중…</option></select>
+      <button aria-label="차량 선택 해제" id="deselect-vehicle" title="선택 해제" type="button">✕</button>
+     </div>
      <span class="ui-chip" id="selected-status">
      </span>
      <p class="metadata" id="selected-updated">
