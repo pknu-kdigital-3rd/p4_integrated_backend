@@ -17,8 +17,9 @@ const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const endpointSnapPreviewLayerGroup = L.layerGroup().addTo(map);
-// A separate canvas lets us erase the middle of the road stroke without
-// erasing routes or the basemap underneath it.
+// Draw all nearby roads as one path, then erase all their interiors together.
+// This merges intersecting road outlines without painting borders back over
+// an adjacent road's cleared interior. Only this overlay's canvas is erased.
 const RoadOutlineRenderer = L.Canvas.extend({
   _fillStroke(ctx, layer) {
     L.Canvas.prototype._fillStroke.call(this, ctx, layer);
@@ -184,15 +185,15 @@ function renderEndpointSnapPreview(context, snapped) {
   const nearbyRoads = snapped.nearbyRoadGeometry?.type === 'MultiLineString'
     ? snapped.nearbyRoadGeometry.coordinates
     : snapped.roadGeometry?.type === 'LineString' ? [snapped.roadGeometry.coordinates] : [];
-  for (const coordinates of nearbyRoads || []) {
-    const road = coordinates.map(([lon, lat]) => [Number(lat), Number(lon)])
-      .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
-    if (road.length > 1) {
-      L.polyline(road, { renderer: endpointRoadOutlineRenderer, color, weight: 14, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
-    }
+  const roads = (nearbyRoads || []).map(coordinates => coordinates
+    .map(([lon, lat]) => [Number(lat), Number(lon)])
+    .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon)))
+    .filter(road => road.length > 1);
+  if (roads.length) {
+    L.polyline(roads, { renderer: endpointRoadOutlineRenderer, color, weight: 14, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
   }
   L.circleMarker([snapped.lat, snapped.lon], {
-    radius: 9, color, weight: 3, fill: false, interactive: false,
+    radius: 9, color: '#facc15', weight: 3, fill: false, interactive: false,
   }).addTo(endpointSnapPreviewLayerGroup);
   document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
 }
