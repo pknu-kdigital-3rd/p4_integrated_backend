@@ -59,6 +59,13 @@ export function installOperatorBasemap(map,fallback){
         :url.startsWith(ASSET_ORIGIN)?`${ASSET_ROOT}${url.slice(ASSET_ORIGIN.length)}`:url}),
     }).addTo(map);
     const glMap=layer.getMaplibreMap();
+    // The upstream style references a few POI sprites that it does not ship.
+    // Resolve only those missing basemap images with a transparent pixel; bus
+    // markers are Leaflet HTML icons and are unaffected.
+    const emptyIcon={width:1,height:1,data:new Uint8Array(4)};
+    glMap.on('styleimagemissing',({id})=>{
+      if(id&&!glMap.hasImage(id))glMap.addImage(id,emptyIcon);
+    });
     const useFallback=event=>{
       if(map.hasLayer(layer))map.removeLayer(layer);
       console.warn('Operator vector basemap unavailable; using OSM tiles.',event?.error||event);
