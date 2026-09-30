@@ -47,7 +47,13 @@ export function installOperatorBasemap(map,fallback){
   if(typeof L.maplibreGL!=='function')return;
   let layer;
   try{
+    // A separate lower pane guarantees WebGL tiles cannot cover Leaflet's
+    // routes, vehicles, labels, or controls, regardless of plugin CSS.
+    const pane=map.createPane('operatorBasemapPane');
+    pane.style.zIndex='100';
+    pane.style.pointerEvents='none';
     layer=L.maplibreGL({
+      pane:'operatorBasemapPane',
       style:STYLE_URL,
       transformRequest:url=>({url:url.startsWith(TILE_ORIGIN)?`${BASEMAP_ROOT}${url.slice(TILE_ORIGIN.length)}`
         :url.startsWith(ASSET_ORIGIN)?`${ASSET_ROOT}${url.slice(ASSET_ORIGIN.length)}`:url}),
