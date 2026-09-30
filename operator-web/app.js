@@ -7,10 +7,12 @@ import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-re
 import {plannedProgress,recordedProgress,replayProgressOnRoute,tripTimes} from './trip-route-ui.js';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
+import {installOperatorBasemap} from './operator-basemap.js';
 const map=L.map('map').setView([35.1796,129.0756],12);
 window.__operatorMap=map;
 const fleetViewport=createFleetViewport(map);
-L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
+const fallbackBasemap=L.tileLayer('/osm/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors'}).addTo(map);
+installOperatorBasemap(map,fallbackBasemap);
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 const error=document.querySelector('#error'),details=document.querySelector('#details'),fields=document.querySelector('#fields');
 const operatorLayout=document.querySelector('#operator-layout');
