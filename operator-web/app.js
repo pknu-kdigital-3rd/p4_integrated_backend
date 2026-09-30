@@ -942,6 +942,9 @@ function stopLiveView(){
 // View on the way in. Hiding the panel alone would leave the live-view-open
 // layout class - and with it a display:none sidebar - behind.
 window.__operatorStopLiveView=stopLiveView;
+// Virtual mode closes Live View; these let it reopen for the same vehicle on return.
+window.__operatorLiveViewOpen=()=>Boolean(liveView);
+window.__operatorResumeLiveView=()=>{if(!liveView&&matchesLiveTarget(selected))openLiveView()};
 window.addEventListener('message',event=>{
   if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-video-size'){
     const {width,height}=event.data;

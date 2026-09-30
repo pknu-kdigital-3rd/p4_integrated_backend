@@ -829,6 +829,8 @@ async function removeRestriction(restriction) {
     await refreshAfterRestrictionChange('도로 구간을 해제했습니다.');
   } catch (error) { setStatus(error.message, true); }
 }
+// Whether Live View was open when virtual mode closed it, so it can reopen.
+let liveViewBeforeVirtual = false;
 async function switchMode(next) {
   pickMode = null;
   map.getContainer().style.cursor = '';
@@ -841,6 +843,7 @@ async function switchMode(next) {
     // the live-view-open layout class, which sets #operator-sidebar to
     // display:none. Left behind, it keeps the whole sidebar invisible after the
     // switch back, however the individual sections are set.
+    if (!liveViewBeforeVirtual) liveViewBeforeVirtual = Boolean(window.__operatorLiveViewOpen?.());
     window.__operatorStopLiveView?.();
     window.__operatorCancelMapPick?.();
     normalSectionVisibility.hide();
@@ -855,6 +858,7 @@ async function switchMode(next) {
   } else {
     normalSectionVisibility.restore();
     window.__operatorAttachMapLayers?.();
+    if (liveViewBeforeVirtual) { liveViewBeforeVirtual = false; window.__operatorResumeLiveView?.(); }
     clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
     draftRouteSignature = '';
     activeRouteSignature = '';
