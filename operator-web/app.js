@@ -236,7 +236,9 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
     ?estimatedReplayTimestamp(sourceTime,receivedAt,Date.now(),Number(item?.telemetry?.speed_kmh)):null;
   const playbackPosition=replayOnly?matchedRoutePosition(display.replayPreview?.roadMatch?.anchors,estimatedTime||sourceTime,display.replayPreview?.roadMatch?.coordinateDistancesM):null;
   const remaining=remainingRoute(currentRouteCoordinates,fix,Math.max(routePosition,playbackPosition??0),replayOnly,Boolean(estimatedTime));
-  if(!remaining){layer.setLatLngs([]);return}
+  // No current position yet (trip not started, phone not streaming): show the
+  // whole route rather than nothing.
+  if(!remaining){layer.setLatLngs(Array.isArray(currentRouteCoordinates)?currentRouteCoordinates.map(([lon,lat])=>[lat,lon]):[]);return}
   // A prediction must not become confirmed progress: a returning GPS fix may
   // correct it backward to the actual road segment.
   if(!estimatedTime)routePosition=remaining.position;
@@ -261,7 +263,10 @@ function showTripDisplay(display){
   const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}:${display.replayPreview?.roadMatch?.graphVersion??''}:${display.replayPosition?.recordingSessionId??''}`;
   if(key!==displayedRouteKey){
     clearTripLayers();displayedRouteKey=key;
-    currentRouteCoordinates=replayOnly?display.replayPreview?.roadMatch?.routeGeojson?.coordinates:display.plannedRoute?.routeGeojson?.coordinates;
+    // Without a road match (routing unavailable or unmatched) fall back to the
+    // recorded GPS line itself, so the replay path is never missing.
+    const recordedLine=Array.isArray(display.replayPreview?.points)?display.replayPreview.points.map(point=>[point[1],point[2]]):null;
+    currentRouteCoordinates=replayOnly?display.replayPreview?.roadMatch?.routeGeojson?.coordinates||recordedLine:display.plannedRoute?.routeGeojson?.coordinates;
     if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
     if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],{renderer:tripRouteRenderer,color:'#0878f9',weight:6,opacity:1,lineCap:'round',lineJoin:'round',interactive:false}).addTo(map);
     const target=replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
@@ -270,7 +275,7 @@ function showTripDisplay(display){
   currentTripDisplay=display;
   updateRemainingTripRoute();
   document.querySelector('#route-label').textContent=replayOnly
-    ?display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 재생 경로':'도로 경로 매칭을 사용할 수 없습니다'
+    ?display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 재생 경로':'남은 GPS 재생 경로 (도로 매칭 없음)'
     :'목적지까지 남은 최적 경로';
   let progress=null,label='진행 상태 대기 중';
   if(replayOnly){
