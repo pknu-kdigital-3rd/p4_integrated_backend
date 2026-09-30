@@ -329,6 +329,9 @@ function presentedFrameTime(){
 }
 function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   const display=currentTripDisplay,layer=routeLayer||replayRouteLayer;
+  window.__replayDebug={at:new Date().toISOString(),stage:!display?'no trip shown':!layer?'no route layer':'placing',
+    tripId:display?.tripId??null,routeMode:display?.routeMode??null,tripStatus:display?.tripStatus??null,
+    liveViewVehicle:liveView?.vehicleId??null,tripVehicle:display?.vehicleId??null};
   if(!display||!layer)return;
   const replayOnly=display.routeMode==='REPLAY_ONLY';
   const candidates=latestFleet.filter(entry=>String(entry.vehicleId)===String(display.vehicleId));
@@ -367,7 +370,7 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
       const after=points.findIndex(point=>BigInt(point[0])>BigInt(time));
       if(after>0)gapS=Number(BigInt(points[after][0])-BigInt(points[after-1][0]))/1e9;
     }
-    window.__replayDebug={at:new Date().toISOString(),caller:sourceTimeOverride?'frame-with-gps':fixOverride?'fix':'tick-or-frame-without-gps',
+    window.__replayDebug={...window.__replayDebug,caller:sourceTimeOverride?'frame-with-gps':fixOverride?'fix':'tick-or-frame-without-gps',
       timeSource:sourceTimeOverride?'frame':liveSourceTime?(liveGps?'live-gps':'presented-frame'):clock?'replay-clock':metadata?.sourceTimestampNs?'last-fix':'trip-position',
       sourceTime,estimatedTime,placedTime:time,playbackPosition,routePosition,hasItem:Boolean(item),hasMarker:Boolean(marker),hasFix:Number.isFinite(fix?.latitude),
       liveFrameAgeMs:lastLiveMessageAt?Date.now()-lastLiveMessageAt:null,liveStatus:lastLiveMessage?.telemetry?.status??null,
@@ -949,6 +952,9 @@ window.addEventListener('message',event=>{
   const message=acceptLiveTelemetry(liveView,event,liveFrame.contentWindow);
   if(!message)return;
   lastLiveMessage=message;lastLiveMessageAt=Date.now();
+  window.__liveFrameDebug={at:new Date().toISOString(),status:message.telemetry?.status??null,hasGps:Boolean(message.telemetry?.gps),
+    frameTime:message.telemetry?.source_timestamp_ns??message.sourceTimestampNs??null,tripShown:currentTripDisplay?.tripId??null,
+    routeMode:currentTripDisplay?.routeMode??null,sameVehicle:String(liveView?.vehicleId)===String(currentTripDisplay?.vehicleId)};
   const position=applyLiveTelemetry(liveView,message,Date.now());
   if(!position&&currentTripDisplay?.routeMode==='REPLAY_ONLY'&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)){
     // No GPS for this frame (a tunnel): place the replay vehicle by its time.
