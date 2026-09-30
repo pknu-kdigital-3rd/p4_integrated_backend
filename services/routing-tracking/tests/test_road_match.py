@@ -20,14 +20,14 @@ class FakeGraph:
         return SimpleNamespace(coords=path) if path else None
 
 
-def match(graph, edges, points):
+def match(graph, edges, points, failure=None):
     records = []
     for source, target, geometry in edges:
         bounds = (min(point[1] for point in geometry), min(point[0] for point in geometry),
                   max(point[1] for point in geometry), max(point[0] for point in geometry))
         records.append((f"{source}:{target}:1", "1", geometry, bounds))
     cell = (math.floor(points[0][1]), math.floor(points[0][0]))
-    return match_preview(graph, records, {cell: list(range(len(records)))}, (), 1, points)
+    return match_preview(graph, records, {cell: list(range(len(records)))}, (), 1, points, failure=failure)
 
 
 class RoadMatchTests(unittest.TestCase):
@@ -65,6 +65,27 @@ class RoadMatchTests(unittest.TestCase):
         edges = [(1, 2, [(35, 129), (35, 129.001)]),
                  (3, 4, [(35, 129.002), (35, 129.003)])]
         self.assertIsNone(match(graph, edges, [(35, 129.0008), (35, 129.0022)]))
+
+
+class RoadMatchFailureReasonTests(unittest.TestCase):
+    def test_reports_the_anchor_with_no_road_nearby(self):
+        graph = FakeGraph({1: (35, 129), 2: (35, 129.01)})
+        failure = {}
+        result = match(graph, [(1, 2, [(35, 129), (35, 129.01)])],
+                       [(35.00005, 129.0025), (35.01, 129.0075)], failure)
+        self.assertIsNone(result)
+        self.assertEqual(failure["reason"], "no_road_nearby")
+        self.assertEqual(failure["anchor"], 1)
+        self.assertEqual((failure["lat"], failure["lon"]), (35.01, 129.0075))
+
+    def test_reports_a_missing_connection(self):
+        graph = FakeGraph({1: (35, 129), 2: (35, 129.01), 3: (35.02, 129), 4: (35.02, 129.01)})
+        failure = {}
+        result = match(graph, [(1, 2, [(35, 129), (35, 129.01)]), (3, 4, [(35.02, 129), (35.02, 129.01)])],
+                       [(35.00005, 129.005), (35.02005, 129.005)], failure)
+        self.assertIsNone(result)
+        self.assertEqual(failure["reason"], "no_connection")
+        self.assertEqual(failure["anchor"], 1)
 
 
 if __name__ == "__main__":

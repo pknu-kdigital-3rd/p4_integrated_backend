@@ -832,11 +832,21 @@ def internal_match_preview(req: MatchPreviewRequest):
            or abs(point.lat) > 90 or abs(point.lon) > 180 for point in req.points):
         raise HTTPException(status_code=422, detail="Invalid GPS anchor coordinates")
     _ensure_edge_spatial_index()
+    failure = {}
     result = match_preview(graph, _edge_records_cache, _edge_spatial_index,
                            _edge_long_records, max(0.0001, EDGE_INDEX_BUCKET_DEGREES),
-                           [(point.lat, point.lon) for point in req.points])
+                           [(point.lat, point.lon) for point in req.points], failure=failure)
     if result is None:
-        raise HTTPException(status_code=422, detail={"code": "ROAD_MATCH_NOT_FOUND"})
+        # Say which rule rejected which anchor: Node logs this message, and it is the
+        # only way to tell off-graph GPS from a one-way conflict or a detour.
+        explanations = {
+            "no_road_nearby": "no road within {radius_m} m of GPS anchor {anchor} ({lat}, {lon})",
+            "no_connection": "no directed road connection reaches GPS anchor {anchor} ({lat}, {lon})",
+            "detour_too_long": "road path to GPS anchor {anchor} ({lat}, {lon}) is {road_m} m for {gps_m} m of GPS travel",
+        }
+        message = explanations.get(failure.get("reason"), "road match not found").format(**failure) if failure else "road match not found"
+        print(f"road match rejected: {message} ({len(req.points)} anchors)", flush=True)
+        raise HTTPException(status_code=422, detail={"code": "ROAD_MATCH_NOT_FOUND", "message": message, **failure})
     return {"graphVersion": _graph_version(),
             "routeGeojson": {"type": "LineString", "coordinates": result["coordinates"]},
             "anchorPositions": result["anchorPositions"],

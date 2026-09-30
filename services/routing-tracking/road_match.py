@@ -136,13 +136,25 @@ def _edge_after(candidate):
     return [candidate["snap"]] + candidate["geometry"][candidate["segment"]:]
 
 
-def match_preview(graph, records, spatial_index, long_records, bucket_size, points):
-    """Return road geometry and each GPS anchor's index on it, or None."""
+def match_preview(graph, records, spatial_index, long_records, bucket_size, points, failure=None):
+    """Return road geometry and each GPS anchor's index on it, or None.
+
+    When it returns None and ``failure`` is a dict, the dict is filled with why:
+    ``reason`` plus the anchor index and coordinates involved, so an operator can
+    see which part of the recording could not be placed on the road graph.
+    """
+    def fail(reason, anchor, **extra):
+        if failure is not None:
+            lat, lon = points[anchor]
+            failure.update(reason=reason, anchor=anchor, lat=round(lat, 6), lon=round(lon, 6), **extra)
+        return None
+
     if len(points) < 2:
         return None
     rows = [_candidates(graph, point, records, spatial_index, long_records, bucket_size) for point in points]
-    if any(not row for row in rows):
-        return None
+    for anchor, row in enumerate(rows):
+        if not row:
+            return fail("no_road_nearby", anchor, radius_m=120)
     chosen = _choose_sequence(points, rows)
     path = [list(chosen[0]["snap"])]
     positions = [0]
@@ -159,14 +171,14 @@ def match_preview(graph, records, spatial_index, long_records, bucket_size, poin
             if previous["end"] != current["start"]:
                 bridge = graph.route(previous["end"], current["start"])
                 if bridge is None:
-                    return None
+                    return fail("no_connection", point_index + 1)
                 _append(path, bridge.coords)
             _append(path, _edge_before(current))
         road_m = sum(haversine_m(*path[index - 1], *path[index])
                      for index in range(section_start + 1, len(path)))
         gps_m = haversine_m(*points[point_index], *points[point_index + 1])
         if road_m > max(250, 4 * gps_m + 150):
-            return None
+            return fail("detour_too_long", point_index + 1, road_m=round(road_m), gps_m=round(gps_m))
         positions.append(len(path) - 1)
     return {"coordinates": [[lon, lat] for lat, lon in path], "anchorPositions": positions,
             "snapDistancesM": [round(candidate["distance"], 1) for candidate in chosen]}
