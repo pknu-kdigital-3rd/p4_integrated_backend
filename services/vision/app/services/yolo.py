@@ -421,7 +421,35 @@ def load_yolo_model() -> YOLO:
             model.fuse()
     if settings.YOLO_DEVICE.startswith("cuda"):
         torch.backends.cudnn.benchmark = True
+    class_ids = None
+    if settings.YOLO_CLASSES.strip():
+        class_ids = _resolve_yolo_classes(settings.YOLO_CLASSES, model.names)
+    model._p4_class_ids = class_ids
+    print(f"YOLO class filter: {class_ids if class_ids is not None else 'all'}")
     return model
+
+
+def _resolve_yolo_classes(configured: str, names: dict[int, str]) -> list[int] | None:
+    """Resolve operator class names against this checkpoint's own label map."""
+
+    requested = [item.strip() for item in configured.split(",") if item.strip()]
+    if not requested:
+        return None
+    by_name = {name.casefold(): int(class_id) for class_id, name in names.items()}
+    selected = []
+    for item in requested:
+        if item.isdecimal() and int(item) in names:
+            class_id = int(item)
+        else:
+            class_id = by_name.get(item.casefold())
+        if class_id is None:
+            raise ValueError(
+                f"YOLO_CLASSES contains unknown class {item!r}; "
+                f"available classes: {names}"
+            )
+        if class_id not in selected:
+            selected.append(class_id)
+    return selected
 
 
 def reset_tracker(yolo_model: YOLO) -> None:
@@ -479,6 +507,9 @@ def run_yolo(
         16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
     )
     tracking = settings.YOLO_TRACKING
+    class_ids = getattr(yolo_model, "_p4_class_ids", None)
+    if class_ids is None and settings.YOLO_CLASSES.strip():
+        class_ids = _resolve_yolo_classes(settings.YOLO_CLASSES, yolo_model.names)
     depth_future = None
     if depth_model is not None:
         camera_intrinsic = scale_camera_intrinsic(
@@ -506,6 +537,7 @@ def run_yolo(
                     # association stage without allowing them to start tracks.
                     conf=settings.CONF_THRESHOLD_LOW,
                     max_det=settings.YOLO_MAX_DETECTIONS,
+                    classes=class_ids,
                     tracker=settings.YOLO_TRACKER_CONFIG,
                     persist=True,
                     verbose=False,
@@ -518,6 +550,7 @@ def run_yolo(
                     imgsz=imgsz,
                     quantize=quantize,
                     max_det=settings.YOLO_MAX_DETECTIONS,
+                    classes=class_ids,
                     verbose=False,
                     retina_masks=settings.YOLO_RETINA_MASKS,
                 )

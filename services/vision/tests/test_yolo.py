@@ -10,6 +10,7 @@ import numpy as np
 from app.core.settings import BASE_DIR, Settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
+    _resolve_yolo_classes,
     _enqueue_inference_frame,
     _take_latest_inference_frame,
     load_yolo_model,
@@ -85,6 +86,32 @@ class _SourceFrame:
 
 
 class RunYoloTests(unittest.TestCase):
+    def test_class_filter_resolves_names_and_rejects_unknown_classes(self):
+        names = {0: "person", 2: "car", 7: "bus"}
+        self.assertIsNone(_resolve_yolo_classes("", names))
+        self.assertEqual(_resolve_yolo_classes("car, person,2", names), [2, 0])
+        with self.assertRaisesRegex(ValueError, "unknown class 'truck'"):
+            _resolve_yolo_classes("car,truck", names)
+
+    def test_class_filter_is_passed_to_tracking_and_prediction(self):
+        model = _SegmentationModel(SimpleNamespace(boxes=[], masks=None))
+        frame = av.VideoFrame.from_ndarray(
+            np.zeros((64, 96, 3), dtype=np.uint8), format="bgr24"
+        )
+        inference_frame = InferenceFrame(
+            seq=7, frame=frame, pts=9000, time_base=1 / 90000, media_time=0.1
+        )
+        with patch("app.services.yolo.settings.YOLO_CLASSES", "person"), patch(
+            "app.services.yolo.settings.YOLO_DEVICE", "cpu"
+        ), patch("app.services.yolo.settings.YOLO_TRACKING", True):
+            run_yolo(inference_frame, model)
+            self.assertEqual(model.track_kwargs["classes"], [0])
+        with patch("app.services.yolo.settings.YOLO_CLASSES", "dog"), patch(
+            "app.services.yolo.settings.YOLO_DEVICE", "cpu"
+        ), patch("app.services.yolo.settings.YOLO_TRACKING", False):
+            run_yolo(inference_frame, model)
+            self.assertEqual(model.predict_kwargs["classes"], [1])
+
     def test_emits_the_mask_matching_each_retained_box(self):
         boxes = [
             _Box(0.2, 0, [0.1, 0.1, 0.2, 0.2]),

@@ -135,12 +135,21 @@ The host address and BIMS key are not absolute requirements:
 | `TLS_PUBLIC_ADDRESS` | `10.174.96.119` | Set this when the Docker host has another client-reachable address. It controls the TLS certificate SAN, public URLs, MinIO playback URLs, TURN URL, and Coturn relay/external address. |
 | `BUSAN_BIMS_SERVICE_KEY` | empty | Required only when the operator selects **Live BIMS**. Replay mode works without it. Compose forwards it to routing; it is not baked into an image. |
 
-Other commonly changed values are optional: `YOLO_MODEL`, `YOLO_DEVICE`,
+Other commonly changed values are optional: `YOLO_MODEL`, `YOLO_CLASSES`, `YOLO_DEVICE`,
 `YOLO_INFERENCE_SIZE`, `YOLO_USE_LAST_GPU`, `YOLO_GPU_INDEX`,
 `UNIDEPTH_GPU_INDEX`, `UNIDEPTH_COMPILE`,
 `CUDA_DEVICE_ORDER`, `ANDROID_TELEMETRY_ENABLED`, `TURN_URL`,
 `TURN_USERNAME`, `TURN_PASSWORD`, and the recording queue/sample settings.
 The Compose defaults are used when they are omitted.
+
+Set `YOLO_CLASSES=car,person` to retain only those classes from the selected
+YOLO segmentation model. Names are matched without regard to case; numeric
+class IDs also work. An empty value retains all classes. An unknown name fails
+Vision startup and prints the available model classes. In development, after
+changing this Compose environment value, run
+`docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-vision`
+and check it with
+`docker compose -f docker-compose.dev.yml exec p4-vision printenv YOLO_CLASSES`.
 
 ### Supplying production secrets without shell residue
 

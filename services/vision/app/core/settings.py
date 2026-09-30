@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # Segmentation checkpoints use the -seg suffix. Custom trained
     # segmentation checkpoints can be supplied through YOLO_MODEL as usual.
     YOLO_MODEL: str = str(BASE_DIR / "models" / "yolo26s-seg.pt")
+    # Comma-separated model class names (or numeric IDs). Empty keeps all classes.
+    YOLO_CLASSES: str = ""
     YOLO_DEVICE: str = _default_yolo_device()
     # Frames larger than this are aspect-preservingly scaled before BGR
     # materialization, then Ultralytics letterboxes the smaller image to its
