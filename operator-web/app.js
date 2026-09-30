@@ -12,25 +12,29 @@ const map=L.map('map').setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
 mapContainer.addEventListener('mousedown',event=>{
-  if(event.target.closest('.leaflet-control'))return;
+  if(event.target.closest('.leaflet-control,.virtual-route-context-menu'))return;
   if(event.button===0){event.stopPropagation();return;}
   if(event.button!==2)return;
   event.preventDefault();
   event.stopPropagation();
-  rightButtonPan={x:event.clientX,y:event.clientY};
+  rightButtonPan={x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,moved:false};
   mapContainer.classList.add('right-button-panning');
 },true);
 mapContainer.addEventListener('contextmenu',event=>event.preventDefault());
 document.addEventListener('mousemove',event=>{
   if(!rightButtonPan)return;
   const dx=event.clientX-rightButtonPan.x,dy=event.clientY-rightButtonPan.y;
-  rightButtonPan={x:event.clientX,y:event.clientY};
+  if(Math.hypot(event.clientX-rightButtonPan.startX,event.clientY-rightButtonPan.startY)>5)rightButtonPan.moved=true;
+  rightButtonPan.x=event.clientX;
+  rightButtonPan.y=event.clientY;
   if(dx||dy)map.panBy([-dx,-dy],{animate:false});
 });
 document.addEventListener('mouseup',event=>{
   if(event.button!==2||!rightButtonPan)return;
+  const wasClick=!rightButtonPan.moved;
   rightButtonPan=null;
   mapContainer.classList.remove('right-button-panning');
+  if(wasClick)mapContainer.dispatchEvent(new CustomEvent('operator-map-contextrequest',{detail:{clientX:event.clientX,clientY:event.clientY}}));
 });
 window.addEventListener('blur',()=>{
   rightButtonPan=null;

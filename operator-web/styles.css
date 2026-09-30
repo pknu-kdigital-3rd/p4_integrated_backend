@@ -81,6 +81,13 @@ form { display: grid; gap: 10px; }
 #map-surface { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 #map { height: 100%; width: 100%; background: #f7f8f4; }
 #map.right-button-panning { cursor: grabbing; }
+.virtual-route-context-menu { position: absolute; z-index: 1200; min-width: 150px; padding: 5px; display: grid; gap: 3px; background: white; border: 1px solid var(--ui-border); border-radius: 10px; box-shadow: var(--ui-shadow-floating); }
+.virtual-route-context-menu[hidden] { display: none; }
+.virtual-route-context-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; color: var(--ui-text); background: white; text-align: left; }
+.virtual-route-context-menu button:hover { background: var(--ui-surface-soft); }
+.route-point-menu-icon { display: inline-grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; color: white; font-size: 11px; font-weight: 800; }
+.route-point-menu-icon.origin { background: #16a34a; }
+.route-point-menu-icon.destination { background: #dc2626; }
 #map-commands { position: absolute; z-index: 700; top: 20px; left: 20px; width: min(510px,calc(100% - 85px)); }
 .map-search { background: white; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--ui-border); border-radius: 24px; box-shadow: var(--ui-shadow-card); }
 .map-search input { border: 0; padding: 14px 4px; flex: 1; background: transparent; }

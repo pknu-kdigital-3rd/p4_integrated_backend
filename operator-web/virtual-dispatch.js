@@ -18,6 +18,14 @@ const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
 const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
+const routeContextMenu = document.createElement('div');
+routeContextMenu.className = 'virtual-route-context-menu';
+routeContextMenu.setAttribute('role', 'menu');
+routeContextMenu.setAttribute('aria-label', '출발 및 도착 지정');
+routeContextMenu.hidden = true;
+routeContextMenu.innerHTML = '<button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button>';
+map.getContainer().append(routeContextMenu);
+let contextRoutePoint = null;
 const routeRenderer = L.canvas({ padding: 0.5 });
 const routeVisuals = new Set();
 let draftRouteSignature = '';
@@ -125,6 +133,22 @@ async function api(path, options = {}) {
 function setStatus(message, isError = false) {
   status.textContent = message;
   status.dataset.level = isError ? 'error' : 'info';
+}
+function hideRouteContextMenu() {
+  routeContextMenu.hidden = true;
+  contextRoutePoint = null;
+}
+function showRouteContextMenu({ clientX, clientY }) {
+  if (mode !== 'virtual' || pickMode) return;
+  const container = map.getContainer();
+  const bounds = container.getBoundingClientRect();
+  contextRoutePoint = map.mouseEventToLatLng({ clientX, clientY });
+  routeContextMenu.hidden = false;
+  const maxLeft = Math.max(8, container.clientWidth - routeContextMenu.offsetWidth - 8);
+  const maxTop = Math.max(8, container.clientHeight - routeContextMenu.offsetHeight - 8);
+  routeContextMenu.style.left = `${Math.max(8, Math.min(clientX - bounds.left, maxLeft))}px`;
+  routeContextMenu.style.top = `${Math.max(8, Math.min(clientY - bounds.top, maxTop))}px`;
+  routeContextMenu.querySelector('button')?.focus();
 }
 function idempotency(prefix) { return `${prefix}-${crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`}`; }
 function formatPoint(point) { return point ? `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` : uiText('not set'); }
@@ -831,6 +855,7 @@ async function removeRestriction(restriction) {
 // Whether Live View was open when virtual mode closed it, so it can reopen.
 let liveViewBeforeVirtual = false;
 async function switchMode(next) {
+  hideRouteContextMenu();
   pickMode = null;
   map.getContainer().style.cursor = '';
   mode = next; window.__virtualMode = next === 'virtual';
@@ -868,6 +893,7 @@ async function switchMode(next) {
   setTimeout(() => map.invalidateSize({ pan: false }), 0);
 }
 map.on('click', (event) => {
+  hideRouteContextMenu();
   if (mode !== 'virtual' || !pickMode) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
   const selectedMode = pickMode;
@@ -900,7 +926,22 @@ document.querySelectorAll('[data-virtual-command]').forEach((button) => button.a
 document.querySelector('#virtual-speed').addEventListener('input', () => { speedControlEditing = true; renderSpeedControl(); });
 document.querySelector('#virtual-speed-apply').addEventListener('click', () => void command('SET_SPEED_KMH', { speedKmh: selectedSpeedKmh() }));
 document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; map.getContainer().style.cursor = 'crosshair'; setStatus('지도에서 영역의 두 모서리를 선택하세요.'); });
-document.querySelector('#virtual-place-origin').addEventListener('click', () => beginRoutePointPick('origin'));
-document.querySelector('#virtual-place-destination').addEventListener('click', () => beginRoutePointPick('destination'));
 document.querySelector('#virtual-add-waypoint').addEventListener('click', () => beginRoutePointPick('waypoint'));
 document.querySelector('#virtual-restriction-commit').addEventListener('click', () => void commitRestriction());
+map.getContainer().addEventListener('operator-map-contextrequest', (event) => showRouteContextMenu(event.detail));
+routeContextMenu.addEventListener('click', (event) => {
+  event.stopPropagation();
+  const button = event.target.closest('[data-route-point-kind]');
+  if (!button || !contextRoutePoint) return;
+  const kind = button.dataset.routePointKind;
+  const point = { lat: contextRoutePoint.lat, lon: contextRoutePoint.lng };
+  hideRouteContextMenu();
+  if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
+  void snapAndSetRoutePoint(kind, point);
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!routeContextMenu.hidden && !routeContextMenu.contains(event.target)) hideRouteContextMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !routeContextMenu.hidden) hideRouteContextMenu();
+});
