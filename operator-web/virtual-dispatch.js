@@ -184,6 +184,15 @@ function renderEndpointSnapPreview(context, snapped, rawPoint) {
     .addTo(endpointSnapPreviewLayerGroup);
   document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
 }
+function renderPendingEndpointSnapPreview(context) {
+  endpointSnapPreviewLayerGroup.clearLayers();
+  const position = context.marker.getLatLng();
+  const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
+  L.circleMarker(position, {
+    pane: 'markerPane', radius: 9, color: '#fff', weight: 3, fillColor: color, fillOpacity: 0.75, interactive: false,
+  }).bindTooltip('도로 스냅 위치 확인 중…', { permanent: true, direction: 'top', offset: [0, -8], className: 'route-snap-preview-tooltip' })
+    .addTo(endpointSnapPreviewLayerGroup);
+}
 function queueEndpointSnapPreview(context, marker) {
   context.latestPoint = marker.getLatLng();
   if (context.timer) return;
@@ -201,12 +210,20 @@ function queueEndpointSnapPreview(context, marker) {
       const point = { lat: Number(snapped.lat), lon: Number(snapped.lon) };
       if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return;
       renderEndpointSnapPreview(context, { ...snapped, ...point }, rawPoint);
-    }).catch(() => {});
+      if (snapped.roadGeometry?.type !== 'LineString' || !Array.isArray(snapped.roadGeometry.coordinates)) {
+        setStatus('스냅 위치는 표시했지만 도로 윤곽 정보를 받지 못했습니다.', true);
+      }
+    }).catch((error) => {
+      if (endpointDrag === context && requestId === context.requestId) {
+        setStatus(`도로 스냅 미리보기를 표시할 수 없습니다: ${error.message}`, true);
+      }
+    });
   }, delay);
 }
 function startEndpointDrag(kind, marker) {
   endpointDrag = { kind, marker, requestId: 0, lastRequestAt: 0, timer: null };
   marker.setOpacity(0.65);
+  renderPendingEndpointSnapPreview(endpointDrag);
   queueEndpointSnapPreview(endpointDrag, marker);
 }
 function finishEndpointDrag(marker) {
