@@ -71,7 +71,14 @@ export const routingInternalClient = {
         return request<InternalRoadMatch>("/internal/routing/match-preview", { points }, 60_000);
     },
     async snap(input: SnapInput) {
-        return request<{ graphVersion: string; nodeId: string; lat: number; lon: number; distanceM: number }>("/internal/routing/snap", input);
+        return request<{
+            graphVersion: string;
+            nodeId: string;
+            lat: number;
+            lon: number;
+            distanceM: number;
+            roadGeometry: { type: "LineString"; coordinates: [number, number][] } | null;
+        }>("/internal/routing/snap", input);
     },
     async resolveRestriction(input: { geometry: unknown; blockedEdgeIds?: string[]; penaltyFactor?: number }) {
         return request<{

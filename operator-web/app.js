@@ -13,7 +13,7 @@ const mapContainer=map.getContainer();
 let rightButtonPan=null;
 mapContainer.addEventListener('mousedown',event=>{
   if(event.target.closest('.leaflet-control,.virtual-route-context-menu'))return;
-  if(event.button===0){event.stopPropagation();return;}
+  if(event.button===0){if(!event.target.closest('.virtual-point-icon'))event.stopPropagation();return;}
   if(event.button!==2)return;
   event.preventDefault();
   event.stopPropagation();

@@ -20,6 +20,22 @@ def haversine_m(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
+def _polyline_distance_sq_m(lat, lon, points):
+    """Approximate point-to-line distance in metres for nearby road geometry."""
+    scale_x = 111320.0 * math.cos(math.radians(lat))
+    scale_y = 110540.0
+    best = float("inf")
+    for first, second in zip(points, points[1:]):
+        x1, y1 = (first[1] - lon) * scale_x, (first[0] - lat) * scale_y
+        x2, y2 = (second[1] - lon) * scale_x, (second[0] - lat) * scale_y
+        dx, dy = x2 - x1, y2 - y1
+        length_sq = dx * dx + dy * dy
+        fraction = 0.0 if length_sq == 0 else max(0.0, min(1.0, -(x1 * dx + y1 * dy) / length_sq))
+        nearest_x, nearest_y = x1 + fraction * dx, y1 + fraction * dy
+        best = min(best, nearest_x * nearest_x + nearest_y * nearest_y)
+    return best
+
+
 # Road-edge geometry comes from two different adapters.  OSMnx/pyrosm may
 # return a LineString whose coordinate order is opposite to the directed
 # graph arc, while the pure-Python parser already reverses geometry for a
@@ -575,6 +591,31 @@ class OsmnxGraph:
         nid = self.nearest_node(lat, lon)
         return [self.G.nodes[nid]["y"], self.G.nodes[nid]["x"]]
 
+    def nearest_road_geometry(self, lat, lon):
+        node_id = self.nearest_node(lat, lon)
+        if node_id is None:
+            return None
+        graph = self.G
+        edges = list(graph.edges(node_id, keys=True, data=True))
+        edges.extend(graph.in_edges(node_id, keys=True, data=True))
+        candidates = []
+        seen = set()
+        for start_id, end_id, key, data in edges:
+            identity = (start_id, end_id, key)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            start = [float(graph.nodes[start_id]["y"]), float(graph.nodes[start_id]["x"])]
+            end = [float(graph.nodes[end_id]["y"]), float(graph.nodes[end_id]["x"])]
+            geometry = data.get("geometry")
+            points = [[float(y), float(x)] for x, y in geometry.coords] if geometry is not None else [start, end]
+            points = _normalise_edge_geometry(points, start, end)
+            candidates.append((_polyline_distance_sq_m(lat, lon, points), points))
+        if not candidates:
+            return None
+        points = min(candidates, key=lambda candidate: candidate[0])[1]
+        return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
+
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
         # Hand-rolled edge-state A* instead of nx.astar_path. A node-only
         # search can discard a longer arrival at a junction even though its
@@ -854,6 +895,19 @@ class PurePythonGraph:
         if nid is None:
             return None
         return list(self.coords[nid])
+
+    def nearest_road_geometry(self, lat, lon):
+        node_id = self.nearest_node(lat, lon)
+        if node_id is None:
+            return None
+        candidates = []
+        for neighbor, _distance, _speed, geometry, _restrictions, _way_id in self.adjacency.get(node_id, []):
+            points = geometry or [self.coords[node_id], self.coords[neighbor]]
+            candidates.append((_polyline_distance_sq_m(lat, lon, points), points))
+        if not candidates:
+            return None
+        points = min(candidates, key=lambda candidate: candidate[0])[1]
+        return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
         import heapq

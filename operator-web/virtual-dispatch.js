@@ -16,6 +16,7 @@ const routeLayerGroup = L.layerGroup().addTo(map);
 const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
 const pointLayerGroup = L.layerGroup().addTo(map);
+const endpointSnapPreviewLayerGroup = L.layerGroup().addTo(map);
 const restrictionLayerGroup = L.layerGroup().addTo(map);
 const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
 const routeContextMenu = document.createElement('div');
@@ -47,6 +48,7 @@ let restrictions = [];
 let draft = null;
 let points = { origin: null, destination: null, waypoints: [] };
 let pickMode = null;
+let endpointDrag = null;
 let restrictionCorners = [];
 let restrictionGeometry = null;
 let pollTimer = null;
@@ -162,6 +164,57 @@ function pointIcon(kind, index) {
     iconAnchor: [12, 46],
   });
 }
+function renderEndpointSnapPreview(context, snapped, rawPoint) {
+  endpointSnapPreviewLayerGroup.clearLayers();
+  const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
+  const rawLatLng = [rawPoint.lat, rawPoint.lon];
+  const snappedLatLng = [snapped.lat, snapped.lon];
+  if (snapped.roadGeometry?.type === 'LineString' && Array.isArray(snapped.roadGeometry.coordinates)) {
+    const road = snapped.roadGeometry.coordinates.map(([lon, lat]) => [Number(lat), Number(lon)])
+      .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon));
+    if (road.length > 1) {
+      L.polyline(road, { color: '#fff', weight: 14, opacity: 0.95, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
+      L.polyline(road, { color, weight: 8, opacity: 1, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
+    }
+  }
+  L.polyline([rawLatLng, snappedLatLng], { color: '#26364b', weight: 2, opacity: 0.8, dashArray: '4 5', interactive: false }).addTo(endpointSnapPreviewLayerGroup);
+  L.circleMarker(snappedLatLng, {
+    pane: 'markerPane', radius: 8, color: '#fff', weight: 3, fillColor: color, fillOpacity: 1, interactive: false,
+  }).bindTooltip('도로 스냅 위치', { permanent: true, direction: 'top', offset: [0, -8], className: 'route-snap-preview-tooltip' })
+    .addTo(endpointSnapPreviewLayerGroup);
+  document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
+}
+function queueEndpointSnapPreview(context, marker) {
+  context.latestPoint = marker.getLatLng();
+  if (context.timer) return;
+  const delay = Math.max(0, 140 - (performance.now() - context.lastRequestAt));
+  context.timer = setTimeout(() => {
+    context.timer = null;
+    if (endpointDrag !== context) return;
+    context.lastRequestAt = performance.now();
+    const rawPoint = { lat: context.latestPoint.lat, lon: context.latestPoint.lng };
+    const requestId = ++context.requestId;
+    void api(`/api/v1/virtual/scenarios/${encodeURIComponent(scenarioId)}/route-points/snap`, {
+      method: 'POST', body: JSON.stringify(rawPoint),
+    }).then((snapped) => {
+      if (endpointDrag !== context || requestId !== context.requestId) return;
+      const point = { lat: Number(snapped.lat), lon: Number(snapped.lon) };
+      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return;
+      renderEndpointSnapPreview(context, { ...snapped, ...point }, rawPoint);
+    }).catch(() => {});
+  }, delay);
+}
+function startEndpointDrag(kind, marker) {
+  endpointDrag = { kind, marker, requestId: 0, lastRequestAt: 0, timer: null };
+  marker.setOpacity(0.65);
+  queueEndpointSnapPreview(endpointDrag, marker);
+}
+function finishEndpointDrag(marker) {
+  if (endpointDrag?.timer) clearTimeout(endpointDrag.timer);
+  endpointDrag = null;
+  endpointSnapPreviewLayerGroup.clearLayers();
+  marker.setOpacity(1);
+}
 function markPointsChanged(message) {
   draft = null;
   renderDraft();
@@ -227,13 +280,21 @@ function drawPoint(kind, point, index = 0) {
     autoPan: true,
   });
   marker.bindTooltip(kind === 'waypoint' ? `Waypoint ${index + 1}` : kind[0].toUpperCase() + kind.slice(1));
+  if (kind !== 'waypoint') {
+    marker.on('dragstart', () => startEndpointDrag(kind, marker));
+    marker.on('drag', () => {
+      if (endpointDrag?.marker === marker) queueEndpointSnapPreview(endpointDrag, marker);
+    });
+  }
   marker.on('dragend', () => {
     const position = marker.getLatLng();
+    if (kind !== 'waypoint') finishEndpointDrag(marker);
     void snapAndSetRoutePoint(kind, { lat: position.lat, lon: position.lng }, index);
   });
   pointLayerGroup.addLayer(marker);
 }
 function renderPoints() {
+  if (endpointDrag) return;
   pointLayerGroup.clearLayers();
   drawPoint('origin', points.origin);
   drawPoint('destination', points.destination);
@@ -856,6 +917,7 @@ async function removeRestriction(restriction) {
 let liveViewBeforeVirtual = false;
 async function switchMode(next) {
   hideRouteContextMenu();
+  if (endpointDrag) finishEndpointDrag(endpointDrag.marker);
   pickMode = null;
   map.getContainer().style.cursor = '';
   mode = next; window.__virtualMode = next === 'virtual';

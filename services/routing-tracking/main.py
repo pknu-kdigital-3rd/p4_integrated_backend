@@ -841,7 +841,15 @@ def internal_snap(req: SnapRequest):
     coords = graph.nearest_coords(req.lat, req.lon) if node_id is not None else None
     if node_id is None or coords is None:
         raise HTTPException(status_code=422, detail={"code": "POINT_TOO_FAR_FROM_ROAD"})
-    return {"graphVersion": _graph_version(), "nodeId": str(node_id), "lat": coords[0], "lon": coords[1], "distanceM": 0.0}
+    road_geometry = graph.nearest_road_geometry(req.lat, req.lon) if hasattr(graph, "nearest_road_geometry") else None
+    return {
+        "graphVersion": _graph_version(),
+        "nodeId": str(node_id),
+        "lat": coords[0],
+        "lon": coords[1],
+        "distanceM": 0.0,
+        "roadGeometry": road_geometry,
+    }
 
 
 @app.post("/internal/routing/route")
