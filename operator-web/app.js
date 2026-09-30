@@ -316,8 +316,9 @@ function retargetLiveView(item){
   renderLiveTelemetryStatus();
 }
 // The progress card's red end flag frames the vehicle and the trip's destination
-// together (with its own destination marker, as a trip that has not started
-// draws no route) and keeps both in view as the vehicle moves. The vehicle
+// together, clear of the controls over the map (with its own destination
+// marker, as a trip that has not started draws no route), and keeps both in
+// view as the vehicle moves. The vehicle
 // stays live throughout. The vehicle icon on the bar, dragging the map or
 // recentring Live View returns to following the vehicle.
 let destinationPeekMarker=null,destinationFrame=null;
@@ -335,23 +336,45 @@ function tripDestination(display){
 function framedVehiclePosition(){
   return markers.get(liveView?.markerKey??selected?.telemetry?.external_id)?.marker?.getLatLng()??null;
 }
-// Keeps the destination at the centre, zoomed so the vehicle stays in view:
-// fitting the vehicle and its mirror image through the destination centres the
-// view on the destination. It refits only when the vehicle nears the edge or has
-// come well inside (so the view zooms in as it approaches), not on every update.
+// Map space left clear of the controls drawn over it (search and filters, the
+// legend, a floating Live View, Leaflet's controls): padding per side, in px.
+// Each overlay pads the side that costs less of the map - a tall corner panel
+// its left or right edge, a wide bar its top or bottom edge.
+function mapOverlayPadding(){
+  const box=map.getContainer().getBoundingClientRect(),width=box.width,height=box.height;
+  const padding={top:16,right:16,bottom:16,left:16};
+  for(const element of document.querySelectorAll('#map-commands,#map-legend,#map-pick-banner,#live-view-panel,.leaflet-control-container .leaflet-control')){
+    if(element.hidden||!element.offsetParent)continue;
+    const rect=element.getBoundingClientRect();
+    const left=Math.max(0,rect.left-box.left),right=Math.min(width,rect.right-box.left);
+    const top=Math.max(0,rect.top-box.top),bottom=Math.min(height,rect.bottom-box.top);
+    if(right-left<2||bottom-top<2)continue;
+    const horizontalSide=left<width-right?'left':'right',horizontal=horizontalSide==='left'?right:width-left;
+    const verticalSide=top<height-bottom?'top':'bottom',vertical=verticalSide==='top'?bottom:height-top;
+    if(horizontal/width<=vertical/height)padding[horizontalSide]=Math.max(padding[horizontalSide],horizontal+12);
+    else padding[verticalSide]=Math.max(padding[verticalSide],vertical+12);
+  }
+  // Never leave less than 40% of the map for the view itself.
+  for(const [a,b,size] of [['left','right',width],['top','bottom',height]]){
+    const total=padding[a]+padding[b],limit=size*0.6;
+    if(total>limit){padding[a]*=limit/total;padding[b]*=limit/total}
+  }
+  return padding;
+}
+// Keeps the vehicle and the destination in the part of the map no control
+// covers. It refits only when either point leaves that clear area, so the zoom
+// does not change on every position update.
 function frameVehicleAndDestination(force=false){
   if(!destinationFrame)return;
   const vehicle=framedVehiclePosition();
   if(!vehicle)return;
-  const target=destinationFrame.target,view=map.getBounds();
-  const nearEdge=!view.pad(-0.1).contains(vehicle),wellInside=view.pad(-0.35).contains(vehicle)&&map.getZoom()<17;
-  const offCentre=map.latLngToContainerPoint(target).distanceTo(map.getSize().divideBy(2))>24;
-  if(!force&&!nearEdge&&!wellInside&&!offCentre)return;
-  const mirror=L.latLng(2*target.lat-vehicle.lat,2*target.lng-vehicle.lng);
-  // Padding (15% of the map) lands the vehicle between the refit bands above,
-  // so a fit does not immediately trigger the next one.
-  const size=map.getSize();
-  map.fitBounds(L.latLngBounds([vehicle,mirror]),{padding:[Math.round(size.x*0.15),Math.round(size.y*0.15)],maxZoom:17});
+  const padding=mapOverlayPadding(),size=map.getSize();
+  padding.top+=36; // the destination's label sits above its marker
+  const clear=point=>{const p=map.latLngToContainerPoint(point);
+    return p.x>=padding.left-4&&p.x<=size.x-padding.right+4&&p.y>=padding.top-4&&p.y<=size.y-padding.bottom+4};
+  if(!force&&clear(vehicle)&&clear(destinationFrame.target))return;
+  map.fitBounds(L.latLngBounds([vehicle,destinationFrame.target]),
+    {paddingTopLeft:[padding.left,padding.top],paddingBottomRight:[padding.right,padding.bottom],maxZoom:17});
 }
 function showTripDestination(){
   const target=tripDestination(currentTripDisplay);
