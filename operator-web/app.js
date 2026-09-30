@@ -214,8 +214,8 @@ function updateRemainingTripRoute(fixOverride=null){
     &&(replayOnly?entry.telemetry?.telemetry_source==='RECORDED_GPS':entry.telemetry?.telemetry_source==='BIMS_LIVE'&&entry.telemetry?.source_metadata?.state==='live'))
     ||(!replayOnly?latestFleet.find(entry=>String(entry.vehicleId)===String(display.vehicleId)&&entry.telemetry?.telemetry_source==='DEVICE_GPS'):null);
   const marker=item&&markers.get(item.telemetry?.external_id)?.marker;
-  const livePosition=marker&&isLiveOverride(liveView,item.telemetry?.external_id,Date.now())?marker.getLatLng():null;
-  const fix=fixOverride||livePosition&&{latitude:livePosition.lat,longitude:livePosition.lng}||item?.telemetry;
+  const markerPosition=marker?.getLatLng();
+  const fix=fixOverride||(markerPosition?{latitude:markerPosition.lat,longitude:markerPosition.lng}:item?.telemetry);
   const remaining=remainingRoute(currentRouteCoordinates,fix,routePosition);
   if(!remaining){layer.setLatLngs([]);return}
   routePosition=remaining.position;
@@ -294,6 +294,7 @@ async function loadSelectedTrip(){
 }
 function selectVehicle(item){
   selected=item;
+  if(item.tripId)showAssignmentPreview(null);
   const assignmentVehicle=document.querySelector('#trip-vehicle');
   if(assignmentVehicle&&[...assignmentVehicle.options].some(option=>option.value===String(item.vehicleId))){
     assignmentVehicle.value=String(item.vehicleId);void loadAssignmentPreview();
@@ -339,7 +340,7 @@ function render(snapshot){
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
-    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton();renderVehicleDetails(item);void loadSelectedTrip()}
+    if(selected?.telemetry?.external_id===key){selected=entry.item;if(item.tripId)showAssignmentPreview(null);syncLiveViewButton();renderVehicleDetails(item);void loadSelectedTrip()}
     // A new Android stream reuses device:<vehicleId>; reveal it again when its
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
@@ -418,7 +419,7 @@ function syncTripRouteMode(){
     :replayOnly&&vehicleValue&&!preview?'이 차량의 Android 앱에서 GPS 데이터셋을 먼저 선택하세요.':'';
   notice.hidden=!notice.textContent;
   document.querySelector('#create-trip').disabled=Boolean(activeTripId)||(replayOnly&&!preview);
-  showAssignmentPreview(replayOnly&&!activeTripId&&!document.querySelector('#trip-form').hidden?preview:null);
+  showAssignmentPreview(replayOnly&&!activeTripId&&!selected?.tripId&&!document.querySelector('#trip-form').hidden?preview:null);
 }
 // Before a replay-only assignment, draw the exact path and endpoint the server
 // will pin, so the operator never assigns a destination they have not seen.
