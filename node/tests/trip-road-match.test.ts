@@ -28,4 +28,19 @@ describe("recorded GPS road matching", () => {
         expect(result?.coordinateDistancesM).toHaveLength(3);
         route.mockRestore();
     });
+
+    it("leaves anchors the matcher skipped out of the replay timing", async () => {
+        const points: Array<[string, number, number, number]> = [
+            ["100", 129, 35, 0], ["200", 129.001, 35.001, 150], ["300", 129.002, 35, 300],
+        ];
+        expect(roadAnchorIndices(points)).toEqual([0, 1, 2]);
+        const route = vi.spyOn(routingInternalClient, "matchPreview").mockResolvedValueOnce({
+            graphVersion: "test-graph",
+            routeGeojson: { type: "LineString", coordinates: [[129, 35], [129.001, 35], [129.002, 35]] },
+            anchorPositions: [0, 0, 2], snapDistancesM: [0, null, 0], skippedAnchors: [1],
+        });
+        const result = await matchReplayPreview({ fingerprint: "road-match-skip-test", points });
+        expect(result?.anchors.map(anchor => anchor.sourceTimestampNs)).toEqual(["100", "300"]);
+        route.mockRestore();
+    });
 });

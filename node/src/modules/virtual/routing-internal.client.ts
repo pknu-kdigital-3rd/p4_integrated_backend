@@ -16,7 +16,10 @@ export type InternalRoadMatch = {
     graphVersion: string;
     routeGeojson: { type: "LineString"; coordinates: number[][] };
     anchorPositions: number[];
-    snapDistancesM: number[];
+    /** Null for an anchor with no road nearby, which the matcher skipped. */
+    snapDistancesM: Array<number | null>;
+    /** Indices of anchors the matcher bridged over; absent from older routing builds. */
+    skippedAnchors?: number[];
 };
 
 type RouteInput = {

@@ -68,7 +68,10 @@ export async function matchReplayPreview(preview: { fingerprint: string; points:
         const coordinates = route.routeGeojson.coordinates;
         if (coordinates.length < 2 || route.anchorPositions.length !== stops.length) return null;
         const coordinateDistancesM = cumulativeDistances(coordinates);
-        const anchors = indices.map((index, slot) => {
+        // A skipped anchor only repeats its neighbour's route position; leaving it
+        // out keeps the replay marker moving evenly across the bridged gap.
+        const skipped = new Set(route.skippedAnchors ?? []);
+        const anchors = indices.flatMap((index, slot) => skipped.has(slot) ? [] : [{ index, slot }]).map(({ index, slot }) => {
             const position = route.anchorPositions[slot]!;
             if (!Number.isInteger(position) || position < 0 || position >= coordinates.length) throw new Error("Invalid road match anchor position");
             const segment = Math.min(coordinates.length - 2, Math.floor(position));
