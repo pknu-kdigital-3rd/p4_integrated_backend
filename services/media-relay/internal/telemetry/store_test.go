@@ -223,3 +223,37 @@ func TestResentFixKeepsVehicleCurrentWithoutResettingReceiveTime(t *testing.T) {
 		t.Fatalf("a new fix must take its own receive time, got %v", got)
 	}
 }
+
+// Without GPS (a tunnel, an underground car park) the phone still sends IMU
+// batches; their replay clock is published so the map can place the vehicle
+// by how far the recording has played instead of guessing.
+func TestSnapshotPublishesReplayClockFromBatchesWithoutGPS(t *testing.T) {
+	store := NewStore(30 * time.Second)
+	start := time.Date(2026, 9, 30, 3, 0, 0, 0, time.UTC)
+	now := start
+	store.now = func() time.Time { return now }
+	store.Activate(identityA)
+	fix := Accepted{Identity: identityA, Mode: ModeReplay, SourceNS: 1_000_000_000, ReceivedAt: start, GPS: []GPSSample{gpsAt(1_000_000_000, 35.2)}}
+	if err := store.Ingest(fix); err != nil {
+		t.Fatal(err)
+	}
+	now = start.Add(20 * time.Second)
+	imuOnly := Accepted{Identity: identityA, Mode: ModeReplay, SourceNS: 21_000_000_000, ReceivedAt: now, IMU: []IMUSample{{TimestampNS: 21_000_000_000}}}
+	if err := store.Ingest(imuOnly); err != nil {
+		t.Fatal(err)
+	}
+	metadata := store.Snapshot()[0].SourceMetadata
+	if metadata["sourceTimestampNs"] != "1000000000" {
+		t.Fatalf("the last GPS fix must stay the entrance fix: %v", metadata["sourceTimestampNs"])
+	}
+	if metadata["sourceClockNs"] != "21000000000" || metadata["sourceClockAt"] != formatUTC(now) {
+		t.Fatalf("replay clock not published: %v at %v", metadata["sourceClockNs"], metadata["sourceClockAt"])
+	}
+	// Seeking back in the recording moves the clock back.
+	if err := store.Ingest(Accepted{Identity: identityA, Mode: ModeReplay, SourceNS: 5_000_000_000, ReceivedAt: now, IMU: []IMUSample{{TimestampNS: 5_000_000_000}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Snapshot()[0].SourceMetadata["sourceClockNs"]; got != "5000000000" {
+		t.Fatalf("a backward seek was not followed: %v", got)
+	}
+}

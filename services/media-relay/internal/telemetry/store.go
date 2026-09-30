@@ -31,6 +31,11 @@ type session struct {
 	// fix does not move it, so time-based prediction keeps running from the
 	// fix instead of restarting on every resend.
 	fixReceivedAt time.Time
+	// sourceClockNS is the replay clock of the newest batch (IMU-only batches
+	// included) and sourceClockAt when it arrived. Between GPS fixes - a
+	// tunnel, say - it keeps saying how far the recording has played.
+	sourceClockNS int64
+	sourceClockAt time.Time
 	latestIMU     *IMUSample
 	lastReceived  time.Time
 }
@@ -102,6 +107,12 @@ func (s *Store) Ingest(accepted Accepted) error {
 	}
 	current.mode = accepted.Mode
 	current.lastReceived = accepted.ReceivedAt
+	// Batches arrive in order on a reliable channel, so a smaller clock is a
+	// seek back in the recording and is followed.
+	if accepted.SourceNS > 0 {
+		current.sourceClockNS = accepted.SourceNS
+		current.sourceClockAt = accepted.ReceivedAt
+	}
 	for index := range accepted.GPS {
 		sample := accepted.GPS[index]
 		current.gps = insertGPS(current.gps, sample, s.gpsHistory)
@@ -243,6 +254,10 @@ func vehicleState(current *session) VehicleState {
 		"receivedAt":          formatUTC(current.fixReceivedAt),
 		"mode":                string(current.mode),
 		"active":              current.active,
+	}
+	if current.sourceClockNS > 0 {
+		metadata["sourceClockNs"] = strconv.FormatInt(current.sourceClockNS, 10)
+		metadata["sourceClockAt"] = formatUTC(current.sourceClockAt)
 	}
 	if tripID := current.identity.tripString(); tripID != "" {
 		metadata["tripId"] = tripID
