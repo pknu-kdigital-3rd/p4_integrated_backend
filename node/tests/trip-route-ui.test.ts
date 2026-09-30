@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { estimatedReplayTimestamp, forwardOnlyPosition, matchedRoutePosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, forwardOnlyPosition, matchedRoutePosition, replayClock, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -161,5 +161,22 @@ describe("vehicle snapping stability", () => {
         expect(matchedRoutePosition(timing.anchors, "250", timing.distances)).toBeCloseTo(1.5);
         const matched = { ...preview, roadMatch: { anchors: [{ sourceTimestampNs: "100", routePosition: 0 }, { sourceTimestampNs: "300", routePosition: 4 }], coordinateDistancesM: [0, 1, 2, 3, 4] } };
         expect(replayLineTiming(matched)!.anchors).toBe(matched.roadMatch.anchors);
+    });
+});
+
+describe("replay clock through GPS gaps", () => {
+    it("uses the replay clock when it has moved past the last GPS fix", () => {
+        const metadata = { sourceTimestampNs: "1000000000", receivedAt: "2026-09-30T03:00:00.000Z",
+            sourceClockNs: "21000000000", sourceClockAt: "2026-09-30T03:00:20.000Z" };
+        expect(replayClock(metadata)).toEqual({ time: "21000000000", at: "2026-09-30T03:00:20.000Z" });
+        // Along a recorded line with a 275 s tunnel gap, the clock places the vehicle inside it.
+        const timing = replayLineTiming({ points: [["1000000000", 129.08, 35.24, 0], ["276000000000", 129.03, 35.24, 4932]] })!;
+        expect(matchedRoutePosition(timing.anchors, replayClock(metadata)!.time, timing.distances)).toBeCloseTo(20 / 275);
+    });
+
+    it("falls back to the GPS fix when the clock is missing, malformed or not newer", () => {
+        expect(replayClock({ sourceTimestampNs: "5" })).toBeNull();
+        expect(replayClock({ sourceTimestampNs: "5", sourceClockNs: "x", sourceClockAt: "t" })).toBeNull();
+        expect(replayClock({ sourceTimestampNs: "5", sourceClockNs: "5", sourceClockAt: "t" })).toBeNull();
     });
 });

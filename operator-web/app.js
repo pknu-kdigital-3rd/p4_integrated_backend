@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayLineTiming,replayProgressOnRoute,remainingRoute,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=5';
+import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayLineTiming,replayProgressOnRoute,remainingRoute,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=6';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -258,9 +258,13 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   const fix=fixOverride||liveGps||item?.telemetry;
   const metadata=item?.telemetry?.source_metadata;
   const liveSourceTime=liveGps?lastLiveMessage?.telemetry?.source_timestamp_ns:null;
-  const sourceTime=sourceTimeOverride||liveSourceTime||metadata?.sourceTimestampNs||display.replayPosition?.sourceTimestampNs;
+  // The replay clock from the phone's batches keeps advancing where the recording
+  // has no GPS (a tunnel, an underground car park), so it places the vehicle by
+  // how far the recording has actually played; the last fix is the fallback.
+  const clock=replayOnly?replayClock(metadata):null;
+  const sourceTime=sourceTimeOverride||liveSourceTime||clock?.time||metadata?.sourceTimestampNs||display.replayPosition?.sourceTimestampNs;
   const receivedAt=(sourceTimeOverride||liveSourceTime)?null
-    :metadata?.sourceTimestampNs?metadata.receivedAt:display.replayPosition?.receivedAt;
+    :clock?clock.at:metadata?.sourceTimestampNs?metadata.receivedAt:display.replayPosition?.receivedAt;
   const estimatedTime=replayOnly&&display.tripStatus==='IN_PROGRESS'
     ?estimatedReplayTimestamp(sourceTime,receivedAt,Date.now(),Number(item?.telemetry?.speed_kmh)):null;
   // Replay: the recording's own time decides where on the line the vehicle is

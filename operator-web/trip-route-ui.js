@@ -193,3 +193,16 @@ export function replayLineTiming(preview){
   return {anchors:points.map((point,index)=>({sourceTimestampNs:point[0],routePosition:index,routeDistanceM:point[3]})),
     distances:points.map(point=>point[3])};
 }
+
+/**
+ * The replay's current clock, published by the relay from the phone's latest
+ * telemetry batch: {time, at}, or null when absent or not newer than the last
+ * GPS fix (the fix then says the same, and more precisely).
+ */
+export function replayClock(metadata){
+  const time=metadata?.sourceClockNs,at=metadata?.sourceClockAt;
+  if(typeof time!=='string'||!/^\d+$/.test(time)||!at)return null;
+  const fix=metadata?.sourceTimestampNs;
+  if(typeof fix==='string'&&/^\d+$/.test(fix)&&BigInt(time)<=BigInt(fix))return null;
+  return {time,at};
+}
