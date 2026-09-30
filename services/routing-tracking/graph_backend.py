@@ -361,7 +361,7 @@ def _tag_is(val, *targets):
     return val in targets
 
 
-def edge_allowed(restrictions, profile):
+def edge_allowed(restrictions, profile, respect_access=True):
     """True if a vehicle matching `profile` (or no profile = unrestricted)
     is legally allowed to use an edge carrying the given restriction tags.
     Missing/untagged limits are treated as unrestricted for that dimension -
@@ -380,7 +380,7 @@ def edge_allowed(restrictions, profile):
     short-circuit. access=destination is left passable - it means "local
     traffic only", not "closed", and hard-blocking it risks making a
     start/end point that happens to sit on one unreachable."""
-    if _tag_is(restrictions.get("access"), "no", "private"):
+    if respect_access and _tag_is(restrictions.get("access"), "no", "private"):
         return False
     if profile is None:
         return True
@@ -430,11 +430,16 @@ def _parse_float_tag(val):
 # ---------------------------------------------------------------------------
 class OsmnxGraph:
     CACHE_SUFFIX = ".graph_cache.pkl"
+    # Routing refuses access=no/private roads for every vehicle; the road
+    # matching graph turns this off, since a recording can be on such a road.
+    ignore_access_restrictions = False
 
-    def __init__(self, pbf_path, network_type="driving"):
+    def __init__(self, pbf_path, network_type="driving", exclude_highways=(), cache_name=None,
+                 ignore_access_restrictions=False):
         import osmnx as ox
         import networkx as nx
         self.network_type = network_type
+        self.ignore_access_restrictions = ignore_access_restrictions
         self.ox = ox
         self.nx = nx
         # loaded fresh every time, independent of the graph cache below -
@@ -446,7 +451,8 @@ class OsmnxGraph:
 
         # Each pyrosm network type is a different graph, so each gets its own
         # cache; the routing graph keeps its original cache file name.
-        suffix = self.CACHE_SUFFIX if network_type == "driving" else f".{network_type.replace('+', '_')}{self.CACHE_SUFFIX}"
+        name = cache_name or ("" if network_type == "driving" else network_type.replace("+", "_"))
+        suffix = f".{name}{self.CACHE_SUFFIX}" if name else self.CACHE_SUFFIX
         cache_path = pbf_path + suffix
         if self._load_from_cache(cache_path, pbf_path):
             self._prepare_edge_metadata()
@@ -467,6 +473,10 @@ class OsmnxGraph:
             nodes=True,
             extra_attributes=["maxheight", "maxweight", "maxwidth", "maxlength", "hgv"],
         )
+        if exclude_highways:
+            # pyrosm has no custom network filter, so a broad network type is
+            # narrowed here by dropping the listed (walking-only) highway types.
+            edges = edges[~edges["highway"].isin(set(exclude_highways))]
         self.G = ox.simplify_graph(osm.to_graph(nodes, edges, graph_type="networkx"))
 
         manual_overrides = load_overrides()
@@ -577,6 +587,7 @@ class OsmnxGraph:
         track_turn_state = bool(self.turn_restrictions)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
+        respect_access = not getattr(self, "ignore_access_restrictions", False)
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
         max_speed_mps = max_speed_kmh * 1000 / 3600
 
@@ -643,7 +654,7 @@ class OsmnxGraph:
                 # fastest edge before this check can discard a slower edge
                 # whose way is the only legal continuation.
                 for edge_key, attrs in parallel.items():
-                    if not edge_allowed(edge_restrictions(attrs), profile):
+                    if not edge_allowed(edge_restrictions(attrs), profile, respect_access):
                         continue
                     if state == start_state and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
                         continue
@@ -850,6 +861,7 @@ class PurePythonGraph:
         track_turn_state = bool(self.turn_restrictions)
 
         profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
+        respect_access = not getattr(self, "ignore_access_restrictions", False)
         max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
         max_speed_mps = max_speed_kmh * 1000 / 3600
 
@@ -885,7 +897,7 @@ class PurePythonGraph:
                 goal_state = state
                 break
             for neighbor, dist_m, base_speed, geom, restrictions, wid in self.adjacency.get(current, []):
-                if not edge_allowed(restrictions, profile):
+                if not edge_allowed(restrictions, profile, respect_access):
                     continue  # this truck class physically/legally cannot use this road
                 if state == start_state and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
                     continue
@@ -955,24 +967,38 @@ def load_graph(pbf_path):
         return PurePythonGraph(pbf_path)
 
 
+# Highway types no vehicle drives on. The road matching graph keeps every
+# other way - service roads, parking aisles and private (campus, apartment)
+# roads included - so a recording is matched where it actually drove.
+NON_DRIVABLE_HIGHWAYS = (
+    "footway", "path", "pedestrian", "steps", "cycleway", "bridleway", "corridor",
+    "elevator", "escalator", "platform", "proposed", "construction", "abandoned",
+    "raceway", "via_ferrata",
+)
+
+
 def load_match_graph(pbf_path):
     """Road graph for GPS road matching, separate from the routing graph.
 
     pyrosm's "driving" network (the routing graph) drops highway=service
-    roads, so recordings on campus and other service roads could not be
-    matched. "driving+service" keeps them while still excluding footways,
-    steps and cycleways. The routing graph is unchanged, so truck routes are
+    roads, parking aisles and private roads, so recordings on campus roads or
+    in car parks could not be matched. The matching graph takes pyrosm's "all"
+    network minus NON_DRIVABLE_HIGHWAYS, and lets its bridging routes use
+    access=private roads. The routing graph is unchanged, so truck routes are
     never sent through those roads. The pure-Python backend already keeps
-    service roads.
+    service and private roads; it gets the same private-access setting.
     """
     requested_backend = os.environ.get("ROUTING_GRAPH_BACKEND", "auto").strip().lower()
     if requested_backend not in {"pure", "fallback"}:
         try:
             import osmnx  # noqa: F401
             import pyrosm  # noqa: F401
-            print("Using osmnx (via pyrosm) driving+service graph for road matching")
-            return OsmnxGraph(pbf_path, network_type="driving+service")
+            print("Using osmnx (via pyrosm) all-drivable graph for road matching")
+            return OsmnxGraph(pbf_path, network_type="all", exclude_highways=NON_DRIVABLE_HIGHWAYS,
+                              cache_name="road_match", ignore_access_restrictions=True)
         except ImportError:
             pass
     print("Using pure-Python graph for road matching")
-    return PurePythonGraph(pbf_path)
+    graph = PurePythonGraph(pbf_path)
+    graph.ignore_access_restrictions = True
+    return graph
