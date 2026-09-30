@@ -477,7 +477,11 @@ class OsmnxGraph:
             # pyrosm has no custom network filter, so a broad network type is
             # narrowed here by dropping the listed (walking-only) highway types.
             edges = edges[~edges["highway"].isin(set(exclude_highways))]
-        self.G = ox.simplify_graph(osm.to_graph(nodes, edges, graph_type="networkx"))
+        # pyrosm makes every edge of a walking or "all" network two-way; a vehicle
+        # graph must honour oneway whatever roads it includes, or road matching
+        # drives against the traffic on a one-way carriageway. The direction rule
+        # is the only thing to_graph's network_type changes.
+        self.G = ox.simplify_graph(osm.to_graph(nodes, edges, graph_type="networkx", network_type="driving"))
 
         manual_overrides = load_overrides()
         if manual_overrides:
@@ -995,7 +999,7 @@ def load_match_graph(pbf_path):
             import pyrosm  # noqa: F401
             print("Using osmnx (via pyrosm) all-drivable graph for road matching")
             return OsmnxGraph(pbf_path, network_type="all", exclude_highways=NON_DRIVABLE_HIGHWAYS,
-                              cache_name="road_match", ignore_access_restrictions=True)
+                              cache_name="road_match_oneway", ignore_access_restrictions=True)
         except ImportError:
             pass
     print("Using pure-Python graph for road matching")
