@@ -61,6 +61,11 @@ async function request<T>(path: string, body?: unknown, timeoutMs = 8000): Promi
 }
 
 export const routingInternalClient = {
+    async brushRestriction(input: { points: Coordinate[]; radiusM: number; restrictions: Array<{ restrictionId: string; geometry: unknown }> }) {
+        return request<{ geometry: unknown; changes: Array<{ restrictionId: string; geometry: unknown | null }> }>(
+            "/internal/routing/road-restrictions/brush", input,
+        );
+    },
     async graphVersion() {
         return request<{ graphVersion: string }>("/internal/routing/graph-version");
     },

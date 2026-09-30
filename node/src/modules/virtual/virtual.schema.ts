@@ -91,6 +91,13 @@ export const destinationSchema = z.object({
 });
 
 const polygonCoordinates = z.array(z.array(z.array(z.number().finite()))).min(1).max(1000);
+export const restrictionBrushSchema = z.object({
+    mode: z.enum(["paint", "erase"]),
+    points: z.array(coordinate).min(1).max(256),
+    radiusM: z.number().finite().min(5).max(250),
+    expectedRestrictionRevision: z.number().int().nonnegative(),
+});
+export type RestrictionBrushBody = z.infer<typeof restrictionBrushSchema>;
 export const restrictionSchema = z.object({
     kind: z.enum(["BLOCKED", "HEAVY_PENALTY"]),
     geometry: z.object({

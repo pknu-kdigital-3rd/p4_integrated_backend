@@ -85,6 +85,7 @@ form { display: grid; gap: 10px; }
 .virtual-route-context-menu[hidden] { display: none; }
 .virtual-route-context-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; color: var(--ui-text); background: white; text-align: left; }
 .virtual-route-context-menu button:hover { background: var(--ui-surface-soft); }
+.road-brush-submenu { margin-left: 18px; padding-left: 5px; border-left: 2px solid var(--ui-danger); }
 .route-point-menu-icon { display: inline-grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; color: white; font-size: 11px; font-weight: 800; }
 .route-point-menu-icon.origin { background: #16a34a; }
 .route-point-menu-icon.destination { background: #dc2626; }

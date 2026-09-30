@@ -2,6 +2,7 @@ import {uiText, applyRoadHatch, vehicleIcon} from './dashboard-ui.js';
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
+import { installRoadBrush } from './road-brush.js';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -37,13 +38,13 @@ snapPreviewPane.style.zIndex = '640';
 snapPreviewPane.style.pointerEvents = 'none';
 const endpointSnapCircleRenderer = L.svg({ pane: 'snapPreviewPane' });
 const restrictionLayerGroup = L.layerGroup().addTo(map);
-const restrictionDraftLayerGroup = L.layerGroup().addTo(map);
 const routeContextMenu = document.createElement('div');
 routeContextMenu.className = 'virtual-route-context-menu';
 routeContextMenu.setAttribute('role', 'menu');
-routeContextMenu.setAttribute('aria-label', '출발 및 도착 지정');
+routeContextMenu.setAttribute('aria-label', '경로 및 도로 차단');
 routeContextMenu.hidden = true;
 routeContextMenu.innerHTML = '<button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button>';
+routeContextMenu.insertAdjacentHTML('beforeend', '<button type="button" role="menuitem" data-road-menu aria-expanded="false"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단</span><span aria-hidden="true">▾</span></button><div class="road-brush-submenu" hidden><button type="button" role="menuitem" data-road-tool="paint">브러시</button><button type="button" role="menuitem" data-road-tool="erase">지우개</button></div>');
 map.getContainer().append(routeContextMenu);
 let contextRoutePoint = null;
 const routeRenderer = L.canvas({ padding: 0.5 });
@@ -71,14 +72,34 @@ let dispatchSubmitting = false;
 let points = { origin: null, destination: null, waypoints: [] };
 let pickMode = null;
 let endpointDrag = null;
-let restrictionCorners = [];
-let restrictionGeometry = null;
 let pollTimer = null;
 let vehiclePollTimer = null;
 let lastEventId = '';
 const SPEED_PRESETS_KMH = [25, 50, 100, 200];
 const virtualVehicleMarkers = new Map();
 const virtualVehicleAnimationFrames = new Map();
+const roadBrush = installRoadBrush(map, {
+  isActive: () => mode === 'virtual' && Boolean(scenarioId),
+  onStatus: setStatus,
+  async onStroke(stroke) {
+    const targetScenario = scenarioId;
+    setStatus(stroke.mode === 'paint' ? '도로 차단을 적용하는 중…' : '도로 차단을 지우는 중…');
+    try {
+      const result = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(targetScenario)}/road-restrictions/brush`, {
+        method: 'POST', body: JSON.stringify({ ...stroke, expectedRestrictionRevision: scenarioRevision }),
+      });
+      if (scenarioId !== targetScenario || mode !== 'virtual') return;
+      scenarioRevision = result.restrictionRevision;
+      await refreshAfterRestrictionChange(stroke.mode === 'paint' ? '도로 차단을 적용했습니다.' : '지운 영역의 도로 차단을 해제했습니다.');
+    } catch (error) {
+      if (scenarioId !== targetScenario || mode !== 'virtual') return;
+      try { await loadScenarioData(); } catch {}
+      throw error;
+    }
+  },
+});
+window.__operatorRoadBrushPointerDown = roadBrush.handleMouseDown;
+
 
 function speedPresetIndex(speedKmh) {
   const numeric = Number(speedKmh);
@@ -160,10 +181,12 @@ function setStatus(message, isError = false) {
 }
 function hideRouteContextMenu() {
   routeContextMenu.hidden = true;
+  routeContextMenu.querySelector('.road-brush-submenu').hidden = true;
+  routeContextMenu.querySelector('[data-road-menu]').setAttribute('aria-expanded', 'false');
   contextRoutePoint = null;
 }
 function showRouteContextMenu({ clientX, clientY }) {
-  if (mode !== 'virtual' || pickMode) return;
+  if (mode !== 'virtual') return;
   const container = map.getContainer();
   const bounds = container.getBoundingClientRect();
   contextRoutePoint = map.mouseEventToLatLng({ clientX, clientY });
@@ -867,12 +890,10 @@ async function removeScenario() {
     vehicles = [];
     draft = null;
     points = { origin: null, destination: null, waypoints: [] };
-    restrictionCorners = [];
-    restrictionGeometry = null;
+    roadBrush.reset();
     pickMode = null;
     map.getContainer().style.cursor = '';
     restrictionLayerGroup.clearLayers();
-    restrictionDraftLayerGroup.clearLayers();
     renderRestrictions([]);
     renderPoints();
     renderDraft();
@@ -963,6 +984,7 @@ async function applySelectedSpeed() {
   }
 }
 function beginRoutePointPick(kind) {
+  roadBrush.reset();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   pickMode = kind;
   map.getContainer().style.cursor = 'crosshair';
@@ -993,17 +1015,6 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
     setStatus(`Could not snap ${label.toLowerCase()}: ${error.message}`, true);
   }
 }
-function selectRestrictionPoint(point) {
-  restrictionCorners.push(point);
-  if (restrictionCorners.length < 2) { setStatus('영역의 반대쪽 모서리를 선택하세요.'); return; }
-  const [a, b] = restrictionCorners;
-  const west = Math.min(a.lon, b.lon), east = Math.max(a.lon, b.lon), south = Math.min(a.lat, b.lat), north = Math.max(a.lat, b.lat);
-  restrictionGeometry = { type: 'Polygon', coordinates: [[[west, south], [east, south], [east, north], [west, north], [west, south]]] };
-  restrictionDraftLayerGroup.clearLayers();
-  L.rectangle([[south, west], [north, east]], { color: '#e76f51', weight: 2, fillOpacity: 0.15 }).addTo(restrictionDraftLayerGroup);
-  document.querySelector('#virtual-restriction-commit').disabled = false;
-  restrictionCorners = []; pickMode = null; map.getContainer().style.cursor = ''; setStatus('영역 활성화 버튼으로 도로 상태를 적용하세요.');
-}
 async function refreshAfterRestrictionChange(message) {
   draft = null;
   renderDraft();
@@ -1014,26 +1025,6 @@ async function refreshAfterRestrictionChange(message) {
   if (noRouteMessage) setStatus(noRouteMessage, true);
   else if (points.origin && points.destination && selected?.vehicleStatus === 'READY') await previewRoute();
   else setStatus(message);
-}
-async function commitRestriction() {
-  if (!restrictionGeometry || !scenarioId) return;
-  const body = { kind: 'BLOCKED', geometry: restrictionGeometry };
-  try {
-    setStatus('Checking the road change and recalculating affected virtual routes…');
-    const preview = await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions/preview`, { method: 'POST', body: JSON.stringify(body) });
-    if (!preview.canActivate) { setStatus(`Blocked region is occupied by vehicle(s): ${preview.occupyingVirtualVehicleIds.join(', ')}`, true); return; }
-    await api(`/api/v1/virtual/scenarios/${scenarioId}/road-restrictions`, { method: 'POST', body: JSON.stringify({ ...body, expectedRestrictionRevision: scenarioRevision }) });
-    restrictionGeometry = null;
-    restrictionDraftLayerGroup.clearLayers();
-    document.querySelector('#virtual-restriction-commit').disabled = true;
-    // The existing draft was calculated against the previous restriction
-    // revision.  Remove it before refreshing so the map cannot keep showing
-    // a route that still crosses the newly blocked region.  Re-preview an
-    // idle selected vehicle automatically when the two endpoints are still
-    // present; active trips are rerouted by the backend instead.
-    await refreshAfterRestrictionChange('Road state activated.');
-  }
-  catch (error) { setStatus(error.message, true); }
 }
 async function removeRestriction(restriction) {
   if (!scenarioId || !restriction?.restrictionId) return;
@@ -1051,6 +1042,7 @@ async function removeRestriction(restriction) {
 // Whether Live View was open when virtual mode closed it, so it can reopen.
 let liveViewBeforeVirtual = false;
 async function switchMode(next) {
+  roadBrush.reset();
   hideRouteContextMenu();
   if (endpointDrag) finishEndpointDrag(endpointDrag.marker);
   pickMode = null;
@@ -1080,7 +1072,7 @@ async function switchMode(next) {
     normalSectionVisibility.restore();
     window.__operatorAttachMapLayers?.();
     if (liveViewBeforeVirtual) { liveViewBeforeVirtual = false; window.__operatorResumeLiveView?.(); }
-    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers(); restrictionDraftLayerGroup.clearLayers();
+    clearRouteGroup(routeLayerGroup); clearRouteGroup(activeRouteLayerGroup); clearVirtualVehicleMarkers(); pointLayerGroup.clearLayers(); restrictionLayerGroup.clearLayers();
     draftRouteSignature = '';
     activeRouteSignature = '';
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -1094,16 +1086,13 @@ map.on('click', (event) => {
   if (mode !== 'virtual' || !pickMode) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
   const selectedMode = pickMode;
-  if (selectedMode === 'restriction') selectRestrictionPoint(point);
-  else {
-    pickMode = null;
-    map.getContainer().style.cursor = '';
-    void snapAndSetRoutePoint(selectedMode, point);
-  }
+  pickMode = null;
+  map.getContainer().style.cursor = '';
+  void snapAndSetRoutePoint(selectedMode, point);
 });
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
-scenarioSelect.addEventListener('change', () => { scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
+scenarioSelect.addEventListener('change', () => { roadBrush.reset(); scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
 vehicleSelect.addEventListener('change', () => {
   selectedVehicleId = vehicleSelect.value;
   speedControlEditing = false;
@@ -1121,18 +1110,35 @@ document.querySelector('#virtual-dispatch').addEventListener('click', () => void
 document.querySelector('#virtual-following').addEventListener('change', (event) => void setFollowing(event.target.checked));
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => void applySelectedSpeed());
-document.querySelector('#virtual-restriction-pick').addEventListener('click', () => { restrictionCorners = []; pickMode = 'restriction'; map.getContainer().style.cursor = 'crosshair'; setStatus('지도에서 영역의 두 모서리를 선택하세요.'); });
 document.querySelector('#virtual-add-waypoint').addEventListener('click', () => beginRoutePointPick('waypoint'));
-document.querySelector('#virtual-restriction-commit').addEventListener('click', () => void commitRestriction());
 map.getContainer().addEventListener('operator-map-contextrequest', (event) => showRouteContextMenu(event.detail));
 routeContextMenu.addEventListener('click', (event) => {
   event.stopPropagation();
+  const submenuButton = event.target.closest('[data-road-menu]');
+  if (submenuButton) {
+    const submenu = routeContextMenu.querySelector('.road-brush-submenu');
+    submenu.hidden = !submenu.hidden;
+    submenuButton.setAttribute('aria-expanded', String(!submenu.hidden));
+    const container = map.getContainer();
+    routeContextMenu.style.top = `${Math.max(8, Math.min(parseFloat(routeContextMenu.style.top), container.clientHeight - routeContextMenu.offsetHeight - 8))}px`;
+    return;
+  }
+  const toolButton = event.target.closest('[data-road-tool]');
+  if (toolButton) {
+    hideRouteContextMenu();
+    if (!scenarioId) { setStatus('시나리오를 먼저 선택하세요.', true); return; }
+    pickMode = null;
+    roadBrush.setTool(toolButton.dataset.roadTool);
+    return;
+  }
   const button = event.target.closest('[data-route-point-kind]');
   if (!button || !contextRoutePoint) return;
   const kind = button.dataset.routePointKind;
   const point = { lat: contextRoutePoint.lat, lon: contextRoutePoint.lng };
   hideRouteContextMenu();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
+  roadBrush.reset();
+  pickMode = null;
   void snapAndSetRoutePoint(kind, point);
 });
 document.addEventListener('pointerdown', (event) => {

@@ -9,6 +9,7 @@ import {
     dispatchRequestSchema,
     followingSchema,
     requestIdParamSchema,
+    restrictionBrushSchema,
     routePreviewSchema,
     scenarioIdParamSchema,
     snapPointSchema,
@@ -19,6 +20,14 @@ import {
 
 const dataResponse = z.object({ data: z.unknown() });
 const bearer = [{ bearerAuth: [] }];
+
+registry.registerPath({
+    method: "post", path: "/api/v1/virtual/scenarios/{scenarioId}/road-restrictions/brush",
+    tags: ["Virtual Dispatch"], summary: "Paint blocked roads or erase part of existing blocked regions",
+    security: bearer,
+    request: { params: scenarioIdParamSchema, body: { content: { "application/json": { schema: restrictionBrushSchema } } } },
+    responses: { 200: { description: "Updated restrictions", content: { "application/json": { schema: dataResponse } } } },
+});
 
 registry.registerPath({
     method: "post",

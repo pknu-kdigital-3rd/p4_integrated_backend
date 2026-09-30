@@ -13,6 +13,7 @@ import {
     followingSchema,
     requestIdParamSchema,
     restrictionSchema,
+    restrictionBrushSchema,
     restrictionIdParamSchema,
     restrictionUpdateSchema,
     routePreviewSchema,
@@ -47,6 +48,7 @@ virtualRouter.post("/trips/:tripId/commands", ...write, validateParams(virtualTr
 virtualRouter.put("/trips/:tripId/waypoints", ...write, validateParams(virtualTripIdParamSchema), validateBody(waypointsSchema), virtualController.replaceWaypoints);
 virtualRouter.put("/trips/:tripId/destination", ...write, validateParams(virtualTripIdParamSchema), validateBody(destinationSchema), virtualController.replaceDestination);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions/preview", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionSchema), virtualController.previewRestriction);
+virtualRouter.post("/scenarios/:scenarioId/road-restrictions/brush", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionBrushSchema), virtualController.brushRestriction);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionSchema), virtualController.createRestriction);
 virtualRouter.patch("/road-restrictions/:restrictionId", ...write, validateParams(restrictionIdParamSchema), validateBody(restrictionUpdateSchema), virtualController.updateRestriction);
 virtualRouter.get("/scenarios/:scenarioId/events", ...read, validateParams(scenarioIdParamSchema), virtualController.listEvents);

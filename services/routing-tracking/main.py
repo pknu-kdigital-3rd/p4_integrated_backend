@@ -19,7 +19,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from graph_backend import load_graph, load_match_graph, TRUCK_PROFILES, get_override_locations
 from road_match import match_preview
@@ -245,6 +245,23 @@ class RestrictionResolveRequest(BaseModel):
 
 class SnapRequest(InternalCoordinate):
     vehicleProfile: str = "car"
+
+
+class RestrictionBrushRequest(BaseModel):
+    points: list[InternalCoordinate] = Field(min_length=1, max_length=256)
+    radiusM: float = Field(ge=5, le=250)
+    restrictions: list[dict] = Field(default_factory=list)
+
+
+@app.post("/internal/routing/road-restrictions/brush")
+def internal_restriction_brush(req: RestrictionBrushRequest):
+    from restriction_brush import apply_brush
+    if any(not math.isfinite(p.lat) or not math.isfinite(p.lon) or abs(p.lat) > 90 or abs(p.lon) > 180 for p in req.points):
+        raise HTTPException(status_code=422, detail="Invalid brush coordinates")
+    try:
+        return apply_brush([(p.lat, p.lon) for p in req.points], req.radiusM, req.restrictions)
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Road painting requires the routing osmnx dependencies")
 
 
 class MatchPreviewRequest(BaseModel):

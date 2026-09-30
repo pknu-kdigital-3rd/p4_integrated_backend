@@ -11,6 +11,7 @@ import type {
     DispatchRequestBody,
     FollowingBody,
     RestrictionBody,
+    RestrictionBrushBody,
     RestrictionUpdateBody,
     RoutePreviewBody,
     WaypointsBody,
@@ -846,6 +847,69 @@ export const virtualService = {
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
         const occupied = occupiedVehicleIds(states, resolved);
         return { ...resolved, scenarioId, restrictionRevision: scenario.restrictionRevision, kind: input.kind, canActivate: input.kind !== "BLOCKED" || occupied.length === 0, occupyingVirtualVehicleIds: occupied };
+    },
+
+    async brushRestriction(scenarioId: bigint, input: RestrictionBrushBody, actorId?: bigint) {
+        const scenario = await getScenario(scenarioId);
+        if (input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed; retry the stroke", "STALE_REVISION");
+        const existing = input.mode === "erase"
+            ? await prisma.virtualRoadRestriction.findMany({ where: { scenarioId, kind: "BLOCKED", isActive: true } }) : [];
+        const result = await routingInternalClient.brushRestriction({
+            points: input.points, radiusM: input.radiusM,
+            restrictions: existing.map(item => ({ restrictionId: item.restrictionId.toString(), geometry: item.geometry })),
+        });
+        const changes = input.mode === "paint"
+            ? [{ restrictionId: null, geometry: result.geometry }]
+            : result.changes.filter(change => existing.some(item => item.restrictionId.toString() === change.restrictionId));
+        if (!changes.length) return { restrictionRevision: scenario.restrictionRevision, changed: 0 };
+        const prepared: Array<{
+            restrictionId: string | null;
+            geometry: unknown;
+            resolved: Awaited<ReturnType<typeof routingInternalClient.resolveRestriction>> | null;
+        }> = [];
+        for (const change of changes) {
+            const resolved = change.geometry ? await routingInternalClient.resolveRestriction({ geometry: change.geometry }) : null;
+            if (input.mode === "paint" && resolved) {
+                const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
+                const occupied = occupiedVehicleIds(states, resolved);
+                if (occupied.length) throw new AppError(409, `Blocked road is occupied by virtual vehicles: ${occupied.join(", ")}`, "ROAD_OCCUPIED");
+            }
+            prepared.push({ ...change, resolved });
+        }
+        const revision = scenario.restrictionRevision + 1;
+        await prisma.$transaction(async tx => {
+            const updated = await tx.virtualScenario.updateMany({
+                where: { scenarioId, restrictionRevision: scenario.restrictionRevision }, data: { restrictionRevision: revision },
+            });
+            if (!updated.count) throw new AppError(409, "Scenario restrictions changed; retry the stroke", "STALE_REVISION");
+            for (const change of prepared) {
+                const data = {
+                    revision, isActive: change.geometry !== null,
+                    ...(change.geometry && change.resolved ? {
+                        geometry: json(change.geometry),
+                        affectedDirectedEdgeIds: json(change.resolved.affectedDirectedEdgeIds),
+                        affectedPhysicalSegmentIds: json(change.resolved.affectedPhysicalSegmentIds),
+                        graphVersion: change.resolved.graphVersion,
+                    } : {}),
+                };
+                if (change.restrictionId) {
+                    await tx.virtualRoadRestriction.update({ where: { restrictionId: BigInt(change.restrictionId) }, data });
+                } else if (change.resolved) {
+                    await tx.virtualRoadRestriction.create({ data: {
+                        ...data, scenarioId, kind: "BLOCKED", geometry: json(change.geometry),
+                        affectedDirectedEdgeIds: json(change.resolved.affectedDirectedEdgeIds),
+                        affectedPhysicalSegmentIds: json(change.resolved.affectedPhysicalSegmentIds),
+                        graphVersion: change.resolved.graphVersion, createdBy: actorId ?? null,
+                    } });
+                }
+            }
+            await createEvent(tx, { scenarioId, actorId: actorId ?? null,
+                eventType: input.mode === "paint" ? "ROAD_RESTRICTION_PAINTED" : "ROAD_RESTRICTION_ERASED",
+                payload: { revision, changed: prepared.length },
+            });
+        });
+        await this.refreshFollowingTrips(scenarioId, { preserveMotionOnFailure: input.mode === "erase" });
+        return { restrictionRevision: revision, changed: prepared.length };
     },
 
     async createRestriction(scenarioId: bigint, input: RestrictionBody, actorId?: bigint) {

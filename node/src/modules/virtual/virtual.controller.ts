@@ -8,6 +8,7 @@ import type {
     DispatchRequestBody,
     FollowingBody,
     RestrictionBody,
+    RestrictionBrushBody,
     RoutePreviewBody,
     WaypointsBody,
     RestrictionUpdateBody,
@@ -98,6 +99,9 @@ export const virtualController = {
 
     async previewRestriction(req: Request<{ scenarioId: string }, {}, RestrictionBody>, res: Response) {
         res.json({ data: await virtualService.previewRestriction(BigInt(req.params.scenarioId), req.body) });
+    },
+    async brushRestriction(req: Request<{ scenarioId: string }, {}, RestrictionBrushBody>, res: Response) {
+        res.json({ data: await virtualService.brushRestriction(BigInt(req.params.scenarioId), req.body, actorId(req)) });
     },
 
     async createRestriction(req: Request<{ scenarioId: string }, {}, RestrictionBody>, res: Response) {

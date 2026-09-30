@@ -8,7 +8,7 @@
   </title>
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
-  <link href="styles.css?v=12" rel="stylesheet"/>
+  <link href="styles.css?v=13" rel="stylesheet"/>
  </head>
  <body>
   <header class="app-header">
@@ -205,14 +205,8 @@
       도로 상태 설정
      </h3>
      <p>
-      선택한 영역의 도로 통행을 차단합니다.
+      지도를 오른쪽 클릭한 뒤 차단 → 브러시 또는 지우개를 선택하세요. 왼쪽 드래그로 칠하거나 지우고, 버튼을 놓으면 적용됩니다. Esc로 도구를 종료합니다.
      </p>
-     <button id="virtual-restriction-pick" type="button">
-      영역 선택
-     </button>
-     <button disabled="" id="virtual-restriction-commit" type="button">
-      영역 활성화
-     </button>
      <h4 id="virtual-restrictions-title">
       활성 도로 구간
      </h4>
@@ -661,9 +655,9 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js">
   </script>
-  <script src="app.js?v=37" type="module">
+  <script src="app.js?v=38" type="module">
   </script>
-  <script src="virtual-dispatch.js?v=13" type="module">
+  <script src="virtual-dispatch.js?v=14" type="module">
   </script>
  </body>
 </html>
