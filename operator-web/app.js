@@ -358,6 +358,22 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   // Replay: the recording's own time decides where on the line the vehicle is
   // (road-matched or the recorded line itself), never a nearest-segment search.
   const playbackPosition=replayOnly?matchedRoutePosition(currentRouteTiming?.anchors,withReplayGpsLead(estimatedTime||sourceTime),currentRouteTiming?.distances):null;
+  // Read-only snapshot for diagnosing replay placement from the browser console
+  // (copy(JSON.stringify(window.__replayDebug)) while the problem is visible).
+  if(replayOnly){
+    const points=display.replayPreview?.points,time=withReplayGpsLead(estimatedTime||sourceTime);
+    let gapS=null;
+    if(Array.isArray(points)&&time!=null){
+      const after=points.findIndex(point=>BigInt(point[0])>BigInt(time));
+      if(after>0)gapS=Number(BigInt(points[after][0])-BigInt(points[after-1][0]))/1e9;
+    }
+    window.__replayDebug={at:new Date().toISOString(),caller:sourceTimeOverride?'frame-with-gps':fixOverride?'fix':'tick-or-frame-without-gps',
+      timeSource:sourceTimeOverride?'frame':liveSourceTime?(liveGps?'live-gps':'presented-frame'):clock?'replay-clock':metadata?.sourceTimestampNs?'last-fix':'trip-position',
+      sourceTime,estimatedTime,placedTime:time,playbackPosition,routePosition,hasItem:Boolean(item),hasMarker:Boolean(marker),hasFix:Number.isFinite(fix?.latitude),
+      liveFrameAgeMs:lastLiveMessageAt?Date.now()-lastLiveMessageAt:null,liveStatus:lastLiveMessage?.telemetry?.status??null,
+      previewFingerprint:display.replayPreview?.fingerprint??null,previewPoints:Array.isArray(points)?points.length:null,previewGapAroundTimeS:gapS,
+      lineAnchors:currentRouteTiming?.anchors?.length??null};
+  }
   let remaining;
   if(playbackPosition!=null){
     remaining=remainingRoute(currentRouteCoordinates,fix,forwardOnlyPosition(routePosition,playbackPosition,currentRouteTiming?.distances),true,true);
