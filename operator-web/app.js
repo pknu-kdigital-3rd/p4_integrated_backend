@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride} from './live-telemetry.js';
 import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayLineTiming,replayProgressOnRoute,remainingRoute,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=6';
+import {estimatedReplayTimestamp,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayLineTiming,replayProgressOnRoute,remainingRoute,routeFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=7';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -20,7 +20,7 @@ mapStyleSelect.addEventListener('change',()=>{
   localStorage.setItem('operatorMapStyle',mapStyleSelect.value);
   setMapStyle(mapStyleSelect.value);
 });
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let routePosition=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let assignmentPreviewLayer=null;let assignmentPreviewRoute=null;let assignmentPreviewCoordinates=null;let activeTripByVehicle=new Map();let assignmentPreviewKey='';let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.
 const tripRouteRenderer=L.svg({padding:3});
@@ -240,7 +240,7 @@ function retargetLiveView(item){
 }
 function clearTripLayers(){
   for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
-  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;routePosition=0;
+  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);
   for(const entry of markers.values())if(entry.estimated){entry.estimated=false;syncVehicleMapLabel(entry)}
 }
 function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
@@ -283,13 +283,45 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   // whole route rather than nothing.
   if(!remaining){layer.setLatLngs(Array.isArray(currentRouteCoordinates)?currentRouteCoordinates.map(([lon,lat])=>[lat,lon]):[]);return}
   routePosition=remaining.position;
-  layer.setLatLngs(remaining.latLngs);
   if(replayOnly&&marker){
-    glideMarker(marker,remaining.latLngs[0],ROUTE_TICK_MS);
+    // The replay marker sits on its line, so animate the position along the
+    // line and draw both from it: the path is eaten away continuously with the
+    // vehicle exactly at its head, instead of the path jumping ahead first.
+    animateReplayRoute(layer,marker,remaining.position);
     const entry=markers.get(item.telemetry.external_id);
     if(entry){entry.estimated=Boolean(estimatedTime);syncVehicleMapLabel(entry)}
+    return remaining.latLngs[0];
   }
-  return replayOnly?remaining.latLngs[0]:null;
+  layer.setLatLngs(remaining.latLngs);
+  return null;
+}
+function drawReplayRouteAt(layer,marker,position){
+  const latLngs=routeFromPosition(currentRouteCoordinates,position);
+  if(!latLngs)return;
+  shownRoutePosition=position;
+  layer.setLatLngs(latLngs);
+  cancelAnimationFrame(marker.glideFrame);
+  marker.setLatLng(latLngs[0]);
+}
+// Moves the shown position to target over one route tick. A first draw, a
+// hidden page or a jump over 1 km (a seek in the recording) is applied at once.
+function animateReplayRoute(layer,marker,target){
+  cancelAnimationFrame(routeAnimationFrame);
+  const from=shownRoutePosition,distances=currentRouteTiming?.distances;
+  const metresAt=position=>{
+    if(!Array.isArray(distances)||distances.length<2)return null;
+    const first=Math.max(0,Math.min(distances.length-1,Math.floor(position))),next=Math.min(distances.length-1,first+1);
+    return distances[first]+(position-first)*(distances[next]-distances[first]);
+  };
+  const jumpM=from==null?null:Math.abs((metresAt(target)??0)-(metresAt(from)??0));
+  if(from==null||document.hidden||jumpM>1000){drawReplayRouteAt(layer,marker,target);return}
+  const started=performance.now();
+  const step=now=>{
+    const t=Math.min(1,(now-started)/ROUTE_TICK_MS);
+    drawReplayRouteAt(layer,marker,from+(target-from)*t);
+    if(t<1)routeAnimationFrame=requestAnimationFrame(step);
+  };
+  routeAnimationFrame=requestAnimationFrame(step);
 }
 function showTripDisplay(display){
   const card=document.querySelector('#trip-progress-card');card.hidden=false;

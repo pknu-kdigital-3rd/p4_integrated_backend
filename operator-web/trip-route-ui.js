@@ -206,3 +206,17 @@ export function replayClock(metadata){
   if(typeof fix==='string'&&/^\d+$/.test(fix)&&BigInt(time)<=BigInt(fix))return null;
   return {time,at};
 }
+
+/**
+ * The route ahead of a fractional position (index + fraction along the
+ * coordinates) as Leaflet [lat, lon] pairs; its first point is where the
+ * vehicle is, so the marker and the drawn path always meet exactly.
+ */
+export function routeFromPosition(coordinates,position){
+  if(!Array.isArray(coordinates)||coordinates.length<2||!Number.isFinite(position))return null;
+  const clamped=Math.max(0,Math.min(coordinates.length-1,position));
+  const segment=Math.min(coordinates.length-2,Math.floor(clamped)),fraction=clamped-segment;
+  const a=coordinates[segment],b=coordinates[segment+1];
+  const head=[a[0]+(b[0]-a[0])*fraction,a[1]+(b[1]-a[1])*fraction];
+  return [head,...coordinates.slice(segment+1)].map(([lon,lat])=>[lat,lon]);
+}

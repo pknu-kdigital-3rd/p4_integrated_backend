@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { estimatedReplayTimestamp, forwardOnlyPosition, matchedRoutePosition, replayClock, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
+import { estimatedReplayTimestamp, forwardOnlyPosition, matchedRoutePosition, replayClock, routeFromPosition, plannedProgress, recordedProgress, remainingRoute, replayLineTiming, replayProgressOnRoute, tripTimes } from "../../operator-web/trip-route-ui.js";
 
 const line = { type: "LineString", coordinates: [[129.0, 35.0], [129.0, 35.01], [129.0, 35.02]] };
 
@@ -178,5 +178,22 @@ describe("replay clock through GPS gaps", () => {
         expect(replayClock({ sourceTimestampNs: "5" })).toBeNull();
         expect(replayClock({ sourceTimestampNs: "5", sourceClockNs: "x", sourceClockAt: "t" })).toBeNull();
         expect(replayClock({ sourceTimestampNs: "5", sourceClockNs: "5", sourceClockAt: "t" })).toBeNull();
+    });
+});
+
+describe("replay path drawn from the vehicle's position", () => {
+    const line = [[129.000, 35.0], [129.001, 35.0], [129.002, 35.0]];
+
+    it("starts the drawn path exactly where the vehicle is", () => {
+        const path = routeFromPosition(line, 0.5)!;
+        expect(path[0]).toEqual([35.0, 129.0005]);
+        expect(path.slice(1)).toEqual([[35.0, 129.001], [35.0, 129.002]]);
+    });
+
+    it("clamps to the line and rejects unusable input", () => {
+        expect(routeFromPosition(line, 5)!).toEqual([[35.0, 129.002], [35.0, 129.002]]);
+        expect(routeFromPosition(line, -1)![0]).toEqual([35.0, 129.0]);
+        expect(routeFromPosition(line, Number.NaN)).toBeNull();
+        expect(routeFromPosition([[129, 35]], 0)).toBeNull();
     });
 });
