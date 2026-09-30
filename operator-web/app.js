@@ -108,12 +108,22 @@ document.querySelector('#live-float').addEventListener('click',async()=>{
 document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView()});
 placeLivePanel(true);
 function createMarkerEntry(item,position,{liveOnly=false}={}){
-  const androidGps=isAndroidGpsItem(item),marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
-  const entry={marker,item,liveOnly};
+  const marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
+  const entry={marker,item,liveOnly,labelOnTrip:null};
   marker.on('click',()=>selectVehicle(entry.item));
-  const label=document.createElement('span');label.textContent=item?.telemetry?.telemetry_source==='RECORDED_GPS'?`Android GPS 재생 · ${item?.vehicleCode||'vehicle'}`:androidGps?`Android GPS · ${item?.vehicleCode||item?.telemetry?.external_id||'vehicle'}`:item?.vehicleCode||item?.telemetry?.external_id||'Live vehicle';marker.bindTooltip(label,{direction:'top',className:'vehicle-label'});
+  syncVehicleMapLabel(entry);
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
   return entry;
+}
+function syncVehicleMapLabel(entry){
+  const item=entry.item,telemetry=item?.telemetry||{},onTrip=item?.tripStatus==='IN_PROGRESS';
+  const name=telemetry.telemetry_source==='RECORDED_GPS'?`GPS 재생 · ${item?.vehicleCode||'차량'}`:isAndroidGpsItem(item)?`Android GPS · ${item?.vehicleCode||telemetry.external_id||'차량'}`:item?.vehicleCode||telemetry.external_id||'차량';
+  const label=document.createElement('span');label.textContent=name;
+  if(entry.labelOnTrip!==onTrip){
+    entry.marker.unbindTooltip();
+    entry.marker.bindTooltip(label,{direction:'top',permanent:onTrip,offset:[0,-14],className:`vehicle-label${onTrip?' vehicle-label--trip':''}`,interactive:false});
+    entry.labelOnTrip=onTrip;
+  }else entry.marker.setTooltipContent(label);
 }
 // Every normal-monitoring layer on the map. All three are cached and only
 // added to the map when first created, so whoever takes the map away has to
@@ -204,11 +214,19 @@ function showTripDisplay(display){
   const key=`${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}`;
   if(key!==displayedRouteKey){
     clearTripLayers();displayedRouteKey=key;
-    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.geoJSON(display.plannedRoute.routeGeojson,{style:{color:'#0868dd',weight:6}}).addTo(map);
+    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.geoJSON(display.plannedRoute.routeGeojson,{style:{color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round'}}).addTo(map);
     const points=display.replayPreview?.points;
     if(Array.isArray(points)&&points.length>1){
-      replayRouteLayer=L.polyline(points.map(point=>[point[2],point[1]]),{color:'#e78328',weight:4,dashArray:replayOnly?undefined:'10 8'}).addTo(map);
-      replayRouteLayer.bindTooltip('Android GPS 재생 경로');
+      const latLngs=points.map(point=>[point[2],point[1]]);
+      replayRouteLayer=L.layerGroup().addTo(map);
+      L.polyline(latLngs,{color:'#ffffff',weight:11,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
+      const gpsLine=L.polyline(latLngs,{color:'#0878f9',weight:6,opacity:1,dashArray:replayOnly?null:'10 8',lineCap:'round',lineJoin:'round'}).addTo(replayRouteLayer);
+      gpsLine.bindTooltip('Android GPS 경로');
+      const nodeCount=Math.min(18,Math.max(0,latLngs.length-2));
+      for(let i=1;i<=nodeCount;i++){
+        const point=latLngs[Math.round(i*(latLngs.length-1)/(nodeCount+1))];
+        L.circleMarker(point,{radius:3,color:'#0878f9',weight:2,fillColor:'#ffffff',fillOpacity:1,interactive:false}).addTo(replayRouteLayer);
+      }
     }
     const target=replayOnly?points?.at(-1)?.slice(1,3):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
     if(target)destinationMarker=L.circleMarker([target[1],target[0]],{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map).bindTooltip(display.destinationName);
@@ -250,7 +268,7 @@ async function loadSelectedTrip(){
   const item=selected,request=++displayRequest;
   if(demoMode){
     clearTripLayers();
-    if(item?.plannedRoute?.routeGeojson)routeLayer=L.geoJSON(item.plannedRoute.routeGeojson,{style:{color:'#0868dd',weight:6}}).addTo(map);
+    if(item?.plannedRoute?.routeGeojson)routeLayer=L.geoJSON(item.plannedRoute.routeGeojson,{style:{color:'#0878f9',weight:6,opacity:0.95,lineCap:'round',lineJoin:'round'}}).addTo(map);
     document.querySelector('#trip-progress-card').hidden=true;
     document.querySelector('#route-label').textContent=`계획 경로 · ${item?.plannedRoute?.routeSource||'경로 없음'}`;
     return;
@@ -323,7 +341,7 @@ function render(snapshot){
     const session=t.source_metadata?.recordingSessionId;
     // A new stream session supersedes the old one; reject its late frames.
     if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
-    const label=document.createElement('span');label.textContent=t.telemetry_source==='RECORDED_GPS'?`Android GPS 재생 · ${item.vehicleCode||key}`:isAndroidGpsItem(item)?`Android GPS · ${item.vehicleCode||key}`:item.vehicleCode||key;entry.marker.setTooltipContent(label);
+    syncVehicleMapLabel(entry);
   }
   dashboard.update(snapshot.vehicles);
   if(!liveView&&!snapshot.vehicles.some(isAndroidGpsItem))fleetViewport.fit(snapshot.vehicles,{initial:true});

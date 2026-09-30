@@ -77,10 +77,11 @@ const paths = {
 export const icon = name => `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.bus}</svg>`;
 export function vehicleIcon(item, selected = false, virtual = false) {
   const state = vehicleStatus(item);
-  if(item?.telemetry?.telemetry_source==='RECORDED_GPS')return L.divIcon({className:'vehicle-map-icon',html:`<span class="replay-cursor${selected?' selected':''}">▶</span>`,iconSize:[28,28],iconAnchor:[14,14],tooltipAnchor:[0,-18]});
+  const onTrip = item?.tripStatus === 'IN_PROGRESS';
+  if(item?.telemetry?.telemetry_source==='RECORDED_GPS')return L.divIcon({className:'vehicle-map-icon',html:`${onTrip?'<span class="vehicle-radiation" aria-hidden="true"><i></i><i></i></span>':''}<span class="replay-cursor${selected?' selected':''}">▶</span>`,iconSize:[32,32],iconAnchor:[16,16],tooltipAnchor:[0,-18]});
   const android = ['DEVICE_GPS','RECORDED_GPS'].includes(item?.telemetry?.telemetry_source);
   const colors = { running: '#0868dd', ready: '#13ad72', maintenance: '#ed3d4f', offline: '#8995a5', stale: '#b86b08', unknown: '#65758b' };
-  return L.divIcon({ className: 'vehicle-map-icon', html: `<span class="vehicle-symbol${selected ? ' selected' : ''}${android ? ' android' : ''}" style="--vehicle-color:${android ? '#16a5c8' : virtual ? '#0868dd' : colors[state]}">${icon('bus')}</span>`, iconSize: [32,36], iconAnchor: [16,18], tooltipAnchor: [0,-22] });
+  return L.divIcon({ className: 'vehicle-map-icon', html: `${onTrip ? '<span class="vehicle-radiation" aria-hidden="true"><i></i><i></i></span>' : ''}<span class="vehicle-symbol${selected ? ' selected' : ''}${android ? ' android' : ''}" style="--vehicle-color:${android ? '#16a5c8' : virtual ? '#0868dd' : colors[state]}">${icon('bus')}</span>`, iconSize: [32,36], iconAnchor: [16,18], tooltipAnchor: [0,-22] });
 }
 export function renderVehicleDetails(item) {
   const t = item.telemetry || {}, state = vehicleStatus(item);

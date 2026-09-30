@@ -79,7 +79,8 @@ form { display: grid; gap: 10px; }
 
 /* Map surfaces and commands */
 #map-surface { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
-#map { height: 100%; width: 100%; background: #e5eee9; }
+#map { height: 100%; width: 100%; background: #dcedfb; }
+#map .leaflet-tile-pane { filter: saturate(.76) brightness(1.08) contrast(.94); }
 #map-commands { position: absolute; z-index: 700; top: 20px; left: 20px; width: min(510px,calc(100% - 85px)); }
 .map-search { background: white; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--ui-border); border-radius: 24px; box-shadow: var(--ui-shadow-card); }
 .map-search input { border: 0; padding: 14px 4px; flex: 1; background: transparent; }
@@ -106,12 +107,19 @@ form { display: grid; gap: 10px; }
 .leaflet-top.leaflet-left { left: auto; right: 12px; top: 10px; }
 .leaflet-control-zoom { border: 1px solid var(--ui-border)!important; box-shadow: var(--ui-shadow-card)!important; }
 .vehicle-map-icon { background: transparent; border: 0; }
+.vehicle-map-icon { overflow: visible; }
 .vehicle-symbol { display: grid; place-items: center; width: 32px; height: 36px; border-radius: 12px 12px 12px 3px; color: white; background: var(--vehicle-color,#0868dd); border: 2px solid white; box-shadow: 0 3px 8px #29466550; }
 .vehicle-symbol.selected { box-shadow: 0 0 0 8px #0868dd30,0 3px 8px #29466550; transform: scale(1.15); }
 .vehicle-symbol.android { border-style: double; border-width: 4px; }
+.vehicle-radiation { position: absolute; inset: 50% auto auto 50%; width: 1px; height: 1px; pointer-events: none; }
+.vehicle-radiation i { position: absolute; left: 0; top: 0; width: 38px; height: 38px; margin: -19px; border: 2px solid #0878f9; border-radius: 50%; opacity: 0; animation: vehicle-radiate 2.4s ease-out infinite; }
+.vehicle-radiation i:nth-child(2) { animation-delay: 1.2s; }
+@keyframes vehicle-radiate { 0% { transform: scale(.35); opacity: .7; } 85%,100% { transform: scale(1.65); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .vehicle-radiation i { animation: none; opacity: .35; transform: scale(1.35); } }
 .replay-cursor { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #e78328; color: #fff; border: 2px solid #fff; box-shadow: 0 2px 8px #73420e80; font-size: 13px; }
 .replay-cursor.selected { box-shadow: 0 0 0 6px #e7832840,0 2px 8px #73420e80; }
 .leaflet-tooltip.vehicle-label { color: white; background: var(--ui-primary); border: 0; font-weight: 700; }
+.leaflet-tooltip.vehicle-label--trip { background: #075fcb; border: 1px solid #fff; border-radius: 7px; box-shadow: 0 2px 8px rgb(20 62 112 / 28%); font-size: 12px; padding: 5px 9px; }
 .leaflet-tooltip.trip-point-label { background: white; color: var(--ui-text); font-weight: 700; }
 
 /* Monitoring cards */
