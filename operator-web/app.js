@@ -449,19 +449,22 @@ function showTripDisplay(display){
   document.querySelector('#selected-origin-time').textContent=times.origin;
   document.querySelector('#selected-destination-time').textContent=times.destination;
   const replayOnly=display.routeMode==='REPLAY_ONLY';
-  const key=`${roadSnapMode}:${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}:${display.replayPreview?.roadMatch?.graphVersion??''}:${display.replayPosition?.recordingSessionId??''}`;
+  // The route is drawn only while the trip runs: an assigned (READY) trip shows
+  // its card, but no path, and its vehicle follows its GPS rather than a route.
+  const running=display.tripStatus==='IN_PROGRESS';
+  const key=`${running}:${roadSnapMode}:${display.tripId}:${display.routeMode}:${display.plannedRoute?.routeId??''}:${display.replayPreview?.fingerprint??''}:${display.replayPreview?.roadMatch?.graphVersion??''}:${display.replayPosition?.recordingSessionId??''}`;
   if(key!==displayedRouteKey){
     clearTripLayers();displayedRouteKey=key;
     // Without a road match (routing unavailable or unmatched) fall back to the
     // recorded GPS line itself, so the replay path is never missing.
     // The remaining route and vehicle share the same timed replay line.
-    const replayLine=replayOnly?replayRouteLine(display.replayPreview,roadSnapMode):null;
-    currentRouteCoordinates=replayOnly?replayLine?.coordinates:display.plannedRoute?.routeGeojson?.coordinates;
+    const replayLine=running&&replayOnly?replayRouteLine(display.replayPreview,roadSnapMode):null;
+    currentRouteCoordinates=!running?null:replayOnly?replayLine?.coordinates:display.plannedRoute?.routeGeojson?.coordinates;
     currentRouteTiming=replayLine?.timing??null;
     currentRouteBreaks=replayLine?.breaks??[];
-    if(!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],tripRouteStyle).addTo(map);
+    if(running&&!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],tripRouteStyle).addTo(map);
     if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],tripRouteStyle).addTo(map);
-    const target=replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
+    const target=!running?null:replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
     if(target)destinationMarker=L.circleMarker([target[1],target[0]],{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map).bindTooltip(display.destinationName);
   }
   currentTripDisplay=display;
