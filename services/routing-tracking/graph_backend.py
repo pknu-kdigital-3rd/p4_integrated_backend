@@ -581,9 +581,15 @@ class OsmnxGraph:
                 edge_times[pname] = length / (min(base_speed, p["max_speed_kmh"]) * 1000 / 3600)
             data["_p4_edge_times"] = edge_times
         self._node_coords = {n: (float(data["y"]), float(data["x"])) for n, data in self.G.nodes(data=True)}
+        # Build once at graph load; dragging performs many nearest-node queries.
+        import numpy as np
+        from sklearn.neighbors import BallTree
+        self._nearest_node_ids = list(self._node_coords)
+        self._nearest_node_tree = BallTree(np.radians(list(self._node_coords.values())), metric="haversine")
 
     def nearest_node(self, lat, lon):
-        return self.ox.distance.nearest_nodes(self.G, X=lon, Y=lat)
+        _distances, indices = self._nearest_node_tree.query([[math.radians(lat), math.radians(lon)]], k=1)
+        return self._nearest_node_ids[int(indices[0][0])]
 
     def nearest_coords(self, lat, lon):
         """Returns [lat, lon] of the graph vertex nearest to the given point -

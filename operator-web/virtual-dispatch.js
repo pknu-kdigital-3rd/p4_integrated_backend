@@ -195,12 +195,13 @@ function renderPendingEndpointSnapPreview(context) {
 }
 function queueEndpointSnapPreview(context, marker) {
   context.latestPoint = marker.getLatLng();
-  if (context.timer) return;
-  const delay = Math.max(0, 140 - (performance.now() - context.lastRequestAt));
+  if (context.timer || context.inFlight) return;
+  const delay = Math.max(0, 80 - (performance.now() - context.lastRequestAt));
   context.timer = setTimeout(() => {
     context.timer = null;
     if (endpointDrag !== context) return;
     context.lastRequestAt = performance.now();
+    context.inFlight = true;
     const rawPoint = { lat: context.latestPoint.lat, lon: context.latestPoint.lng };
     const requestId = ++context.requestId;
     void api(`/api/v1/virtual/scenarios/${encodeURIComponent(scenarioId)}/route-points/snap`, {
@@ -216,6 +217,11 @@ function queueEndpointSnapPreview(context, marker) {
     }).catch((error) => {
       if (endpointDrag === context && requestId === context.requestId) {
         setStatus(`도로 스냅 미리보기를 표시할 수 없습니다: ${error.message}`, true);
+      }
+    }).finally(() => {
+      context.inFlight = false;
+      if (endpointDrag === context && (context.latestPoint.lat !== rawPoint.lat || context.latestPoint.lng !== rawPoint.lon)) {
+        queueEndpointSnapPreview(context, marker);
       }
     });
   }, delay);
