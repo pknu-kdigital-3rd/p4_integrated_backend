@@ -17,15 +17,22 @@ const (
 )
 
 type session struct {
-	identity     StreamIdentity
-	mode         Mode
-	active       bool
-	gps          []GPSSample
-	imu          []IMUSample
-	latestGPS    *GPSSample
-	latestGPSAt  time.Time
-	latestIMU    *IMUSample
-	lastReceived time.Time
+	identity  StreamIdentity
+	mode      Mode
+	active    bool
+	gps       []GPSSample
+	imu       []IMUSample
+	latestGPS *GPSSample
+	// latestGPSAt is when the vehicle was last heard from, including a phone
+	// resending its last fix to stay on the map (for example through a tunnel);
+	// it only decides whether the vehicle is still current.
+	latestGPSAt time.Time
+	// fixReceivedAt is when the current fix first arrived. A resend of the same
+	// fix does not move it, so time-based prediction keeps running from the
+	// fix instead of restarting on every resend.
+	fixReceivedAt time.Time
+	latestIMU     *IMUSample
+	lastReceived  time.Time
 }
 
 // Store keeps a bounded source-timestamp history per recordingSessionId. Only
@@ -98,6 +105,9 @@ func (s *Store) Ingest(accepted Accepted) error {
 	for index := range accepted.GPS {
 		sample := accepted.GPS[index]
 		current.gps = insertGPS(current.gps, sample, s.gpsHistory)
+		if current.latestGPS == nil || current.latestGPS.TimestampNS != sample.TimestampNS {
+			current.fixReceivedAt = accepted.ReceivedAt
+		}
 		current.latestGPS = &sample
 		current.latestGPSAt = accepted.ReceivedAt
 	}
@@ -216,7 +226,7 @@ func vehicleState(current *session) VehicleState {
 		value := formatUTC(time.UnixMilli(*fix.UTCEpochMS))
 		observedAt = &value
 	} else {
-		value := formatUTC(current.latestGPSAt)
+		value := formatUTC(current.fixReceivedAt)
 		observedAt = &value
 	}
 	var speedKMH *float64
@@ -230,7 +240,7 @@ func vehicleState(current *session) VehicleState {
 		"sourceTimestampNs":   strconv.FormatInt(fix.TimestampNS, 10),
 		"horizontalAccuracyM": fix.HorizontalAccuracyM,
 		"altitudeM":           fix.AltitudeM,
-		"receivedAt":          formatUTC(current.latestGPSAt),
+		"receivedAt":          formatUTC(current.fixReceivedAt),
 		"mode":                string(current.mode),
 		"active":              current.active,
 	}

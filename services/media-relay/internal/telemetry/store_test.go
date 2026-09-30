@@ -186,3 +186,40 @@ func TestStoreSnapshotOmitsTripForVehicleOnlyStream(t *testing.T) {
 		t.Fatalf("unexpected vehicle-only metadata: %+v", vehicles[0].SourceMetadata)
 	}
 }
+
+// Through a tunnel the phone resends its last fix to stay on the map. That
+// keeps the vehicle current, but must not restart the fix's receive time,
+// or time-based prediction snaps back to the tunnel entrance on every resend.
+func TestResentFixKeepsVehicleCurrentWithoutResettingReceiveTime(t *testing.T) {
+	store := NewStore(30 * time.Second)
+	start := time.Date(2026, 9, 30, 2, 0, 0, 0, time.UTC)
+	now := start
+	store.now = func() time.Time { return now }
+	store.Activate(identityA)
+	entrance := gpsAt(1_000_000_000, 35.2)
+	if err := store.Ingest(accepted(identityA, start, []GPSSample{entrance}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	for second := 1; second <= 40; second++ {
+		now = start.Add(time.Duration(second) * time.Second)
+		if err := store.Ingest(accepted(identityA, now, []GPSSample{entrance}, nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vehicles := store.Snapshot()
+	if len(vehicles) != 1 {
+		t.Fatalf("a vehicle held for 40 s by resends must stay current (limit 30 s): %+v", vehicles)
+	}
+	if got := vehicles[0].SourceMetadata["receivedAt"]; got != formatUTC(start) {
+		t.Fatalf("resends moved the fix's receive time to %v, want %v", got, formatUTC(start))
+	}
+
+	exit := gpsAt(9_000_000_000, 35.3)
+	now = start.Add(41 * time.Second)
+	if err := store.Ingest(accepted(identityA, now, []GPSSample{exit}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Snapshot()[0].SourceMetadata["receivedAt"]; got != formatUTC(now) {
+		t.Fatalf("a new fix must take its own receive time, got %v", got)
+	}
+}
