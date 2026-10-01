@@ -10,7 +10,10 @@ import numpy as np
 from app.core.settings import BASE_DIR, Settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
+    _model_confidence_floor,
     _resolve_yolo_classes,
+    _tracker_config_cache,
+    tracker_confidence_config,
     _enqueue_inference_frame,
     _take_latest_inference_frame,
     load_yolo_model,
@@ -577,6 +580,53 @@ class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.metrics.inference_enqueue_dropped, 1)
         self.assertEqual(state.metrics.inference_worker_dropped, 0)
         self.assertTrue(state.result_store[(1, 2)].result["inference_skipped"])
+
+
+class TrackerConfidenceConfigTests(unittest.TestCase):
+    def setUp(self):
+        _tracker_config_cache.clear()
+
+    def _config(self, appear, keep):
+        with patch("app.services.yolo.settings.YOLO_TRACKER_CONFIG", str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml")), patch(
+            "app.services.yolo.settings.YOLO_APPEAR_CONFIDENCE", appear
+        ), patch("app.services.yolo.settings.YOLO_KEEP_CONFIDENCE", keep):
+            return tracker_confidence_config()
+
+    def test_without_overrides_uses_the_yaml_unchanged(self):
+        path, thresholds = self._config(None, None)
+        self.assertEqual(path, str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml"))
+        self.assertEqual(thresholds, {"appear": 0.35, "keep": 0.10})
+
+    def test_overrides_are_written_with_high_threshold_between_keep_and_appear(self):
+        import yaml
+
+        path, thresholds = self._config(0.2, 0.05)
+        self.assertEqual(thresholds, {"appear": 0.2, "keep": 0.05})
+        written = yaml.safe_load(open(path, encoding="utf-8"))
+        self.assertEqual(written["new_track_thresh"], 0.2)
+        self.assertEqual(written["track_low_thresh"], 0.05)
+        # The YAML's 0.25 would block new tracks between 0.2 and 0.25.
+        self.assertEqual(written["track_high_thresh"], 0.2)
+        self.assertEqual(written["tracker_type"], "bytetrack")
+
+    def test_keep_above_appear_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._config(0.3, 0.5)
+
+    def test_lower_keep_lowers_the_model_confidence_floor(self):
+        with patch("app.services.yolo.settings.CONF_THRESHOLD_LOW", 0.1), patch(
+            "app.services.yolo.settings.YOLO_KEEP_CONFIDENCE", 0.05
+        ):
+            self.assertEqual(_model_confidence_floor(), 0.05)
+        with patch("app.services.yolo.settings.CONF_THRESHOLD_LOW", 0.1), patch(
+            "app.services.yolo.settings.YOLO_KEEP_CONFIDENCE", None
+        ):
+            self.assertEqual(_model_confidence_floor(), 0.1)
+
+    def test_blank_environment_values_mean_unset(self):
+        configured = Settings(YOLO_APPEAR_CONFIDENCE="", YOLO_KEEP_CONFIDENCE=" ")
+        self.assertIsNone(configured.YOLO_APPEAR_CONFIDENCE)
+        self.assertIsNone(configured.YOLO_KEEP_CONFIDENCE)
 
 
 if __name__ == "__main__":

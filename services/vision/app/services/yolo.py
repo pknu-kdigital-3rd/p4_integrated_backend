@@ -426,7 +426,72 @@ def load_yolo_model() -> YOLO:
         class_ids = _resolve_yolo_classes(settings.YOLO_CLASSES, model.names)
     model._p4_class_ids = class_ids
     print(f"YOLO class filter: {class_ids if class_ids is not None else 'all'}")
+    if settings.YOLO_TRACKING:
+        # Validates YOLO_APPEAR/KEEP_CONFIDENCE at startup, like YOLO_CLASSES.
+        tracker_path, thresholds = tracker_confidence_config()
+        print(f"YOLO tracker config: {tracker_path} appear={thresholds['appear']} keep={thresholds['keep']}")
     return model
+
+
+_tracker_config_cache: dict[tuple, tuple[str, dict[str, float | None]]] = {}
+
+
+def tracker_confidence_config() -> tuple[str, dict[str, float | None]]:
+    """Return the tracker config path and its effective confidence thresholds.
+
+    Without YOLO_APPEAR_CONFIDENCE / YOLO_KEEP_CONFIDENCE the configured YAML
+    is used unchanged. With either set, a copy with the overrides applied is
+    written once to the temp directory. track_high_thresh is clamped between
+    keep and appear: ByteTrack only starts tracks from detections above it,
+    so a value above appear would silently raise the appear threshold.
+    """
+    base_path = settings.YOLO_TRACKER_CONFIG
+    appear_override = settings.YOLO_APPEAR_CONFIDENCE
+    keep_override = settings.YOLO_KEEP_CONFIDENCE
+    key = (base_path, appear_override, keep_override)
+    cached = _tracker_config_cache.get(key)
+    if cached is not None:
+        return cached
+    import hashlib
+    import tempfile
+
+    import yaml
+
+    try:
+        base = yaml.safe_load(Path(base_path).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        if appear_override is not None or keep_override is not None:
+            raise
+        base = {}
+    appear = appear_override if appear_override is not None else base.get("new_track_thresh")
+    keep = keep_override if keep_override is not None else base.get("track_low_thresh")
+    if appear_override is None and keep_override is None:
+        result = (base_path, {"appear": appear, "keep": keep})
+    else:
+        if appear is None or keep is None or keep > appear:
+            raise ValueError(
+                f"YOLO_KEEP_CONFIDENCE ({keep}) must not exceed YOLO_APPEAR_CONFIDENCE ({appear}); "
+                "otherwise a shown box would disappear before it could ever appear"
+            )
+        effective = dict(base)
+        effective["new_track_thresh"] = float(appear)
+        effective["track_low_thresh"] = float(keep)
+        high = float(effective.get("track_high_thresh", appear))
+        effective["track_high_thresh"] = min(max(high, float(keep)), float(appear))
+        text = yaml.safe_dump(effective, sort_keys=False)
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+        path = Path(tempfile.gettempdir()) / f"p4-vision-tracker-{digest}.yaml"
+        path.write_text(text, encoding="utf-8")
+        result = (str(path), {"appear": float(appear), "keep": float(keep)})
+    _tracker_config_cache[key] = result
+    return result
+
+
+def _model_confidence_floor() -> float:
+    # Detections below the floor never reach the tracker, so a lowered keep
+    # threshold must lower the floor too or it would have no effect.
+    keep = settings.YOLO_KEEP_CONFIDENCE
+    return settings.CONF_THRESHOLD_LOW if keep is None else min(settings.CONF_THRESHOLD_LOW, keep)
 
 
 def _resolve_yolo_classes(configured: str, names: dict[int, str]) -> list[int] | None:
@@ -535,10 +600,10 @@ def run_yolo(
                     quantize=quantize,
                     # Keep weak detections available to ByteTrack's second
                     # association stage without allowing them to start tracks.
-                    conf=settings.CONF_THRESHOLD_LOW,
+                    conf=_model_confidence_floor(),
                     max_det=settings.YOLO_MAX_DETECTIONS,
                     classes=class_ids,
-                    tracker=settings.YOLO_TRACKER_CONFIG,
+                    tracker=tracker_confidence_config()[0],
                     persist=True,
                     verbose=False,
                     retina_masks=settings.YOLO_RETINA_MASKS,

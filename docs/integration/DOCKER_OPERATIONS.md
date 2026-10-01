@@ -151,6 +151,22 @@ changing this Compose environment value, run
 and check it with
 `docker compose -f docker-compose.dev.yml exec p4-vision printenv YOLO_CLASSES`.
 
+Vision tracking uses two confidence thresholds. `YOLO_APPEAR_CONFIDENCE`
+(ByteTrack `new_track_thresh`, default 0.35 from
+`services/vision/app/trackers/bytetrack.yaml`) is what a new box must reach to
+be shown. `YOLO_KEEP_CONFIDENCE` (`track_low_thresh`, default 0.10) is how low
+an already shown box may drop before it is removed; keeping it below the
+appear value prevents boxes from flickering. Leave either empty to use the
+YAML value. The keep value must not exceed the appear value, or Vision fails
+at startup. Apply a change the same way as `YOLO_CLASSES` (recreate
+`p4-vision`); the startup log prints `YOLO tracker config: ... appear=... keep=...`.
+
+The Live View page also has a **min confidence** slider. It applies
+immediately in that browser without restarting Vision, and only hides boxes:
+a box is shown once its confidence reaches the slider value and then stays
+until the server tracker drops it. Values below the server's appear
+threshold, shown next to the slider, have no effect.
+
 ### Supplying production secrets without shell residue
 
 Use an ignored file outside the repository and pass it explicitly on each

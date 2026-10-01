@@ -30,6 +30,18 @@ def _frame_telemetry(state: AppState, source: dict) -> dict:
     return telemetry
 
 
+def _confidence_thresholds() -> dict[str, float | None] | None:
+    """Server-side tracker thresholds, shown next to the viewer's own filter."""
+    if not settings.YOLO_TRACKING:
+        return None
+    from app.services.yolo import tracker_confidence_config
+
+    try:
+        return tracker_confidence_config()[1]
+    except (OSError, ValueError):
+        return None
+
+
 def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     result = item.result
     source = result.get("source", {})
@@ -37,6 +49,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
         "type": "frame",
         "session_id": state.session_id,
         "model_filename": Path(settings.YOLO_MODEL).name,
+        "confidence_thresholds": _confidence_thresholds(),
         "epoch": item.epoch,
         "seq": item.seq,
         "source": source,

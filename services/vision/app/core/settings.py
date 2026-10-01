@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # detection.
     YOLO_TRACKING: bool = True
     YOLO_TRACKER_CONFIG: str = str(BASE_DIR / "app" / "trackers" / "bytetrack.yaml")
+    # Overrides for the tracker config's two confidence thresholds; unset
+    # keeps the YAML values. APPEAR is new_track_thresh: a new box must
+    # reach it to be shown. KEEP is track_low_thresh: an established box
+    # stays shown down to it (the anti-flicker threshold). KEEP <= APPEAR.
+    YOLO_APPEAR_CONFIDENCE: float | None = Field(default=None, ge=0.0, le=1.0)
+    YOLO_KEEP_CONFIDENCE: float | None = Field(default=None, ge=0.0, le=1.0)
     # `latest` keeps only the newest queued frame for the next inference call;
     # skipped media frames still pass through with the last completed
     # detections so the H.264 playback sequence remains decodable. `queue`
@@ -169,6 +175,12 @@ class Settings(BaseSettings):
     @classmethod
     def _strip(cls, v: str) -> str:
         return v.strip() if isinstance(v, str) else v
+
+    @field_validator("YOLO_APPEAR_CONFIDENCE", "YOLO_KEEP_CONFIDENCE", mode="before")
+    @classmethod
+    def _blank_confidence_is_unset(cls, v: object) -> object:
+        # Compose passes `${VAR:-}` as an empty string when it is not set.
+        return None if isinstance(v, str) and not v.strip() else v
 
     @field_validator("YOLO_MODEL")
     @classmethod

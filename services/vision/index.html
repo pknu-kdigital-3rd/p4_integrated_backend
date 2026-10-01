@@ -58,6 +58,11 @@
   <label>ghost frames
     <input id="ghostFrames" type="number" min="0" max="30" step="1" value="2" />
   </label>
+  <label title="A new box is shown once its confidence reaches this value; it then stays until the server tracker drops it.">min confidence
+    <input id="minConfidence" type="range" min="0" max="1" step="0.05" value="0" />
+    <output id="minConfidenceValue">0.00</output>
+  </label>
+  <span id="serverThresholds"></span>
   <div id="status">Stopped</div><div id="model-label">Segmentation model: --</div><div id="stats"></div>
   <section id="telemetry" aria-live="polite">
     <h3>Vehicle telemetry (presented frame)</h3>
@@ -80,6 +85,9 @@
   const overlayModeEl = document.getElementById('overlayMode');
   const compensationModeEl = document.getElementById('compensationMode');
   const ghostFramesEl = document.getElementById('ghostFrames');
+  const minConfidenceEl = document.getElementById('minConfidence');
+  const minConfidenceValueEl = document.getElementById('minConfidenceValue');
+  const serverThresholdsEl = document.getElementById('serverThresholds');
   let socket = null, reconnectTimer = null, reconnectAttempt = 0, stopped = true;
   let jumpPending = false, awaitingLiveEpoch = false, backgroundedWhilePlaying = false;
   let foregroundResumePending = false, foregroundResumeTimer = null, foregroundReconnectAttempts = 0;
@@ -97,6 +105,9 @@
   let overlayMode = localStorage.getItem('playback-overlay-mode') || 'person_box_other_segmentation';
   let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
   let ghostFrames = Number.parseInt(localStorage.getItem('playback-ghost-frames') ?? '2', 10);
+  // Viewer-side appear threshold. It only hides boxes: the server tracker
+  // already drops new boxes below its own appear threshold.
+  let minConfidence = Math.max(0, Math.min(1, Number(localStorage.getItem('playback-min-confidence') ?? '0') || 0));
   let globalMotion = { dx: 0, dy: 0, confidence: 0 };
   const MOTION_WIDTH = 160;
   const MOTION_HEIGHT = 90;
@@ -451,6 +462,9 @@
     const observedConfidence = Number(observation.item.confidence || 0);
     track.confidence = track.confidence * (1 - TRACK_SMOOTHING) + observedConfidence * TRACK_SMOOTHING;
     track.confirmed = track.confirmed || track.server || track.hits >= TRACK_CONFIRM_HITS;
+    // Once shown, a box stays while the tracker keeps it, like the server's
+    // keep threshold; only its first appearance needs minConfidence.
+    track.shown = track.shown || observedConfidence >= minConfidence;
   }
   function createTrack(id, observation, server) {
     // A server-identified track has already cleared the tracker's
@@ -460,6 +474,7 @@
       id, server, className: observation.className, box: observation.box.slice(),
       item: observation.item, confidence: Number(observation.item.confidence || 0),
       hits: 1, misses: 0, confirmed: server || TRACK_CONFIRM_HITS <= 1,
+      shown: Number(observation.item.confidence || 0) >= minConfidence,
     });
     return id;
   }
@@ -471,7 +486,8 @@
 
     if (compensationMode === 'raw') {
       tracks.clear();
-      return observations.map(observation => ({
+      // No tracks in raw mode, so the filter applies per frame.
+      return observations.filter(observation => Number(observation.item.confidence || 0) >= minConfidence).map(observation => ({
         item: observation.item,
         box: observation.box,
         confidence: Number(observation.item.confidence || 0),
@@ -521,7 +537,7 @@
       track.confidence *= 0.75;
       if (track.misses > ghostFrames) tracks.delete(id);
     }
-    return Array.from(tracks.values()).filter(track => track.confirmed);
+    return Array.from(tracks.values()).filter(track => track.confirmed && track.shown);
   }
   function drawOverlay(inference, width, height) {
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
@@ -609,6 +625,10 @@
     if (meta.model_filename) {
       modelFilename = String(meta.model_filename);
       modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
+    }
+    const thresholds = meta.confidence_thresholds;
+    if (thresholds && Number.isFinite(Number(thresholds.appear)) && Number.isFinite(Number(thresholds.keep))) {
+      serverThresholdsEl.textContent = `(server: appear ≥ ${Number(thresholds.appear).toFixed(2)}, keep ≥ ${Number(thresholds.keep).toFixed(2)})`;
     }
     const key = `${meta.epoch}:${meta.seq}`;
     if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; awaitingLiveEpoch = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
@@ -763,6 +783,16 @@
     resetCompensation();
     setStatus(`Ghost frames: ${ghostFrames}`, '#fc6');
   });
+  function applyMinConfidence(value, persist) {
+    minConfidence = Math.max(0, Math.min(1, Number(value) || 0));
+    minConfidenceEl.value = String(minConfidence);
+    minConfidenceValueEl.textContent = minConfidence.toFixed(2);
+    if (persist) localStorage.setItem('playback-min-confidence', String(minConfidence));
+    // Re-evaluate boxes already on screen against the new value.
+    for (const track of tracks.values()) track.shown = Number(track.item?.confidence || 0) >= minConfidence;
+  }
+  applyMinConfidence(minConfidence, false);
+  minConfidenceEl.addEventListener('input', () => applyMinConfidence(minConfidenceEl.value, true));
   document.getElementById('start').onclick = start;
   document.getElementById('stop').onclick = stop;
   document.getElementById('live').onclick = jumpLive;
