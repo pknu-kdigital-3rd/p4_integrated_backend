@@ -38,6 +38,59 @@ type RerouteOptions = {
     transactionRetryCount?: number;
 };
 
+type RouteCallTiming = {
+    avoidInitialReverse: boolean;
+    outcome: string;
+    // Node -> routing service round trip, including queueing in its threadpool.
+    httpMs: number;
+    // Time the routing service spent calculating (its calculationTimeMs).
+    searchMs: number | null;
+};
+
+type RerouteTiming = {
+    tripId?: string;
+    overlayMs: number | null;
+    routeCalls: RouteCallTiming[];
+    claimMs: number | null;
+};
+
+function elapsedMs(startedAt: number): number {
+    return Math.round((performance.now() - startedAt) * 10) / 10;
+}
+
+async function timedRoute(input: Parameters<typeof routingInternalClient.route>[0], timing: RerouteTiming) {
+    const startedAt = performance.now();
+    const avoidInitialReverse = Boolean(input.avoidInitialReverseOfEdgeId);
+    try {
+        const route = await routingInternalClient.route(input);
+        timing.routeCalls.push({ avoidInitialReverse, outcome: "OK", httpMs: elapsedMs(startedAt), searchMs: route.calculationTimeMs ?? null });
+        return route;
+    } catch (error) {
+        const details = error instanceof AppError ? error.details as { calculationTimeMs?: unknown } | undefined : undefined;
+        const searchMs = Number(details?.calculationTimeMs);
+        timing.routeCalls.push({
+            avoidInitialReverse,
+            outcome: error instanceof AppError ? error.code ?? "APPLICATION_ERROR" : "ERROR",
+            httpMs: elapsedMs(startedAt),
+            searchMs: Number.isFinite(searchMs) ? searchMs : null,
+        });
+        throw error;
+    }
+}
+
+// One line per operator road-state change: prepareMs covers geometry
+// resolution and the DB write, refreshMs the vehicle reroutes it triggered.
+function logRoadChangeTiming(operation: string, scenarioId: bigint, startedAt: number, refreshStartedAt: number, extra: Record<string, unknown> = {}) {
+    logger.info({
+        operation,
+        scenarioId: scenarioId.toString(),
+        prepareMs: Math.round((refreshStartedAt - startedAt) * 10) / 10,
+        refreshMs: elapsedMs(refreshStartedAt),
+        totalMs: elapsedMs(startedAt),
+        ...extra,
+    }, "Virtual road-state change timing");
+}
+
 function isPrismaWriteConflict(error: unknown): boolean {
     if (error instanceof VehicleCheckpointChanged) return true;
     if (typeof error !== "object" || error === null) return false;
@@ -798,8 +851,37 @@ export const virtualService = {
     },
 
     async rerouteFromCurrentPosition(vehicleId: bigint, state?: Awaited<ReturnType<typeof activeVehicleState>>, options: RerouteOptions = {}): Promise<VirtualRoute | null> {
+        // One "Virtual reroute timing" line per attempt (retries log their
+        // own line with a higher transactionRetry).
+        const timing: RerouteTiming = { overlayMs: null, routeCalls: [], claimMs: null };
+        const startedAt = performance.now();
+        let outcome = "ERROR";
+        try {
+            const route = await this.solveAndActivateReroute(vehicleId, state, options, timing);
+            outcome = route ? "ACTIVATED" : "SKIPPED";
+            return route;
+        } catch (error) {
+            outcome = error instanceof AppError ? error.code ?? "APPLICATION_ERROR" : isPrismaWriteConflict(error) ? "WRITE_CONFLICT" : "ERROR";
+            throw error;
+        } finally {
+            logger.info({
+                vehicleId: vehicleId.toString(),
+                tripId: timing.tripId,
+                reason: options.reason ?? "FOLLOWING_ENABLED",
+                transactionRetry: options.transactionRetryCount ?? 0,
+                outcome,
+                totalMs: elapsedMs(startedAt),
+                overlayMs: timing.overlayMs,
+                routeCalls: timing.routeCalls,
+                claimMs: timing.claimMs,
+            }, "Virtual reroute timing");
+        }
+    },
+
+    async solveAndActivateReroute(vehicleId: bigint, state: Awaited<ReturnType<typeof activeVehicleState>> | undefined, options: RerouteOptions, timing: RerouteTiming): Promise<VirtualRoute | null> {
         const current = state ?? await activeVehicleState(vehicleId);
         if (!current) return null;
+        timing.tripId = current.virtualTripId.toString();
         const vehicle = await getVirtualVehicle(vehicleId);
         // A waypoint behind the vehicle on its active route was already
         // visited even if the worker has not recorded it yet; routing back to
@@ -810,6 +892,9 @@ export const virtualService = {
         const remainingWaypoints = remainingWaypointRows.map((waypoint) => point(waypoint.originalPoint));
         const currentPosition = point(current.lastPosition);
         const continuation = forwardContinuationForReroute(current, currentPosition);
+        const overlayStartedAt = performance.now();
+        const overlay = options.preloadedOverlay ?? await restrictionOverlay(current.scenarioId);
+        timing.overlayMs = options.preloadedOverlay ? 0 : elapsedMs(overlayStartedAt);
         const routeInput = {
             // Start the graph solve at the forward endpoint of the edge the
             // vehicle currently occupies.  The edge remainder is prefixed to
@@ -819,24 +904,25 @@ export const virtualService = {
             destination: options.destination ?? point(current.trip.destination),
             waypoints: remainingWaypoints,
             vehicleProfile: profileForVehicle(vehicle),
-            ...(options.preloadedOverlay ?? await restrictionOverlay(current.scenarioId)),
+            ...overlay,
         };
         let solvedRoute;
         try {
-            solvedRoute = await routingInternalClient.route({
+            solvedRoute = await timedRoute({
                 ...routeInput,
                 ...(current.currentEdgeId ? { avoidInitialReverseOfEdgeId: current.currentEdgeId } : {}),
-            });
+            }, timing);
         } catch (error) {
             // A closure can leave only a U-turn route. Prefer a forward
             // continuation, but retain a legal fallback when reversing is the
             // only way to reach the destination.
             if (!(error instanceof AppError) || error.code !== "ROUTE_NOT_FOUND" || !current.currentEdgeId) throw error;
-            solvedRoute = await routingInternalClient.route(routeInput);
+            solvedRoute = await timedRoute(routeInput, timing);
         }
         const scenario = await getScenario(current.scenarioId);
+        const claimStartedAt = performance.now();
         try {
-            return await prisma.$transaction(async (tx) => {
+            const activated = await prisma.$transaction(async (tx) => {
             // Lock the vehicle row before reading it. The worker rewrites the
             // checkpoint every tick, and this transaction writes the route
             // before claiming the state; without the lock a tick landing in
@@ -945,7 +1031,10 @@ export const virtualService = {
             await createEvent(tx, { scenarioId: current.scenarioId, virtualTripId: current.virtualTripId, actorId: options.actorId ?? null, eventType: "ROUTE_RECALCULATED", payload: { reason: options.reason ?? "FOLLOWING_ENABLED", routeVersion: nextVersion } });
             return nextRoute;
             }, { isolationLevel: "ReadCommitted", maxWait: 5000, timeout: 15000 });
+            timing.claimMs = elapsedMs(claimStartedAt);
+            return activated;
         } catch (error) {
+            timing.claimMs = elapsedMs(claimStartedAt);
             const retryCount = options.transactionRetryCount ?? 0;
             if (!isPrismaWriteConflict(error) || retryCount >= 3) throw error;
             const latest = await activeVehicleState(vehicleId);
@@ -1009,6 +1098,7 @@ export const virtualService = {
     },
 
     async brushRestriction(scenarioId: bigint, input: RestrictionBrushBody, actorId?: bigint) {
+        const startedAt = performance.now();
         await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         if (input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed; retry the stroke", "STALE_REVISION");
@@ -1070,15 +1160,18 @@ export const virtualService = {
             });
         });
         const relaxingRoadState = input.mode === "erase";
+        const refreshStartedAt = performance.now();
         const routingFailures = await this.refreshFollowingTrips(scenarioId, {
             preserveMotionOnFailure: relaxingRoadState,
             recoverStoppedTrips: relaxingRoadState,
             previousOverlay,
         });
+        logRoadChangeTiming(`brush-${input.mode}`, scenarioId, startedAt, refreshStartedAt, { changed: prepared.length, failureCount: routingFailures.length });
         return { restrictionRevision: revision, changed: prepared.length, routingFailures };
     },
 
     async createRestriction(scenarioId: bigint, input: RestrictionBody, actorId?: bigint) {
+        const startedAt = performance.now();
         await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         if (input.expectedRestrictionRevision !== undefined && input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed", "STALE_REVISION");
@@ -1095,11 +1188,14 @@ export const virtualService = {
             await createEvent(tx, { scenarioId, actorId: actorId ?? null, eventType: "ROAD_RESTRICTION_ACTIVATED", payload: { restrictionId: restriction.restrictionId.toString(), kind: input.kind, revision } });
             return restriction;
         });
+        const refreshStartedAt = performance.now();
         await this.refreshFollowingTrips(scenarioId, { previousOverlay });
+        logRoadChangeTiming(`create-${input.kind}`, scenarioId, startedAt, refreshStartedAt);
         return restriction;
     },
 
     async updateRestriction(restrictionId: bigint, input: RestrictionUpdateBody, actorId?: bigint) {
+        const startedAt = performance.now();
         const existing = await prisma.virtualRoadRestriction.findUnique({ where: { restrictionId } });
         if (!existing) throw new AppError(404, "Road restriction not found", "RESTRICTION_NOT_FOUND");
         await assertScenarioEditable(existing.scenarioId);
@@ -1119,7 +1215,9 @@ export const virtualService = {
             // step against the remaining active BLOCKED edges, so retaining
             // the last valid route is safe while a later road-state change or
             // operator action retries the calculation.
+            const refreshStartedAt = performance.now();
             await this.refreshFollowingTrips(existing.scenarioId, { preserveMotionOnFailure: true, recoverStoppedTrips: true, previousOverlay });
+            logRoadChangeTiming("deactivate", existing.scenarioId, startedAt, refreshStartedAt);
             return deactivated;
         }
         const kind = input.kind ?? existing.kind;
@@ -1138,11 +1236,14 @@ export const virtualService = {
             await createEvent(tx, { scenarioId: existing.scenarioId, actorId: actorId ?? null, eventType: "ROAD_RESTRICTION_UPDATED", payload: { restrictionId: restrictionId.toString(), kind, revision } });
             return result;
         });
+        const refreshStartedAt = performance.now();
         await this.refreshFollowingTrips(existing.scenarioId, { previousOverlay });
+        logRoadChangeTiming("update", existing.scenarioId, startedAt, refreshStartedAt);
         return updated;
     },
 
     async bulkRemoveRestrictions(scenarioId: bigint, input: RestrictionBulkRemoveBody, actorId?: bigint) {
+        const startedAt = performance.now();
         await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         if (input.expectedRestrictionRevision !== scenario.restrictionRevision) {
@@ -1166,11 +1267,13 @@ export const virtualService = {
             return result.count;
         });
         if (changed > 0) {
+            const refreshStartedAt = performance.now();
             await this.refreshFollowingTrips(scenarioId, {
                 preserveMotionOnFailure: true,
                 recoverStoppedTrips: true,
                 previousOverlay,
             });
+            logRoadChangeTiming("bulk-remove", scenarioId, startedAt, refreshStartedAt, { changed });
         }
         return { changed, restrictionRevision: changed > 0 ? revision : scenario.restrictionRevision };
     },
@@ -1183,6 +1286,7 @@ export const virtualService = {
         // vehicles whose remaining route uses a changed edge.
         previousOverlay?: RestrictionOverlay;
     } = {}) {
+        const refreshStartedAt = performance.now();
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, include: { trip: { include: { routes: { where: { isCurrent: true } }, waypoints: { orderBy: { sequence: "asc" } } } } } });
         const settings = await prisma.virtualVehicleSettings.findMany({ where: { vehicleId: { in: states.map((state) => state.vehicleId) }, autoFollowEnabled: true } });
         const following = new Set(settings.map((item) => item.vehicleId.toString()));
@@ -1194,7 +1298,9 @@ export const virtualService = {
         // Fetch the restriction overlay once and share it across all vehicle
         // reroutes - all vehicles in the same scenario see the same restrictions,
         // so N per-vehicle DB queries for identical data is pure waste.
+        const overlayStartedAt = performance.now();
         const preloadedOverlay = await restrictionOverlay(scenarioId);
+        const overlayMs = elapsedMs(overlayStartedAt);
         const change = options.previousOverlay ? diffRoadState(options.previousOverlay, preloadedOverlay) : null;
         const changeReason = change ? rerouteReason(change) : null;
         // A stopped trip has no motion to keep, so it is always retried. A
@@ -1287,6 +1393,7 @@ export const virtualService = {
             }
         };
         const workerCount = Math.min(concurrency, reroutingStates.length);
+        const reroutesStartedAt = performance.now();
         await Promise.all(Array.from({ length: workerCount }, async () => {
             while (true) {
                 const index = nextStateIndex++;
@@ -1294,6 +1401,16 @@ export const virtualService = {
                 await processState(reroutingStates[index]!);
             }
         }));
+        logger.info({
+            scenarioId: scenarioId.toString(),
+            reason: changeReason,
+            reroutingVehicleCount: reroutingStates.length,
+            failureCount: routingFailures.length,
+            concurrency: workerCount,
+            overlayMs,
+            reroutesMs: elapsedMs(reroutesStartedAt),
+            totalMs: elapsedMs(refreshStartedAt),
+        }, "Virtual road-state refresh timing");
         return routingFailures;
     },
 
