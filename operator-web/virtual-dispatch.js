@@ -50,9 +50,24 @@ routingLogOverlay.className = 'virtual-routing-log';
 routingLogOverlay.setAttribute('role', 'log');
 routingLogOverlay.setAttribute('aria-live', 'polite');
 routingLogOverlay.hidden = true;
-routingLogOverlay.innerHTML = '<header><strong>라우팅 로그</strong><button type="button" data-clear-routing-log aria-label="로그 지우기">지우기</button></header><ol></ol>';
+routingLogOverlay.innerHTML = '<header><strong>라우팅 로그</strong><div><button type="button" data-copy-routing-log>복사</button><button type="button" data-clear-routing-log aria-label="로그 지우기">지우기</button></div></header><ol></ol>';
 map.getContainer().append(routingLogOverlay);
 const routingLogList = routingLogOverlay.querySelector('ol');
+routingLogOverlay.querySelector('[data-copy-routing-log]').addEventListener('click', async () => {
+  const text = [...routingLogList.querySelectorAll('li')].map(item => item.textContent).join('\n');
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+    else {
+      const field = document.createElement('textarea');
+      field.value = text;
+      field.style.position = 'fixed'; field.style.opacity = '0';
+      document.body.append(field); field.select();
+      if (!document.execCommand('copy')) throw new Error('Clipboard copy failed');
+      field.remove();
+    }
+    setStatus('라우팅 로그를 복사했습니다.');
+  } catch { setStatus('라우팅 로그를 복사하지 못했습니다.', true); }
+});
 routingLogOverlay.querySelector('[data-clear-routing-log]').addEventListener('click', () => {
   routingLogList.replaceChildren();
   routingLogOverlay.hidden = true;

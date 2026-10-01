@@ -88,9 +88,10 @@ form { display: grid; gap: 10px; }
 body:not(.virtual-mode) .virtual-routing-log { display: none; }
 .virtual-routing-log[hidden] { display: none; }
 .virtual-routing-log header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.virtual-routing-log header div { display: flex; gap: 5px; }
 .virtual-routing-log header button { padding: 3px 8px; border: 1px solid #efb1b1; border-radius: 5px; background: white; color: inherit; cursor: pointer; }
 .virtual-routing-log ol { display: grid; gap: 4px; margin: 0; padding: 0 0 0 19px; }
-.virtual-routing-log li { overflow-wrap: anywhere; }
+.virtual-routing-log li { overflow-wrap: anywhere; user-select: text; }
 .virtual-route-context-menu button { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 9px; color: var(--ui-text); background: var(--ui-surface-soft); border: 1px solid var(--ui-border); border-radius: 6px; text-align: left; }
 .virtual-route-context-menu button:hover { background: #e9f0f5; }
 .route-point-menu-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
