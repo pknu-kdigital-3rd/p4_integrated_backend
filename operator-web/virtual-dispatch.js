@@ -560,6 +560,9 @@ function restrictionLabel(restriction) {
     ? ` · ×${Number(restriction.penaltyFactor).toFixed(1)}` : '';
   return `${kind}${factor} · revision ${restriction?.revision ?? '?'}`;
 }
+function restrictionMapLabel(restriction) {
+  return restriction?.kind === 'BLOCKED' ? String(restriction?.revision ?? '') : restrictionLabel(restriction);
+}
 function renderRestrictions(items) {
   restrictions = Array.isArray(items) ? items.filter((restriction) => restriction?.isActive !== false) : [];
   restrictionLayerGroup.clearLayers();
@@ -576,7 +579,7 @@ function renderRestrictions(items) {
       const layer = L.geoJSON(restriction.geometry, {
         style: { color, weight: 2, fillColor: color, fillOpacity: 0.16 },
       });
-      layer.bindTooltip(restrictionLabel(restriction), {permanent:true,direction:'center',className:'road-region-label'});
+      layer.bindTooltip(restrictionMapLabel(restriction), {permanent:true,direction:'center',className:'road-region-label'});
       layer.on('add', () => requestAnimationFrame(() => applyRoadHatch(layer, restriction.kind, color)));
       restrictionLayerGroup.addLayer(layer);
     }
