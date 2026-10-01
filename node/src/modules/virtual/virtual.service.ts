@@ -799,7 +799,7 @@ export const virtualService = {
     async command(tripId: bigint, input: CommandBody, actorId?: bigint) {
         const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { stateRecord: true } });
         if (!trip || !trip.stateRecord) throw new AppError(404, "Virtual trip not found", "VIRTUAL_TRIP_NOT_FOUND");
-        if (trip.state === "DRIVING" && trip.stateRecord.simStatus === "DRIVING" && trip.stateRecord.speedFactor >= 20) {
+        if (trip.state === "DRIVING" && trip.stateRecord.simStatus === "DRIVING" && trip.stateRecord.speedFactor >= 20 && input.command !== "SET_TURBO_MODE") {
             throw new AppError(409, "Trip controls are locked while turbo progress is active", "TURBO_PROGRESS_LOCK");
         }
         if (["COMPLETED", "CANCELLED"].includes(trip.state)) throw new AppError(409, "Virtual trip is terminal", "TRIP_TERMINAL");
@@ -809,6 +809,17 @@ export const virtualService = {
             return prisma.$transaction(async (tx) => { await tx.vehicle.update({ where: { vehicleId: trip.vehicleId }, data: { vehicleStatus: "READY" } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "CANCELLED", commandVersion: { increment: 1 } } }); const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "CANCELLED", endedAt: new Date(), commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_CANCELLED", payload: {} }); return result; });
         }
         if (input.command === "SET_SPEED_FACTOR") return prisma.$transaction(async (tx) => { const result = await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { speedFactor: input.speedFactor, commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "SPEED_FACTOR_CHANGED", payload: { speedFactor: input.speedFactor } }); return result; });
+        if (input.command === "SET_TURBO_MODE") return prisma.$transaction(async (tx) => {
+            if (trip.state !== "DRIVING" || !trip.stateRecord || trip.stateRecord.simStatus !== "DRIVING") {
+                throw new AppError(409, "Turbo mode requires an active driving trip", "TURBO_REQUIRES_DRIVING_TRIP");
+            }
+            const result = await tx.virtualVehicleState.update({
+                where: { virtualTripId: tripId },
+                data: { speedKmh: 200, speedFactor: input.enabled ? 20 : 1, commandVersion: { increment: 1 } },
+            });
+            await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TURBO_MODE_CHANGED", payload: { enabled: input.enabled, speedKmh: 200 } });
+            return result;
+        });
         if (input.command === "SET_SPEED_KMH") return prisma.$transaction(async (tx) => {
             // speedKmh is the vehicle's requested cruising speed.  Reset the
             // legacy multiplier so selecting a preset has a direct meaning;

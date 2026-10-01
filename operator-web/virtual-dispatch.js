@@ -159,6 +159,7 @@ map.getContainer().append(turboProgressIndicator);
 const turboProgressMessage = turboProgressIndicator.querySelector('[data-turbo-progress-message]');
 const turboModeToggle = document.querySelector('#virtual-turbo-mode');
 let turboCommandPending = false;
+let turboCommandTarget = false;
 let turboLockActive = false;
 let turboDisabledControlStates = null;
 const routeOperations = new Map();
@@ -184,14 +185,15 @@ function syncTurboModeUI() {
   }
   turboProgressIndicator.hidden = !locked;
   turboProgressMessage.textContent = turboCommandPending
-    ? '터보 모드를 시작하는 중 · 편집 잠금'
-    : `터보 진행 20× · ${turboVehicles.length}대 · 운행 완료까지 편집 잠금`;
+    ? (turboCommandTarget ? '터보 모드를 시작하는 중 · 200 km/h · 편집 잠금' : '터보 모드를 종료하는 중…')
+    : `터보 진행 20× · 기준 200 km/h · ${turboVehicles.length}대 · 편집 잠금`;
   const selectedVehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
   const selectedTripIsDriving = selectedVehicle?.state?.simStatus === 'DRIVING'
     && selectedVehicle?.state?.trip?.state === 'DRIVING';
-  turboModeToggle.checked = turboCommandPending || isTurboProgressVehicle(selectedVehicle);
-  turboModeToggle.disabled = turboCommandPending || locked || !selectedTripIsDriving;
-  const lockableControls = [scenarioSelect, vehicleSelect, removeScenarioButton, removeVehicleButton,
+  const selectedTurboActive = isTurboProgressVehicle(selectedVehicle);
+  turboModeToggle.checked = turboCommandPending ? turboCommandTarget : selectedTurboActive;
+  turboModeToggle.disabled = turboCommandPending || !selectedTripIsDriving || (locked && !selectedTurboActive);
+  const lockableControls = [scenarioSelect, vehicleSelect, removeVehicleButton,
     document.querySelector('#virtual-new-scenario'), document.querySelector('#virtual-new-vehicle'),
     document.querySelector('#virtual-dispatch'), document.querySelector('#virtual-following'),
     document.querySelector('#virtual-speed'), ...document.querySelectorAll('[data-virtual-command]')].filter(Boolean);
@@ -1680,17 +1682,18 @@ document.querySelector('#virtual-following').addEventListener('change', (event) 
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => void applySelectedSpeed());
 turboModeToggle.addEventListener('change', async () => {
-  if (!turboModeToggle.checked) return;
+  const enabled = turboModeToggle.checked;
   const selectedVehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
   if (selectedVehicle?.state?.simStatus !== 'DRIVING' || selectedVehicle?.state?.trip?.state !== 'DRIVING') {
-    turboModeToggle.checked = false;
+    turboModeToggle.checked = isTurboProgressVehicle(selectedVehicle);
     return;
   }
+  turboCommandTarget = enabled;
   turboCommandPending = true;
   syncTurboModeUI();
-  const enabled = await command('SET_SPEED_FACTOR', { speedFactor: 20 });
+  const succeeded = await command('SET_TURBO_MODE', { enabled });
   turboCommandPending = false;
-  if (!enabled) turboModeToggle.checked = false;
+  if (!succeeded) turboModeToggle.checked = isTurboProgressVehicle(vehicles.find((item) => String(item.vehicleId) === selectedVehicleId));
   syncTurboModeUI();
 });
 map.getContainer().addEventListener('operator-map-contextrequest', (event) => showRouteContextMenu(event.detail));
