@@ -8,11 +8,14 @@ import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOn
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
-const map=L.map('map').setView([35.1796,129.0756],12);
+const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
 let leftButtonPan=null;
 mapContainer.addEventListener('mousedown',event=>{
+  // Chromium emits compatibility mouse events after touch input. Leave those
+  // to Leaflet so touch taps and pinch gestures are not treated as mouse pans.
+  if(event.sourceCapabilities?.firesTouchEvents)return;
   if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
   if(window.__operatorRoadBrushPointerDown?.(event)){event.preventDefault();event.stopImmediatePropagation();return;}
   if(event.button===0){
