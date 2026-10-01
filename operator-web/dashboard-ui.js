@@ -75,13 +75,10 @@ const paths = {
   warning: '<path d="m12 3 10 18H2Zm0 6v5m0 3v1"/>'
 };
 export const icon = name => `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.bus}</svg>`;
-export function vehicleIcon(item, selected = false, virtual = false) {
-  const state = vehicleStatus(item);
-  const onTrip = item?.tripStatus === 'IN_PROGRESS';
-  if(item?.telemetry?.telemetry_source==='RECORDED_GPS')return L.divIcon({className:'vehicle-map-icon',html:`${onTrip?'<span class="vehicle-radiation" aria-hidden="true"><i></i><i></i></span>':''}<span class="replay-cursor${selected?' selected':''}">▶</span>`,iconSize:[32,32],iconAnchor:[16,16],tooltipAnchor:[0,-18]});
-  const android = ['DEVICE_GPS','RECORDED_GPS'].includes(item?.telemetry?.telemetry_source);
-  const colors = { running: '#0868dd', ready: '#13ad72', maintenance: '#ed3d4f', offline: '#8995a5', stale: '#b86b08', unknown: '#65758b' };
-  return L.divIcon({ className: 'vehicle-map-icon', html: `${onTrip ? '<span class="vehicle-radiation" aria-hidden="true"><i></i><i></i></span>' : ''}<span class="vehicle-symbol${selected ? ' selected' : ''}${android ? ' android' : ''}" style="--vehicle-color:${android ? '#16a5c8' : virtual ? '#0868dd' : colors[state]}">${icon('bus')}</span>`, iconSize: [32,36], iconAnchor: [16,18], tooltipAnchor: [0,-22] });
+export function vehicleIcon(item, selected = false, virtual = false, livePreview = false) {
+  const color = livePreview ? '#10b981' : '#2563eb';
+  const vehicle = '<svg class="transport-vehicle" viewBox="0 0 40 48" aria-hidden="true"><path d="m20 1 5 6H15Z" fill="currentColor" stroke="white" stroke-width="1.5"/><g fill="#172b45"><rect x="5" y="16" width="5" height="9" rx="2"/><rect x="30" y="16" width="5" height="9" rx="2"/><rect x="5" y="33" width="5" height="9" rx="2"/><rect x="30" y="33" width="5" height="9" rx="2"/></g><rect class="transport-body" x="9" y="10" width="22" height="36" rx="8" fill="currentColor" stroke="white" stroke-width="2"/><path d="m13 18 2-4h10l2 4-2 5H15Z" fill="white"/><rect x="14" y="26" width="12" height="10" rx="3" fill="white" opacity=".2"/><path d="M14 40h12" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>';
+  return L.divIcon({className:'vehicle-map-icon',html:`<span class="transport-marker${selected ? ' selected' : ''}${livePreview ? ' live-preview' : ''}" style="--vehicle-color:${color}" aria-label="${livePreview ? '실시간 영상 차량' : virtual ? '가상 차량' : '차량'}">${vehicle}${livePreview ? `<span class="vehicle-camera-badge">${icon('video')}</span>` : ''}</span>`,iconSize:[40,48],iconAnchor:[20,26],tooltipAnchor:[0,-28]});
 }
 export function renderVehicleDetails(item) {
   const t = item.telemetry || {}, state = vehicleStatus(item);

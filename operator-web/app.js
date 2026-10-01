@@ -1,4 +1,4 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=2';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS} from './live-telemetry.js';
@@ -324,7 +324,7 @@ for(const picker of vehiclePickers)picker.addEventListener('change',()=>{
   map.setView(position,Math.max(map.getMinZoom(),maxZoom-2));
 });
 function createMarkerEntry(item,position,{liveOnly=false}={}){
-  const marker=L.marker(position,{icon:vehicleIcon(item,liveOnly),zIndexOffset:liveOnly?1000:0}).addTo(map);
+  const marker=L.marker(position,{icon:vehicleIcon(item,liveOnly,false,Boolean(liveView&&liveView.markerKey===item?.telemetry?.external_id)),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const icon=marker.options.icon;
   const entry={marker,item,liveOnly,labelOnTrip:null,iconKey:icon?.options?`${icon.options.className}|${icon.options.html}`:null};
   marker.on('click',()=>selectVehicle(entry.item));
@@ -799,7 +799,7 @@ function selectVehicle(item){
   renderVehicleDetails(item);
   for(const entry of markers.values()){
     const active=entry.item.telemetry?.external_id===item.telemetry?.external_id;
-    setMarkerIcon(entry,vehicleIcon(entry.item,active));
+    setMarkerIcon(entry,vehicleIcon(entry.item,active,false,Boolean(liveView&&liveView.markerKey===entry.item.telemetry?.external_id)));
     entry.marker.setZIndexOffset(active?1000:0);
     const showLabel=active||entry.item?.tripStatus==='IN_PROGRESS';
     if(entry.marker.getTooltip())entry.marker.getTooltip().options.permanent=showLabel;
@@ -840,8 +840,8 @@ function render(snapshot){
     // A new Android stream reuses device:<vehicleId>; reveal it again when its
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
-    const liveSelected=liveView?.markerKey===key;
-    setMarkerIcon(entry,vehicleIcon(item,liveSelected||selected?.telemetry?.external_id===key));
+    const liveSelected=Boolean(liveView&&liveView.markerKey===key);
+    setMarkerIcon(entry,vehicleIcon(item,liveSelected||selected?.telemetry?.external_id===key,false,liveSelected));
     entry.marker.setZIndexOffset(liveSelected||selected?.telemetry?.external_id===key?1000:0);
     // Live frames own the selected marker between successful fleet polls.
     if(!isLiveOverride(liveView,key,Date.now())){
@@ -1155,6 +1155,7 @@ function stopLiveView(){
   operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
   liveView=null;lastLiveMessage=null;liveVideoSize=null;liveDetections=null;fitLivePanelToVideo();
+  refreshLiveMarkerIcons();
   document.querySelector('#live-view-title').textContent='실시간 전방 영상';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
   refreshMapLayout();
@@ -1229,6 +1230,7 @@ function openLiveView(){
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
   liveView=createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
   liveMapFollower.begin(liveView);
+  refreshLiveMarkerIcons();
   updateLiveTitle();
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
@@ -1239,6 +1241,12 @@ function openLiveView(){
   // part of the user's click instead of while the iframe is hidden.
   liveFrame.src=liveViewUrl;
   syncLiveViewButton();
+}
+function refreshLiveMarkerIcons(){
+  for(const [key,entry] of markers){
+    const live=Boolean(liveView&&liveView.markerKey===key);
+    setMarkerIcon(entry,vehicleIcon(entry.item,live||selected?.telemetry?.external_id===key,false,live));
+  }
 }
 liveFrame.addEventListener('load',event=>{
   if(livePanel.hidden)return;
