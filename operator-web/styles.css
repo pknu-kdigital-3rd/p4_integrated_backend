@@ -309,6 +309,12 @@ body.virtual-mode #navigation-rail,body.virtual-mode #operator-sidebar,body.virt
 body.virtual-mode #virtual-legend,body.virtual-mode #virtual-route-summary { display: block; }
 .road-region-label { border: 0; background: white; font-weight: 700; color: #ad2438; }
 .virtual-no-route-alarm { position: absolute; z-index: 1100; top: 20px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: 48px minmax(0,1fr) 32px; align-items: center; gap: 14px; width: min(680px,calc(100% - 32px)); padding: 18px 20px; border: 2px solid #9f1729; border-radius: 14px; background: linear-gradient(135deg,#fff4f4,#ffe4e6); color: #791323; box-shadow: 0 10px 36px rgb(93 10 26 / 34%); pointer-events: auto; animation: virtual-alarm-in 180ms ease-out, virtual-alarm-pulse 1.5s ease-in-out 2; }
+.virtual-route-progress { position: absolute; z-index: 1099; top: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100% - 32px); padding: 10px 16px; border: 1px solid #a9c6e8; border-radius: 999px; background: #f4f8ff; color: #174477; box-shadow: 0 4px 16px rgb(20 62 112 / 22%); font-size: 14px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+.virtual-route-progress[hidden] { display: none; }
+.virtual-route-progress-spinner { width: 17px; height: 17px; flex: 0 0 17px; border: 2px solid #b7d0ef; border-top-color: #1266c3; border-radius: 50%; animation: route-progress-spin .75s linear infinite; }
+@keyframes route-progress-spin { to { transform: rotate(360deg); } }
+.leaflet-container.route-calculating .virtual-no-route-alarm { top: 76px; }
+.virtual-route-context-menu button:disabled,#virtual-restrictions button:disabled { opacity: .45; cursor: wait; }
 .virtual-no-route-alarm[hidden] { display: none; }
 .virtual-no-route-alarm-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: #b42335; color: white; font-size: 30px; font-weight: 900; box-shadow: 0 0 0 6px #b4233522; }
 .virtual-no-route-alarm strong { display: block; font-size: 21px; line-height: 1.2; letter-spacing: .02em; }
@@ -340,6 +346,8 @@ body.virtual-mode #virtual-legend,body.virtual-mode #virtual-route-summary { dis
   #live-view-panel { height: 270px; max-height: 70%; } .live-view-header h2 { font-size: 11px; }
   .live-view-actions button { font-size: 10px; padding: 5px; }
   .virtual-no-route-alarm { top: 10px; grid-template-columns: 38px minmax(0,1fr) 28px; gap: 10px; padding: 13px; }
+  .virtual-route-progress { top: 10px; gap: 8px; padding: 8px 12px; font-size: 12px; }
+  .leaflet-container.route-calculating .virtual-no-route-alarm { top: 64px; }
   .virtual-no-route-alarm-icon { width: 36px; height: 36px; font-size: 24px; }
   .virtual-no-route-alarm strong { font-size: 17px; }
   .virtual-no-route-alarm p { font-size: 12px; }

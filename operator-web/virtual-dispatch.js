@@ -92,6 +92,33 @@ function syncNoRouteAlarms() {
     noRouteAlarm.dataset.key = '';
   }
 }
+const routeProgressIndicator = document.createElement('div');
+routeProgressIndicator.className = 'virtual-route-progress';
+routeProgressIndicator.setAttribute('role', 'status');
+routeProgressIndicator.setAttribute('aria-live', 'polite');
+routeProgressIndicator.hidden = true;
+routeProgressIndicator.innerHTML = '<span class="virtual-route-progress-spinner" aria-hidden="true"></span><span data-route-progress-message>경로를 계산하는 중…</span>';
+map.getContainer().append(routeProgressIndicator);
+const routeProgressMessage = routeProgressIndicator.querySelector('[data-route-progress-message]');
+const routeOperations = new Map();
+function syncRouteProgress() {
+  const busy = routeOperations.size > 0;
+  routeProgressIndicator.hidden = !busy;
+  map.getContainer().classList.toggle('route-calculating', busy);
+  routeProgressMessage.textContent = [...routeOperations.values()].at(-1) || '경로를 계산하는 중…';
+  routeContextMenu.querySelectorAll('button').forEach((button) => { button.disabled = busy; });
+  restrictionList.querySelectorAll('button').forEach((button) => { button.disabled = busy; });
+}
+function beginRouteCalculation(message = '경로를 계산하는 중…') {
+  const operation = Symbol('route calculation');
+  routeOperations.set(operation, message);
+  hideRouteContextMenu();
+  syncRouteProgress();
+  return () => {
+    routeOperations.delete(operation);
+    syncRouteProgress();
+  };
+}
 async function copyRoutingText(text) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -184,6 +211,7 @@ const roadBrush = installRoadBrush(map, {
   isActive: () => mode === 'virtual' && Boolean(scenarioId),
   onStatus: setStatus,
   async onStroke(stroke) {
+    const finishRouting = beginRouteCalculation(stroke.mode === 'paint' ? '차단 구간을 적용하고 경로를 다시 계산하는 중…' : '차단 구간을 해제하고 경로를 다시 계산하는 중…');
     const targetScenario = scenarioId;
     setStatus(stroke.mode === 'paint' ? '도로 차단을 적용하는 중…' : '도로 차단을 지우는 중…');
     try {
@@ -205,6 +233,8 @@ const roadBrush = installRoadBrush(map, {
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
       try { await loadScenarioData(); } catch {}
       throw error;
+    } finally {
+      finishRouting();
     }
   },
 });
@@ -299,7 +329,7 @@ function hideRouteContextMenu() {
   contextRoutePoint = null;
 }
 function showRouteContextMenu({ clientX, clientY }) {
-  if (mode !== 'virtual') return;
+  if (mode !== 'virtual' || routeOperations.size > 0) return;
   const container = map.getContainer();
   const bounds = container.getBoundingClientRect();
   contextRoutePoint = map.mouseEventToLatLng({ clientX, clientY });
@@ -467,6 +497,7 @@ async function replaceActiveDestination(activeTrip, destination, previousDestina
     setStatus('The active trip revision is unavailable; refresh the virtual workspace.', true);
     return;
   }
+  const finishRouting = beginRouteCalculation('목적지까지 경로를 다시 계산하는 중…');
   try {
     setStatus('Recalculating from the vehicle position to the new destination…');
     await api(`/api/v1/virtual/trips/${encodeURIComponent(activeTrip.tripId)}/destination`, {
@@ -481,6 +512,8 @@ async function replaceActiveDestination(activeTrip, destination, previousDestina
       renderPoints();
     }
     setStatus(error.message, true);
+  } finally {
+    finishRouting();
   }
 }
 async function refreshPreviewAfterPointChange(message, kind = null, previousPoint = null) {
@@ -589,6 +622,7 @@ function renderRestrictions(items) {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.textContent = 'Remove';
+    remove.disabled = routeOperations.size > 0;
     remove.addEventListener('click', () => void removeRestriction(restriction));
     row.append(label, remove);
     restrictionList.append(row);
@@ -1017,10 +1051,12 @@ async function decideRequest(requestId, action) {
 }
 async function previewRoute() {
   if (!scenarioId || !selectedVehicleId || !points.origin || !points.destination) { setStatus(uiText('Select a virtual vehicle and pick origin and destination.'), true); return; }
+  const finishRouting = beginRouteCalculation('경로를 계산하는 중…');
   try {
     draft = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/preview`, { method: 'POST', body: JSON.stringify({ selectedVehicleId, origin: points.origin, destination: points.destination, waypoints: points.waypoints, expectedRestrictionRevision: scenarioRevision }) });
     renderDraft(); setStatus(`Route preview ready for vehicle ${selectedVehicleId}.`);
   } catch (error) { draft = null; renderDraft(); showRoutingLog(error.message, error.details); setStatus(error.message, true); }
+  finally { finishRouting(); }
 }
 async function generateRequest() {
   if (!draft || dispatchSubmitting) return;
@@ -1184,6 +1220,7 @@ map.on('mousemove', event => {
 async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
   const previousDestination = kind === 'destination' ? points.destination : null;
   const label = kind === 'waypoint' ? `Waypoint ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind[0].toUpperCase() + kind.slice(1);
+  const finishRouting = beginRouteCalculation('위치를 도로에 맞추고 경로를 계산하는 중…');
   setStatus(`Snapping ${label.toLowerCase()} to the nearest road…`);
   try {
     const snapped = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(scenarioId)}/route-points/snap`, {
@@ -1203,6 +1240,8 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
   } catch (error) {
     renderPoints();
     setStatus(`Could not snap ${label.toLowerCase()}: ${error.message}`, true);
+  } finally {
+    finishRouting();
   }
 }
 async function refreshAfterRestrictionChange(message) {
@@ -1217,9 +1256,10 @@ async function refreshAfterRestrictionChange(message) {
   else setStatus(message);
 }
 async function removeRestriction(restriction) {
-  if (!scenarioId || !restriction?.restrictionId) return;
+  if (!scenarioId || !restriction?.restrictionId || routeOperations.size > 0) return;
   const label = restrictionLabel(restriction);
   if (!window.confirm(`Remove ${label}? Routes will be recalculated.`)) return;
+  const finishRouting = beginRouteCalculation('차단 구간을 해제하고 경로를 다시 계산하는 중…');
   try {
     setStatus(`Removing ${label} and recalculating affected virtual routes…`);
     await api(`/api/v1/virtual/road-restrictions/${encodeURIComponent(restriction.restrictionId)}`, {
@@ -1228,6 +1268,7 @@ async function removeRestriction(restriction) {
     });
     await refreshAfterRestrictionChange('도로 구간을 해제했습니다.');
   } catch (error) { setStatus(error.message, true); }
+  finally { finishRouting(); }
 }
 // Whether Live View was open when virtual mode closed it, so it can reopen.
 let liveViewBeforeVirtual = false;
@@ -1315,6 +1356,7 @@ document.querySelector('#virtual-add-waypoint').addEventListener('click', () => 
 map.getContainer().addEventListener('operator-map-contextrequest', (event) => showRouteContextMenu(event.detail));
 routeContextMenu.addEventListener('click', (event) => {
   event.stopPropagation();
+  if (routeOperations.size > 0) return;
   const toolButton = event.target.closest('[data-road-tool]');
   if (toolButton) {
     hideRouteContextMenu();
