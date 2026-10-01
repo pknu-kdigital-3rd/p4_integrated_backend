@@ -232,17 +232,31 @@ const roadBrush = installRoadBrush(map, {
   async onStroke(stroke) {
     const finishRouting = beginRouteCalculation(stroke.mode === 'paint' ? '차단 구간을 적용하고 경로를 다시 계산하는 중…' : '차단 구간을 해제하고 경로를 다시 계산하는 중…');
     const targetScenario = scenarioId;
+    let requestRevision = scenarioRevision;
     setStatus(stroke.mode === 'paint' ? '도로 차단을 적용하는 중…' : '도로 차단을 지우는 중…');
     try {
-      const result = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(targetScenario)}/road-restrictions/brush`, {
-        method: 'POST', body: JSON.stringify({ ...stroke, expectedRestrictionRevision: scenarioRevision }),
-      });
+      let result;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          result = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(targetScenario)}/road-restrictions/brush`, {
+            method: 'POST', body: JSON.stringify({ ...stroke, expectedRestrictionRevision: requestRevision }),
+          });
+          break;
+        } catch (error) {
+          if (error.code !== 'STALE_REVISION' || attempt === 2) throw error;
+          setStatus('도로 상태가 바뀌어 차단 작업을 다시 시도하는 중…');
+          const latestScenario = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(targetScenario)}`);
+          if (scenarioId !== targetScenario || mode !== 'virtual') return;
+          requestRevision = Number(latestScenario.restrictionRevision || 0);
+          scenarioRevision = Math.max(scenarioRevision, requestRevision);
+        }
+      }
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
       if (!result.changed) {
         setStatus(stroke.mode === 'erase' ? '브러시 범위에 해제할 차단 구간이 없습니다.' : '차단 구간을 만들지 못했습니다.', true);
         return;
       }
-      scenarioRevision = result.restrictionRevision;
+      scenarioRevision = Math.max(scenarioRevision, result.restrictionRevision);
       for (const failure of result.routingFailures || []) {
         // A confirmed NO_ROUTE already raises the centre-top alarm; the log
         // keeps only failures that left the trip state unchanged.
