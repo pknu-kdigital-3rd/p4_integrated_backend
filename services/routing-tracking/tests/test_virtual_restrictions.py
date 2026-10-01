@@ -162,6 +162,24 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
         self.assertEqual(second_leg.edge_ids, ["1:2:0", "2:3:0"])
         self.assertEqual(graph.route(1, 3).edge_ids, ["1:3:0"])
 
+    def test_precomputed_edges_apply_profile_limits_and_edge_times(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {1: (0.0, 0.0), 2: (0.0, 0.01), 3: (0.01, 0.0), 4: (0.01, 0.01)}
+        graph.turn_restrictions = set()
+        graph.adjacency = defaultdict(list)
+        low_bridge = {**empty_restrictions(), "max_height_m": 3.0}
+        graph.adjacency[1].append((2, 1000.0, 30.0, [], empty_restrictions(), 1))
+        graph.adjacency[1].append((4, 1000.0, 100.0, [], low_bridge, 2))
+        graph.adjacency[2].append((4, 1000.0, 30.0, [], empty_restrictions(), 3))
+
+        car = graph.route(1, 4)
+        self.assertEqual(car.edge_ids, ["1:4:2"])
+        # The taken edge's own speed, not the first edge leaving node 1.
+        self.assertAlmostEqual(car.edge_times[0], 1000.0 / (100 / 3.6))
+        semi = graph.route(1, 4, truck_class="semi")
+        self.assertEqual(semi.edge_ids, ["1:2:1", "2:4:3"])
+        self.assertAlmostEqual(semi.time_s, 2 * 1000.0 / (30 / 3.6))
+
     def test_reversed_edge_curve_is_normalised_to_directed_travel(self):
         graph = object.__new__(PurePythonGraph)
         graph.coords = {

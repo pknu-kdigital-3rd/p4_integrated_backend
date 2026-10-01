@@ -467,6 +467,56 @@ def _parse_float_tag(val):
 
 
 # ---------------------------------------------------------------------------
+# Precomputed routing edges. Vehicle eligibility and traversal time depend
+# only on static OSM tags and the small fixed set of profiles, so both are
+# computed once per edge instead of on every A* relaxation:
+#   - allowed_mask: bit i = profile ROUTING_PROFILES[i] may use the edge
+#     with access restrictions respected; bit i + len(ROUTING_PROFILES) =
+#     the same with access ignored (the road matching graph).
+#   - times: traversal seconds per profile, indexed like ROUTING_PROFILES.
+# Dynamic closures and penalties stay per-request overlays keyed by the
+# precomputed raw edge id.
+# ---------------------------------------------------------------------------
+ROUTING_PROFILES = (None, *TRUCK_PROFILES)  # index 0 = unrestricted car
+_PROFILE_INDEX = {name: index for index, name in enumerate(ROUTING_PROFILES)}
+_PROFILE_SPEED_CAPS = tuple(
+    TRUCK_PROFILES[name]["max_speed_kmh"] if name else GLOBAL_MAX_SPEED_KMH
+    for name in ROUTING_PROFILES
+)
+
+
+def _profile_mask_bit(truck_class, respect_access):
+    index = _PROFILE_INDEX.get(truck_class, 0)
+    return 1 << (index if respect_access else index + len(ROUTING_PROFILES))
+
+
+def _allowed_mask(restrictions):
+    mask = 0
+    for index, name in enumerate(ROUTING_PROFILES):
+        profile = TRUCK_PROFILES.get(name) if name else None
+        if edge_allowed(restrictions, profile, True):
+            mask |= 1 << index
+        if edge_allowed(restrictions, profile, False):
+            mask |= 1 << (index + len(ROUTING_PROFILES))
+    return mask
+
+
+def _profile_times(length_m, base_speed_kmh):
+    return tuple(length_m / (min(base_speed_kmh, cap) * 1000 / 3600) for cap in _PROFILE_SPEED_CAPS)
+
+
+def _osmnx_edge_restrictions(data):
+    return {
+        "max_height_m": _parse_float_tag(data.get("maxheight")),
+        "max_weight_t": _parse_float_tag(data.get("maxweight")),
+        "max_width_m": _parse_float_tag(data.get("maxwidth")),
+        "max_length_m": _parse_float_tag(data.get("maxlength")),
+        "hgv": data.get("hgv"),
+        "access": data.get("access"),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Backend 1: osmnx / networkx (preferred - use this when osmnx is installed)
 # ---------------------------------------------------------------------------
 class OsmnxGraph:
@@ -583,34 +633,50 @@ class OsmnxGraph:
             pickle.dump(self.G, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     def _prepare_edge_metadata(self):
-        """Cache parsed static restrictions, per-profile edge times, and node coords."""
-        for _u, _v, _key, data in self.G.edges(keys=True, data=True):
-            data["_p4_edge_restrictions"] = {
-                "max_height_m": _parse_float_tag(data.get("maxheight")),
-                "max_weight_t": _parse_float_tag(data.get("maxweight")),
-                "max_width_m": _parse_float_tag(data.get("maxwidth")),
-                "max_length_m": _parse_float_tag(data.get("maxlength")),
-                "hgv": data.get("hgv"),
-                "access": data.get("access"),
-            }
-            highway = data.get("highway", "residential")
-            if isinstance(highway, list):
-                highway = highway[0]
-            base_speed = ROAD_SPEED_KMH.get(highway, 30)
-            length = data.get("length", 0)
-            # Precompute traversal time (seconds) for every known profile + None (car).
-            # Keyed by truck_class string (or None for unrestricted) so route() can do a
-            # single dict lookup instead of recomputing highway/speed/division per hop.
-            edge_times: dict = {None: length / (min(base_speed, GLOBAL_MAX_SPEED_KMH) * 1000 / 3600)}
-            for pname, p in TRUCK_PROFILES.items():
-                edge_times[pname] = length / (min(base_speed, p["max_speed_kmh"]) * 1000 / 3600)
-            data["_p4_edge_times"] = edge_times
+        """Build the precomputed routing adjacency and node coords at load."""
+        self._routing_adjacency()
         self._node_coords = {n: (float(data["y"]), float(data["x"])) for n, data in self.G.nodes(data=True)}
         # Build once at graph load; dragging performs many nearest-node queries.
         import numpy as np
         from sklearn.neighbors import BallTree
         self._nearest_node_ids = list(self._node_coords)
         self._nearest_node_tree = BallTree(np.radians(list(self._node_coords.values())), metric="haversine")
+
+    def _routing_adjacency(self):
+        """Return {node: [(neighbor, edge_key, attrs, allowed_mask, times,
+        way_ids, raw_edge_id), ...]} for self.G, built once per graph.
+
+        Parallel edges stay separate entries in the graph's own order, so
+        turn legality is still evaluated per edge and A* tie-breaking is
+        unchanged. way_ids is the edge's osmid as a tuple (a list when
+        simplify_graph() merged several ways), matching turn restrictions.
+        """
+        G = self.G
+        cached = getattr(self, "_routing_adjacency_cache", None)
+        if cached is not None and cached[0] is G:
+            return cached[1]
+        adjacency = {}
+        for current, neighbors in G.adj.items():
+            entries = []
+            for neighbor, parallel in neighbors.items():
+                for edge_key, data in parallel.items():
+                    highway = data.get("highway", "residential")
+                    if isinstance(highway, list):
+                        highway = highway[0]
+                    osmid = data.get("osmid")
+                    entries.append((
+                        neighbor,
+                        edge_key,
+                        data,
+                        _allowed_mask(_osmnx_edge_restrictions(data)),
+                        _profile_times(data.get("length", 0), ROAD_SPEED_KMH.get(highway, 30)),
+                        tuple(osmid) if isinstance(osmid, list) else (osmid,),
+                        f"{current}:{neighbor}:{edge_key}",
+                    ))
+            if entries:
+                adjacency[current] = entries
+        self._routing_adjacency_cache = (G, adjacency)
+        return adjacency
 
     def nearest_node(self, lat, lon):
         _distances, indices = self._nearest_node_tree.query([[math.radians(lat), math.radians(lon)]], k=1)
@@ -664,43 +730,13 @@ class OsmnxGraph:
         penalty_lookup = _prepare_overlay_values(penalty_edge_factors)
         reverse_from, reverse_to = _initial_reverse_nodes(avoid_initial_reverse_of_edge_id) or (None, None)
         turns_by_via = _turn_restriction_index(self)
+        adjacency = self._routing_adjacency()
 
-        profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         respect_access = not getattr(self, "ignore_access_restrictions", False)
-        max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
-        max_speed_mps = max_speed_kmh * 1000 / 3600
-
-        def edge_restrictions(data):
-            cached = data.get("_p4_edge_restrictions")
-            if cached is not None:
-                return cached
-            return {
-                "max_height_m": _parse_float_tag(data.get("maxheight")),
-                "max_weight_t": _parse_float_tag(data.get("maxweight")),
-                "max_width_m": _parse_float_tag(data.get("maxwidth")),
-                "max_length_m": _parse_float_tag(data.get("maxlength")),
-                "hgv": data.get("hgv"),
-                "access": data.get("access"),
-            }
-
-        def _osmids(data):
-            # osmid is a single id, or a list if simplify_graph() merged
-            # several original ways into this one edge - turn restrictions
-            # reference a specific original way id, so treat both forms
-            # uniformly as a list to check membership against
-            oid = data.get("osmid")
-            return oid if isinstance(oid, list) else [oid]
-
-        def _edge_time_from_data(data):
-            cached_times = data.get("_p4_edge_times")
-            if cached_times is not None:
-                return cached_times[truck_class]
-            highway = data.get("highway", "residential")
-            if isinstance(highway, list):
-                highway = highway[0]
-            base_speed = ROAD_SPEED_KMH.get(highway, 30)
-            effective_speed = min(base_speed, max_speed_kmh)
-            return data.get("length", 0) / (effective_speed * 1000 / 3600)
+        profile_index = _PROFILE_INDEX.get(truck_class, 0)
+        profile_bit = _profile_mask_bit(truck_class, respect_access)
+        max_speed_mps = _PROFILE_SPEED_CAPS[profile_index] * 1000 / 3600
+        has_overlay = bool(blocked_lookup or penalty_lookup)
 
         _node_coords = getattr(self, '_node_coords', None)
         if _node_coords is None:
@@ -716,7 +752,7 @@ class OsmnxGraph:
         push_order = count()
         open_set = [(h(start_id), 0.0, next(push_order), start_state)]
         # came_from[state] = (previous_state, dist_m, edge_data,
-        #                     osmids_of_this_edge, edge_key, penalty)
+        #                     way_ids_of_this_edge, edge_key, edge_time)
         came_from = {}
         g_score = {start_state: 0.0}
         goal_state = None
@@ -734,38 +770,33 @@ class OsmnxGraph:
             # Incoming ways are kept only at via nodes, so a non-None value
             # always has a turn table.
             turn_table = turns_by_via[current] if incoming_osmids is not None else None
-            for neighbor, parallel in G.adj.get(current, {}).items():
-                track_neighbor = neighbor in turns_by_via
-                # Evaluate turn legality per parallel edge. Selecting the
-                # fastest edge before this check can discard a slower edge
-                # whose way is the only legal continuation.
-                for edge_key, attrs in parallel.items():
-                    if not edge_allowed(edge_restrictions(attrs), profile, respect_access):
+            avoid_reverse = state == start_state and reverse_from is not None and str(current) == reverse_from
+            # Parallel edges are separate entries: evaluate turn legality per
+            # edge. Selecting the fastest edge before this check can discard
+            # a slower edge whose way is the only legal continuation.
+            for neighbor, edge_key, attrs, allowed_mask, times, way_ids, raw_edge_id in adjacency.get(current, ()):
+                if not allowed_mask & profile_bit:
+                    continue
+                if avoid_reverse and str(neighbor) == reverse_to:
+                    continue
+                if has_overlay:
+                    if raw_edge_id in blocked_lookup:
                         continue
-                    if state == start_state and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
-                        continue
-                    if blocked_lookup or penalty_lookup:
-                        raw_edge_id = f"{current}:{neighbor}:{edge_key}"
-                        if raw_edge_id in blocked_lookup:
-                            continue
-                        penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
-                    else:
-                        penalty = 1.0
-                    if turn_table is not None or track_neighbor:
-                        out_osmids = tuple(_osmids(attrs))
-                        if turn_table is not None and any(
-                            (fw, tw) in turn_table
-                            for fw in incoming_osmids for tw in out_osmids
-                        ):
-                            continue  # illegal turn (from incoming way, via current, onto this way)
-                    else:
-                        out_osmids = None
-                    tentative = g + _edge_time_from_data(attrs) * penalty
-                    next_state = (neighbor, out_osmids if track_neighbor else None)
-                    if tentative < g_score.get(next_state, float("inf")):
-                        g_score[next_state] = tentative
-                        came_from[next_state] = (state, attrs.get("length", 0), attrs, out_osmids, edge_key, penalty)
-                        heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
+                    penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
+                else:
+                    penalty = 1.0
+                if turn_table is not None and any(
+                    (fw, tw) in turn_table
+                    for fw in incoming_osmids for tw in way_ids
+                ):
+                    continue  # illegal turn (from incoming way, via current, onto this way)
+                edge_time = times[profile_index] * penalty
+                tentative = g + edge_time
+                next_state = (neighbor, way_ids if neighbor in turns_by_via else None)
+                if tentative < g_score.get(next_state, float("inf")):
+                    g_score[next_state] = tentative
+                    came_from[next_state] = (state, attrs.get("length", 0), attrs, way_ids, edge_key, edge_time)
+                    heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
 
         if goal_state is None:
             return None  # no path exists under this profile's constraints (or at all)
@@ -775,11 +806,11 @@ class OsmnxGraph:
         edges = []
         state = goal_state
         while state != start_state:
-            prev_state, dist_m, edge_data, _osmids_value, edge_key, penalty = came_from[state]
-            edges.append((dist_m, edge_data, state[0], prev_state[0], edge_key, penalty))
+            prev_state, dist_m, edge_data, way_ids, edge_key, edge_time = came_from[state]
+            edges.append((dist_m, edge_data, state[0], prev_state[0], edge_key, edge_time, way_ids))
             state = prev_state
         edges.reverse()  # now in start -> goal order
-        final_incoming_ways = tuple(_osmids(edges[-1][1])) if edges else start_ways
+        final_incoming_ways = edges[-1][6] if edges else start_ways
 
         # Stitch the real road curve, not straight chords between nodes.
         # osmnx keeps the original shape points as a shapely `geometry` on
@@ -789,9 +820,8 @@ class OsmnxGraph:
         distance_m = 0.0
         time_s = 0.0
         edge_ids, edge_lengths, edge_times, physical_ids = [], [], [], []
-        for dist_m, edge_data, to_node, from_node, edge_key, penalty in edges:
+        for dist_m, edge_data, to_node, from_node, edge_key, edge_time, _way_ids in edges:
             distance_m += dist_m
-            edge_time = _edge_time_from_data(edge_data) * penalty
             time_s += edge_time
             edge_ids.append(f"{from_node}:{to_node}:{edge_key}")
             osmids = edge_data.get("osmid", edge_key)
@@ -908,6 +938,7 @@ class PurePythonGraph:
 
         self.coords = {v: nodes[v][:2] for v in vertex_ids if v in nodes}
         self.adjacency = adjacency
+        self._routing_adjacency()
         self.turn_restrictions = load_turn_restrictions()
         if self.turn_restrictions:
             print(f"Loaded {len(self.turn_restrictions)} turn restriction(s)")
@@ -918,6 +949,25 @@ class PurePythonGraph:
         for vid, (lat, lon) in self.coords.items():
             key = (int(lat / self.grid_size), int(lon / self.grid_size))
             self.grid[key].append(vid)
+
+    def _routing_adjacency(self):
+        """Return {node: [(neighbor, dist_m, geom, allowed_mask, times,
+        way_ids, raw_edge_id), ...]} for self.adjacency, built once."""
+        source = self.adjacency
+        cached = getattr(self, "_routing_adjacency_cache", None)
+        if cached is not None and cached[0] is source:
+            return cached[1]
+        adjacency = {}
+        for current, edges in source.items():
+            entries = [
+                (neighbor, dist_m, geom, _allowed_mask(restrictions), _profile_times(dist_m, base_speed),
+                 (wid,), f"{current}:{neighbor}:{wid}")
+                for neighbor, dist_m, base_speed, geom, restrictions, wid in edges
+            ]
+            if entries:
+                adjacency[current] = entries
+        self._routing_adjacency_cache = (source, adjacency)
+        return adjacency
 
     def nearest_node(self, lat, lon):
         best, best_d = None, float("inf")
@@ -963,11 +1013,13 @@ class PurePythonGraph:
         # The incoming way is part of the search state only at via nodes of
         # a turn restriction; see _turn_restriction_index.
         turns_by_via = _turn_restriction_index(self)
+        adjacency = self._routing_adjacency()
 
-        profile = TRUCK_PROFILES.get(truck_class) if truck_class else None
         respect_access = not getattr(self, "ignore_access_restrictions", False)
-        max_speed_kmh = profile["max_speed_kmh"] if profile else GLOBAL_MAX_SPEED_KMH
-        max_speed_mps = max_speed_kmh * 1000 / 3600
+        profile_index = _PROFILE_INDEX.get(truck_class, 0)
+        profile_bit = _profile_mask_bit(truck_class, respect_access)
+        max_speed_mps = _PROFILE_SPEED_CAPS[profile_index] * 1000 / 3600
+        has_overlay = bool(blocked_lookup or penalty_lookup)
 
         def h(n):
             # admissible lower-bound time estimate: straight-line distance
@@ -978,16 +1030,12 @@ class PurePythonGraph:
             lat2, lon2 = coords[goal_id]
             return haversine_m(lat1, lon1, lat2, lon2) / max_speed_mps
 
-        def edge_time_s(dist_m, base_speed_kmh):
-            effective_kmh = min(base_speed_kmh, max_speed_kmh)
-            return dist_m / (effective_kmh * 1000 / 3600)
-
         start_ways = tuple(initial_incoming_ways) if initial_incoming_ways and start_id in turns_by_via else None
         start_state = (start_id, start_ways)
         push_order = count()
         open_set = [(h(start_id), 0.0, next(push_order), start_state)]
         # came_from[state] stores (previous_state, dist_m,
-        # geometry_of_this_edge, way_id_of_this_edge, penalty) so we can
+        # geometry_of_this_edge, way_id_of_this_edge, edge_time) so we can
         # stitch the real road curve and preserve turn context.
         came_from = {}
         g_score = {start_state: 0.0}
@@ -1004,26 +1052,27 @@ class PurePythonGraph:
                 goal_state = state
                 break
             turn_table = turns_by_via[current] if incoming_ways is not None else None
-            for neighbor, dist_m, base_speed, geom, restrictions, wid in self.adjacency.get(current, []):
-                if not edge_allowed(restrictions, profile, respect_access):
+            avoid_reverse = state == start_state and reverse_from is not None and str(current) == reverse_from
+            for neighbor, dist_m, geom, allowed_mask, times, way_ids, raw_edge_id in adjacency.get(current, ()):
+                if not allowed_mask & profile_bit:
                     continue  # this truck class physically/legally cannot use this road
-                if state == start_state and reverse_from is not None and str(current) == reverse_from and str(neighbor) == reverse_to:
+                if avoid_reverse and str(neighbor) == reverse_to:
                     continue
+                wid = way_ids[0]
                 if turn_table is not None and any((fw, wid) in turn_table for fw in incoming_ways):
                     continue  # illegal turn (from the incoming way, via current, onto wid)
-                if blocked_lookup or penalty_lookup:
-                    raw_edge_id = f"{current}:{neighbor}:{wid}"
+                if has_overlay:
                     if raw_edge_id in blocked_lookup:
                         continue
                     penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                 else:
                     penalty = 1.0
-                w = edge_time_s(dist_m, base_speed) * penalty
-                tentative = g + w
-                next_state = (neighbor, (wid,) if neighbor in turns_by_via else None)
+                edge_time = times[profile_index] * penalty
+                tentative = g + edge_time
+                next_state = (neighbor, way_ids if neighbor in turns_by_via else None)
                 if tentative < g_score.get(next_state, float("inf")):
                     g_score[next_state] = tentative
-                    came_from[next_state] = (state, dist_m, geom, wid, penalty)
+                    came_from[next_state] = (state, dist_m, geom, wid, edge_time)
                     heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
 
         if goal_state is None:
@@ -1034,8 +1083,8 @@ class PurePythonGraph:
         edges = []
         state = goal_state
         while state != start_state:
-            prev_state, dist_m, geom, wid, penalty = came_from[state]
-            edges.append((dist_m, geom, prev_state[0], state[0], wid, penalty))
+            prev_state, dist_m, geom, wid, edge_time = came_from[state]
+            edges.append((dist_m, geom, prev_state[0], state[0], wid, edge_time))
             state = prev_state
         edges.reverse()  # now in start -> goal order
         final_incoming_ways = (edges[-1][4],) if edges else start_ways
@@ -1043,12 +1092,12 @@ class PurePythonGraph:
         coords_out = [list(coords[start_id])]
         distance_m = 0.0
         edge_ids, edge_lengths, edge_times, physical_ids = [], [], [], []
-        for dist_m, geom, prev, current, wid, penalty in edges:
+        for dist_m, geom, prev, current, wid, edge_time in edges:
             distance_m += dist_m
             edge_ids.append(f"{prev}:{current}:{wid}")
             physical_ids.append(str(wid))
             edge_lengths.append(dist_m)
-            edge_times.append(edge_time_s(dist_m, self.adjacency[prev][0][2]) * penalty if self.adjacency.get(prev) else 0.0)
+            edge_times.append(edge_time)
             _append_edge_geometry(coords_out, geom, coords[prev], coords[current])
 
         return RouteResult(coords_out, distance_m, g_score[goal_state], edge_ids, edge_lengths, edge_times, physical_ids,
