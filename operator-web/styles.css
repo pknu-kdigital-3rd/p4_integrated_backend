@@ -291,7 +291,7 @@ body.virtual-mode #navigation-rail,body.virtual-mode #operator-sidebar,body.virt
 .virtual-step h3 b { display: inline-grid; place-items: center; background: var(--ui-primary); color: white; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; }
 .virtual-step label,.virtual-step p { font-size: 12px; color: var(--ui-text-secondary); }
 .virtual-step button { font-size: 12px; padding: 8px 10px; }
-.virtual-toolbar-actions,.virtual-point-actions,.virtual-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.virtual-toolbar-actions,.virtual-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .virtual-actions button { flex: 1 1 100%; }
 .virtual-coordinates>div { display: grid; grid-template-columns: 60px 1fr; font-size: 12px; margin-bottom: 7px; gap: 5px; }
 .virtual-coordinates output { overflow-wrap: anywhere; color: var(--ui-text-secondary); }

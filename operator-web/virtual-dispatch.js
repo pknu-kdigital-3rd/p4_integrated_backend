@@ -843,7 +843,7 @@ function renderDraft() {
   if (!draft) {
     if (draftRouteSignature) clearRouteGroup(routeLayerGroup);
     draftRouteSignature = '';
-    document.querySelector('#virtual-draft-summary').textContent = '경로 미리보기를 실행하세요.';
+    document.querySelector('#virtual-draft-summary').textContent = '출발지와 도착지를 지정하세요.';
     document.querySelector('#virtual-dispatch').disabled = true;
     return;
   }
@@ -1388,12 +1388,10 @@ document.querySelector('#virtual-new-scenario').addEventListener('click', () => 
 removeScenarioButton.addEventListener('click', () => void removeScenario());
 document.querySelector('#virtual-new-vehicle').addEventListener('click', () => void createVehicle());
 removeVehicleButton.addEventListener('click', () => void removeVehicle());
-document.querySelector('#virtual-preview').addEventListener('click', () => void previewRoute());
 document.querySelector('#virtual-dispatch').addEventListener('click', () => void generateRequest());
 document.querySelector('#virtual-following').addEventListener('change', (event) => void setFollowing(event.target.checked));
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => void applySelectedSpeed());
-document.querySelector('#virtual-add-waypoint').addEventListener('click', () => beginRoutePointPick('waypoint'));
 map.getContainer().addEventListener('operator-map-contextrequest', (event) => showRouteContextMenu(event.detail));
 routeContextMenu.addEventListener('click', (event) => {
   event.stopPropagation();
