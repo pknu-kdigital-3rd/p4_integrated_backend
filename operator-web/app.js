@@ -12,6 +12,51 @@ const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
 let leftButtonPan=null;
+const touchPresses=new Map();
+let touchMenuTimer=0;
+let touchMenuPointerId=null;
+let touchContextMenuOpened=false;
+const cancelTouchMenu=()=>{
+  if(touchMenuTimer)window.clearTimeout(touchMenuTimer);
+  touchMenuTimer=0;
+  touchMenuPointerId=null;
+};
+mapContainer.addEventListener('pointerdown',event=>{
+  if(event.pointerType!=='touch')return;
+  touchPresses.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  // A second finger means this is a map gesture (usually pinch zoom), not a
+  // request for the right-click menu.
+  if(touchPresses.size!==1){cancelTouchMenu();return;}
+  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
+  touchMenuPointerId=event.pointerId;
+  touchMenuTimer=window.setTimeout(()=>{
+    const point=touchPresses.get(event.pointerId);
+    if(!point||touchPresses.size!==1)return;
+    touchMenuTimer=0;
+    touchMenuPointerId=null;
+    touchContextMenuOpened=true;
+    mapContainer.dispatchEvent(new CustomEvent('operator-map-contextrequest',{
+      detail:{clientX:point.x,clientY:point.y,touch:true},
+    }));
+  },550);
+});
+mapContainer.addEventListener('pointermove',event=>{
+  if(event.pointerType!=='touch')return;
+  const point=touchPresses.get(event.pointerId);
+  if(!point)return;
+  if(Math.hypot(event.clientX-point.x,event.clientY-point.y)>10&&touchMenuPointerId===event.pointerId)cancelTouchMenu();
+});
+const finishTouchPress=event=>{
+  if(event.pointerType!=='touch')return;
+  touchPresses.delete(event.pointerId);
+  if(touchMenuPointerId===event.pointerId)cancelTouchMenu();
+  if(touchContextMenuOpened){
+    touchContextMenuOpened=false;
+    map.once('click',clickEvent=>L.DomEvent.stop(clickEvent));
+  }
+};
+mapContainer.addEventListener('pointerup',finishTouchPress);
+mapContainer.addEventListener('pointercancel',finishTouchPress);
 mapContainer.addEventListener('mousedown',event=>{
   // Chromium emits compatibility mouse events after touch input. Leave those
   // to Leaflet so touch taps and pinch gestures are not treated as mouse pans.
