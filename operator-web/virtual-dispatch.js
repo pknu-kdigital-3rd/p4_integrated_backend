@@ -68,6 +68,51 @@ noRouteAlarm.setAttribute('aria-live', 'assertive');
 noRouteAlarm.hidden = true;
 noRouteAlarm.innerHTML = '<span class="virtual-no-route-alarm-icon" aria-hidden="true">!</span><div><strong>경로 없음</strong><p data-no-route-message></p></div><button type="button" aria-label="경고 닫기" title="경고 닫기">×</button>';
 map.getContainer().append(noRouteAlarm);
+const tripCompletionMessage = document.createElement('section');
+tripCompletionMessage.className = 'virtual-trip-completion';
+tripCompletionMessage.setAttribute('role', 'status');
+tripCompletionMessage.setAttribute('aria-live', 'polite');
+tripCompletionMessage.hidden = true;
+tripCompletionMessage.innerHTML = '<span class="virtual-trip-completion-icon" aria-hidden="true">✓</span><div><strong>운행 완료</strong><p data-trip-completion-text></p></div><button type="button" aria-label="완료 메시지 닫기" title="닫기">×</button>';
+map.getContainer().append(tripCompletionMessage);
+const tripCompletionText = tripCompletionMessage.querySelector('[data-trip-completion-text]');
+let completionDismissTimer = null;
+let completionScenarioId = '';
+let completionInitialized = false;
+const seenCompletedTripIds = new Set();
+tripCompletionMessage.querySelector('button').addEventListener('click', () => {
+  tripCompletionMessage.hidden = true;
+  if (completionDismissTimer) clearTimeout(completionDismissTimer);
+});
+function showTripCompletion(vehicle, tripId) {
+  tripCompletionText.textContent = `${vehicle.vehicleCode || `차량 ${vehicle.vehicleId}`} · 운행 ${tripId}을(를) 완료했습니다.`;
+  tripCompletionMessage.hidden = false;
+  if (completionDismissTimer) clearTimeout(completionDismissTimer);
+  completionDismissTimer = setTimeout(() => { tripCompletionMessage.hidden = true; }, 9000);
+}
+function syncTripCompletions(nextVehicles) {
+  if (completionScenarioId !== scenarioId) {
+    completionScenarioId = scenarioId;
+    completionInitialized = false;
+    seenCompletedTripIds.clear();
+    tripCompletionMessage.hidden = true;
+    if (completionDismissTimer) { clearTimeout(completionDismissTimer); completionDismissTimer = null; }
+  }
+  const completed = nextVehicles.filter(vehicle => vehicle.state?.trip?.state === 'COMPLETED')
+    .map(vehicle => ({ vehicle, tripId: vehicle.state?.trip?.virtualTripId ?? vehicle.state?.virtualTripId }))
+    .filter(item => item.tripId !== null && item.tripId !== undefined);
+  if (!completionInitialized) {
+    completed.forEach(item => seenCompletedTripIds.add(String(item.tripId)));
+    completionInitialized = true;
+    return;
+  }
+  for (const item of completed) {
+    const key = String(item.tripId);
+    if (seenCompletedTripIds.has(key)) continue;
+    seenCompletedTripIds.add(key);
+    showTripCompletion(item.vehicle, key);
+  }
+}
 const noRouteAlarmMessage = noRouteAlarm.querySelector('[data-no-route-message]');
 const noRouteAlarmDismiss = noRouteAlarm.querySelector('button');
 const seenNoRouteKeys = new Set();
@@ -663,7 +708,12 @@ function restrictionMapLabel(restriction) {
 }
 function renderRestrictions(items) {
   const scrollTop = restrictionList.scrollTop;
-  restrictions = Array.isArray(items) ? items.filter((restriction) => restriction?.isActive !== false) : [];
+  restrictions = Array.isArray(items) ? items.filter((restriction) => restriction?.isActive !== false).sort((a, b) => {
+    const revisionOrder = Number(b.revision ?? 0) - Number(a.revision ?? 0);
+    if (revisionOrder) return revisionOrder;
+    const aId = BigInt(a.restrictionId ?? 0), bId = BigInt(b.restrictionId ?? 0);
+    return aId === bId ? 0 : aId > bId ? -1 : 1;
+  }) : [];
   const activeBlockedIds = new Set(restrictions.filter((item) => item.kind === 'BLOCKED').map((item) => String(item.restrictionId)));
   for (const id of selectedRestrictionIds) if (!activeBlockedIds.has(id)) selectedRestrictionIds.delete(id);
   restrictionBulkToggle.hidden = !activeBlockedIds.size;
@@ -1132,6 +1182,7 @@ async function loadScenarioData() {
   scenarioRevision = Number(scenario?.restrictionRevision || 0);
   renderRestrictions(scenario?.restrictions);
   vehicles = scenarioVehicles;
+  syncTripCompletions(scenarioVehicles);
   syncNoRouteAlarms();
   renderVehicles();
   renderRequests(requests);
@@ -1143,6 +1194,7 @@ async function refreshVehiclePositions() {
   const requestedScenarioId = scenarioId;
   const latestVehicles = await api(`/api/v1/virtual/scenarios/${requestedScenarioId}/vehicles`);
   if (mode !== 'virtual' || scenarioId !== requestedScenarioId) return;
+  syncTripCompletions(latestVehicles);
   vehicles = latestVehicles;
   syncNoRouteAlarms();
   renderVehicles({ updateVehicleSelect: false });
@@ -1465,6 +1517,8 @@ async function switchMode(next) {
     if (!vehiclePollTimer) vehiclePollTimer = setInterval(() => void refreshVehiclePositions().catch((error) => setStatus(error.message, true)), 250);
   } else {
     noRouteAlarm.hidden = true;
+    tripCompletionMessage.hidden = true;
+    if (completionDismissTimer) { clearTimeout(completionDismissTimer); completionDismissTimer = null; }
     seenNoRouteKeys.clear();
     normalSectionVisibility.restore();
     window.__operatorAttachMapLayers?.();
