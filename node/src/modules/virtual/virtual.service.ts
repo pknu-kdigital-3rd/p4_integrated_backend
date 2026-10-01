@@ -4,6 +4,7 @@ import { logger } from "../../config/logger.ts";
 import type { Prisma, VirtualRoute } from "../../generated/prisma/client.ts";
 import { routingInternalClient } from "./routing-internal.client.ts";
 import { diffRoadState, rerouteReason, routeAffectedByChange } from "./virtual-reroute-scope.ts";
+import { shiftSnappedStops, waypointPassed, waypointRouteOffsets } from "./virtual-waypoint-progress.ts";
 import type {
     CommandBody,
     Coordinate,
@@ -237,6 +238,7 @@ function anchorRerouteAtPosition(
                 coordinates: [...prefix, ...coordinates.slice(1)],
             },
             directedItinerary: [continuation.edge, ...(shiftedItinerary ?? [])],
+            snappedStops: shiftSnappedStops(route.snappedStops, prefixDistanceM),
             distanceM: route.distanceM + prefixDistanceM,
             durationSec: route.durationSec + prefixDistanceM / averageSpeedMps,
         };
@@ -275,6 +277,7 @@ function anchorRerouteAtPosition(
             coordinates: [[position.lon, position.lat], ...coordinates],
         },
         directedItinerary: anchoredItinerary,
+        snappedStops: shiftSnappedStops(route.snappedStops, connectorDistanceM),
         distanceM: route.distanceM + connectorDistanceM,
         durationSec: route.durationSec + connectorDistanceM / averageSpeedMps,
     };
@@ -636,10 +639,11 @@ export const virtualService = {
                         },
                     },
                     waypoints: {
-                        create: (request.draft.waypoints as Array<{ lat: number; lon: number; clientId?: string }>).map((item, index) => ({
+                        create: (request.draft.waypoints as Array<{ lat: number; lon: number; clientId?: string }>).map((item, index, all) => ({
                             sequence: index,
                             originalPoint: json(item),
                             clientId: item.clientId ?? null,
+                            snappedOffsetM: waypointRouteOffsets(request.draft.snappedStops, all.length)[index] ?? null,
                         })),
                     },
                 },
@@ -756,9 +760,13 @@ export const virtualService = {
         const current = state ?? await activeVehicleState(vehicleId);
         if (!current) return null;
         const vehicle = await getVirtualVehicle(vehicleId);
-        const remainingWaypoints = current.trip.waypoints
-            .filter((waypoint) => waypoint.status !== "REACHED")
-            .map((waypoint) => point(waypoint.originalPoint));
+        // A waypoint behind the vehicle on its active route was already
+        // visited even if the worker has not recorded it yet; routing back to
+        // it would force a U-turn and can make a closure look impassable.
+        const pendingWaypoints = current.trip.waypoints.filter((waypoint) => waypoint.status !== "REACHED");
+        const passedWaypoints = pendingWaypoints.filter((waypoint) => waypointPassed(waypoint.snappedOffsetM, current.offsetM));
+        const remainingWaypointRows = pendingWaypoints.filter((waypoint) => !passedWaypoints.includes(waypoint));
+        const remainingWaypoints = remainingWaypointRows.map((waypoint) => point(waypoint.originalPoint));
         const currentPosition = point(current.lastPosition);
         const continuation = forwardContinuationForReroute(current, currentPosition);
         const routeInput = {
@@ -772,9 +780,9 @@ export const virtualService = {
             vehicleProfile: profileForVehicle(vehicle),
             ...(options.preloadedOverlay ?? await restrictionOverlay(current.scenarioId)),
         };
-        let route;
+        let solvedRoute;
         try {
-            route = await routingInternalClient.route({
+            solvedRoute = await routingInternalClient.route({
                 ...routeInput,
                 ...(current.currentEdgeId ? { avoidInitialReverseOfEdgeId: current.currentEdgeId } : {}),
             });
@@ -783,15 +791,34 @@ export const virtualService = {
             // continuation, but retain a legal fallback when reversing is the
             // only way to reach the destination.
             if (!(error instanceof AppError) || error.code !== "ROUTE_NOT_FOUND" || !current.currentEdgeId) throw error;
-            route = await routingInternalClient.route(routeInput);
+            solvedRoute = await routingInternalClient.route(routeInput);
         }
-        route = anchorRerouteAtPosition(route, currentPosition, continuation);
         const scenario = await getScenario(current.scenarioId);
         try {
             return await prisma.$transaction(async (tx) => {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
             if (!latestTrip || !latestTrip.stateRecord || latestTrip.stateRecord.commandVersion !== current.commandVersion
                 || (options.expectedTripRevision !== undefined && latestTrip.tripRevision !== options.expectedTripRevision)) return null;
+            const latestState = latestTrip.stateRecord;
+            // The simulation worker checkpoints a driving vehicle every tick,
+            // so a solve longer than one tick used to always lose this claim
+            // and be thrown away. The search starts at the far end of the edge
+            // the vehicle occupies, so its result stays valid while the
+            // vehicle is still on that edge: attach it at the latest
+            // checkpoint instead. Only leaving the edge requires a new solve.
+            let anchorPosition = currentPosition;
+            let anchorContinuation = continuation;
+            if (continuation) {
+                if (latestState.currentEdgeId !== current.currentEdgeId || latestState.activeRouteId !== current.activeRouteId
+                    || latestState.simStatus !== current.simStatus) {
+                    throw new VehicleCheckpointChanged("Vehicle left the edge the route was solved from");
+                }
+                anchorPosition = point(latestState.lastPosition);
+                anchorContinuation = forwardContinuationForReroute({ ...current, offsetM: latestState.offsetM }, anchorPosition);
+            } else if (latestState.lastCheckpointAt.getTime() !== current.lastCheckpointAt.getTime()) {
+                throw new VehicleCheckpointChanged("Vehicle checkpoint advanced during route calculation");
+            }
+            const route = anchorRerouteAtPosition(solvedRoute, anchorPosition, anchorContinuation);
             // System stop transitions historically incremented only the trip
             // command version. Normalize both rows while claiming the route so
             // a stopped trip can recover even if its saved versions diverged.
@@ -826,7 +853,8 @@ export const virtualService = {
                     vehicleId,
                     virtualTripId: current.virtualTripId,
                     commandVersion: current.commandVersion,
-                    lastCheckpointAt: current.lastCheckpointAt,
+                    // The checkpoint the route was just anchored to.
+                    lastCheckpointAt: latestState.lastCheckpointAt,
                     simStatus: current.simStatus,
                 },
                 data: {
@@ -844,6 +872,19 @@ export const virtualService = {
                 },
             });
             if (!stateClaim.count) throw new VehicleCheckpointChanged("Vehicle checkpoint advanced during route calculation");
+            // Waypoint offsets refer to the active route, so rewrite them for
+            // the new one; the waypoints left out of the solve were passed.
+            const now = new Date();
+            if (passedWaypoints.length) {
+                await tx.virtualTripWaypoint.updateMany({
+                    where: { waypointId: { in: passedWaypoints.map((waypoint) => waypoint.waypointId) }, status: "PENDING" },
+                    data: { status: "REACHED", reachedAt: now },
+                });
+            }
+            const offsets = waypointRouteOffsets(route.snappedStops, remainingWaypointRows.length);
+            for (const [index, waypoint] of remainingWaypointRows.entries()) {
+                await tx.virtualTripWaypoint.updateMany({ where: { waypointId: waypoint.waypointId }, data: { snappedOffsetM: offsets[index] ?? null } });
+            }
             await tx.virtualTrip.update({
                 where: { virtualTripId: current.virtualTripId },
                 data: {

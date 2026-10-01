@@ -296,6 +296,26 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
         self.assertTrue(result["directedItinerary"])
         self.assertTrue(all(not item["edgeId"].endswith(":1:2:10") for item in result["directedItinerary"]))
 
+    def test_internal_route_reports_route_offset_of_each_stop(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {1: (0.0, 0.0), 2: (0.0, 1.0), 3: (0.0, 2.0)}
+        graph.turn_restrictions = set()
+        graph.adjacency = defaultdict(list)
+        graph.grid_size = 10.0
+        graph.grid = defaultdict(list)
+        graph.grid[(0, 0)].extend(graph.coords)
+        graph.adjacency[1].append((2, 100.0, 40.0, [[0.0, 0.0], [0.0, 1.0]], empty_restrictions(), 10))
+        graph.adjacency[2].append((3, 250.0, 40.0, [[0.0, 1.0], [0.0, 2.0]], empty_restrictions(), 11))
+        main.graph = graph
+
+        result = main._internal_route(main.InternalRouteRequest(
+            origin=main.InternalCoordinate(lat=0.0, lon=0.0),
+            waypoints=[main.InternalWaypoint(lat=0.0, lon=1.0)],
+            destination=main.InternalCoordinate(lat=0.0, lon=2.0),
+        ))
+
+        self.assertEqual([stop["routeOffsetM"] for stop in result["snappedStops"]], [0.0, 100.0, 350.0])
+
 
 if __name__ == "__main__":
     unittest.main()

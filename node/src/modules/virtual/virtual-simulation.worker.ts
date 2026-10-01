@@ -1,6 +1,7 @@
 import { logger } from "../../config/logger.ts";
 import { prisma } from "../../infrastructure/database/prisma.ts";
 import { virtualService } from "./virtual.service.ts";
+import { waypointPassed } from "./virtual-waypoint-progress.ts";
 
 type RouteGeometry = { type?: string; coordinates?: unknown };
 type Point = { lat: number; lon: number };
@@ -91,7 +92,10 @@ async function acceptDueRequests() {
 async function advanceVehicles() {
     const states = await prisma.virtualVehicleState.findMany({
         where: { simStatus: "DRIVING" },
-        include: { activeRoute: true, trip: true },
+        include: {
+            activeRoute: true,
+            trip: { include: { waypoints: { where: { status: "PENDING" }, select: { waypointId: true, snappedOffsetM: true } } } },
+        },
         take: 200,
     });
     const scenarios = [...new Set(states.map((state) => state.scenarioId.toString()))].map((value) => BigInt(value));
@@ -181,13 +185,32 @@ async function advanceVehicles() {
             await prisma.$transaction([
                 prisma.virtualVehicleState.update({ where: { vehicleId: state.vehicleId }, data: { simStatus: "COMPLETED", simElapsedMs: BigInt(Math.round(durationMs)), currentEdgeId: null, currentPhysicalSegmentId: null, offsetM: position.offsetM, lastPosition: position.position, lastCheckpointAt: new Date(now), updatedAt: new Date(now) } }),
                 prisma.virtualTrip.update({ where: { virtualTripId: state.virtualTripId }, data: { state: "COMPLETED", endedAt: new Date(now), updatedAt: new Date(now) } }),
+                prisma.virtualTripWaypoint.updateMany({ where: { virtualTripId: state.virtualTripId, status: "PENDING" }, data: { status: "REACHED", reachedAt: new Date(now) } }),
                 prisma.vehicle.update({ where: { vehicleId: state.vehicleId }, data: { vehicleStatus: "READY" } }),
             ]);
             continue;
         }
-        await prisma.virtualVehicleState.updateMany({
+        const checkpoint = {
             where: { vehicleId: state.vehicleId, virtualTripId: state.virtualTripId, simStatus: "DRIVING", commandVersion: state.commandVersion },
             data: { simElapsedMs: BigInt(Math.round(totalElapsedMs)), currentEdgeId, currentPhysicalSegmentId, offsetM: position.offsetM, lastPosition: position.position, lastCheckpointAt: new Date(now), updatedAt: new Date(now) },
+        };
+        const reachedWaypointIds = state.trip.waypoints
+            .filter((waypoint) => waypointPassed(waypoint.snappedOffsetM, position.offsetM))
+            .map((waypoint) => waypoint.waypointId);
+        if (!reachedWaypointIds.length) {
+            await prisma.virtualVehicleState.updateMany(checkpoint);
+            continue;
+        }
+        // Waypoint offsets belong to the route read this tick. A reroute
+        // committed meanwhile bumps commandVersion, which rejects this
+        // checkpoint, so the stale offsets are never applied to a new route.
+        await prisma.$transaction(async (tx) => {
+            const claimed = await tx.virtualVehicleState.updateMany(checkpoint);
+            if (!claimed.count) return;
+            await tx.virtualTripWaypoint.updateMany({
+                where: { waypointId: { in: reachedWaypointIds }, status: "PENDING" },
+                data: { status: "REACHED", reachedAt: new Date(now) },
+            });
         });
     }
 }

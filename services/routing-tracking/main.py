@@ -349,6 +349,9 @@ def _internal_route(req: InternalRouteRequest, cancel_event=None):
             "lat": snapped[0] if snapped else stop.lat,
             "lon": snapped[1] if snapped else stop.lon,
             "nodeId": str(node_id),
+            # Distance along the returned route at which this stop is reached;
+            # set below once the leg ending here is routed.
+            "routeOffsetM": 0.0,
         })
         if index == 0:
             continue
@@ -397,6 +400,7 @@ def _internal_route(req: InternalRouteRequest, cancel_event=None):
             route_coords.extend(coords)
         distance_m += result.distance_m
         duration_s += result.time_s
+        snapped_stops[index]["routeOffsetM"] = distance_m
         # Adapter edge IDs are graph-version scoped at this boundary so a
         # route snapshot cannot accidentally be applied to a rebuilt graph.
         for edge_index, raw_edge_id in enumerate(getattr(result, "edge_ids", [])):
