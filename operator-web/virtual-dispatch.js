@@ -53,6 +53,40 @@ routingLogOverlay.hidden = true;
 routingLogOverlay.innerHTML = '<header><strong>라우팅 로그</strong><div><button type="button" data-copy-routing-log>복사</button><button type="button" data-clear-routing-log aria-label="로그 지우기">지우기</button></div></header><ol></ol>';
 map.getContainer().append(routingLogOverlay);
 const routingLogList = routingLogOverlay.querySelector('ol');
+const noRouteAlarm = document.createElement('section');
+noRouteAlarm.className = 'virtual-no-route-alarm';
+noRouteAlarm.setAttribute('role', 'alert');
+noRouteAlarm.setAttribute('aria-live', 'assertive');
+noRouteAlarm.hidden = true;
+noRouteAlarm.innerHTML = '<span class="virtual-no-route-alarm-icon" aria-hidden="true">!</span><div><strong>경로 없음</strong><p data-no-route-message></p></div><button type="button" aria-label="경고 닫기" title="경고 닫기">×</button>';
+map.getContainer().append(noRouteAlarm);
+const noRouteAlarmMessage = noRouteAlarm.querySelector('[data-no-route-message]');
+const noRouteAlarmDismiss = noRouteAlarm.querySelector('button');
+const seenNoRouteKeys = new Set();
+noRouteAlarmDismiss.addEventListener('click', () => { noRouteAlarm.hidden = true; });
+function showNoRouteAlarm(vehicleId, tripId, message) {
+  const vehicle = vehicles.find((item) => String(item.vehicleId) === String(vehicleId));
+  const label = vehicle?.vehicleCode || `차량 ${vehicleId}`;
+  noRouteAlarmMessage.textContent = `${label}${tripId ? ` · 운행 ${tripId}` : ''} — ${message || '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.'}`;
+  noRouteAlarm.hidden = false;
+}
+function syncNoRouteAlarms() {
+  const currentKeys = new Set();
+  for (const vehicle of vehicles) {
+    if (vehicle.state?.simStatus !== 'NO_ROUTE' || ![
+      'No viable path after road restriction',
+      'No legal route under the current road state',
+    ].includes(vehicle.state?.blockedReason)) continue;
+    const tripId = vehicle.state.virtualTripId || vehicle.state.trip?.virtualTripId || '';
+    const key = `${scenarioId}:${vehicle.vehicleId}:${tripId}`;
+    currentKeys.add(key);
+    if (!seenNoRouteKeys.has(key)) {
+      seenNoRouteKeys.add(key);
+      showNoRouteAlarm(vehicle.vehicleId, tripId, '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.');
+    }
+  }
+  for (const key of seenNoRouteKeys) if (!currentKeys.has(key)) seenNoRouteKeys.delete(key);
+}
 async function copyRoutingText(text) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(text);
@@ -155,6 +189,11 @@ const roadBrush = installRoadBrush(map, {
       scenarioRevision = result.restrictionRevision;
       for (const failure of result.routingFailures || []) {
         showRoutingLog(failure.message || failure.code || '경로 계산에 실패했습니다.', failure.details, failure);
+        if (failure.stateChangedToNoRoute) {
+          const key = `${targetScenario}:${failure.vehicleId}:${failure.tripId}`;
+          seenNoRouteKeys.add(key);
+          showNoRouteAlarm(failure.vehicleId, failure.tripId, '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.');
+        }
       }
       await refreshAfterRestrictionChange(stroke.mode === 'paint' ? '도로 차단을 적용했습니다.' : '지운 영역의 도로 차단을 해제했습니다.');
     } catch (error) {
@@ -951,6 +990,7 @@ async function loadScenarioData() {
   scenarioRevision = Number(scenario?.restrictionRevision || 0);
   renderRestrictions(scenario?.restrictions);
   vehicles = scenarioVehicles;
+  syncNoRouteAlarms();
   renderVehicles();
   renderRequests(requests);
   renderEvents(events);
@@ -1213,6 +1253,8 @@ async function switchMode(next) {
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
     if (!vehiclePollTimer) vehiclePollTimer = setInterval(() => void refreshVehiclePositions().catch((error) => setStatus(error.message, true)), 250);
   } else {
+    noRouteAlarm.hidden = true;
+    seenNoRouteKeys.clear();
     normalSectionVisibility.restore();
     window.__operatorAttachMapLayers?.();
     if (liveViewBeforeVirtual) { liveViewBeforeVirtual = false; window.__operatorResumeLiveView?.(); }

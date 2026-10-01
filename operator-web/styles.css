@@ -307,6 +307,15 @@ body.virtual-mode #navigation-rail,body.virtual-mode #operator-sidebar,body.virt
 #virtual-legend,#virtual-route-summary { display: none; }
 body.virtual-mode #virtual-legend,body.virtual-mode #virtual-route-summary { display: block; }
 .road-region-label { border: 0; background: white; font-weight: 700; color: #ad2438; }
+.virtual-no-route-alarm { position: absolute; z-index: 1100; top: 20px; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: 48px minmax(0,1fr) 32px; align-items: center; gap: 14px; width: min(680px,calc(100% - 32px)); padding: 18px 20px; border: 2px solid #9f1729; border-radius: 14px; background: linear-gradient(135deg,#fff4f4,#ffe4e6); color: #791323; box-shadow: 0 10px 36px rgb(93 10 26 / 34%); pointer-events: auto; animation: virtual-alarm-in 180ms ease-out, virtual-alarm-pulse 1.5s ease-in-out 2; }
+.virtual-no-route-alarm[hidden] { display: none; }
+.virtual-no-route-alarm-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: #b42335; color: white; font-size: 30px; font-weight: 900; box-shadow: 0 0 0 6px #b4233522; }
+.virtual-no-route-alarm strong { display: block; font-size: 21px; line-height: 1.2; letter-spacing: .02em; }
+.virtual-no-route-alarm p { margin: 5px 0 0; font-size: 14px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.virtual-no-route-alarm button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: #b4233514; color: #791323; font-size: 25px; cursor: pointer; }
+.virtual-no-route-alarm button:hover { background: #b4233526; }
+@keyframes virtual-alarm-in { from { opacity: 0; translate: 0 -12px; } to { opacity: 1; translate: 0 0; } }
+@keyframes virtual-alarm-pulse { 0%,100% { box-shadow: 0 10px 36px rgb(93 10 26 / 34%); } 50% { box-shadow: 0 10px 42px rgb(180 35 53 / 58%),0 0 0 7px #b4233524; } }
 
 /* Responsive composition */
 @media(max-width:1199px) {
@@ -329,4 +338,8 @@ body.virtual-mode #virtual-legend,body.virtual-mode #virtual-route-summary { dis
   #virtual-route-summary { right: 10px; padding: 12px; }#route-summary-values { font-size: 12px; }
   #live-view-panel { height: 270px; max-height: 70%; } .live-view-header h2 { font-size: 11px; }
   .live-view-actions button { font-size: 10px; padding: 5px; }
+  .virtual-no-route-alarm { top: 10px; grid-template-columns: 38px minmax(0,1fr) 28px; gap: 10px; padding: 13px; }
+  .virtual-no-route-alarm-icon { width: 36px; height: 36px; font-size: 24px; }
+  .virtual-no-route-alarm strong { font-size: 17px; }
+  .virtual-no-route-alarm p { font-size: 12px; }
 }
