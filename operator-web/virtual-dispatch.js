@@ -238,6 +238,10 @@ const roadBrush = installRoadBrush(map, {
         method: 'POST', body: JSON.stringify({ ...stroke, expectedRestrictionRevision: scenarioRevision }),
       });
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
+      if (!result.changed) {
+        setStatus(stroke.mode === 'erase' ? '브러시 범위에 해제할 차단 구간이 없습니다.' : '차단 구간을 만들지 못했습니다.', true);
+        return;
+      }
       scenarioRevision = result.restrictionRevision;
       for (const failure of result.routingFailures || []) {
         // A confirmed NO_ROUTE already raises the centre-top alarm; the log
@@ -1340,7 +1344,6 @@ async function refreshAfterRestrictionChange(message) {
 async function removeRestriction(restriction) {
   if (!scenarioId || !restriction?.restrictionId || routeOperations.size > 0) return;
   const label = restrictionLabel(restriction);
-  if (!window.confirm(`Remove ${label}? Routes will be recalculated.`)) return;
   const finishRouting = beginRouteCalculation('차단 구간을 해제하고 경로를 다시 계산하는 중…');
   try {
     setStatus(`Removing ${label} and recalculating affected virtual routes…`);
@@ -1371,7 +1374,6 @@ restrictionSelectAll.addEventListener('click', () => {
 restrictionBulkRemove.addEventListener('click', async () => {
   if (!scenarioId || !selectedRestrictionIds.size || routeOperations.size > 0) return;
   const ids = [...selectedRestrictionIds];
-  if (!window.confirm(`해당 차단 구간 ${ids.length}개를 모두 해제할까요? 영향을 받는 경로를 다시 계산합니다.`)) return;
   const targetScenario = scenarioId;
   const finishRouting = beginRouteCalculation('차단 구간을 일괄 해제하고 경로를 다시 계산하는 중…');
   try {

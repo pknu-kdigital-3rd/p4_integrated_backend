@@ -42,7 +42,10 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
     if (!isActive() || !tool || busy) return;
     const bounds = container.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
-      if (stroke) void finish(); else clearPreview();
+      // Keep the active stroke until mouseup. Finishing as soon as the pointer
+      // crossed the map edge made the rest of a fast drag disappear while the
+      // operator was still holding the button.
+      if (!stroke) clearPreview();
       return;
     }
     const point = position(event);
@@ -57,7 +60,7 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
   });
   document.addEventListener('mouseup', event => { if (event.button === 0) void finish(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && tool) setTool(null); });
-  window.addEventListener('blur', cancel);
-  map.on('zoomstart', cancel);
+  window.addEventListener('blur', () => { if (stroke) void finish(); else clearPreview(); });
+  map.on('zoomstart', () => { if (stroke) void finish(); else clearPreview(); });
   return { setTool, handleMouseDown, reset() { cancel(); tool = null; container.style.cursor = ''; } };
 }
