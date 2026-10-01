@@ -67,6 +67,7 @@ noRouteAlarmDismiss.addEventListener('click', () => { noRouteAlarm.hidden = true
 function showNoRouteAlarm(vehicleId, tripId, message) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === String(vehicleId));
   const label = vehicle?.vehicleCode || `차량 ${vehicleId}`;
+  noRouteAlarm.dataset.key = `${scenarioId}:${vehicleId}:${tripId || ''}`;
   noRouteAlarmMessage.textContent = `${label}${tripId ? ` · 운행 ${tripId}` : ''} — ${message || '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.'}`;
   noRouteAlarm.hidden = false;
 }
@@ -86,6 +87,10 @@ function syncNoRouteAlarms() {
     }
   }
   for (const key of seenNoRouteKeys) if (!currentKeys.has(key)) seenNoRouteKeys.delete(key);
+  if (noRouteAlarm.dataset.key && !currentKeys.has(noRouteAlarm.dataset.key)) {
+    noRouteAlarm.hidden = true;
+    noRouteAlarm.dataset.key = '';
+  }
 }
 async function copyRoutingText(text) {
   if (navigator.clipboard?.writeText) {
@@ -1000,6 +1005,7 @@ async function refreshVehiclePositions() {
   const latestVehicles = await api(`/api/v1/virtual/scenarios/${requestedScenarioId}/vehicles`);
   if (mode !== 'virtual' || scenarioId !== requestedScenarioId) return;
   vehicles = latestVehicles;
+  syncNoRouteAlarms();
   renderVehicles({ updateVehicleSelect: false });
 }
 async function decideRequest(requestId, action) {
