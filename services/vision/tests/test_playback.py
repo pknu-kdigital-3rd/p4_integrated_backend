@@ -126,30 +126,37 @@ class LiveResyncTests(unittest.TestCase):
 
 
 class SingleViewerSlotTests(unittest.TestCase):
-    """A rejected second viewer must not release the active viewer's slot."""
+    """The newest viewer takes the single slot; the replaced one is told so."""
 
-    def test_rejected_viewer_leaves_the_active_viewer_connected(self):
+    OPEN = {
+        "type": "open",
+        "session_id": None,
+        "epoch": 0,
+        "last_presented_seq": -1,
+        "decoder_state_preserved": False,
+    }
+
+    def test_newest_viewer_takes_over_and_the_old_one_is_closed_with_4001(self):
         from starlette.websockets import WebSocketDisconnect
 
         state = AppState()
         state.current_epoch = 3
-        client = _make_client(state)
-        open_message = {
-            "type": "open",
-            "session_id": None,
-            "epoch": 0,
-            "last_presented_seq": -1,
-            "decoder_state_preserved": False,
-        }
-        with client.websocket_connect("/ws/playback") as active:
-            active.send_json(open_message)
-            self.assertEqual(active.receive_json()["type"], "session")
+        # Both connections must share one event loop, as under uvicorn; the
+        # TestClient context manager provides that.
+        with _make_client(state) as client, client.websocket_connect("/ws/playback") as first:
+            first.send_json(self.OPEN)
+            self.assertEqual(first.receive_json()["type"], "session")
             with client.websocket_connect("/ws/playback") as second:
-                second.send_json(open_message)
+                second.send_json(self.OPEN)
+                self.assertEqual(second.receive_json()["type"], "session")
                 with self.assertRaises(WebSocketDisconnect) as closed:
-                    second.receive_json()
-                self.assertEqual(closed.exception.code, 1008)
-            self.assertTrue(state.viewer_connected)
+                    while True:
+                        first.receive_json()
+                self.assertEqual(closed.exception.code, playback.VIEWER_REPLACED_CLOSE_CODE)
+                # The replaced viewer leaving must not free the new owner's slot.
+                time.sleep(0.1)
+                self.assertTrue(state.viewer_connected)
+                self.assertIs(state.viewer_websocket is not None, True)
         deadline = time.monotonic() + 1
         while state.viewer_connected and time.monotonic() < deadline:
             time.sleep(0.01)

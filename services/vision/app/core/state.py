@@ -133,6 +133,11 @@ class AppState:
     current_epoch: int = 0
     session_id: str | None = None
     viewer_connected: bool = False
+    # Identifies the connection that owns the single viewer slot. A newer
+    # viewer takes the slot over; the token stops the replaced connection
+    # from sending or releasing the slot afterwards.
+    viewer_token: int = 0
+    viewer_websocket: Any | None = None
     last_presented: tuple[int, int] | None = None
     resync_generation: int = 0
     inference_queue: asyncio.Queue[InferenceFrame] = field(

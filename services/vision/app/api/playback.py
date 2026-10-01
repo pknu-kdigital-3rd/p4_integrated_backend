@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from time import monotonic
 
@@ -22,6 +23,22 @@ logger = logging.getLogger("uvicorn.error")
 SEQUENCE_GAP_RESYNC_SECONDS = 2.0
 # How often the sender wakes up while waiting, to check for such a gap.
 WAIT_POLL_SECONDS = 0.5
+# Close code sent to a viewer replaced by a newer one. The page shows it as
+# "opened elsewhere" and does not reconnect, so two viewers cannot fight.
+VIEWER_REPLACED_CLOSE_CODE = 4001
+
+
+def _owns_viewer_slot(state: AppState, token: int) -> bool:
+    return state.viewer_connected and state.viewer_token == token
+
+
+async def _release_viewer_slot(state: AppState, token: int) -> None:
+    """Free the slot, unless a newer viewer has taken it over meanwhile."""
+    async with state.result_condition:
+        if state.viewer_token == token:
+            state.viewer_connected = False
+            state.viewer_websocket = None
+        state.result_condition.notify_all()
 
 
 def _frame_telemetry(state: AppState, source: dict) -> dict:
@@ -96,7 +113,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
 
 
 async def _wait_for_item(
-    state: AppState, epoch: int, seq: int, timeout: float | None = None
+    state: AppState, epoch: int, seq: int, timeout: float | None = None, token: int | None = None
 ) -> PlaybackItem | None:
     """Wait for a result; None on epoch change, disconnect, fault or timeout."""
     deadline = None if timeout is None else monotonic() + timeout
@@ -104,7 +121,7 @@ async def _wait_for_item(
         while True:
             if state.current_epoch != epoch:
                 return None
-            if not state.viewer_connected:
+            if not state.viewer_connected or (token is not None and state.viewer_token != token):
                 return None
             item = state.result_store.get((epoch, seq))
             if item is not None:
@@ -139,11 +156,14 @@ async def _request_resync(state: AppState, reason: str) -> None:
 
 
 async def _receive_controls(
-    websocket: WebSocket, state: AppState, epoch_ref: list[int]
+    websocket: WebSocket, state: AppState, epoch_ref: list[int], token: int
 ) -> None:
     try:
         while True:
             message = json.loads(await websocket.receive_text())
+            if state.viewer_token != token:
+                # Replaced by a newer viewer: its controls own the stream now.
+                return
             message_type = message.get("type")
             if message_type == "presented":
                 epoch = int(message.get("epoch", -1))
@@ -159,9 +179,7 @@ async def _receive_controls(
             elif message_type == "stop":
                 logger.info("playback stop received client=%s", websocket.client)
                 await state.feed_commands.put({"type": "stop"})
-                state.viewer_connected = False
-                async with state.result_condition:
-                    state.result_condition.notify_all()
+                await _release_viewer_slot(state, token)
                 return
             elif message_type == "open":
                 # OPEN is consumed before this task starts.  Ignore duplicate
@@ -169,9 +187,7 @@ async def _receive_controls(
                 continue
     except (WebSocketDisconnect, asyncio.IncompleteReadError, json.JSONDecodeError):
         logger.info("playback control channel disconnected client=%s", websocket.client)
-        state.viewer_connected = False
-        async with state.result_condition:
-            state.result_condition.notify_all()
+        await _release_viewer_slot(state, token)
 
 
 @router.websocket("/ws/playback")
@@ -179,11 +195,9 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
     await websocket.accept()
     logger.info("playback websocket accepted client=%s", websocket.client)
     control_task: asyncio.Task | None = None
-    # Only the connection that took the single viewer slot may release it.
-    # A rejected second viewer used to clear viewer_connected on its way out,
-    # which stopped the active viewer, and the two then knocked each other
-    # off in an endless reconnect loop.
-    owns_slot = False
+    # Only the connection that holds the single viewer slot may release it
+    # (see _release_viewer_slot); a takeover hands the slot to a new token.
+    token: int | None = None
     try:
         first = json.loads(await websocket.receive_text())
         if first.get("type") != "open":
@@ -191,12 +205,23 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
             return
 
         requested_session = first.get("session_id")
-        # A live viewer owns the single playback slot. Check this before
-        # comparing session IDs so a stale ID from sessionStorage cannot
-        # mutate the active session or turn a reconnect into a close loop.
+        # One viewer owns the playback slot. The newest viewer takes it over,
+        # so a forgotten background tab cannot block the one being watched;
+        # the replaced viewer is closed with VIEWER_REPLACED_CLOSE_CODE and
+        # does not reconnect on its own.
         if state.viewer_connected:
-            await websocket.close(code=1008, reason="shared playback session is in use")
-            return
+            previous = state.viewer_websocket
+            async with state.result_condition:
+                state.viewer_token += 1
+                state.viewer_connected = False
+                state.viewer_websocket = None
+                state.result_condition.notify_all()
+            logger.info("playback viewer replaced by client=%s", websocket.client)
+            if previous is not None:
+                with suppress(Exception):
+                    await previous.close(
+                        code=VIEWER_REPLACED_CLOSE_CODE, reason="replaced by another viewer"
+                    )
         session_mismatch = (
             state.session_id is not None
             and bool(requested_session)
@@ -204,8 +229,10 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
         )
         if state.session_id is None:
             state.session_id = requested_session or uuid.uuid4().hex
+        state.viewer_token += 1
+        token = state.viewer_token
         state.viewer_connected = True
-        owns_slot = True
+        state.viewer_websocket = websocket
 
         requested_epoch = int(first.get("epoch", state.current_epoch))
         requested_seq = int(first.get("last_presented_seq", -1)) + 1
@@ -279,7 +306,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
 
         epoch_ref = [requested_epoch]
         control_task = asyncio.create_task(
-            _receive_controls(websocket, state, epoch_ref)
+            _receive_controls(websocket, state, epoch_ref, token)
         )
         next_seq = requested_seq
         gap_since: float | None = None
@@ -296,7 +323,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                 if state.resync_generation != seen_resync_generation:
                     sent_sizes.clear()
                     seen_resync_generation = state.resync_generation
-                while state.viewer_connected:
+                while _owns_viewer_slot(state, token):
                     ack = state.last_presented
                     if ack is not None:
                         for key in list(sent_sizes):
@@ -311,10 +338,10 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                         break
                     await state.result_condition.wait()
             item = await _wait_for_item(
-                state, epoch_ref[0], next_seq, timeout=WAIT_POLL_SECONDS
+                state, epoch_ref[0], next_seq, timeout=WAIT_POLL_SECONDS, token=token
             )
             if item is None:
-                if not state.viewer_connected:
+                if not _owns_viewer_slot(state, token):
                     break
                 if state.fault:
                     if not reported_fault:
@@ -359,10 +386,15 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
             next_seq += 1
     except (WebSocketDisconnect, asyncio.IncompleteReadError):
         logger.info("playback websocket disconnected client=%s", websocket.client)
+    except RuntimeError:
+        # A send can race with the takeover closing this socket.
+        if token is None or state.viewer_token == token:
+            raise
+        logger.info("playback websocket replaced client=%s", websocket.client)
     finally:
         if control_task is not None:
             control_task.cancel()
             await asyncio.gather(control_task, return_exceptions=True)
-        if owns_slot:
-            state.viewer_connected = False
+        if token is not None:
+            await _release_viewer_slot(state, token)
         logger.info("playback websocket closed client=%s", websocket.client)

@@ -181,6 +181,8 @@
   // decoder never returns a frame for would leave it locked forever, so
   // rejoin live when a decode has been outstanding this long.
   const DECODE_STALL_MS = 3000;
+  // Server close code for a viewer replaced by a newer one (playback.py).
+  const VIEWER_REPLACED_CLOSE_CODE = 4001;
   let decodeStartedAt = 0;
   const telemetryStateEl = document.getElementById('telemetry-state');
   const telemetryFieldsEl = document.getElementById('telemetry-fields');
@@ -849,6 +851,13 @@
     };
     ws.onclose = (event) => {
       if (stopped || socket !== ws) return;
+      if (event.code === VIEWER_REPLACED_CLOSE_CODE) {
+        // A newer Live View took over the single viewer slot. Reconnecting
+        // here would take it back and the two pages would fight.
+        stop();
+        setStatus('Live View opened elsewhere — press Start to take over', '#fc6');
+        return;
+      }
       const detail = event.reason ? ` ${event.code}: ${event.reason}` : ` (${event.code})`;
       setStatus(`Playback connection lost${detail}; continuing local buffer`, '#fc6');
       scheduleReconnect();
