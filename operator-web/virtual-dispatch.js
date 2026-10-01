@@ -219,7 +219,7 @@ function renderEndpointSnapPreview(context, snapped) {
   endpointSnapPreviewLayerGroup.eachLayer(layer => {
     if (layer !== context.snapCircle && layer !== context.snapRipple) endpointSnapPreviewLayerGroup.removeLayer(layer);
   });
-  const color = context.kind === 'origin' ? '#16a34a' : '#dc2626';
+  const color = context.kind === 'origin' ? '#16a34a' : context.kind === 'destination' ? '#dc2626' : '#f59e0b';
   const nearbyRoads = snapped.nearbyRoadGeometry?.type === 'MultiLineString'
     ? snapped.nearbyRoadGeometry.coordinates
     : snapped.roadGeometry?.type === 'LineString' ? [snapped.roadGeometry.coordinates] : [];
@@ -244,7 +244,13 @@ function renderEndpointSnapPreview(context, snapped) {
     }).addTo(endpointSnapPreviewLayerGroup);
     animateSnapCircle(context);
   }
-  document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
+  if (context.kind === 'waypoint') {
+    const waypoints = points.waypoints.slice();
+    if (waypoints[context.index]) waypoints[context.index] = { lat: snapped.lat, lon: snapped.lon };
+    document.querySelector('#virtual-waypoints').textContent = waypoints.map(formatPoint).join(' · ');
+  } else {
+    document.querySelector(`#virtual-${context.kind}`).textContent = formatPoint({ lat: snapped.lat, lon: snapped.lon });
+  }
 }
 function animateSnapCircle(context) {
   const startedAt = performance.now();
@@ -298,8 +304,8 @@ function queueEndpointSnapPreview(context, marker) {
     });
   }, delay);
 }
-function startEndpointDrag(kind, marker) {
-  endpointDrag = { kind, marker, requestId: 0, lastRequestAt: 0, timer: null };
+function startEndpointDrag(kind, marker, index = null) {
+  endpointDrag = { kind, marker, index, requestId: 0, lastRequestAt: 0, timer: null };
   marker.setOpacity(0.65);
   endpointSnapPreviewLayerGroup.clearLayers();
   const position = marker.getLatLng();
@@ -385,17 +391,17 @@ function drawPoint(kind, point, index = 0) {
     autoPan: true,
   });
   if (kind === 'waypoint') marker.bindTooltip(`Waypoint ${index + 1}`);
-  marker.on('dragstart', () => marker.getElement()?.classList.add('is-dragging'));
-  if (kind !== 'waypoint') {
-    marker.on('dragstart', () => startEndpointDrag(kind, marker));
-    marker.on('drag', () => {
-      if (endpointDrag?.marker === marker) queueEndpointSnapPreview(endpointDrag, marker);
-    });
-  }
+  marker.on('dragstart', () => {
+    marker.getElement()?.classList.add('is-dragging');
+    startEndpointDrag(kind, marker, kind === 'waypoint' ? index : null);
+  });
+  marker.on('drag', () => {
+    if (endpointDrag?.marker === marker) queueEndpointSnapPreview(endpointDrag, marker);
+  });
   marker.on('dragend', () => {
     marker.getElement()?.classList.remove('is-dragging');
     const position = marker.getLatLng();
-    if (kind !== 'waypoint') finishEndpointDrag(marker);
+    finishEndpointDrag(marker);
     void snapAndSetRoutePoint(kind, { lat: position.lat, lon: position.lng }, index);
   });
   marker.on('add', () => {
