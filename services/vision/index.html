@@ -722,7 +722,7 @@
           if (typeof overlayCtx.roundRect === 'function') {
             overlayCtx.beginPath(); overlayCtx.roundRect(labelX, labelY, labelWidth, labelHeight, 4); overlayCtx.fill();
           } else overlayCtx.fillRect(labelX, labelY, labelWidth, labelHeight);
-          overlayCtx.fillStyle = labelTextColor;
+          overlayCtx.fillStyle = '#073b2b';
           overlayCtx.textBaseline = 'middle';
           const textY = labelY + labelHeight / 2;
           overlayCtx.font = `700 ${classFontSize}px sans-serif`;
