@@ -146,6 +146,11 @@
   let targetSeconds = 2, lowWatermarkSeconds = 0.5, maxBufferBytes = 64 * 1024 * 1024;
   // Queued video beyond this is drained without source pacing (see the decoder output).
   const MAX_LIVE_LAG_S = 0.25;
+  // pump() decodes one chunk at a time and waits for its frame. A chunk the
+  // decoder never returns a frame for would leave it locked forever, so
+  // rejoin live when a decode has been outstanding this long.
+  const DECODE_STALL_MS = 3000;
+  let decodeStartedAt = 0;
   const telemetryStateEl = document.getElementById('telemetry-state');
   const telemetryFieldsEl = document.getElementById('telemetry-fields');
   // Operator origins allowed to receive telemetry; injected by the server from
@@ -396,10 +401,14 @@
       },
       error(error) {
         if (generation !== decoderGeneration || decoder !== configuredDecoder) return;
-        setStatus(`Decoder error: ${error.message || error}`, '#f66');
         decoding = false;
         invalidateDecoder();
-        if (!stopped) { pump(); updateStats(); }
+        // A replacement decoder needs a keyframe, and the following delta
+        // frames would fail one by one while no frame is acknowledged, until
+        // the server's send window filled and the preview froze for good.
+        // Rejoin live instead: the new epoch starts at a keyframe.
+        if (!stopped) jumpLive(false);
+        setStatus(`Decoder error: ${error.message || error}; rejoining live`, '#f66');
       }
     });
     decoder = configuredDecoder;
@@ -658,6 +667,7 @@
     const pair = queue.shift();
     pending.set(pair.timestamp_us, pair);
     decoding = true;
+    decodeStartedAt = performance.now();
     decoder.decode(new EncodedVideoChunk({ type: pair.keyframe ? 'key' : 'delta', timestamp: pair.timestamp_us, data: pair.data }));
   }
   function maybeStart() {
@@ -870,6 +880,12 @@
   }
   applyMinConfidence(minConfidence, false);
   minConfidenceEl.addEventListener('input', () => applyMinConfidence(minConfidenceEl.value, true));
+  setInterval(() => {
+    if (stopped || !playing || !decoding || document.hidden) return;
+    if (performance.now() - decodeStartedAt < DECODE_STALL_MS) return;
+    jumpLive(false);
+    setStatus('Decoder stalled; rejoining live', '#f66');
+  }, 1000);
   document.getElementById('start').onclick = start;
   document.getElementById('stop').onclick = stop;
   document.getElementById('live').onclick = jumpLive;

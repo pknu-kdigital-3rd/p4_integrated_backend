@@ -1,6 +1,7 @@
+import asyncio
 import unittest
-import queue
 import time
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -102,11 +103,68 @@ class LiveResyncTests(unittest.TestCase):
                 try:
                     command = self.state.feed_commands.get_nowait()
                     break
-                except queue.Empty:
+                except asyncio.QueueEmpty:
                     time.sleep(0.01)
 
             self.assertEqual(command, {"type": "resync", "reason": "jump_to_live"})
             self.assertEqual(self.state.result_store, {})
+
+
+class SequenceGapResyncTests(unittest.TestCase):
+    """A missing sequence with later results present must not freeze playback."""
+
+    def setUp(self):
+        self.state = AppState()
+        self.state.current_epoch = 3
+        self.state.session_id = "existing-session"
+        for seq in (0, 2):  # seq 1 never arrives
+            self.state.put_result(PlaybackItem(
+                epoch=3, seq=seq, encoded=b"frame", timestamp_us=seq * 33_000, keyframe=seq == 0,
+                result={"width": 1, "height": 1, "items": []},
+            ))
+        self.client = _make_client(self.state)
+
+    def _next_command(self, timeout=2.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                return self.state.feed_commands.get_nowait()
+            except asyncio.QueueEmpty:
+                time.sleep(0.01)
+        return None
+
+    def test_gap_triggers_a_live_resync(self):
+        with patch.object(playback, "SEQUENCE_GAP_RESYNC_SECONDS", 0.1), patch.object(
+            playback, "WAIT_POLL_SECONDS", 0.05
+        ), self.client.websocket_connect("/ws/playback") as ws:
+            ws.send_json({
+                "type": "open",
+                "session_id": "existing-session",
+                "epoch": 3,
+                "last_presented_seq": -1,
+                "decoder_state_preserved": True,
+            })
+            self.assertEqual(ws.receive_json()["mode"], "resumed")
+            ws.receive_bytes()  # seq 0 is delivered normally
+            command = self._next_command()
+            self.assertEqual(command, {"type": "resync", "reason": "sequence_gap"})
+            self.assertEqual(self.state.result_store, {})
+
+    def test_waiting_for_the_live_edge_is_not_a_gap(self):
+        self.state.result_store.pop((3, 2))
+        with patch.object(playback, "SEQUENCE_GAP_RESYNC_SECONDS", 0.1), patch.object(
+            playback, "WAIT_POLL_SECONDS", 0.05
+        ), self.client.websocket_connect("/ws/playback") as ws:
+            ws.send_json({
+                "type": "open",
+                "session_id": "existing-session",
+                "epoch": 3,
+                "last_presented_seq": -1,
+                "decoder_state_preserved": True,
+            })
+            self.assertEqual(ws.receive_json()["mode"], "resumed")
+            ws.receive_bytes()
+            self.assertIsNone(self._next_command(timeout=0.4))
 
 
 class FrameTelemetryMetadataTests(unittest.TestCase):

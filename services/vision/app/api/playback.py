@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from pathlib import Path
+from time import monotonic
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -13,6 +14,14 @@ from app.core.state import AppState, PlaybackItem, get_app_state
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn.error")
+
+# The sender delivers results strictly by sequence. If the next sequence
+# never arrives while later ones do (for example a packet the H.264 decoder
+# dropped without raising), waiting would freeze the viewer forever. After
+# this long, rejoin live through a resync, as Jump to Live does.
+SEQUENCE_GAP_RESYNC_SECONDS = 2.0
+# How often the sender wakes up while waiting, to check for such a gap.
+WAIT_POLL_SECONDS = 0.5
 
 
 def _frame_telemetry(state: AppState, source: dict) -> dict:
@@ -72,7 +81,11 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     return len(metadata_bytes).to_bytes(4, "big") + metadata_bytes + item.encoded
 
 
-async def _wait_for_item(state: AppState, epoch: int, seq: int) -> PlaybackItem | None:
+async def _wait_for_item(
+    state: AppState, epoch: int, seq: int, timeout: float | None = None
+) -> PlaybackItem | None:
+    """Wait for a result; None on epoch change, disconnect, fault or timeout."""
+    deadline = None if timeout is None else monotonic() + timeout
     async with state.result_condition:
         while True:
             if state.current_epoch != epoch:
@@ -84,7 +97,31 @@ async def _wait_for_item(state: AppState, epoch: int, seq: int) -> PlaybackItem 
                 return item
             if state.fault:
                 return None
-            await state.result_condition.wait()
+            if deadline is None:
+                await state.result_condition.wait()
+                continue
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                await asyncio.wait_for(state.result_condition.wait(), remaining)
+            except asyncio.TimeoutError:
+                return None
+
+
+def _has_later_result(state: AppState, epoch: int, seq: int) -> bool:
+    return any(key[0] == epoch and key[1] > seq for key in state.result_store)
+
+
+async def _request_resync(state: AppState, reason: str) -> None:
+    """Drop queued results and ask the relay for a new live epoch."""
+    async with state.result_condition:
+        state.clear_all_results()
+        state.fault = None
+        state.last_presented = None
+        state.resync_generation += 1
+        state.result_condition.notify_all()
+    await state.feed_commands.put({"type": "resync", "reason": reason})
 
 
 async def _receive_controls(
@@ -104,15 +141,7 @@ async def _receive_controls(
                 async with state.result_condition:
                     state.result_condition.notify_all()
             elif message_type in {"jump_to_live", "resync"}:
-                async with state.result_condition:
-                    state.clear_all_results()
-                    state.fault = None
-                    state.last_presented = None
-                    state.resync_generation += 1
-                    state.result_condition.notify_all()
-                await state.feed_commands.put(
-                    {"type": "resync", "reason": message_type}
-                )
+                await _request_resync(state, message_type)
             elif message_type == "stop":
                 logger.info("playback stop received client=%s", websocket.client)
                 await state.feed_commands.put({"type": "stop"})
@@ -232,6 +261,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
             _receive_controls(websocket, state, epoch_ref)
         )
         next_seq = requested_seq
+        gap_since: float | None = None
         reported_fault = False
         sent_sizes: dict[tuple[int, int], int] = {}
         seen_resync_generation = state.resync_generation
@@ -259,7 +289,9 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                     ):
                         break
                     await state.result_condition.wait()
-            item = await _wait_for_item(state, epoch_ref[0], next_seq)
+            item = await _wait_for_item(
+                state, epoch_ref[0], next_seq, timeout=WAIT_POLL_SECONDS
+            )
             if item is None:
                 if not state.viewer_connected:
                     break
@@ -286,8 +318,20 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                         )
                     )
                     continue
-                await asyncio.sleep(0.05)
+                if _has_later_result(state, epoch_ref[0], next_seq):
+                    gap_since = gap_since if gap_since is not None else monotonic()
+                    if monotonic() - gap_since >= SEQUENCE_GAP_RESYNC_SECONDS:
+                        logger.warning(
+                            "playback sequence gap: epoch=%s seq=%s missing while later results exist; resyncing",
+                            epoch_ref[0],
+                            next_seq,
+                        )
+                        gap_since = None
+                        await _request_resync(state, "sequence_gap")
+                    continue
+                gap_since = None
                 continue
+            gap_since = None
             await websocket.send_bytes(_frame_message(state, item))
             state.metrics.websocket_frames_sent += 1
             sent_sizes[(item.epoch, item.seq)] = len(item.encoded)
