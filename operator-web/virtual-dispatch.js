@@ -70,6 +70,8 @@ let draft = null;
 let dispatchSubmitting = false;
 let points = { origin: null, destination: null, waypoints: [] };
 let pickMode = null;
+let pointPlacement = null;
+let movingPin = null;
 let endpointDrag = null;
 let pollTimer = null;
 let vehiclePollTimer = null;
@@ -214,6 +216,16 @@ function pointIcon(kind, index) {
     iconSize: [42, 56],
     iconAnchor: [21, 54.6],
   });
+}
+function cancelPointPlacement() {
+  if (!pointPlacement) return;
+  if (endpointDrag?.marker === movingPin) finishEndpointDrag(movingPin);
+  movingPin?.remove();
+  movingPin = null;
+  if (pointPlacement.originalMarker) pointPlacement.originalMarker.setOpacity(1);
+  pointPlacement = null;
+  pickMode = null;
+  map.getContainer().style.cursor = '';
 }
 function renderEndpointSnapPreview(context, snapped) {
   endpointSnapPreviewLayerGroup.eachLayer(layer => {
@@ -391,6 +403,10 @@ function drawPoint(kind, point, index = 0) {
     autoPan: true,
   });
   if (kind === 'waypoint') marker.bindTooltip(`Waypoint ${index + 1}`);
+  marker.on('click', event => {
+    if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+    beginRoutePointPick(kind, kind === 'waypoint' ? index : null, marker.getLatLng(), marker);
+  });
   marker.on('dragstart', () => {
     marker.getElement()?.classList.add('is-dragging');
     startEndpointDrag(kind, marker, kind === 'waypoint' ? index : null);
@@ -915,7 +931,7 @@ async function removeScenario() {
     draft = null;
     points = { origin: null, destination: null, waypoints: [] };
     roadBrush.reset();
-    pickMode = null;
+    cancelPointPlacement();
     map.getContainer().style.cursor = '';
     restrictionLayerGroup.clearLayers();
     renderRestrictions([]);
@@ -1007,14 +1023,26 @@ async function applySelectedSpeed() {
     catch (error) { setStatus(error.message, true); }
   }
 }
-function beginRoutePointPick(kind) {
+function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getCenter(), originalMarker = null) {
   roadBrush.reset();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
+  cancelPointPlacement();
   pickMode = kind;
+  pointPlacement = { kind, waypointIndex, originalMarker };
+  if (originalMarker) originalMarker.setOpacity(0);
+  movingPin = L.marker(initialPoint, { icon: pointIcon(kind, waypointIndex ?? points.waypoints.length), interactive: false, keyboard: false, opacity: 0.85, zIndexOffset: 10000 }).addTo(map);
+  movingPin.getElement()?.classList.add('is-moving');
+  startEndpointDrag(kind, movingPin, waypointIndex);
+  const label = kind === 'waypoint' ? `경유지 ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind === 'origin' ? '출발지' : '도착지';
   map.getContainer().style.cursor = 'crosshair';
-  const label = kind === 'waypoint' ? `waypoint ${points.waypoints.length + 1}` : kind;
-  setStatus(`Click the map to place the ${label}; it will snap to the nearest road.`);
+  setStatus(`${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭해 놓으세요.`);
 }
+window.__operatorPointPlacementActive = () => Boolean(pointPlacement);
+map.on('mousemove', event => {
+  if (!pointPlacement || !movingPin) return;
+  movingPin.setLatLng(event.latlng);
+  if (endpointDrag?.marker === movingPin) queueEndpointSnapPreview(endpointDrag, movingPin);
+});
 async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
   const previousDestination = kind === 'destination' ? points.destination : null;
   const label = kind === 'waypoint' ? `Waypoint ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind[0].toUpperCase() + kind.slice(1);
@@ -1067,6 +1095,7 @@ async function removeRestriction(restriction) {
 let liveViewBeforeVirtual = false;
 async function switchMode(next) {
   roadBrush.reset();
+  cancelPointPlacement();
   hideRouteContextMenu();
   if (endpointDrag) finishEndpointDrag(endpointDrag.marker);
   pickMode = null;
@@ -1110,13 +1139,21 @@ map.on('click', (event) => {
   if (mode !== 'virtual' || !pickMode) return;
   const point = { lat: event.latlng.lat, lon: event.latlng.lng };
   const selectedMode = pickMode;
+  const selectedIndex = pointPlacement?.waypointIndex ?? null;
+  const pin = movingPin;
+  const originalMarker = pointPlacement?.originalMarker;
+  if (pin && endpointDrag?.marker === pin) finishEndpointDrag(pin);
+  pin?.remove();
+  if (originalMarker) originalMarker.setOpacity(1);
+  movingPin = null;
+  pointPlacement = null;
   pickMode = null;
   map.getContainer().style.cursor = '';
-  void snapAndSetRoutePoint(selectedMode, point);
+  void snapAndSetRoutePoint(selectedMode, point, selectedIndex);
 });
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
-scenarioSelect.addEventListener('change', () => { roadBrush.reset(); scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
+scenarioSelect.addEventListener('change', () => { roadBrush.reset(); cancelPointPlacement(); scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
 vehicleSelect.addEventListener('change', () => {
   selectedVehicleId = vehicleSelect.value;
   speedControlEditing = false;
@@ -1151,23 +1188,23 @@ routeContextMenu.addEventListener('click', (event) => {
   if (toolButton) {
     hideRouteContextMenu();
     if (!scenarioId) { setStatus('시나리오를 먼저 선택하세요.', true); return; }
-    pickMode = null;
+    cancelPointPlacement();
     roadBrush.setTool(toolButton.dataset.roadTool);
     return;
   }
   const button = event.target.closest('[data-route-point-kind]');
   if (!button || !contextRoutePoint) return;
   const kind = button.dataset.routePointKind;
-  const point = { lat: contextRoutePoint.lat, lon: contextRoutePoint.lng };
+  const point = { lat: contextRoutePoint.lat, lng: contextRoutePoint.lon };
   hideRouteContextMenu();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   roadBrush.reset();
-  pickMode = null;
-  void snapAndSetRoutePoint(kind, point);
+  beginRoutePointPick(kind, null, point);
 });
 document.addEventListener('pointerdown', (event) => {
   if (!routeContextMenu.hidden && !routeContextMenu.contains(event.target)) hideRouteContextMenu();
 });
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && pointPlacement) { cancelPointPlacement(); setStatus('핀 이동을 취소했습니다.'); return; }
   if (event.key === 'Escape' && !routeContextMenu.hidden) hideRouteContextMenu();
 });
