@@ -140,7 +140,7 @@ const livePanel=document.querySelector('#live-view-panel'),liveFrame=document.qu
 // Debugging details (diagnostics, telemetry status, the Vision page's controls)
 // are hidden by default and one click away; the choice is remembered.
 // The live preview is docked in the "실시간 영상" tab unless the operator floats it on the map.
-let liveDocked=true;
+let liveDocked=(()=>{try{return localStorage.getItem('operatorLivePanelDocked')!=='false'}catch{return true}})();
 const liveDock=document.querySelector('#live-view-dock');
 // Details (diagnostics, telemetry status, the Vision page's information and
 // options) are a fullscreen-only view: "상세 보기" appears only in fullscreen,
@@ -200,6 +200,7 @@ function updateLiveTitle(){
 }
 function placeLivePanel(docked){
   liveDocked=docked;
+  try{localStorage.setItem('operatorLivePanelDocked',String(docked))}catch{}
   const host=docked?liveDock:document.querySelector('#map-surface');
   if(livePanel.parentElement!==host){
     if(typeof host.moveBefore==='function'){try{host.moveBefore(livePanel,null)}catch{host.appendChild(livePanel)}}
@@ -231,7 +232,7 @@ document.querySelector('#live-float').addEventListener('click',async()=>{
 });
 // A docked preview is hidden by the saved-recordings tab; close it rather than keep a TURN port busy.
 document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView()});
-placeLivePanel(true);
+placeLivePanel(liveDocked);
 const ROUTE_TICK_MS=500,FLEET_POLL_MS=3000;
 // How the replay line uses the road match: 'gaps' (default) follows the
 // recorded GPS and uses the road only across GPS gaps; 'always' snaps the
@@ -1232,8 +1233,8 @@ function openLiveView(){
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
   livePanel.hidden=false;
-  // Opens docked in the "실시간 영상" tab; "지도에 띄우기" moves it onto the map.
-  placeLivePanel(true);
+  // Restore the operator's saved docked or floating placement.
+  placeLivePanel(liveDocked);
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
   liveFrame.src=liveViewUrl;
