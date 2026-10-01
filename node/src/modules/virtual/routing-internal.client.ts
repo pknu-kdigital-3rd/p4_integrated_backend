@@ -10,6 +10,7 @@ export type InternalRoute = {
     distanceM: number;
     durationSec: number;
     warnings: string[];
+    calculationTimeMs?: number;
 };
 
 export type InternalRoadMatch = {

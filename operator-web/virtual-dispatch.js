@@ -210,9 +210,13 @@ function showRoutingLog(message, details = null, context = {}) {
   const trip = context.tripId ? `운행 ${context.tripId} · ` : '';
   const edgeCount = Number.isInteger(context.blockedDirectedEdgeCount) ? ` · 차단 edge ${context.blockedDirectedEdgeCount}개` : '';
   const noRoute = context.stateChangedToNoRoute ? ' · NO_ROUTE 전환' : '';
+  const rawCalculationTime = context.calculationTimeMs ?? details?.calculationTimeMs ?? details?.detail?.calculationTimeMs;
+  const calculationTime = rawCalculationTime !== undefined && rawCalculationTime !== null && Number.isFinite(Number(rawCalculationTime))
+    ? ` · 백엔드 경로 계산 ${Number(rawCalculationTime).toFixed(1)}ms` : '';
+  const resultLabel = context.success ? '경로 계산 완료' : `${leg} 실패`;
   const text = document.createElement('span');
   text.dataset.routingLogText = 'true';
-  text.textContent = `${new Date().toLocaleTimeString()} · ${vehicle}${trip}${leg} 실패: ${message}${edgeCount}${noRoute}`;
+  text.textContent = `${new Date().toLocaleTimeString()} · ${vehicle}${trip}${resultLabel}: ${message}${calculationTime}${edgeCount}${noRoute}`;
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
   copyButton.className = 'virtual-routing-log-copy';
@@ -1209,10 +1213,16 @@ async function previewRoute() {
     const nextDraft = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/preview`, { method: 'POST', body: JSON.stringify({ selectedVehicleId, origin: points.origin, destination: points.destination, waypoints: points.waypoints, expectedRestrictionRevision: scenarioRevision }), signal: controller.signal });
     if (routeCalculationController !== controller) return;
     draft = nextDraft;
-    renderDraft(); setStatus(`Route preview ready for vehicle ${selectedVehicleId}.`);
+    renderDraft();
+    showRoutingLog('경로 미리보기를 생성했습니다.', null, {
+      vehicleId: selectedVehicleId,
+      success: true,
+      calculationTimeMs: nextDraft.route?.calculationTimeMs,
+    });
+    setStatus(`Route preview ready for vehicle ${selectedVehicleId}.`);
   } catch (error) {
     if (controller.signal.aborted || routeCalculationController !== controller) return;
-    draft = null; renderDraft(); showRoutingLog(error.message, error.details); setStatus(error.message, true);
+    draft = null; renderDraft(); showRoutingLog(error.message, error.details, { calculationTimeMs: error.details?.calculationTimeMs }); setStatus(error.message, true);
   } finally {
     if (routeCalculationController === controller) routeCalculationController = null;
     finishRouting();

@@ -300,7 +300,7 @@ def _graph_version() -> str:
     return version
 
 
-def _internal_route(req: InternalRouteRequest, cancel_event=None):
+def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
     if graph is None:
         raise HTTPException(status_code=503, detail="Routing graph is not ready")
     profile = None if req.vehicleProfile in ("", "car", "unrestricted") else req.vehicleProfile
@@ -429,6 +429,23 @@ def _internal_route(req: InternalRouteRequest, cancel_event=None):
         "durationSec": duration_s,
         "warnings": warnings,
     }
+
+
+def _internal_route(req: InternalRouteRequest, cancel_event=None):
+    started_at = time.perf_counter()
+    try:
+        result = _calculate_internal_route(req, cancel_event)
+    except HTTPException as error:
+        calculation_time_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        detail = error.detail
+        if isinstance(detail, dict):
+            detail = {**detail, "calculationTimeMs": calculation_time_ms}
+        else:
+            detail = {"message": str(detail), "calculationTimeMs": calculation_time_ms}
+        raise HTTPException(status_code=error.status_code, detail=detail, headers=error.headers) from error
+    if result is not None:
+        result["calculationTimeMs"] = round((time.perf_counter() - started_at) * 1000, 1)
+    return result
 
 
 def _geometry_polygons(geometry: dict) -> list[list[list[tuple[float, float]]]]:
