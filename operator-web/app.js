@@ -99,8 +99,8 @@ function syncLiveDetails(){
   fitLivePanelToVideo();
 }
 // In video-only mode the panel takes the video's exact shape, so there are no
-// black bars; it stays at most 540px wide and inside the map. With details
-// shown (or before the video size is known) the stylesheet size applies.
+// black bars; its desktop size follows the viewport and its mobile size uses
+// the available map width. With details shown, the stylesheet size applies.
 let liveVideoSize=null;
 const LIVE_PANEL_INSET=8; // matches the video's side margins in styles.css
 const LIVE_PANEL_FOOTER=30; // the detection status row under the video
@@ -120,8 +120,11 @@ function fitLivePanelToVideo(){
   if(!fit){livePanel.style.removeProperty('width');livePanel.style.removeProperty('height')}
   else{
     const surface=document.querySelector('#map-surface').getBoundingClientRect();
-    let videoWidth=Math.max(160,Math.min(540,surface.width-36))-2*inset,videoHeight=videoWidth/ratio;
-    const maxVideoHeight=Math.max(90,Math.min(470,surface.height-36,surface.height*0.7)-header-footer);
+    const maxPanelWidth=window.innerWidth<=767
+      ?Math.min(surface.width-24,window.innerWidth-24)
+      :Math.min(460,window.innerWidth*0.22,surface.width-36);
+    let videoWidth=Math.max(160,maxPanelWidth)-2*inset,videoHeight=videoWidth/ratio;
+    const maxVideoHeight=Math.max(90,Math.min(360,window.innerHeight*0.36,surface.height-36,surface.height*0.7)-header-footer);
     if(videoHeight>maxVideoHeight){videoHeight=maxVideoHeight;videoWidth=videoHeight*ratio}
     livePanel.style.width=`${Math.round(videoWidth+2*inset)}px`;livePanel.style.height=`${Math.round(header+videoHeight+footer)}px`;
   }
