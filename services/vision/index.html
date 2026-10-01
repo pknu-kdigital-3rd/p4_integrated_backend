@@ -604,6 +604,7 @@
       const ghost = track.state === 'holding';
       overlayCtx.globalAlpha = track.state ? temporal.trackAlpha(track, nowMs, temporalConfig) : 1;
       const className = String(item.class || 'object').toLowerCase();
+      const labelTextColor = className === 'person' ? '#073b2b' : '#fff';
       const drawBox = overlayMode === 'all' || overlayMode === 'boxes' || (overlayMode === 'person_box_other_segmentation' && className === 'person');
       const drawMask = overlayMode === 'all' || overlayMode === 'segmentation' || (overlayMode === 'person_box_other_segmentation' && className !== 'person');
       const showBox = boxesEl.checked && drawBox;
@@ -631,7 +632,7 @@
           if (typeof overlayCtx.roundRect === 'function') {
             overlayCtx.beginPath(); overlayCtx.roundRect(labelX, labelY, labelWidth, labelHeight, 4); overlayCtx.fill();
           } else overlayCtx.fillRect(labelX, labelY, labelWidth, labelHeight);
-          overlayCtx.fillStyle = '#fff';
+          overlayCtx.fillStyle = labelTextColor;
           overlayCtx.textBaseline = 'middle';
           const textY = labelY + labelHeight / 2;
           overlayCtx.font = `700 ${classFontSize}px sans-serif`;
@@ -643,7 +644,7 @@
           overlayCtx.textBaseline = 'alphabetic';
         } else if (distanceLabel) {
           overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
-          overlayCtx.fillStyle = '#fff';
+          overlayCtx.fillStyle = labelTextColor;
           const labelWidth = overlayCtx.measureText(distanceLabel).width;
           const labelX = Math.max(0, Math.min(x + w / 2 - labelWidth / 2, overlayCanvas.width - labelWidth));
           overlayCtx.fillText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
