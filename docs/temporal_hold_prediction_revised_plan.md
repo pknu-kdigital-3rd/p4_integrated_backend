@@ -85,7 +85,7 @@ The temporal logic is pure (no DOM) and lives in
 `services/vision/live-view-tracks.js`, served by the vision app at
 `/live-view-tracks.js` (Nginx already forwards every path on the Live View
 port), loaded by `index.html` with a classic `<script src>`, and unit-tested
-with `node --test services/vision/tests/js/`. The module exposes a global
+with `node --test "services/vision/tests/js/*.test.js"`. The module exposes a global
 (`window.LiveViewTracks`) and CommonJS exports for the tests.
 
 ### 1.8 One expiry system

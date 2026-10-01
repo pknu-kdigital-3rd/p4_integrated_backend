@@ -55,8 +55,11 @@
       <option value="raw">Total compensation disabled</option>
     </select>
   </label>
-  <label>ghost frames
-    <input id="ghostFrames" type="number" min="0" max="30" step="1" value="2" />
+  <label title="Keep moving a box this long after its last real detection">predict ms
+    <input id="trackPredictMs" type="number" min="0" max="2000" step="10" value="150" />
+  </label>
+  <label title="Hold and fade a box until this long after its last real detection, then remove it">hold ms
+    <input id="trackHoldMs" type="number" min="0" max="2000" step="10" value="220" />
   </label>
   <label title="A new box is shown once its confidence reaches this value; it then stays until the server tracker drops it.">min confidence
     <input id="minConfidence" type="range" min="0" max="1" step="0.05" value="0" />
@@ -70,6 +73,7 @@
     <dl id="telemetry-fields"></dl>
   </section>
 </main>
+<script src="live-view-tracks.js"></script>
 <script>
 (() => {
   const videoCanvas = document.getElementById('video');
@@ -84,7 +88,9 @@
   const masksEl = document.getElementById('masks');
   const overlayModeEl = document.getElementById('overlayMode');
   const compensationModeEl = document.getElementById('compensationMode');
-  const ghostFramesEl = document.getElementById('ghostFrames');
+  const trackPredictMsEl = document.getElementById('trackPredictMs');
+  const trackHoldMsEl = document.getElementById('trackHoldMs');
+  const temporal = window.LiveViewTracks;
   const minConfidenceEl = document.getElementById('minConfidence');
   const minConfidenceValueEl = document.getElementById('minConfidenceValue');
   const serverThresholdsEl = document.getElementById('serverThresholds');
@@ -104,7 +110,12 @@
   let tracks = new Map(), nextTrackId = 1;
   let overlayMode = localStorage.getItem('playback-overlay-mode') || 'person_box_other_segmentation';
   let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
-  let ghostFrames = Number.parseInt(localStorage.getItem('playback-ghost-frames') ?? '2', 10);
+  // Track hold/prediction timing in media milliseconds; see live-view-tracks.js.
+  let temporalConfig = temporal.normalizeConfig({
+    predictMs: localStorage.getItem('playback-track-predict-ms') ?? undefined,
+    holdMs: localStorage.getItem('playback-track-hold-ms') ?? undefined,
+  });
+  let lastTrackClockMs = null;
   // Viewer-side appear threshold. It only hides boxes: the server tracker
   // already drops new boxes below its own appear threshold.
   let minConfidence = Math.max(0, Math.min(1, Number(localStorage.getItem('playback-min-confidence') ?? '0') || 0));
@@ -121,9 +132,6 @@
   const TRACK_CENTER_DISTANCE = 0.20;
   const TRACK_SMOOTHING = 0.45;
   const TRACK_CONFIRM_HITS = 2;
-  // Keep a missed box or mask visible briefly while the next detection arrives.
-  // The previous 0.18 alpha made the first held frame almost invisible.
-  const GHOST_OPACITY = 0.7;
   let targetSeconds = 2, lowWatermarkSeconds = 0.5, maxBufferBytes = 64 * 1024 * 1024;
   // Queued video beyond this is drained without source pacing (see the decoder output).
   const MAX_LIVE_LAG_S = 0.25;
@@ -246,7 +254,7 @@
   }
   function updateStats() {
     const depthStatus = lastDepth.status ? `  depth=${lastDepth.status}` : '';
-    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  ghost_frames=${ghostFrames}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${depthStatus}`;
+    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  predict=${temporalConfig.predictMs}ms hold=${temporalConfig.holdMs}ms  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${depthStatus}`;
     modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
   }
   function updateBrowserFps() {
@@ -266,13 +274,11 @@
   overlayModeEl.value = overlayMode;
   if (!['global', 'local', 'raw'].includes(compensationMode)) compensationMode = 'global';
   compensationModeEl.value = compensationMode;
-  if (!Number.isFinite(ghostFrames)) ghostFrames = 0;
-  ghostFrames = Math.max(0, Math.min(30, Math.trunc(ghostFrames)));
-  ghostFramesEl.value = String(ghostFrames);
 
   function resetCompensation() {
     tracks.clear();
     nextTrackId = 1;
+    lastTrackClockMs = null;
     previousMotionLuma = null;
     globalMotion = { dx: 0, dy: 0, confidence: 0 };
     lastDepth = {};
@@ -403,7 +409,9 @@
     estimateGlobalMotion();
     frame.close();
     lastDepth = pair.inference.depth || {};
-    drawOverlay(pair.inference, pair.frame.width, pair.frame.height);
+    // Media time, not the browser clock: a drained backlog paints many
+    // frames within a few milliseconds.
+    drawOverlay(pair.inference, pair.frame.width, pair.frame.height, Number(pair.timestamp_us) / 1000);
     updateBrowserFps();
     lastPresentedTs = pair.timestamp_us;
     lastPresentedSeq = pair.seq;
@@ -455,7 +463,8 @@
     const bx = (b[0] + b[2]) / 2, by = (b[1] + b[3]) / 2;
     return Math.hypot(ax - bx, ay - by);
   }
-  function updateTrack(track, observation) {
+  function updateTrack(track, observation, nowMs) {
+    temporal.recordObservation(track, observation.box, nowMs, temporalConfig);
     track.hits++; track.misses = 0;
     track.box = track.box.map((value, index) => value * (1 - TRACK_SMOOTHING) + observation.box[index] * TRACK_SMOOTHING);
     track.item = observation.item;
@@ -466,19 +475,19 @@
     // keep threshold; only its first appearance needs minConfidence.
     track.shown = track.shown || observedConfidence >= minConfidence;
   }
-  function createTrack(id, observation, server) {
+  function createTrack(id, observation, server, nowMs) {
     // A server-identified track has already cleared the tracker's
     // new_track_thresh, so requiring a second local confirmation would only
     // add a frame of latency before it can be drawn.
-    tracks.set(id, {
+    tracks.set(id, temporal.startTrack({
       id, server, className: observation.className, box: observation.box.slice(),
       item: observation.item, confidence: Number(observation.item.confidence || 0),
       hits: 1, misses: 0, confirmed: server || TRACK_CONFIRM_HITS <= 1,
       shown: Number(observation.item.confidence || 0) >= minConfidence,
-    });
+    }, observation.box, nowMs));
     return id;
   }
-  function compensatedDetections(inference, width, height) {
+  function compensatedDetections(inference, width, height, nowMs) {
     const observations = (inference.items || []).map(item => ({
       item, box: normalizedBox(item, width, height),
       className: String(item.class || 'object').toLowerCase(),
@@ -494,20 +503,25 @@
       }));
     }
 
+    // Media time only moves forward within an epoch; a step back means a
+    // new stream position, where held boxes would be meaningless.
+    if (lastTrackClockMs !== null && nowMs < lastTrackClockMs) tracks.clear();
+    lastTrackClockMs = nowMs;
+
     if (compensationMode === 'global' && globalMotion.confidence > 0) {
       // Predict each previous track into the current image coordinates before
       // comparing it with this frame's YOLO result. The motion estimate is a
       // translation from previous displayed frame to current displayed frame.
-      for (const track of tracks.values()) {
-        track.box = track.box.map((value, index) => {
-          const shift = index % 2 === 0 ? globalMotion.dx : globalMotion.dy;
-          return Math.max(0, Math.min(1, value + shift));
-        });
-      }
+      // This is the only place camera motion is applied to tracks.
+      for (const track of tracks.values()) temporal.shiftTrack(track, globalMotion.dx, globalMotion.dy);
     }
 
+    // A frame the model skipped repeats the previous result's items. They are
+    // not new observations: counting them would reset each track's age and
+    // freeze its box. They only seed tracks when there are none yet.
+    const fresh = !inference.inference_skipped || tracks.size === 0;
     const used = new Set(), matched = new Set(), unidentified = [];
-    for (const observation of observations) {
+    for (const observation of fresh ? observations : []) {
       const trackId = observation.item.track_id;
       if (trackId === null || trackId === undefined) { unidentified.push(observation); continue; }
       // The server tracker already resolved identity across frames, including
@@ -516,8 +530,8 @@
       const id = `s${trackId}`;
       const track = tracks.get(id);
       used.add(id); matched.add(id);
-      if (track) updateTrack(track, observation);
-      else createTrack(id, observation, true);
+      if (track) updateTrack(track, observation, nowMs);
+      else createTrack(id, observation, true, nowMs);
     }
     for (const observation of unidentified) {
       let best = null, bestIou = TRACK_IOU_THRESHOLD;
@@ -528,18 +542,17 @@
         if (score < bestIou && distance > TRACK_CENTER_DISTANCE) continue;
         if (!best || score > bestIou || (score === bestIou && distance < boxCenterDistance(best.box, observation.box))) { best = track; bestIou = score; }
       }
-      if (best) { used.add(best.id); matched.add(best.id); updateTrack(best, observation); }
-      else matched.add(createTrack(`l${nextTrackId++}`, observation, false));
+      if (best) { used.add(best.id); matched.add(best.id); updateTrack(best, observation, nowMs); }
+      else matched.add(createTrack(`l${nextTrackId++}`, observation, false, nowMs));
     }
     for (const [id, track] of tracks) {
       if (matched.has(id)) continue;
       track.misses++;
-      track.confidence *= 0.75;
-      if (track.misses > ghostFrames) tracks.delete(id);
+      if (temporal.advanceMissingTrack(track, nowMs, temporalConfig) === 'expired') tracks.delete(id);
     }
     return Array.from(tracks.values()).filter(track => track.confirmed && track.shown);
   }
-  function drawOverlay(inference, width, height) {
+  function drawOverlay(inference, width, height, nowMs) {
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     const classColors = {
       person: '#35e18c', chair: '#4dabf7', clock: '#c77dff', car: '#ff922b',
@@ -554,15 +567,16 @@
       for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
       return fallbackColors[hash % fallbackColors.length];
     }
-    for (const track of compensatedDetections(inference, width, height)) {
+    for (const track of compensatedDetections(inference, width, height, nowMs)) {
       const item = track.item;
       const [x1, y1, x2, y2] = track.box;
       const x = x1 * overlayCanvas.width, y = y1 * overlayCanvas.height;
       const w = (x2 - x1) * overlayCanvas.width, h = (y2 - y1) * overlayCanvas.height;
       const color = colorForClass(item.class);
       const confidence = track.confidence;
-      const ghost = track.misses > 0;
-      overlayCtx.globalAlpha = ghost ? Math.pow(GHOST_OPACITY, track.misses) : 1;
+      // Raw mode returns plain detections without temporal state.
+      const ghost = track.state === 'holding';
+      overlayCtx.globalAlpha = track.state ? temporal.trackAlpha(track, nowMs, temporalConfig) : 1;
       const className = String(item.class || 'object').toLowerCase();
       const drawBox = overlayMode === 'all' || overlayMode === 'boxes' || (overlayMode === 'person_box_other_segmentation' && className === 'person');
       const drawMask = overlayMode === 'all' || overlayMode === 'segmentation' || (overlayMode === 'person_box_other_segmentation' && className !== 'person');
@@ -791,14 +805,25 @@
     setStatus(`Overlay style: ${overlayMode}`, '#fc6');
     updateStats();
   });
-  ghostFramesEl.addEventListener('change', () => {
-    const parsed = Number.parseInt(ghostFramesEl.value, 10);
-    ghostFrames = Number.isFinite(parsed) ? Math.max(0, Math.min(30, parsed)) : 0;
-    ghostFramesEl.value = String(ghostFrames);
-    localStorage.setItem('playback-ghost-frames', String(ghostFrames));
-    resetCompensation();
-    setStatus(`Ghost frames: ${ghostFrames}`, '#fc6');
-  });
+  function applyTemporalControls(persist) {
+    temporalConfig = temporal.normalizeConfig({
+      ...temporalConfig,
+      predictMs: Math.min(2000, Number(trackPredictMsEl.value)),
+      holdMs: Math.min(2000, Number(trackHoldMsEl.value)),
+    });
+    trackPredictMsEl.value = String(temporalConfig.predictMs);
+    trackHoldMsEl.value = String(temporalConfig.holdMs);
+    if (persist) {
+      localStorage.setItem('playback-track-predict-ms', String(temporalConfig.predictMs));
+      localStorage.setItem('playback-track-hold-ms', String(temporalConfig.holdMs));
+      setStatus(`Track predict ${temporalConfig.predictMs} ms, hold ${temporalConfig.holdMs} ms`, '#fc6');
+    }
+    updateStats();
+  }
+  trackPredictMsEl.value = String(temporalConfig.predictMs);
+  trackHoldMsEl.value = String(temporalConfig.holdMs);
+  trackPredictMsEl.addEventListener('change', () => applyTemporalControls(true));
+  trackHoldMsEl.addEventListener('change', () => applyTemporalControls(true));
   function applyMinConfidence(value, persist) {
     minConfidence = Math.max(0, Math.min(1, Number(value) || 0));
     minConfidenceEl.value = String(minConfidence);

@@ -1,11 +1,13 @@
 import json
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
-from app.core.settings import INDEX_HTML_PATH, settings
+from app.core.settings import BASE_DIR, INDEX_HTML_PATH, settings
 
 router = APIRouter()
+
+LIVE_VIEW_TRACKS_JS_PATH = BASE_DIR / "live-view-tracks.js"
 
 PARENT_ORIGINS_PLACEHOLDER = "__LIVE_VIEW_PARENT_ORIGINS__"
 
@@ -20,3 +22,14 @@ def parent_origins_json() -> str:
 async def index():
     with open(INDEX_HTML_PATH, "r", encoding="utf-8") as f:
         return f.read().replace(PARENT_ORIGINS_PLACEHOLDER, parent_origins_json())
+
+
+@router.get("/live-view-tracks.js")
+async def live_view_tracks_js():
+    # Overlay track hold/prediction logic, kept separate so it can be
+    # unit-tested with node; no-cache so a page reload picks up changes.
+    return FileResponse(
+        LIVE_VIEW_TRACKS_JS_PATH,
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
