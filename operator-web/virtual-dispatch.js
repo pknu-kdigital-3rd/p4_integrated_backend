@@ -43,7 +43,7 @@ routeContextMenu.className = 'virtual-route-context-menu';
 routeContextMenu.setAttribute('role', 'menu');
 routeContextMenu.setAttribute('aria-label', '경로 및 도로 차단');
 routeContextMenu.hidden = true;
-routeContextMenu.innerHTML = '<div class="route-point-menu-row"><button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button><button type="button" role="menuitem" data-route-point-kind="waypoint"><span aria-hidden="true" class="route-point-menu-icon waypoint">＋</span><span>경유지</span></button></div><button type="button" role="menuitem" data-road-menu aria-expanded="false"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단</span><span aria-hidden="true">▾</span></button><div class="road-brush-submenu" hidden><button type="button" role="menuitem" data-road-tool="paint">브러시</button><button type="button" role="menuitem" data-road-tool="erase">지우개</button></div>';
+routeContextMenu.innerHTML = '<div class="route-point-menu-row"><button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button><button type="button" role="menuitem" data-route-point-kind="waypoint"><span aria-hidden="true" class="route-point-menu-icon waypoint">＋</span><span>경유지</span></button></div><div class="road-brush-heading"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단</span></div><div class="road-brush-submenu"><button type="button" role="menuitem" data-road-tool="paint">브러시</button><button type="button" role="menuitem" data-road-tool="erase">지우개</button></div>';
 map.getContainer().append(routeContextMenu);
 const routingLogOverlay = document.createElement('section');
 routingLogOverlay.className = 'virtual-routing-log';
@@ -291,8 +291,6 @@ function setStatus(message, isError = false) {
 }
 function hideRouteContextMenu() {
   routeContextMenu.hidden = true;
-  routeContextMenu.querySelector('.road-brush-submenu').hidden = true;
-  routeContextMenu.querySelector('[data-road-menu]').setAttribute('aria-expanded', 'false');
   contextRoutePoint = null;
 }
 function showRouteContextMenu({ clientX, clientY }) {
@@ -1308,15 +1306,6 @@ document.querySelector('#virtual-add-waypoint').addEventListener('click', () => 
 map.getContainer().addEventListener('operator-map-contextrequest', (event) => showRouteContextMenu(event.detail));
 routeContextMenu.addEventListener('click', (event) => {
   event.stopPropagation();
-  const submenuButton = event.target.closest('[data-road-menu]');
-  if (submenuButton) {
-    const submenu = routeContextMenu.querySelector('.road-brush-submenu');
-    submenu.hidden = !submenu.hidden;
-    submenuButton.setAttribute('aria-expanded', String(!submenu.hidden));
-    const container = map.getContainer();
-    routeContextMenu.style.top = `${Math.max(8, Math.min(parseFloat(routeContextMenu.style.top), container.clientHeight - routeContextMenu.offsetHeight - 8))}px`;
-    return;
-  }
   const toolButton = event.target.closest('[data-road-tool]');
   if (toolButton) {
     hideRouteContextMenu();

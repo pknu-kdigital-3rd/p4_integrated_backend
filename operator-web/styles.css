@@ -99,6 +99,7 @@ body:not(.virtual-mode) .virtual-routing-log { display: none; }
 .virtual-route-context-menu button:hover { background: #e9f0f5; }
 .route-point-menu-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .route-point-menu-row button { justify-content: center; flex-direction: column; gap: 4px; padding: 7px 4px; white-space: nowrap; }
+.road-brush-heading { display: flex; align-items: center; gap: 7px; padding: 3px 4px 0; color: var(--ui-text-secondary); font-size: 12px; font-weight: 750; }
 .road-brush-submenu { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .route-point-menu-icon { display: inline-grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; color: white; font-size: 11px; font-weight: 800; }
 .route-point-menu-icon.origin { background: #16a34a; }
