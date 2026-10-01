@@ -385,6 +385,7 @@ function drawPoint(kind, point, index = 0) {
     autoPan: true,
   });
   if (kind === 'waypoint') marker.bindTooltip(`Waypoint ${index + 1}`);
+  marker.on('dragstart', () => marker.getElement()?.classList.add('is-dragging'));
   if (kind !== 'waypoint') {
     marker.on('dragstart', () => startEndpointDrag(kind, marker));
     marker.on('drag', () => {
@@ -392,6 +393,7 @@ function drawPoint(kind, point, index = 0) {
     });
   }
   marker.on('dragend', () => {
+    marker.getElement()?.classList.remove('is-dragging');
     const position = marker.getLatLng();
     if (kind !== 'waypoint') finishEndpointDrag(marker);
     void snapAndSetRoutePoint(kind, { lat: position.lat, lon: position.lng }, index);
