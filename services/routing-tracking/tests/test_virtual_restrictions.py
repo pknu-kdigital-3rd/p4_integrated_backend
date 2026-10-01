@@ -112,6 +112,56 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.edge_ids, ["0:2:2", "2:1:4", "1:3:3"])
 
+    def test_turn_restriction_at_waypoint_uses_previous_leg_arrival(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {
+            0: (0.0, 0.0),
+            1: (0.0, 1.0),
+            2: (1.0, 1.0),
+            3: (0.0, 2.0),
+        }
+        graph.turn_restrictions = {(1, 1, 3)}
+        graph.adjacency = defaultdict(list)
+        graph.adjacency[0].append((1, 1.0, 40.0, [[0.0, 0.0], [0.0, 1.0]], empty_restrictions(), 1))
+        graph.adjacency[1].append((3, 1.0, 40.0, [[0.0, 1.0], [0.0, 2.0]], empty_restrictions(), 3))
+        graph.adjacency[1].append((2, 10.0, 40.0, [[0.0, 1.0], [1.0, 1.0]], empty_restrictions(), 5))
+        graph.adjacency[2].append((3, 10.0, 40.0, [[1.0, 1.0], [0.0, 2.0]], empty_restrictions(), 6))
+
+        first_leg = graph.route(0, 1)
+        self.assertEqual(first_leg.final_incoming_ways, (1,))
+        # The waypoint (node 1) was reached on way 1, so way 3 is banned there.
+        second_leg = graph.route(1, 3, initial_incoming_ways=first_leg.final_incoming_ways)
+        self.assertEqual(second_leg.edge_ids, ["1:2:5", "2:3:6"])
+        # Without arrival context the direct way is legal.
+        self.assertEqual(graph.route(1, 3).edge_ids, ["1:3:3"])
+
+    def test_osmnx_turn_restriction_at_waypoint_uses_previous_leg_arrival(self):
+        class FakeGraph:
+            nodes = {
+                0: {"y": 0.0, "x": 0.0},
+                1: {"y": 0.0, "x": 1.0},
+                2: {"y": 1.0, "x": 1.0},
+                3: {"y": 0.0, "x": 2.0},
+            }
+            adj = {
+                0: {1: {0: {"length": 1.0, "highway": "residential", "osmid": [7, 1]}}},
+                1: {
+                    3: {0: {"length": 1.0, "highway": "residential", "osmid": 3}},
+                    2: {0: {"length": 10.0, "highway": "residential", "osmid": 5}},
+                },
+                2: {3: {0: {"length": 10.0, "highway": "residential", "osmid": 6}}},
+            }
+
+        graph = object.__new__(OsmnxGraph)
+        graph.G = FakeGraph()
+        graph.turn_restrictions = {(1, 1, 3)}
+
+        first_leg = graph.route(0, 1)
+        self.assertEqual(first_leg.final_incoming_ways, (7, 1))
+        second_leg = graph.route(1, 3, initial_incoming_ways=first_leg.final_incoming_ways)
+        self.assertEqual(second_leg.edge_ids, ["1:2:0", "2:3:0"])
+        self.assertEqual(graph.route(1, 3).edge_ids, ["1:3:0"])
+
     def test_reversed_edge_curve_is_normalised_to_directed_travel(self):
         graph = object.__new__(PurePythonGraph)
         graph.coords = {

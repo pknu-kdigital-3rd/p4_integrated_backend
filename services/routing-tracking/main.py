@@ -314,6 +314,7 @@ def _internal_route(req: InternalRouteRequest, cancel_event=None):
     snapped_stops: list[dict] = []
     graph_version = _graph_version()
     blocked_edge_ids = list(req.blockedEdgeIds)
+    incoming_ways = None
     if req.blockedGeometries:
         # Resolve all active closure polygons against this graph before A*.
         # This also repairs restrictions persisted by a previous resolver
@@ -361,6 +362,9 @@ def _internal_route(req: InternalRouteRequest, cancel_event=None):
             penalty_edge_factors=req.penaltyEdgeFactors,
             avoid_initial_reverse_of_edge_id=req.avoidInitialReverseOfEdgeId if index == 1 else None,
             cancel_event=cancel_event,
+            # A turn restriction at a waypoint depends on the road the
+            # previous leg arrived on.
+            initial_incoming_ways=incoming_ways,
         )
         if cancel_event is not None and cancel_event.is_set():
             return None
@@ -385,6 +389,7 @@ def _internal_route(req: InternalRouteRequest, cancel_event=None):
                 "message": f"No route found for stop index {index}",
                 "stopIndex": index,
             })
+        incoming_ways = getattr(result, "final_incoming_ways", None)
         coords = result.coords
         if route_coords and coords:
             route_coords.extend(coords[1:])
