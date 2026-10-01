@@ -3,6 +3,7 @@ import { AppError } from "../../common/errors/app-error.ts";
 import { logger } from "../../config/logger.ts";
 import type { Prisma, VirtualRoute } from "../../generated/prisma/client.ts";
 import { routingInternalClient } from "./routing-internal.client.ts";
+import { diffRoadState, rerouteReason, routeAffectedByChange } from "./virtual-reroute-scope.ts";
 import type {
     CommandBody,
     Coordinate,
@@ -943,6 +944,7 @@ export const virtualService = {
             prepared.push({ ...change, resolved });
         }
         const revision = scenario.restrictionRevision + 1;
+        const previousOverlay = await restrictionOverlay(scenarioId);
         await prisma.$transaction(async tx => {
             const updated = await tx.virtualScenario.updateMany({
                 where: { scenarioId, restrictionRevision: scenario.restrictionRevision }, data: { restrictionRevision: revision },
@@ -978,6 +980,7 @@ export const virtualService = {
         const routingFailures = await this.refreshFollowingTrips(scenarioId, {
             preserveMotionOnFailure: relaxingRoadState,
             recoverStoppedTrips: relaxingRoadState,
+            previousOverlay,
         });
         return { restrictionRevision: revision, changed: prepared.length, routingFailures };
     },
@@ -991,13 +994,14 @@ export const virtualService = {
         const occupied = occupiedVehicleIds(states, resolved);
         if (input.kind === "BLOCKED" && occupied.length) throw new AppError(409, `Blocked road is occupied by virtual vehicles: ${occupied.join(", ")}`, "ROAD_OCCUPIED");
         const revision = scenario.restrictionRevision + 1;
+        const previousOverlay = await restrictionOverlay(scenarioId);
         const restriction = await prisma.$transaction(async (tx) => {
             const restriction = await tx.virtualRoadRestriction.create({ data: { scenarioId, kind: input.kind, geometry: json(input.geometry), affectedDirectedEdgeIds: json(resolved.affectedDirectedEdgeIds), affectedPhysicalSegmentIds: json(resolved.affectedPhysicalSegmentIds), graphVersion: resolved.graphVersion, penaltyFactor: input.penaltyFactor ?? null, revision, reason: input.reason ?? null, createdBy: actorId ?? null } });
             await tx.virtualScenario.update({ where: { scenarioId }, data: { restrictionRevision: revision } });
             await createEvent(tx, { scenarioId, actorId: actorId ?? null, eventType: "ROAD_RESTRICTION_ACTIVATED", payload: { restrictionId: restriction.restrictionId.toString(), kind: input.kind, revision } });
             return restriction;
         });
-        await this.refreshFollowingTrips(scenarioId);
+        await this.refreshFollowingTrips(scenarioId, { previousOverlay });
         return restriction;
     },
 
@@ -1006,6 +1010,7 @@ export const virtualService = {
         if (!existing) throw new AppError(404, "Road restriction not found", "RESTRICTION_NOT_FOUND");
         const scenario = await getScenario(existing.scenarioId);
         if (input.expectedRestrictionRevision !== undefined && input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed", "STALE_REVISION");
+        const previousOverlay = await restrictionOverlay(existing.scenarioId);
         if (input.isActive === false && input.geometry === undefined && input.kind === undefined) {
             const deactivated = await prisma.$transaction(async (tx) => {
                 const result = await tx.virtualRoadRestriction.update({ where: { restrictionId }, data: { isActive: false, updatedAt: new Date() } });
@@ -1019,7 +1024,7 @@ export const virtualService = {
             // step against the remaining active BLOCKED edges, so retaining
             // the last valid route is safe while a later road-state change or
             // operator action retries the calculation.
-            await this.refreshFollowingTrips(existing.scenarioId, { preserveMotionOnFailure: true, recoverStoppedTrips: true });
+            await this.refreshFollowingTrips(existing.scenarioId, { preserveMotionOnFailure: true, recoverStoppedTrips: true, previousOverlay });
             return deactivated;
         }
         const kind = input.kind ?? existing.kind;
@@ -1038,11 +1043,18 @@ export const virtualService = {
             await createEvent(tx, { scenarioId: existing.scenarioId, actorId: actorId ?? null, eventType: "ROAD_RESTRICTION_UPDATED", payload: { restrictionId: restrictionId.toString(), kind, revision } });
             return result;
         });
-        await this.refreshFollowingTrips(existing.scenarioId);
+        await this.refreshFollowingTrips(existing.scenarioId, { previousOverlay });
         return updated;
     },
 
-    async refreshFollowingTrips(scenarioId: bigint, options: { preserveMotionOnFailure?: boolean; recoverStoppedTrips?: boolean } = {}) {
+    async refreshFollowingTrips(scenarioId: bigint, options: {
+        preserveMotionOnFailure?: boolean;
+        recoverStoppedTrips?: boolean;
+        // Overlay read before the road-state change. When given, a change that
+        // only blocks roads or raises penalties reroutes only the moving
+        // vehicles whose remaining route uses a changed edge.
+        previousOverlay?: RestrictionOverlay;
+    } = {}) {
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, include: { trip: { include: { routes: { where: { isCurrent: true } }, waypoints: { orderBy: { sequence: "asc" } } } } } });
         const settings = await prisma.virtualVehicleSettings.findMany({ where: { vehicleId: { in: states.map((state) => state.vehicleId) }, autoFollowEnabled: true } });
         const following = new Set(settings.map((item) => item.vehicleId.toString()));
@@ -1055,6 +1067,28 @@ export const virtualService = {
         // reroutes - all vehicles in the same scenario see the same restrictions,
         // so N per-vehicle DB queries for identical data is pure waste.
         const preloadedOverlay = await restrictionOverlay(scenarioId);
+        const change = options.previousOverlay ? diffRoadState(options.previousOverlay, preloadedOverlay) : null;
+        const changeReason = change ? rerouteReason(change) : null;
+        // A stopped trip has no motion to keep, so it is always retried. A
+        // moving trip keeps its route when the change cannot affect it.
+        const reroutingStates = change
+            ? eligibleStates.filter((state) => state.simStatus !== "DRIVING" || routeAffectedByChange(
+                state.trip.routes.find((route) => route.routeId === state.activeRouteId) ?? state.trip.routes.at(-1),
+                state.offsetM,
+                change,
+            ))
+            : eligibleStates;
+        if (change) {
+            logger.info({
+                scenarioId: scenarioId.toString(),
+                reason: changeReason,
+                tightenedEdgeCount: change.tightenedEdgeIds.size,
+                relaxedEdgeCount: change.relaxedEdgeIds.size,
+                eligibleVehicleCount: eligibleStates.length,
+                reroutingVehicleCount: reroutingStates.length,
+            }, "Virtual road-state change reroute scope");
+        }
+        if (reroutingStates.length === 0) return [];
         const routingFailures: Array<Record<string, unknown>> = [];
         // A road-state change affects vehicles independently. Solving them
         // serially made the response time grow linearly with fleet size, but
@@ -1079,7 +1113,7 @@ export const virtualService = {
                         preloadedOverlay,
                         ...(options.recoverStoppedTrips && ["BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"].includes(currentState.simStatus)
                             ? { reason: "ROAD_REOPENED" }
-                            : {}),
+                            : changeReason ? { reason: changeReason } : {}),
                     });
                     if (activated) return;
                     const latest = await activeVehicleState(state.vehicleId);
@@ -1124,12 +1158,12 @@ export const virtualService = {
                 ]);
             }
         };
-        const workerCount = Math.min(concurrency, eligibleStates.length);
+        const workerCount = Math.min(concurrency, reroutingStates.length);
         await Promise.all(Array.from({ length: workerCount }, async () => {
             while (true) {
                 const index = nextStateIndex++;
-                if (index >= eligibleStates.length) return;
-                await processState(eligibleStates[index]!);
+                if (index >= reroutingStates.length) return;
+                await processState(reroutingStates[index]!);
             }
         }));
         return routingFailures;
