@@ -280,7 +280,7 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #live-view-panel:not(:fullscreen) #live-details { display: none; }
 
 /* Dedicated virtual dispatch workspace */
-body.virtual-mode #operator-layout { grid-template-columns: 64px minmax(0,1fr) 310px; }
+body.virtual-mode #operator-layout { grid-template-columns: 64px minmax(0,1fr) 410px; }
 body.virtual-mode #operator-sidebar,body.virtual-mode #map-commands,body.virtual-mode #map-legend,body.virtual-mode #map-pick-banner { display: none; }
 body.virtual-mode #navigation-rail { grid-column: 1; grid-row: 1; }
 body.virtual-mode #navigation-rail [data-rail=fleet],body.virtual-mode #navigation-rail [data-icon=bell],body.virtual-mode #navigation-rail [data-icon=chart] { display: none; }
@@ -339,6 +339,7 @@ body.virtual-mode #virtual-legend,body.virtual-mode #virtual-route-summary { dis
 /* Responsive composition */
 @media(max-width:1199px) {
   #operator-layout { grid-template-columns: 64px minmax(0,1fr) 350px; }
+  body.virtual-mode #operator-layout { grid-template-columns: 64px minmax(0,1fr) 350px; }
   .app-header { padding: 0 16px; gap: 12px; }.brand h1 { font-size: 17px; }.brand-mark { display: none; }
   #local-clock,.account-avatar { display: none; }#workspace-nav { gap: 2px; }
   #map-commands { left: 12px; width: calc(100% - 70px); }.filter-chips button { padding: 7px; }
