@@ -140,16 +140,41 @@ async function advanceVehicles() {
                 currentEdgeId,
                 currentPhysicalSegmentId,
             }, "Virtual vehicle stopped before entering a blocked road edge");
-            await prisma.$transaction([
-                prisma.virtualVehicleState.update({ where: { vehicleId: state.vehicleId }, data: { simStatus: "BLOCKED_AWAITING_OPERATOR", currentEdgeId, currentPhysicalSegmentId, blockedReason: "Blocked road ahead", lastCheckpointAt: new Date(now), updatedAt: new Date(now) } }),
-                prisma.virtualTrip.update({ where: { virtualTripId: state.virtualTripId }, data: { state: "BLOCKED_AWAITING_OPERATOR", commandVersion: { increment: 1 } } }),
-                prisma.virtualOperatorEvent.create({ data: {
+            const stopped = await prisma.$transaction(async (tx) => {
+                const stateClaim = await tx.virtualVehicleState.updateMany({
+                    where: {
+                        vehicleId: state.vehicleId,
+                        virtualTripId: state.virtualTripId,
+                        activeRouteId: state.activeRouteId,
+                        simStatus: "DRIVING",
+                        commandVersion: state.commandVersion,
+                        lastCheckpointAt: state.lastCheckpointAt,
+                    },
+                    data: {
+                        simStatus: "BLOCKED_AWAITING_OPERATOR",
+                        currentEdgeId,
+                        currentPhysicalSegmentId,
+                        blockedReason: "Blocked road ahead",
+                        lastCheckpointAt: new Date(now),
+                        updatedAt: new Date(now),
+                        commandVersion: { increment: 1 },
+                    },
+                });
+                if (!stateClaim.count) return false;
+                const tripClaim = await tx.virtualTrip.updateMany({
+                    where: { virtualTripId: state.virtualTripId, state: "DRIVING", commandVersion: state.commandVersion },
+                    data: { state: "BLOCKED_AWAITING_OPERATOR", commandVersion: { increment: 1 } },
+                });
+                if (!tripClaim.count) throw new Error("Trip changed while the simulation worker was stopping at a blocked road");
+                await tx.virtualOperatorEvent.create({ data: {
                     scenarioId: state.scenarioId,
                     virtualTripId: state.virtualTripId,
                     eventType: "VEHICLE_BLOCKED_BY_RESTRICTION",
                     payload: { vehicleId: state.vehicleId.toString(), tripId: state.virtualTripId.toString(), currentEdgeId, currentPhysicalSegmentId },
-                } }),
-            ]);
+                } });
+                return true;
+            });
+            if (!stopped) continue;
             continue;
         }
         if (fraction >= 1) {

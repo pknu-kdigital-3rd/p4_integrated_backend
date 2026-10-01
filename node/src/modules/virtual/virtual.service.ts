@@ -741,7 +741,7 @@ export const virtualService = {
                     details: error.details,
                 }, "Virtual trip entered NO_ROUTE while enabling route following");
                 await prisma.$transaction([
-                    prisma.virtualVehicleState.update({ where: { vehicleId }, data: { simStatus: "NO_ROUTE", blockedReason: "No legal route under the current road state" } }),
+                    prisma.virtualVehicleState.update({ where: { vehicleId }, data: { simStatus: "NO_ROUTE", blockedReason: "No legal route under the current road state", commandVersion: { increment: 1 } } }),
                     prisma.virtualTrip.update({ where: { virtualTripId: state.virtualTripId }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),
                 ]);
             }
@@ -790,9 +790,13 @@ export const virtualService = {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
             if (!latestTrip || !latestTrip.stateRecord || latestTrip.stateRecord.commandVersion !== current.commandVersion
                 || (options.expectedTripRevision !== undefined && latestTrip.tripRevision !== options.expectedTripRevision)) return null;
+            // System stop transitions historically incremented only the trip
+            // command version. Normalize both rows while claiming the route so
+            // a stopped trip can recover even if its saved versions diverged.
+            const nextCommandVersion = Math.max(current.commandVersion, latestTrip.commandVersion) + 1;
             const tripClaim = await tx.virtualTrip.updateMany({
-                where: { virtualTripId: current.virtualTripId, commandVersion: current.commandVersion },
-                data: { commandVersion: { increment: 1 } },
+                where: { virtualTripId: current.virtualTripId, commandVersion: latestTrip.commandVersion },
+                data: { commandVersion: nextCommandVersion },
             });
             if (!tripClaim.count) return null;
             await tx.virtualRoute.updateMany({ where: { virtualTripId: current.virtualTripId, isCurrent: true }, data: { isCurrent: false } });
@@ -834,7 +838,7 @@ export const virtualService = {
                     offsetM: 0,
                     lastCheckpointAt: new Date(),
                     blockedReason: null,
-                    commandVersion: { increment: 1 },
+                    commandVersion: nextCommandVersion,
                 },
             });
             if (!stateClaim.count) throw new VehicleCheckpointChanged("Vehicle checkpoint advanced during route calculation");
@@ -1114,7 +1118,7 @@ export const virtualService = {
                 logger.warn({ ...failure, err: error }, noViablePath ? "Virtual trip entered NO_ROUTE after road-state update" : "Virtual route recalculation failed without a confirmed no-route result");
                 if (!noViablePath) return;
                 await prisma.$transaction([
-                    prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: noViablePath ? "No viable path after road restriction" : "Routing failed after road-state change" } }),
+                    prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: noViablePath ? "No viable path after road restriction" : "Routing failed after road-state change", commandVersion: { increment: 1 } } }),
                     prisma.virtualTrip.updateMany({ where: { virtualTripId: latest.virtualTripId, state: { in: ACTIVE_TRIP_STATES } }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),
                 ]);
             }
