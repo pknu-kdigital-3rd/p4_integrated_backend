@@ -7,6 +7,7 @@ Run:
 
 Then open http://127.0.0.1:8000
 """
+import gc
 import hashlib
 import json
 import math
@@ -169,6 +170,39 @@ def health_ready():
     return {"status": "ready", "graph": "ok", "telemetry": "ok"}
 
 
+# Cyclic GC time, for ROUTE_TIMING. A full collection walks every tracked
+# object; with the routing and road-matching graphs loaded that took over a
+# second and landed inside whichever route search triggered it.
+_gc_totals = {"ms": 0.0, "fullCollections": 0}
+_gc_phase_started = [0.0]
+
+
+def _gc_timer(phase, info):
+    if phase == "start":
+        _gc_phase_started[0] = time.perf_counter()
+        return
+    _gc_totals["ms"] += (time.perf_counter() - _gc_phase_started[0]) * 1000
+    if info.get("generation") == 2:
+        _gc_totals["fullCollections"] += 1
+
+
+gc.callbacks.append(_gc_timer)
+
+
+def _freeze_loaded_objects(label: str):
+    """Exclude the just-loaded static graph data from future GC passes.
+
+    The graphs are never freed, but every full collection still traversed
+    their millions of objects (about 450 ms for the routing graph alone).
+    gc.freeze() moves all currently tracked objects to a permanent
+    generation; collect first so existing garbage is not frozen with them.
+    """
+    started = time.perf_counter()
+    gc.collect()
+    gc.freeze()
+    print(f"GC: froze {gc.get_freeze_count()} objects after {label} in {time.perf_counter() - started:.1f} s", flush=True)
+
+
 @app.on_event("startup")
 def startup():
     global graph, override_locations, hybrid_bus_service
@@ -188,6 +222,7 @@ def startup():
     )
     _install_telemetry_mode(_load_telemetry_mode(), persist=False, history_compensation_enabled=_load_history_compensation())
     print(f"Graph loaded and ready. {len(override_locations)} manual override location(s) found.")
+    _freeze_loaded_objects("routing graph load")
     threading.Thread(target=_load_match_graph, name="road-match-graph", daemon=True).start()
 
 
@@ -469,6 +504,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
 
 def _log_route_timing(req: InternalRouteRequest, timing: dict, outcome: str, total_ms: float, queue_ms, distance_m=None):
     legs = timing.get("legs", [])
+    gc_started = timing.get("gcStart", (0.0, 0))
     print("ROUTE_TIMING " + json.dumps({
         "outcome": outcome,
         "totalMs": total_ms,
@@ -482,6 +518,9 @@ def _log_route_timing(req: InternalRouteRequest, timing: dict, outcome: str, tot
         "searchCpuMs": round(sum(leg.get("searchCpuMs", 0.0) for leg in legs), 1),
         # Route requests running in this process when this one finished.
         "concurrentRoutes": _active_route_requests,
+        # GC during this request (process-wide, so shared if concurrentRoutes > 1).
+        "gcMs": round(_gc_totals["ms"] - gc_started[0], 1),
+        "gcFullCollections": _gc_totals["fullCollections"] - gc_started[1],
         "expanded": sum(leg.get("expanded", 0) for leg in legs),
         "heapPushes": sum(leg.get("heapPushes", 0) for leg in legs),
         "blockedEdgeHits": sum(leg.get("blockedEdgeHits", 0) for leg in legs),
@@ -514,7 +553,7 @@ def _internal_route(req: InternalRouteRequest, cancel_event=None, enqueued_at: f
 def _timed_internal_route(req: InternalRouteRequest, cancel_event=None, enqueued_at: float | None = None):
     started_at = time.perf_counter()
     queue_ms = None if enqueued_at is None else round((started_at - enqueued_at) * 1000, 1)
-    timing: dict = {}
+    timing: dict = {"gcStart": (_gc_totals["ms"], _gc_totals["fullCollections"])}
     try:
         result = _calculate_internal_route(req, cancel_event, timing)
     except HTTPException as error:
@@ -792,6 +831,7 @@ def _load_match_graph():
         _match_edge_index = (tuple(records), spatial_index, tuple(long_records))
         match_graph = loaded
         print(f"Road matching graph ready: {len(records)} edges in {time.perf_counter() - started:.1f} s", flush=True)
+        _freeze_loaded_objects("road matching graph load")
     except Exception as exc:  # routing keeps working without road matching
         print(f"Road matching graph failed to load: {exc!r}", flush=True)
 
