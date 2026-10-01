@@ -12,6 +12,8 @@
 //   age <= predictMs  -> 'predicting' (centre moves with the learned residual
 //                        velocity; drawn like an observed box)
 //   age <= holdMs     -> 'holding'    (dashed, fading, no distance)
+// A retained mask follows its box for maskPredictMs, then only the box is
+// drawn.
 //   age >  holdMs     -> 'expired'    (caller deletes the track)
 (function (root, factory) {
   const api = factory();
@@ -74,14 +76,23 @@
     // object motion after camera compensation.
     track.vx = 0;
     track.vy = 0;
+    // Displacement of the box since its mask was observed (camera shift plus
+    // prediction); a retained mask is drawn moved by this much.
+    track.maskShift = [0, 0];
     return track;
   }
 
   // Apply the frame's camera translation to everything positioned in image
   // coordinates. Called once per displayed frame, before matching.
+  function addMaskShift(track, dx, dy) {
+    const shift = Array.isArray(track.maskShift) ? track.maskShift : [0, 0];
+    track.maskShift = [shift[0] + dx, shift[1] + dy];
+  }
+
   function shiftTrack(track, dx, dy) {
     track.box = translateBox(track.box, dx, dy);
     if (track.lastObservedBox) track.lastObservedBox = translateBox(track.lastObservedBox, dx, dy);
+    addMaskShift(track, dx, dy);
   }
 
   // Learn velocity from two real observations. lastObservedBox has been
@@ -117,6 +128,7 @@
     track.lastObservedAtMs = nowMs;
     track.lastUpdatedAtMs = nowMs;
     track.state = 'observed';
+    track.maskShift = [0, 0];
     return reacquired;
   }
 
@@ -140,7 +152,10 @@
     const to = Math.min(nowMs, windowEnd);
     if (to > from) {
       const stepSec = (to - from) / 1000;
-      track.box = translateBox(track.box, finiteOr(track.vx, 0) * stepSec, finiteOr(track.vy, 0) * stepSec);
+      const dx = finiteOr(track.vx, 0) * stepSec;
+      const dy = finiteOr(track.vy, 0) * stepSec;
+      track.box = translateBox(track.box, dx, dy);
+      addMaskShift(track, dx, dy);
     }
     track.state = age <= config.predictMs ? 'predicting' : 'holding';
     track.lastUpdatedAtMs = nowMs;
@@ -163,6 +178,40 @@
     return track.state !== 'holding';
   }
 
+  // The mask to draw for a track: the observed polygon while observed, the
+  // same polygon moved with its box for maskPredictMs after the last real
+  // observation, then none (box only). A polygon is not extrapolated
+  // further because its shape changes with the object.
+  function maskForTrack(track, mask, nowMs, config) {
+    if (!Array.isArray(mask) || mask.length < 3) return null;
+    if (track.state === 'observed') return mask;
+    if (observationAgeMs(track, nowMs) > config.maskPredictMs) return null;
+    const [dx, dy] = Array.isArray(track.maskShift) ? track.maskShift : [0, 0];
+    if (!dx && !dy) return mask;
+    return mask.map((point) => [point[0] + dx, point[1] + dy]);
+  }
+
+  // Per-state counts and the oldest current prediction, for the stats line.
+  function summarize(trackList, nowMs) {
+    const summary = { observed: 0, predicting: 0, holding: 0, maxPredictionAgeMs: 0 };
+    for (const track of trackList) {
+      if (!(track.state in summary)) continue;
+      summary[track.state] += 1;
+      if (track.state !== 'observed') {
+        summary.maxPredictionAgeMs = Math.max(summary.maxPredictionAgeMs, observationAgeMs(track, nowMs));
+      }
+    }
+    return summary;
+  }
+
+  // Optional per-track debug text, e.g. "s17 PRED 67ms".
+  function debugLabel(track, nowMs) {
+    const age = Math.round(observationAgeMs(track, nowMs));
+    if (track.state === 'predicting') return `${track.id} PRED ${age}ms`;
+    if (track.state === 'holding') return `${track.id} HOLD ${age}ms`;
+    return `${track.id} OBS`;
+  }
+
   return {
     DEFAULTS,
     normalizeConfig,
@@ -177,5 +226,8 @@
     advanceMissingTrack,
     trackAlpha,
     distanceVisible,
+    maskForTrack,
+    summarize,
+    debugLabel,
   };
 });

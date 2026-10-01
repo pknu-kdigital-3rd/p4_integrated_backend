@@ -61,6 +61,10 @@
   <label title="Hold and fade a box until this long after its last real detection, then remove it">hold ms
     <input id="trackHoldMs" type="number" min="0" max="2000" step="10" value="220" />
   </label>
+  <label title="Keep a segmentation mask, moved with its box, this long after its last real detection">mask ms
+    <input id="maskPredictMs" type="number" min="0" max="2000" step="10" value="100" />
+  </label>
+  <label title="Show each track's state (OBS / PRED / HOLD) and age"><input id="trackDebug" type="checkbox" /> track debug</label>
   <label title="A new box is shown once its confidence reaches this value; it then stays until the server tracker drops it.">min confidence
     <input id="minConfidence" type="range" min="0" max="1" step="0.05" value="0" />
     <output id="minConfidenceValue">0.00</output>
@@ -90,6 +94,8 @@
   const compensationModeEl = document.getElementById('compensationMode');
   const trackPredictMsEl = document.getElementById('trackPredictMs');
   const trackHoldMsEl = document.getElementById('trackHoldMs');
+  const maskPredictMsEl = document.getElementById('maskPredictMs');
+  const trackDebugEl = document.getElementById('trackDebug');
   const temporal = window.LiveViewTracks;
   const minConfidenceEl = document.getElementById('minConfidence');
   const minConfidenceValueEl = document.getElementById('minConfidenceValue');
@@ -114,8 +120,13 @@
   let temporalConfig = temporal.normalizeConfig({
     predictMs: localStorage.getItem('playback-track-predict-ms') ?? undefined,
     holdMs: localStorage.getItem('playback-track-hold-ms') ?? undefined,
+    maskPredictMs: localStorage.getItem('playback-mask-predict-ms') ?? undefined,
   });
   let lastTrackClockMs = null;
+  let trackDebug = localStorage.getItem('playback-track-debug') === 'true';
+  // Cumulative since the last reset, plus the current per-state counts.
+  let trackCounters = { expired: 0, reacquired: 0 };
+  let trackSummary = { observed: 0, predicting: 0, holding: 0, maxPredictionAgeMs: 0 };
   // Viewer-side appear threshold. It only hides boxes: the server tracker
   // already drops new boxes below its own appear threshold.
   let minConfidence = Math.max(0, Math.min(1, Number(localStorage.getItem('playback-min-confidence') ?? '0') || 0));
@@ -254,7 +265,7 @@
   }
   function updateStats() {
     const depthStatus = lastDepth.status ? `  depth=${lastDepth.status}` : '';
-    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  predict=${temporalConfig.predictMs}ms hold=${temporalConfig.holdMs}ms  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${depthStatus}`;
+    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  predict=${temporalConfig.predictMs}ms hold=${temporalConfig.holdMs}ms mask=${temporalConfig.maskPredictMs}ms  tracks obs/pred/hold=${trackSummary.observed}/${trackSummary.predicting}/${trackSummary.holding} max_age=${Math.round(trackSummary.maxPredictionAgeMs)}ms expired=${trackCounters.expired} reacquired=${trackCounters.reacquired}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${depthStatus}`;
     modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
   }
   function updateBrowserFps() {
@@ -279,6 +290,8 @@
     tracks.clear();
     nextTrackId = 1;
     lastTrackClockMs = null;
+    trackCounters = { expired: 0, reacquired: 0 };
+    trackSummary = { observed: 0, predicting: 0, holding: 0, maxPredictionAgeMs: 0 };
     previousMotionLuma = null;
     globalMotion = { dx: 0, dy: 0, confidence: 0 };
     lastDepth = {};
@@ -464,7 +477,7 @@
     return Math.hypot(ax - bx, ay - by);
   }
   function updateTrack(track, observation, nowMs) {
-    temporal.recordObservation(track, observation.box, nowMs, temporalConfig);
+    if (temporal.recordObservation(track, observation.box, nowMs, temporalConfig)) trackCounters.reacquired++;
     track.hits++; track.misses = 0;
     track.box = track.box.map((value, index) => value * (1 - TRACK_SMOOTHING) + observation.box[index] * TRACK_SMOOTHING);
     track.item = observation.item;
@@ -548,8 +561,12 @@
     for (const [id, track] of tracks) {
       if (matched.has(id)) continue;
       track.misses++;
-      if (temporal.advanceMissingTrack(track, nowMs, temporalConfig) === 'expired') tracks.delete(id);
+      if (temporal.advanceMissingTrack(track, nowMs, temporalConfig) === 'expired') {
+        tracks.delete(id);
+        trackCounters.expired++;
+      }
     }
+    trackSummary = temporal.summarize(tracks.values(), nowMs);
     return Array.from(tracks.values()).filter(track => track.confirmed && track.shown);
   }
   function drawOverlay(inference, width, height, nowMs) {
@@ -623,7 +640,16 @@
           overlayCtx.fillText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
         }
       }
-      if (masksEl.checked && drawMask && item.mask && item.mask.length > 2) { overlayCtx.beginPath(); item.mask.forEach((point, i) => { const px = point[0] * overlayCanvas.width, py = point[1] * overlayCanvas.height; i ? overlayCtx.lineTo(px, py) : overlayCtx.moveTo(px, py); }); overlayCtx.closePath(); overlayCtx.fillStyle = color + '44'; overlayCtx.fill(); overlayCtx.strokeStyle = color; overlayCtx.stroke(); }
+      if (trackDebug && track.state) {
+        overlayCtx.font = '600 11px monospace';
+        overlayCtx.fillStyle = '#fff';
+        overlayCtx.textBaseline = 'top';
+        overlayCtx.fillText(temporal.debugLabel(track, nowMs), x + 3, Math.min(y + h + 2, overlayCanvas.height - 12));
+        overlayCtx.textBaseline = 'alphabetic';
+      }
+      // A retained mask follows its box briefly, then only the box is drawn.
+      const mask = track.state ? temporal.maskForTrack(track, item.mask, nowMs, temporalConfig) : item.mask;
+      if (masksEl.checked && drawMask && mask && mask.length > 2) { overlayCtx.beginPath(); mask.forEach((point, i) => { const px = point[0] * overlayCanvas.width, py = point[1] * overlayCanvas.height; i ? overlayCtx.lineTo(px, py) : overlayCtx.moveTo(px, py); }); overlayCtx.closePath(); overlayCtx.fillStyle = color + '44'; overlayCtx.fill(); overlayCtx.strokeStyle = color; overlayCtx.stroke(); }
       overlayCtx.globalAlpha = 1;
     }
   }
@@ -810,20 +836,30 @@
       ...temporalConfig,
       predictMs: Math.min(2000, Number(trackPredictMsEl.value)),
       holdMs: Math.min(2000, Number(trackHoldMsEl.value)),
+      maskPredictMs: Math.min(2000, Number(maskPredictMsEl.value)),
     });
     trackPredictMsEl.value = String(temporalConfig.predictMs);
     trackHoldMsEl.value = String(temporalConfig.holdMs);
+    maskPredictMsEl.value = String(temporalConfig.maskPredictMs);
     if (persist) {
       localStorage.setItem('playback-track-predict-ms', String(temporalConfig.predictMs));
       localStorage.setItem('playback-track-hold-ms', String(temporalConfig.holdMs));
-      setStatus(`Track predict ${temporalConfig.predictMs} ms, hold ${temporalConfig.holdMs} ms`, '#fc6');
+      localStorage.setItem('playback-mask-predict-ms', String(temporalConfig.maskPredictMs));
+      setStatus(`Track predict ${temporalConfig.predictMs} ms, hold ${temporalConfig.holdMs} ms, mask ${temporalConfig.maskPredictMs} ms`, '#fc6');
     }
     updateStats();
   }
   trackPredictMsEl.value = String(temporalConfig.predictMs);
   trackHoldMsEl.value = String(temporalConfig.holdMs);
+  maskPredictMsEl.value = String(temporalConfig.maskPredictMs);
   trackPredictMsEl.addEventListener('change', () => applyTemporalControls(true));
   trackHoldMsEl.addEventListener('change', () => applyTemporalControls(true));
+  maskPredictMsEl.addEventListener('change', () => applyTemporalControls(true));
+  trackDebugEl.checked = trackDebug;
+  trackDebugEl.addEventListener('change', () => {
+    trackDebug = trackDebugEl.checked;
+    localStorage.setItem('playback-track-debug', String(trackDebug));
+  });
   function applyMinConfidence(value, persist) {
     minConfidence = Math.max(0, Math.min(1, Number(value) || 0));
     minConfidenceEl.value = String(minConfidence);

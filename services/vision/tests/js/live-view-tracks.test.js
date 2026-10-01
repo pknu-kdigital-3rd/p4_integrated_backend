@@ -163,3 +163,53 @@ test('a gap longer than the sample limit resets velocity on reacquisition', () =
   assert.equal(track.vx, 0);
   assert.equal(track.vy, 0);
 });
+
+const MASK = [[0.40, 0.40], [0.50, 0.40], [0.50, 0.60], [0.40, 0.60]];
+
+test('an observed track draws its mask unchanged', () => {
+  const track = newTrack();
+  assert.equal(tracks.maskForTrack(track, MASK, 0, config), MASK);
+  assert.equal(tracks.maskForTrack(track, [[0, 0], [1, 1]], 0, config), null);
+});
+
+test('a retained mask moves with its box, then is dropped before the box', () => {
+  const track = movingTrack();
+  const t0 = track.lastObservedAtMs;
+  tracks.shiftTrack(track, 0.05, 0);
+  tracks.advanceMissingTrack(track, t0 + 66, config);
+  const mask = tracks.maskForTrack(track, MASK, t0 + 66, config);
+  const expectedDx = 0.05 + track.vx * 0.066;
+  assert.ok(Math.abs(mask[0][0] - (0.40 + expectedDx)) < 1e-9, `mask x ${mask[0][0]}`);
+  assert.equal(+mask[0][1].toFixed(9), 0.40);
+  // Past maskPredictMs the box is still predicted but the mask is gone.
+  assert.equal(tracks.advanceMissingTrack(track, t0 + 120, config), 'predicting');
+  assert.equal(tracks.maskForTrack(track, MASK, t0 + 120, config), null);
+});
+
+test('a new observation resets the mask displacement', () => {
+  const track = movingTrack();
+  tracks.shiftTrack(track, 0.05, 0.02);
+  tracks.recordObservation(track, BOX, track.lastObservedAtMs + 33, config);
+  assert.deepEqual(track.maskShift, [0, 0]);
+});
+
+test('summary counts states and the oldest prediction', () => {
+  const observed = newTrack();
+  const predicting = newTrack();
+  const holding = newTrack();
+  tracks.advanceMissingTrack(predicting, 100, config);
+  tracks.advanceMissingTrack(holding, 200, config);
+  observed.lastObservedAtMs = 200;
+  const summary = tracks.summarize([observed, predicting, holding], 200);
+  assert.deepEqual(summary, { observed: 1, predicting: 1, holding: 1, maxPredictionAgeMs: 200 });
+});
+
+test('debug labels name the state and age', () => {
+  const track = newTrack();
+  track.id = 's17';
+  assert.equal(tracks.debugLabel(track, 0), 's17 OBS');
+  tracks.advanceMissingTrack(track, 67, config);
+  assert.equal(tracks.debugLabel(track, 67), 's17 PRED 67ms');
+  tracks.advanceMissingTrack(track, 184, config);
+  assert.equal(tracks.debugLabel(track, 184), 's17 HOLD 184ms');
+});
