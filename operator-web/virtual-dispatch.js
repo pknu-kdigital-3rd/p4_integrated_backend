@@ -101,6 +101,11 @@ routeProgressIndicator.innerHTML = '<span class="virtual-route-progress-spinner"
 map.getContainer().append(routeProgressIndicator);
 const routeProgressMessage = routeProgressIndicator.querySelector('[data-route-progress-message]');
 const routeOperations = new Map();
+let routeCalculationController = null;
+function cancelInFlightRouteCalculation() {
+  routeCalculationController?.abort();
+  routeCalculationController = null;
+}
 function syncRouteProgress() {
   const busy = routeOperations.size > 0;
   routeProgressIndicator.hidden = !busy;
@@ -459,6 +464,7 @@ function queueEndpointSnapPreview(context, marker) {
   }, delay);
 }
 function startEndpointDrag(kind, marker, index = null) {
+  cancelInFlightRouteCalculation();
   endpointDrag = { kind, marker, index, requestId: 0, lastRequestAt: 0, timer: null };
   marker.setOpacity(0.65);
   endpointSnapPreviewLayerGroup.clearLayers();
@@ -479,6 +485,7 @@ function markPointsChanged(message) {
   setStatus(message);
 }
 function removeRoutePoint(kind, index) {
+  cancelInFlightRouteCalculation();
   if (kind === 'waypoint') points.waypoints.splice(index, 1);
   else points[kind] = null;
   renderPoints();
@@ -497,22 +504,30 @@ async function replaceActiveDestination(activeTrip, destination, previousDestina
     setStatus('The active trip revision is unavailable; refresh the virtual workspace.', true);
     return;
   }
+  cancelInFlightRouteCalculation();
+  const controller = new AbortController();
+  routeCalculationController = controller;
   const finishRouting = beginRouteCalculation('목적지까지 경로를 다시 계산하는 중…');
   try {
     setStatus('Recalculating from the vehicle position to the new destination…');
     await api(`/api/v1/virtual/trips/${encodeURIComponent(activeTrip.tripId)}/destination`, {
       method: 'PUT',
       body: JSON.stringify({ destination, expectedTripRevision }),
+      signal: controller.signal,
     });
+    if (routeCalculationController !== controller) return;
     await loadScenarioData();
+    if (routeCalculationController !== controller) return;
     setStatus('Destination updated and optimal path recalculated.');
   } catch (error) {
+    if (controller.signal.aborted || routeCalculationController !== controller) return;
     if (previousDestination) {
       points.destination = previousDestination;
       renderPoints();
     }
     setStatus(error.message, true);
   } finally {
+    if (routeCalculationController === controller) routeCalculationController = null;
     finishRouting();
   }
 }
@@ -1051,12 +1066,22 @@ async function decideRequest(requestId, action) {
 }
 async function previewRoute() {
   if (!scenarioId || !selectedVehicleId || !points.origin || !points.destination) { setStatus(uiText('Select a virtual vehicle and pick origin and destination.'), true); return; }
+  cancelInFlightRouteCalculation();
+  const controller = new AbortController();
+  routeCalculationController = controller;
   const finishRouting = beginRouteCalculation('경로를 계산하는 중…');
   try {
-    draft = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/preview`, { method: 'POST', body: JSON.stringify({ selectedVehicleId, origin: points.origin, destination: points.destination, waypoints: points.waypoints, expectedRestrictionRevision: scenarioRevision }) });
+    const nextDraft = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/preview`, { method: 'POST', body: JSON.stringify({ selectedVehicleId, origin: points.origin, destination: points.destination, waypoints: points.waypoints, expectedRestrictionRevision: scenarioRevision }), signal: controller.signal });
+    if (routeCalculationController !== controller) return;
+    draft = nextDraft;
     renderDraft(); setStatus(`Route preview ready for vehicle ${selectedVehicleId}.`);
-  } catch (error) { draft = null; renderDraft(); showRoutingLog(error.message, error.details); setStatus(error.message, true); }
-  finally { finishRouting(); }
+  } catch (error) {
+    if (controller.signal.aborted || routeCalculationController !== controller) return;
+    draft = null; renderDraft(); showRoutingLog(error.message, error.details); setStatus(error.message, true);
+  } finally {
+    if (routeCalculationController === controller) routeCalculationController = null;
+    finishRouting();
+  }
 }
 async function generateRequest() {
   if (!draft || dispatchSubmitting) return;
@@ -1198,6 +1223,7 @@ async function applySelectedSpeed() {
   }
 }
 function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getCenter(), originalMarker = null) {
+  cancelInFlightRouteCalculation();
   roadBrush.reset();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   cancelPointPlacement();
@@ -1273,6 +1299,7 @@ async function removeRestriction(restriction) {
 // Whether Live View was open when virtual mode closed it, so it can reopen.
 let liveViewBeforeVirtual = false;
 async function switchMode(next) {
+  cancelInFlightRouteCalculation();
   roadBrush.reset();
   cancelPointPlacement();
   hideRouteContextMenu();
@@ -1334,7 +1361,7 @@ map.on('click', (event) => {
 });
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
-scenarioSelect.addEventListener('change', () => { roadBrush.reset(); cancelPointPlacement(); scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
+scenarioSelect.addEventListener('change', () => { cancelInFlightRouteCalculation(); roadBrush.reset(); cancelPointPlacement(); scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
 vehicleSelect.addEventListener('change', () => {
   selectedVehicleId = vehicleSelect.value;
   speedControlEditing = false;
