@@ -573,11 +573,18 @@
         const rawDistance = skipped ? item.held_distance_m : item.distance_m;
         const distance = Number(rawDistance);
         const distanceLabel = rawDistance != null && Number.isFinite(distance) ? `${Math.round(distance)} m` : '';
-        const label = [item.class || 'object', distanceLabel].filter(Boolean).join(' · ');
-        overlayCtx.font = '700 14px sans-serif';
+        const classLabel = item.class || 'object';
+        const meterFontSize = distanceLabel
+          ? Math.round(14 + 6 * Math.max(0, Math.min(1, 1 - Math.max(0, distance) / 50)))
+          : 14;
         if (showBox) {
-          const paddingX = 5, paddingY = 3, labelHeight = 20;
-          const labelWidth = overlayCtx.measureText(label).width + paddingX * 2;
+          const paddingX = 5, gap = distanceLabel ? 5 : 0, classFontSize = 13;
+          overlayCtx.font = `700 ${classFontSize}px sans-serif`;
+          const classWidth = overlayCtx.measureText(classLabel).width;
+          overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
+          const meterWidth = distanceLabel ? overlayCtx.measureText(distanceLabel).width : 0;
+          const labelHeight = Math.max(classFontSize, meterFontSize) + 6;
+          const labelWidth = classWidth + meterWidth + gap + paddingX * 2;
           const labelX = Math.max(0, Math.min(x, overlayCanvas.width - labelWidth));
           const labelY = y >= labelHeight ? y - labelHeight : y;
           overlayCtx.fillStyle = color;
@@ -585,12 +592,21 @@
             overlayCtx.beginPath(); overlayCtx.roundRect(labelX, labelY, labelWidth, labelHeight, 4); overlayCtx.fill();
           } else overlayCtx.fillRect(labelX, labelY, labelWidth, labelHeight);
           overlayCtx.fillStyle = '#fff';
-          overlayCtx.textBaseline = 'top';
-          overlayCtx.fillText(label, labelX + paddingX, labelY + paddingY);
+          overlayCtx.textBaseline = 'middle';
+          const textY = labelY + labelHeight / 2;
+          overlayCtx.font = `700 ${classFontSize}px sans-serif`;
+          overlayCtx.fillText(classLabel, labelX + paddingX, textY);
+          if (distanceLabel) {
+            overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
+            overlayCtx.fillText(distanceLabel, labelX + paddingX + classWidth + gap, textY);
+          }
           overlayCtx.textBaseline = 'alphabetic';
         } else if (distanceLabel) {
+          overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
           overlayCtx.fillStyle = '#fff';
-          overlayCtx.fillText(distanceLabel, x + 3, Math.max(14, y - 4));
+          const labelWidth = overlayCtx.measureText(distanceLabel).width;
+          const labelX = Math.max(0, Math.min(x + w / 2 - labelWidth / 2, overlayCanvas.width - labelWidth));
+          overlayCtx.fillText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
         }
       }
       if (masksEl.checked && drawMask && item.mask && item.mask.length > 2) { overlayCtx.beginPath(); item.mask.forEach((point, i) => { const px = point[0] * overlayCanvas.width, py = point[1] * overlayCanvas.height; i ? overlayCtx.lineTo(px, py) : overlayCtx.moveTo(px, py); }); overlayCtx.closePath(); overlayCtx.fillStyle = color + '44'; overlayCtx.fill(); overlayCtx.strokeStyle = color; overlayCtx.stroke(); }
