@@ -796,6 +796,13 @@ export const virtualService = {
         const scenario = await getScenario(current.scenarioId);
         try {
             return await prisma.$transaction(async (tx) => {
+            // Lock the vehicle row before reading it. The worker rewrites the
+            // checkpoint every tick, and this transaction writes the route
+            // before claiming the state; without the lock a tick landing in
+            // between made every claim fail. The worker's write now waits and
+            // is then rejected by the bumped commandVersion. Locking the state
+            // row first also matches the worker's state-then-trip lock order.
+            await tx.$queryRaw`SELECT vehicle_id FROM virtual_vehicle_state WHERE vehicle_id = ${vehicleId} FOR UPDATE`;
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
             if (!latestTrip || !latestTrip.stateRecord || latestTrip.stateRecord.commandVersion !== current.commandVersion
                 || (options.expectedTripRevision !== undefined && latestTrip.tripRevision !== options.expectedTripRevision)) return null;
