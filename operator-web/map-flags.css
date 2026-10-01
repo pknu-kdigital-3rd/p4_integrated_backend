@@ -1,13 +1,8 @@
 .virtual-point-icon{background:transparent;border:0;cursor:grab}
 .virtual-point-icon:active{cursor:grabbing}
-.virtual-flag{--flag-color:#f59e0b;position:relative;display:block;width:40px;height:48px;filter:drop-shadow(0 1px 2px #07111f)}
-.virtual-flag-waypoint{--flag-color:#f59e0b}
-.virtual-flag-pole{position:absolute;left:11px;top:4px;width:3px;height:39px;border-radius:2px;background:var(--flag-color);border:1px solid #fff8}
-.virtual-flag-cloth{position:absolute;left:14px;top:2px;display:flex;width:25px;height:19px;align-items:center;justify-content:center;clip-path:polygon(0 0,100% 0,82% 50%,100% 100%,0 100%);background:var(--flag-color);color:#fff;font:700 12px/1 ui-sans-serif,system-ui,sans-serif;text-shadow:0 1px 1px #0008}
-.virtual-flag-base{position:absolute;left:2px;bottom:0;width:23px;height:7px;border:1px solid #fff8;border-radius:50%;background:var(--flag-color);box-shadow:0 1px 2px #07111f99}
-.virtual-flag-waypoint .virtual-flag-cloth{color:#1b2430;text-shadow:none}
 .virtual-endpoint-origin{--pin-fill:#00c853;--pin-border:#008d3c}
 .virtual-endpoint-destination{--pin-fill:#ff4149;--pin-border:#bd282f}
+.virtual-waypoint-icon{--pin-fill:#2563eb;--pin-border:#1e40af}
 .virtual-endpoint-pin{display:block;width:42px;height:56px;overflow:visible;filter:drop-shadow(0 2px 3px #0006)}
 .virtual-endpoint-pin path{fill:var(--pin-fill);stroke:var(--pin-border);stroke-width:2;stroke-linejoin:round}
 .virtual-endpoint-pin text{fill:#fff;font:800 22px Pretendard,'Noto Sans KR','Malgun Gothic',sans-serif;paint-order:stroke;stroke:#0001;stroke-width:.5px}

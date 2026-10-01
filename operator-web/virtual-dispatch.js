@@ -209,10 +209,10 @@ function pointIcon(kind, index) {
     });
   }
   return L.divIcon({
-    className: 'virtual-point-icon',
-    html: `<span class="virtual-flag virtual-flag-waypoint"><span class="virtual-flag-pole"></span><span class="virtual-flag-cloth">${index + 1}</span><span class="virtual-flag-base"></span></span>`,
-    iconSize: [40, 48],
-    iconAnchor: [12, 46],
+    className: 'virtual-point-icon virtual-endpoint-icon virtual-waypoint-icon',
+    html: `<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="35" text-anchor="middle">${index + 1}</text></svg>`,
+    iconSize: [42, 56],
+    iconAnchor: [21, 54.6],
   });
 }
 function renderEndpointSnapPreview(context, snapped) {
