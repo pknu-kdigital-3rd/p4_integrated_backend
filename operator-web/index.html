@@ -9,7 +9,7 @@
   </title>
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
-  <link href="styles.css?v=32" rel="stylesheet"/>
+  <link href="styles.css?v=34" rel="stylesheet"/>
  </head>
  <body>
   <header class="app-header">
@@ -158,6 +158,10 @@
       <h3>
        차량 제어
       </h3>
+      <label class="virtual-turbo-toggle" for="virtual-turbo-mode">
+       <input id="virtual-turbo-mode" type="checkbox"/>
+       터보 진행 (20×)
+      </label>
       <label>
        <input checked="" id="virtual-following" type="checkbox"/>
        경로 추종
@@ -652,7 +656,7 @@
   </script>
   <script src="app.js?v=47" type="module">
   </script>
-  <script src="virtual-dispatch.js?v=31" type="module">
+  <script src="virtual-dispatch.js?v=33" type="module">
   </script>
  </body>
 </html>

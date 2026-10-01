@@ -52,6 +52,14 @@ function id(value: string): bigint {
     return BigInt(value);
 }
 
+async function assertScenarioEditable(scenarioId: bigint): Promise<void> {
+    const turboTrip = await prisma.virtualVehicleState.findFirst({
+        where: { scenarioId, simStatus: "DRIVING", speedFactor: { gte: 20 } },
+        select: { virtualTripId: true },
+    });
+    if (turboTrip) throw new AppError(409, "Scenario editing is locked while a turbo trip is in progress", "TURBO_PROGRESS_LOCK");
+}
+
 function profileForVehicle(vehicle: { vehicleProfile?: unknown; widthM?: unknown; heightM?: unknown; lengthM?: unknown }) {
     if (typeof vehicle.vehicleProfile === "string") return vehicle.vehicleProfile;
     const width = Number(vehicle.widthM ?? 0);
@@ -389,6 +397,7 @@ export const virtualService = {
 
     async removeScenario(scenarioId: bigint, actorId?: bigint, attempt = 0): Promise<Awaited<ReturnType<typeof prisma.virtualScenario.update>>> {
         try {
+            await assertScenarioEditable(scenarioId);
             return await this.archiveScenario(scenarioId, actorId);
         } catch (error) {
             // The simulation worker checkpoints every moving vehicle each
@@ -454,6 +463,7 @@ export const virtualService = {
     },
 
     async snapRoutePoint(scenarioId: bigint, coordinate: Coordinate) {
+        await assertScenarioEditable(scenarioId);
         await getScenario(scenarioId);
         return routingInternalClient.snap(coordinate);
     },
@@ -545,6 +555,7 @@ export const virtualService = {
     },
 
     async previewRoute(scenarioId: bigint, input: RoutePreviewBody, actorId?: bigint, signal?: AbortSignal) {
+        await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         const vehicleId = id(input.selectedVehicleId);
         const vehicle = await getVirtualVehicle(vehicleId);
@@ -593,6 +604,7 @@ export const virtualService = {
     },
 
     async createDispatchRequest(scenarioId: bigint, input: DispatchRequestBody, actorId?: bigint) {
+        await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         const vehicleId = id(input.selectedVehicleId);
         const vehicle = await getVirtualVehicle(vehicleId);
@@ -626,6 +638,11 @@ export const virtualService = {
         const result = await prisma.$transaction(async (tx) => {
             const request = await tx.virtualDispatchRequest.findUnique({ where: { requestId }, include: { draft: true, scenario: true } });
             if (!request) throw new AppError(404, "Dispatch request not found", "REQUEST_NOT_FOUND");
+            const turboTrip = await tx.virtualVehicleState.findFirst({
+                where: { scenarioId: request.scenarioId, simStatus: "DRIVING", speedFactor: { gte: 20 } },
+                select: { virtualTripId: true },
+            });
+            if (turboTrip) throw new AppError(409, "Scenario editing is locked while a turbo trip is in progress", "TURBO_PROGRESS_LOCK");
             if (request.state === "ACCEPTED" && request.acceptedTripId) {
                 return tx.virtualTrip.findUnique({ where: { virtualTripId: request.acceptedTripId }, include: { routes: true, waypoints: true, stateRecord: true } });
             }
@@ -729,6 +746,9 @@ export const virtualService = {
     async command(tripId: bigint, input: CommandBody, actorId?: bigint) {
         const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { stateRecord: true } });
         if (!trip || !trip.stateRecord) throw new AppError(404, "Virtual trip not found", "VIRTUAL_TRIP_NOT_FOUND");
+        if (trip.state === "DRIVING" && trip.stateRecord.simStatus === "DRIVING" && trip.stateRecord.speedFactor >= 20) {
+            throw new AppError(409, "Trip controls are locked while turbo progress is active", "TURBO_PROGRESS_LOCK");
+        }
         if (["COMPLETED", "CANCELLED"].includes(trip.state)) throw new AppError(409, "Virtual trip is terminal", "TRIP_TERMINAL");
         if (input.command === "PAUSE") return prisma.$transaction(async (tx) => { const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "PAUSED", commandVersion: { increment: 1 } } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "PAUSED", lastCheckpointAt: new Date(), commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_PAUSED", payload: {} }); return result; });
         if (input.command === "RESUME") return prisma.$transaction(async (tx) => { const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "DRIVING", commandVersion: { increment: 1 } } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "DRIVING", blockedReason: null, commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_RESUMED", payload: {} }); return result; });
@@ -752,6 +772,7 @@ export const virtualService = {
         const current = await ensureSettings(vehicleId);
         if (input.expectedPolicyVersion !== undefined && input.expectedPolicyVersion !== current.policyVersion) throw new AppError(409, "Vehicle follow setting changed", "STALE_POLICY_VERSION");
         const state = await activeVehicleState(vehicleId);
+        if (state) await assertScenarioEditable(state.scenarioId);
         const settings = await prisma.virtualVehicleSettings.update({ where: { vehicleId }, data: { autoFollowEnabled: input.enabled, policyVersion: { increment: 1 } } });
         if (input.enabled && state && state.trip.state !== "PAUSED" && state.trip.state !== "COMPLETED" && state.trip.state !== "CANCELLED") {
             try {
@@ -943,6 +964,7 @@ export const virtualService = {
     async replaceWaypoints(tripId: bigint, input: WaypointsBody, actorId?: bigint) {
         const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { waypoints: true } });
         if (!trip) throw new AppError(404, "Virtual trip not found", "VIRTUAL_TRIP_NOT_FOUND");
+        await assertScenarioEditable(trip.scenarioId);
         if (trip.tripRevision !== input.expectedTripRevision) throw new AppError(409, "Trip changed; refresh waypoints", "STALE_TRIP_REVISION");
         const reached = trip.waypoints.filter((item) => item.status === "REACHED");
         await prisma.$transaction(async (tx) => {
@@ -959,6 +981,7 @@ export const virtualService = {
     async replaceDestination(tripId: bigint, input: DestinationBody, actorId?: bigint) {
         const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { stateRecord: true } });
         if (!trip || !trip.stateRecord) throw new AppError(404, "Virtual trip not found", "VIRTUAL_TRIP_NOT_FOUND");
+        await assertScenarioEditable(trip.scenarioId);
         if (!["COMPLETED", "CANCELLED"].includes(trip.state) && trip.tripRevision !== input.expectedTripRevision) {
             throw new AppError(409, "Trip changed; refresh the destination", "STALE_TRIP_REVISION");
         }
@@ -976,6 +999,7 @@ export const virtualService = {
     },
 
     async previewRestriction(scenarioId: bigint, input: RestrictionBody) {
+        await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         const restrictionInput = input.penaltyFactor === undefined ? { geometry: input.geometry } : { geometry: input.geometry, penaltyFactor: input.penaltyFactor };
         const resolved = await routingInternalClient.resolveRestriction(restrictionInput);
@@ -985,6 +1009,7 @@ export const virtualService = {
     },
 
     async brushRestriction(scenarioId: bigint, input: RestrictionBrushBody, actorId?: bigint) {
+        await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         if (input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed; retry the stroke", "STALE_REVISION");
         const existing = input.mode === "erase"
@@ -1054,6 +1079,7 @@ export const virtualService = {
     },
 
     async createRestriction(scenarioId: bigint, input: RestrictionBody, actorId?: bigint) {
+        await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         if (input.expectedRestrictionRevision !== undefined && input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed", "STALE_REVISION");
         const restrictionInput = input.penaltyFactor === undefined ? { geometry: input.geometry } : { geometry: input.geometry, penaltyFactor: input.penaltyFactor };
@@ -1076,6 +1102,7 @@ export const virtualService = {
     async updateRestriction(restrictionId: bigint, input: RestrictionUpdateBody, actorId?: bigint) {
         const existing = await prisma.virtualRoadRestriction.findUnique({ where: { restrictionId } });
         if (!existing) throw new AppError(404, "Road restriction not found", "RESTRICTION_NOT_FOUND");
+        await assertScenarioEditable(existing.scenarioId);
         const scenario = await getScenario(existing.scenarioId);
         if (input.expectedRestrictionRevision !== undefined && input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed", "STALE_REVISION");
         const previousOverlay = await restrictionOverlay(existing.scenarioId);
@@ -1116,6 +1143,7 @@ export const virtualService = {
     },
 
     async bulkRemoveRestrictions(scenarioId: bigint, input: RestrictionBulkRemoveBody, actorId?: bigint) {
+        await assertScenarioEditable(scenarioId);
         const scenario = await getScenario(scenarioId);
         if (input.expectedRestrictionRevision !== scenario.restrictionRevision) {
             throw new AppError(409, "Scenario restrictions changed; refresh before bulk removal", "STALE_REVISION");

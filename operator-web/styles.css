@@ -303,6 +303,8 @@ body.virtual-mode #virtual-workspace { grid-column: 3; grid-row: 1; border-right
 .virtual-coordinates>div { display: grid; grid-template-columns: 60px 1fr; font-size: 12px; margin-bottom: 7px; gap: 5px; }
 .virtual-coordinates output { overflow-wrap: anywhere; color: var(--ui-text-secondary); }
 #virtual-trip-controls { display: grid; gap: 8px; }
+.virtual-turbo-toggle { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #edb84b; border-radius: 8px; background: #fff8e7; color: #744c0b!important; font-weight: 750; }
+.virtual-turbo-toggle input { width: 17px; height: 17px; margin: 0; accent-color: #d28a00; }
 #virtual-speed { width: 100%; padding: 0; accent-color: var(--ui-primary); }
 #virtual-workspace ul { list-style: none; padding: 0; margin: 0; max-height: 220px; overflow: auto; }
 #virtual-workspace li { background: var(--ui-surface-soft); font-size: 12px; padding: 9px; border-radius: 8px; margin-top: 6px; overflow-wrap: anywhere; }
@@ -332,6 +334,9 @@ body.virtual-mode #virtual-legend,body.virtual-mode #virtual-route-summary { dis
 .leaflet-container.route-calculating .virtual-trip-completion { top: 66px; }
 .leaflet-container .virtual-no-route-alarm:not([hidden]) ~ .virtual-trip-completion { top: 150px; }
 .virtual-route-progress { position: absolute; z-index: 1099; top: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100% - 32px); padding: 10px 16px; border: 1px solid #a9c6e8; border-radius: 999px; background: #f4f8ff; color: #174477; box-shadow: 0 4px 16px rgb(20 62 112 / 22%); font-size: 14px; font-weight: 700; white-space: nowrap; pointer-events: none; }
+.virtual-turbo-progress { position: absolute; z-index: 1101; top: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100% - 32px); padding: 10px 16px; border: 1px solid #dfa82d; border-radius: 999px; background: linear-gradient(135deg,#fff9e9,#ffedbd); color: #704a00; box-shadow: 0 4px 16px rgb(112 74 0 / 22%); font-size: 14px; font-weight: 750; white-space: nowrap; pointer-events: none; }
+.virtual-turbo-progress[hidden] { display: none; }
+.virtual-turbo-progress span:first-child { font-size: 22px; line-height: .8; }
 .virtual-route-progress[hidden] { display: none; }
 .virtual-route-progress-spinner { width: 17px; height: 17px; flex: 0 0 17px; border: 2px solid #b7d0ef; border-top-color: #1266c3; border-radius: 50%; animation: route-progress-spin .75s linear infinite; }
 @keyframes route-progress-spin { to { transform: rotate(360deg); } }

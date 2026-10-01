@@ -149,8 +149,68 @@ routeProgressIndicator.hidden = true;
 routeProgressIndicator.innerHTML = '<span class="virtual-route-progress-spinner" aria-hidden="true"></span><span data-route-progress-message>경로를 계산하는 중…</span>';
 map.getContainer().append(routeProgressIndicator);
 const routeProgressMessage = routeProgressIndicator.querySelector('[data-route-progress-message]');
+const turboProgressIndicator = document.createElement('div');
+turboProgressIndicator.className = 'virtual-turbo-progress';
+turboProgressIndicator.setAttribute('role', 'status');
+turboProgressIndicator.setAttribute('aria-live', 'polite');
+turboProgressIndicator.hidden = true;
+turboProgressIndicator.innerHTML = '<span aria-hidden="true">»</span><span data-turbo-progress-message>터보 진행 중 · 경로 편집 잠금</span>';
+map.getContainer().append(turboProgressIndicator);
+const turboProgressMessage = turboProgressIndicator.querySelector('[data-turbo-progress-message]');
+const turboModeToggle = document.querySelector('#virtual-turbo-mode');
+let turboCommandPending = false;
+let turboLockActive = false;
+let turboDisabledControlStates = null;
 const routeOperations = new Map();
 let routeCalculationController = null;
+function isTurboProgressVehicle(vehicle) {
+  return vehicle?.state?.simStatus === 'DRIVING'
+    && vehicle?.state?.trip?.state === 'DRIVING'
+    && Number(vehicle?.state?.speedFactor) >= 20;
+}
+function syncTurboModeUI() {
+  const turboVehicles = vehicles.filter(isTurboProgressVehicle);
+  const active = turboVehicles.length > 0;
+  const locked = active || turboCommandPending;
+  const wasLocked = turboLockActive;
+  if (locked !== turboLockActive) {
+    turboLockActive = locked;
+    if (locked) {
+      hideRouteContextMenu();
+      roadBrush.reset();
+      cancelPointPlacement();
+      renderPoints();
+    }
+  }
+  turboProgressIndicator.hidden = !locked;
+  turboProgressMessage.textContent = turboCommandPending
+    ? '터보 모드를 시작하는 중 · 편집 잠금'
+    : `터보 진행 20× · ${turboVehicles.length}대 · 운행 완료까지 편집 잠금`;
+  const selectedVehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
+  const selectedTripIsDriving = selectedVehicle?.state?.simStatus === 'DRIVING'
+    && selectedVehicle?.state?.trip?.state === 'DRIVING';
+  turboModeToggle.checked = turboCommandPending || isTurboProgressVehicle(selectedVehicle);
+  turboModeToggle.disabled = turboCommandPending || locked || !selectedTripIsDriving;
+  const lockableControls = [scenarioSelect, vehicleSelect, removeScenarioButton, removeVehicleButton,
+    document.querySelector('#virtual-new-scenario'), document.querySelector('#virtual-new-vehicle'),
+    document.querySelector('#virtual-dispatch'), document.querySelector('#virtual-following'),
+    document.querySelector('#virtual-speed'), ...document.querySelectorAll('[data-virtual-command]')].filter(Boolean);
+  if (locked && !wasLocked) turboDisabledControlStates = lockableControls.map((control) => [control, control.disabled]);
+  if (locked) lockableControls.forEach((control) => { control.disabled = true; });
+  else if (wasLocked && turboDisabledControlStates) {
+    turboDisabledControlStates.forEach(([control, wasDisabled]) => { control.disabled = wasDisabled; });
+    turboDisabledControlStates = null;
+  }
+  routeContextMenu.querySelectorAll('button').forEach((button) => { button.disabled = locked || routeOperations.size > 0; });
+  restrictionList.querySelectorAll('button,input').forEach((control) => { control.disabled = locked || routeOperations.size > 0; });
+  [restrictionBulkToggle, restrictionSelectAll, restrictionBulkCancel].forEach((button) => {
+    if (button) button.disabled = locked || routeOperations.size > 0;
+  });
+  restrictionBulkRemove.disabled = locked || routeOperations.size > 0 || selectedRestrictionIds.size === 0;
+  if (!locked && previousTurboLockActive) renderPoints();
+  previousTurboLockActive = locked;
+}
+let previousTurboLockActive = false;
 function cancelInFlightRouteCalculation() {
   routeCalculationController?.abort();
   routeCalculationController = null;
@@ -160,10 +220,10 @@ function syncRouteProgress() {
   routeProgressIndicator.hidden = !busy;
   map.getContainer().classList.toggle('route-calculating', busy);
   routeProgressMessage.textContent = [...routeOperations.values()].at(-1) || '경로를 계산하는 중…';
-  routeContextMenu.querySelectorAll('button').forEach((button) => { button.disabled = busy; });
-  restrictionList.querySelectorAll('button').forEach((button) => { button.disabled = busy; });
-  [restrictionBulkToggle, restrictionSelectAll, restrictionBulkCancel].forEach((button) => { if (button) button.disabled = busy; });
-  restrictionBulkRemove.disabled = busy || selectedRestrictionIds.size === 0;
+  routeContextMenu.querySelectorAll('button').forEach((button) => { button.disabled = busy || turboLockActive; });
+  restrictionList.querySelectorAll('button,input').forEach((control) => { control.disabled = busy || turboLockActive; });
+  [restrictionBulkToggle, restrictionSelectAll, restrictionBulkCancel].forEach((button) => { if (button) button.disabled = busy || turboLockActive; });
+  restrictionBulkRemove.disabled = busy || turboLockActive || selectedRestrictionIds.size === 0;
 }
 function beginRouteCalculation(message = '경로를 계산하는 중…') {
   const operation = Symbol('route calculation');
@@ -278,7 +338,7 @@ const cancelledVirtualTripIds = new Set();
 const dismissedCompletedTripIds = new Set();
 const virtualVehicleAnimationFrames = new Map();
 const roadBrush = installRoadBrush(map, {
-  isActive: () => mode === 'virtual' && Boolean(scenarioId),
+  isActive: () => mode === 'virtual' && Boolean(scenarioId) && !turboLockActive,
   onStatus: setStatus,
   onTouchLongPress: point => map.getContainer().dispatchEvent(new CustomEvent('operator-map-contextrequest', { detail: point })),
   async onStroke(stroke) {
@@ -423,7 +483,7 @@ function hideRouteContextMenu() {
   contextRoutePoint = null;
 }
 function showRouteContextMenu({ clientX, clientY }) {
-  if (mode !== 'virtual' || routeOperations.size > 0) return;
+  if (mode !== 'virtual' || routeOperations.size > 0 || turboLockActive) return;
   const container = map.getContainer();
   const bounds = container.getBoundingClientRect();
   contextRoutePoint = map.mouseEventToLatLng({ clientX, clientY });
@@ -627,6 +687,7 @@ async function replaceActiveDestination(activeTrip, destination, previousDestina
   }
 }
 async function refreshPreviewAfterPointChange(message, kind = null, previousPoint = null) {
+  if (turboLockActive) return;
   markPointsChanged(`${message} Recalculating optimal path…`);
   const activeTrip = selectedActiveTrip();
   if (kind === 'destination' && activeTrip && points.destination) {
@@ -653,16 +714,18 @@ function drawPoint(kind, point, index = 0) {
   if (!point) return;
   const marker = L.marker([point.lat, point.lon], {
     icon: pointIcon(kind, index),
-    draggable: true,
+    draggable: !turboLockActive,
     riseOnHover: true,
     autoPan: true,
   });
   if (kind === 'waypoint') marker.bindTooltip(`Waypoint ${index + 1}`);
   marker.on('click', event => {
     if (event.originalEvent) L.DomEvent.stop(event.originalEvent);
+    if (turboLockActive) return;
     beginRoutePointPick(kind, kind === 'waypoint' ? index : null, marker.getLatLng(), marker);
   });
   marker.on('dragstart', () => {
+    if (turboLockActive) { marker.dragging?.disable(); return; }
     marker.getElement()?.classList.add('is-dragging');
     startEndpointDrag(kind, marker, kind === 'waypoint' ? index : null);
   });
@@ -671,6 +734,7 @@ function drawPoint(kind, point, index = 0) {
   });
   marker.on('dragend', () => {
     marker.getElement()?.classList.remove('is-dragging');
+    if (turboLockActive) return;
     const position = marker.getLatLng();
     finishEndpointDrag(marker);
     void snapAndSetRoutePoint(kind, { lat: position.lat, lon: position.lng }, index);
@@ -681,9 +745,11 @@ function drawPoint(kind, point, index = 0) {
     removeButton.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
     removeButton.addEventListener('click', event => {
       event.preventDefault(); event.stopPropagation();
+      if (turboLockActive) return;
       if (endpointDrag?.marker === marker) finishEndpointDrag(marker);
       removeRoutePoint(kind, index);
     });
+    removeButton.disabled = turboLockActive;
   });
   pointLayerGroup.addLayer(marker);
 }
@@ -719,7 +785,7 @@ function renderRestrictions(items) {
   restrictionBulkToggle.hidden = !activeBlockedIds.size;
   restrictionBulkToggle.textContent = restrictionBulkMode ? '일괄 해제 종료' : '차단 일괄 해제';
   restrictionBulkActions.hidden = !restrictionBulkMode;
-  restrictionBulkRemove.disabled = routeOperations.size > 0 || selectedRestrictionIds.size === 0;
+  restrictionBulkRemove.disabled = routeOperations.size > 0 || turboLockActive || selectedRestrictionIds.size === 0;
   restrictionSelectAll.textContent = activeBlockedIds.size > 0 && [...activeBlockedIds].every((id) => selectedRestrictionIds.has(id)) ? '선택 해제' : '전체 선택';
   restrictionLayerGroup.clearLayers();
   restrictionList.replaceChildren();
@@ -748,10 +814,11 @@ function renderRestrictions(items) {
       select.type = 'checkbox';
       select.setAttribute('aria-label', `${restrictionLabel(restriction)} 선택`);
       select.checked = selectedRestrictionIds.has(String(restriction.restrictionId));
+      select.disabled = turboLockActive;
       select.addEventListener('change', () => {
         const id = String(restriction.restrictionId);
         if (select.checked) selectedRestrictionIds.add(id); else selectedRestrictionIds.delete(id);
-        restrictionBulkRemove.disabled = routeOperations.size > 0 || selectedRestrictionIds.size === 0;
+        restrictionBulkRemove.disabled = routeOperations.size > 0 || turboLockActive || selectedRestrictionIds.size === 0;
         const total = restrictions.filter((item) => item.kind === 'BLOCKED').length;
         restrictionSelectAll.textContent = total > 0 && selectedRestrictionIds.size === total ? '선택 해제' : '전체 선택';
       });
@@ -760,7 +827,7 @@ function renderRestrictions(items) {
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = 'Remove';
-      remove.disabled = routeOperations.size > 0;
+      remove.disabled = routeOperations.size > 0 || turboLockActive;
       remove.addEventListener('click', () => void removeRestriction(restriction));
       row.append(label, remove);
     }
@@ -1079,7 +1146,7 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     if (!marker) {
       marker = L.marker([Number(position.lat), Number(position.lon)], { icon: vehicleIcon(vehicle, vehicleId === selected, true) });
       marker.bindTooltip(`Virtual · ${vehicle.vehicleCode}`);
-      marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; speedControlEditing = false; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); });
+      marker.on('click', () => { if (turboLockActive) return; selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; speedControlEditing = false; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); });
       virtualVehicleMarkers.set(vehicleId, marker);
       markerLayerGroup.addLayer(marker);
     } else {
@@ -1096,6 +1163,7 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
   }
   renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId));
   removeVehicleButton.disabled = !selectedVehicleId;
+  syncTurboModeUI();
 }
 function renderSelectedVehicle(vehicle) {
   const controls = document.querySelector('#virtual-trip-controls');
@@ -1124,6 +1192,7 @@ function renderRequests(requests) {
     if (request.state === 'PENDING') {
       const accept = document.createElement('button'); accept.type = 'button'; accept.textContent = uiText('Accept'); accept.onclick = () => decideRequest(request.requestId, 'accept');
       const reject = document.createElement('button'); reject.type = 'button'; reject.textContent = uiText('Reject'); reject.onclick = () => decideRequest(request.requestId, 'reject');
+      accept.disabled = reject.disabled = turboLockActive;
       row.append(' ', accept, ' ', reject);
     }
     requestList.append(row);
@@ -1204,6 +1273,7 @@ async function decideRequest(requestId, action) {
   catch (error) { setStatus(error.message, true); }
 }
 async function previewRoute() {
+  if (turboLockActive) return;
   if (!scenarioId || !selectedVehicleId || !points.origin || !points.destination) { setStatus(uiText('Select a virtual vehicle and pick origin and destination.'), true); return; }
   cancelInFlightRouteCalculation();
   const controller = new AbortController();
@@ -1321,7 +1391,7 @@ async function setFollowing(enabled) {
 async function command(command, extra = {}) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
   const tripId = vehicle?.state?.virtualTripId || vehicle?.state?.trip?.virtualTripId;
-  if (!tripId) { setStatus('The selected virtual vehicle has no active trip.', true); return; }
+  if (!tripId) { setStatus('The selected virtual vehicle has no active trip.', true); return false; }
   try {
     await api(`/api/v1/virtual/trips/${tripId}/commands`, { method: 'POST', body: JSON.stringify({ command, ...extra }) });
     if (command === 'CANCEL_TRIP') {
@@ -1330,8 +1400,9 @@ async function command(command, extra = {}) {
     }
     if (command === 'SET_SPEED_KMH') speedControlEditing = false;
     await loadScenarioData();
+    return true;
   }
-  catch (error) { setStatus(error.message, true); }
+  catch (error) { setStatus(error.message, true); return false; }
 }
 async function applySelectedSpeed() {
   const activeTrip = selectedActiveTrip();
@@ -1373,6 +1444,7 @@ async function applySelectedSpeed() {
   }
 }
 function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getCenter(), originalMarker = null) {
+  if (turboLockActive) return;
   roadBrush.reset();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   cancelPointPlacement();
@@ -1395,6 +1467,7 @@ map.on('mousemove', event => {
   if (endpointDrag?.marker === movingPin) queueEndpointSnapPreview(endpointDrag, movingPin);
 });
 async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
+  if (turboLockActive) return;
   const previousDestination = kind === 'destination' ? points.destination : null;
   const previousPoint = kind === 'waypoint' ? points.waypoints[waypointIndex] : points[kind];
   const label = kind === 'waypoint' ? `Waypoint ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind[0].toUpperCase() + kind.slice(1);
@@ -1449,7 +1522,7 @@ async function refreshAfterRestrictionChange(message) {
   else setStatus(message);
 }
 async function removeRestriction(restriction) {
-  if (!scenarioId || !restriction?.restrictionId || routeOperations.size > 0) return;
+  if (!scenarioId || !restriction?.restrictionId || routeOperations.size > 0 || turboLockActive) return;
   const label = restrictionLabel(restriction);
   const finishRouting = beginRouteCalculation('차단 구간을 해제하고 경로를 다시 계산하는 중…');
   try {
@@ -1463,6 +1536,7 @@ async function removeRestriction(restriction) {
   finally { finishRouting(); }
 }
 restrictionBulkToggle.addEventListener('click', () => {
+  if (turboLockActive) return;
   restrictionBulkMode = !restrictionBulkMode;
   selectedRestrictionIds.clear();
   renderRestrictions(restrictions);
@@ -1479,13 +1553,14 @@ restrictionBulkCancel.addEventListener('click', () => {
   renderRestrictions(restrictions);
 });
 restrictionSelectAll.addEventListener('click', () => {
+  if (turboLockActive) return;
   const blockedIds = restrictions.filter((item) => item.kind === 'BLOCKED').map((item) => String(item.restrictionId));
   if (blockedIds.length && blockedIds.every((id) => selectedRestrictionIds.has(id))) selectedRestrictionIds.clear();
   else blockedIds.forEach((id) => selectedRestrictionIds.add(id));
   renderRestrictions(restrictions);
 });
 restrictionBulkRemove.addEventListener('click', async () => {
-  if (!scenarioId || !selectedRestrictionIds.size || routeOperations.size > 0) return;
+  if (!scenarioId || !selectedRestrictionIds.size || routeOperations.size > 0 || turboLockActive) return;
   const ids = [...selectedRestrictionIds];
   const targetScenario = scenarioId;
   const finishRouting = beginRouteCalculation('차단 구간을 일괄 해제하고 경로를 다시 계산하는 중…');
@@ -1585,10 +1660,24 @@ document.querySelector('#virtual-dispatch').addEventListener('click', () => void
 document.querySelector('#virtual-following').addEventListener('change', (event) => void setFollowing(event.target.checked));
 document.querySelectorAll('[data-virtual-command]').forEach((button) => button.addEventListener('click', () => void command(button.dataset.virtualCommand)));
 document.querySelector('#virtual-speed').addEventListener('input', () => void applySelectedSpeed());
+turboModeToggle.addEventListener('change', async () => {
+  if (!turboModeToggle.checked) return;
+  const selectedVehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
+  if (selectedVehicle?.state?.simStatus !== 'DRIVING' || selectedVehicle?.state?.trip?.state !== 'DRIVING') {
+    turboModeToggle.checked = false;
+    return;
+  }
+  turboCommandPending = true;
+  syncTurboModeUI();
+  const enabled = await command('SET_SPEED_FACTOR', { speedFactor: 20 });
+  turboCommandPending = false;
+  if (!enabled) turboModeToggle.checked = false;
+  syncTurboModeUI();
+});
 map.getContainer().addEventListener('operator-map-contextrequest', (event) => showRouteContextMenu(event.detail));
 routeContextMenu.addEventListener('click', (event) => {
   event.stopPropagation();
-  if (routeOperations.size > 0) return;
+  if (routeOperations.size > 0 || turboLockActive) return;
   const toolButton = event.target.closest('[data-road-tool]');
   if (toolButton) {
     hideRouteContextMenu();
