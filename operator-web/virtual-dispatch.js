@@ -1542,7 +1542,7 @@ restrictionBulkToggle.addEventListener('click', () => {
   renderRestrictions(restrictions);
 });
 map.getContainer().addEventListener('pointermove', event => {
-  if (event.pointerType !== 'touch' || !pointPlacement || !movingPin) return;
+  if (!pointPlacement || !movingPin) return;
   const point = map.mouseEventToLatLng(event);
   movingPin.setLatLng(point);
   if (endpointDrag?.marker === movingPin) queueEndpointSnapPreview(endpointDrag, movingPin);
