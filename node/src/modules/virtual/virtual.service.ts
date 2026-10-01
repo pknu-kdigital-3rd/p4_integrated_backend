@@ -36,8 +36,14 @@ type RerouteOptions = {
 };
 
 function isPrismaWriteConflict(error: unknown): boolean {
-    return typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
+    if (error instanceof VehicleCheckpointChanged) return true;
+    if (typeof error !== "object" || error === null) return false;
+    const code = "code" in error ? error.code : undefined;
+    const message = "message" in error ? String(error.message) : "";
+    return code === "P2034" || /write conflict|deadlock/i.test(message);
 }
+
+class VehicleCheckpointChanged extends Error {}
 
 function id(value: string): bigint {
     return BigInt(value);
@@ -784,6 +790,11 @@ export const virtualService = {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
             if (!latestTrip || !latestTrip.stateRecord || latestTrip.stateRecord.commandVersion !== current.commandVersion
                 || (options.expectedTripRevision !== undefined && latestTrip.tripRevision !== options.expectedTripRevision)) return null;
+            const tripClaim = await tx.virtualTrip.updateMany({
+                where: { virtualTripId: current.virtualTripId, commandVersion: current.commandVersion },
+                data: { commandVersion: { increment: 1 } },
+            });
+            if (!tripClaim.count) return null;
             await tx.virtualRoute.updateMany({ where: { virtualTripId: current.virtualTripId, isCurrent: true }, data: { isCurrent: false } });
             const nextVersion = latestTrip.routeVersion + 1;
             const nextRoute = await tx.virtualRoute.create({
@@ -801,23 +812,44 @@ export const virtualService = {
                     activatedAt: new Date(),
                 },
             });
-            const motionState = latestTrip.stateRecord.simStatus === "PAUSED" ? "PAUSED" : "DRIVING";
+            const motionState = current.simStatus === "PAUSED" ? "PAUSED" : "DRIVING";
             const nextEdgeId = itineraryEdge(route.directedItinerary, "edgeId");
             const nextPhysicalSegmentId = itineraryEdge(route.directedItinerary, "physicalSegmentId");
+            const stateClaim = await tx.virtualVehicleState.updateMany({
+                where: {
+                    vehicleId,
+                    virtualTripId: current.virtualTripId,
+                    commandVersion: current.commandVersion,
+                    lastCheckpointAt: current.lastCheckpointAt,
+                    simStatus: current.simStatus,
+                },
+                data: {
+                    activeRouteId: nextRoute.routeId,
+                    routeVersion: nextVersion,
+                    graphVersion: route.graphVersion,
+                    simStatus: motionState,
+                    simElapsedMs: 0,
+                    currentEdgeId: nextEdgeId,
+                    currentPhysicalSegmentId: nextPhysicalSegmentId,
+                    offsetM: 0,
+                    lastCheckpointAt: new Date(),
+                    blockedReason: null,
+                    commandVersion: { increment: 1 },
+                },
+            });
+            if (!stateClaim.count) throw new VehicleCheckpointChanged("Vehicle checkpoint advanced during route calculation");
             await tx.virtualTrip.update({
                 where: { virtualTripId: current.virtualTripId },
                 data: {
                     activeRouteId: nextRoute.routeId,
                     routeVersion: nextVersion,
                     state: motionState,
-                    commandVersion: { increment: 1 },
                     ...(options.destination ? { destination: json(options.destination), tripRevision: { increment: 1 } } : {}),
                 },
             });
-            await tx.virtualVehicleState.update({ where: { vehicleId }, data: { activeRouteId: nextRoute.routeId, routeVersion: nextVersion, graphVersion: route.graphVersion, simStatus: motionState, simElapsedMs: 0, currentEdgeId: nextEdgeId, currentPhysicalSegmentId: nextPhysicalSegmentId, offsetM: 0, lastCheckpointAt: new Date(), blockedReason: null, commandVersion: { increment: 1 } } });
             await createEvent(tx, { scenarioId: current.scenarioId, virtualTripId: current.virtualTripId, actorId: options.actorId ?? null, eventType: "ROUTE_RECALCULATED", payload: { reason: options.reason ?? "FOLLOWING_ENABLED", routeVersion: nextVersion } });
             return nextRoute;
-            }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 15000 });
+            }, { isolationLevel: "ReadCommitted", maxWait: 5000, timeout: 15000 });
         } catch (error) {
             const retryCount = options.transactionRetryCount ?? 0;
             if (!isPrismaWriteConflict(error) || retryCount >= 3) throw error;
