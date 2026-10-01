@@ -260,10 +260,18 @@ def internal_restriction_brush(req: RestrictionBrushRequest):
     from restriction_brush import apply_brush
     if any(not math.isfinite(p.lat) or not math.isfinite(p.lon) or abs(p.lat) > 90 or abs(p.lon) > 180 for p in req.points):
         raise HTTPException(status_code=422, detail="Invalid brush coordinates")
+    started_at = time.perf_counter()
     try:
-        return apply_brush([(p.lat, p.lon) for p in req.points], req.radiusM, req.restrictions)
+        result = apply_brush([(p.lat, p.lon) for p in req.points], req.radiusM, req.restrictions)
     except ImportError:
         raise HTTPException(status_code=503, detail="Road painting requires the routing osmnx dependencies")
+    print("BRUSH_TIMING " + json.dumps({
+        "totalMs": _elapsed_ms(started_at),
+        "points": len(req.points),
+        "radiusM": req.radiusM,
+        "existingRestrictions": len(req.restrictions),
+    }, separators=(",", ":")), flush=True)
+    return result
 
 
 class MatchPreviewRequest(BaseModel):
@@ -300,7 +308,15 @@ def _graph_version() -> str:
     return version
 
 
-def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
+def _elapsed_ms(started_at: float) -> float:
+    return round((time.perf_counter() - started_at) * 1000, 1)
+
+
+def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timing: dict | None = None):
+    # `timing` collects the ROUTE_TIMING breakdown logged by _internal_route.
+    timing = timing if timing is not None else {}
+    timing.setdefault("legs", [])
+    timing["snapMs"] = 0.0
     if graph is None:
         raise HTTPException(status_code=503, detail="Routing graph is not ready")
     profile = None if req.vehicleProfile in ("", "car", "unrestricted") else req.vehicleProfile
@@ -315,6 +331,8 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
     graph_version = _graph_version()
     blocked_edge_ids = list(req.blockedEdgeIds)
     incoming_ways = None
+    overlay_started = time.perf_counter()
+    timing["overlayReresolved"] = False
     if req.blockedGeometries:
         # Resolve all active closure polygons against this graph before A*.
         # This also repairs restrictions persisted by a previous resolver
@@ -328,6 +346,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
         overlay_is_current = bool(blocked_edge_ids) and all(
             str(edge_id).startswith(current_prefix) for edge_id in blocked_edge_ids
         )
+        timing["overlayReresolved"] = not overlay_is_current
         if not overlay_is_current:
             for geometry in req.blockedGeometries:
                 if cancel_event is not None and cancel_event.is_set():
@@ -337,9 +356,12 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
                         return None
                     blocked_edge_ids.append(f"{graph_version}:{raw_id}")
         blocked_edge_ids = list(dict.fromkeys(blocked_edge_ids))
+    timing["overlayMs"] = _elapsed_ms(overlay_started)
+    timing["blockedEdgeCount"] = len(blocked_edge_ids)
     for index, stop in enumerate(stops):
         if cancel_event is not None and cancel_event.is_set():
             return None
+        snap_started = time.perf_counter()
         node_id = graph.nearest_node(stop.lat, stop.lon)
         if node_id is None:
             raise HTTPException(status_code=422, detail={"code": "POINT_TOO_FAR_FROM_ROAD", "stopIndex": index})
@@ -354,9 +376,13 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
             "routeOffsetM": 0.0,
         })
         if index == 0:
+            timing["snapMs"] += _elapsed_ms(snap_started)
             continue
         previous = stops[index - 1]
         previous_node = graph.nearest_node(previous.lat, previous.lon)
+        timing["snapMs"] += _elapsed_ms(snap_started)
+        leg_stats: dict = {}
+        search_started = time.perf_counter()
         result = graph.route(
             previous_node,
             node_id,
@@ -368,7 +394,9 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
             # A turn restriction at a waypoint depends on the road the
             # previous leg arrived on.
             initial_incoming_ways=incoming_ways,
+            stats=leg_stats,
         )
+        timing["legs"].append({"stopIndex": index, "searchMs": _elapsed_ms(search_started), **leg_stats})
         if cancel_event is not None and cancel_event.is_set():
             return None
         if result is None:
@@ -431,20 +459,54 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None):
     }
 
 
-def _internal_route(req: InternalRouteRequest, cancel_event=None):
+def _log_route_timing(req: InternalRouteRequest, timing: dict, outcome: str, total_ms: float, queue_ms, distance_m=None):
+    legs = timing.get("legs", [])
+    print("ROUTE_TIMING " + json.dumps({
+        "outcome": outcome,
+        "totalMs": total_ms,
+        # Time the request waited for a threadpool worker before starting;
+        # high values mean concurrent route requests are queuing.
+        "queueMs": queue_ms,
+        "overlayMs": timing.get("overlayMs"),
+        "overlayReresolved": timing.get("overlayReresolved"),
+        "snapMs": round(timing.get("snapMs", 0.0), 1),
+        "searchMs": round(sum(leg.get("searchMs", 0.0) for leg in legs), 1),
+        "expanded": sum(leg.get("expanded", 0) for leg in legs),
+        "heapPushes": sum(leg.get("heapPushes", 0) for leg in legs),
+        "blockedEdgeHits": sum(leg.get("blockedEdgeHits", 0) for leg in legs),
+        "legs": legs,
+        "vehicleProfile": req.vehicleProfile or "car",
+        "stops": 2 + len(req.waypoints),
+        "blockedEdgeCount": timing.get("blockedEdgeCount", len(req.blockedEdgeIds)),
+        "blockedGeometryCount": len(req.blockedGeometries),
+        "penaltyEdgeCount": len(req.penaltyEdgeFactors),
+        "avoidInitialReverse": bool(req.avoidInitialReverseOfEdgeId),
+        "distanceM": None if distance_m is None else round(distance_m, 1),
+    }, separators=(",", ":")), flush=True)
+
+
+def _internal_route(req: InternalRouteRequest, cancel_event=None, enqueued_at: float | None = None):
     started_at = time.perf_counter()
+    queue_ms = None if enqueued_at is None else round((started_at - enqueued_at) * 1000, 1)
+    timing: dict = {}
     try:
-        result = _calculate_internal_route(req, cancel_event)
+        result = _calculate_internal_route(req, cancel_event, timing)
     except HTTPException as error:
-        calculation_time_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        calculation_time_ms = _elapsed_ms(started_at)
         detail = error.detail
+        code = detail.get("code") if isinstance(detail, dict) else None
+        _log_route_timing(req, timing, code or f"HTTP_{error.status_code}", calculation_time_ms, queue_ms)
         if isinstance(detail, dict):
             detail = {**detail, "calculationTimeMs": calculation_time_ms}
         else:
             detail = {"message": str(detail), "calculationTimeMs": calculation_time_ms}
         raise HTTPException(status_code=error.status_code, detail=detail, headers=error.headers) from error
-    if result is not None:
-        result["calculationTimeMs"] = round((time.perf_counter() - started_at) * 1000, 1)
+    calculation_time_ms = _elapsed_ms(started_at)
+    if result is None:
+        _log_route_timing(req, timing, "CANCELLED", calculation_time_ms, queue_ms)
+        return result
+    result["calculationTimeMs"] = calculation_time_ms
+    _log_route_timing(req, timing, "OK", calculation_time_ms, queue_ms, result.get("distanceM"))
     return result
 
 
@@ -976,7 +1038,7 @@ def _nearby_road_geometry(lat, lon, radius_m=150):
 @app.post("/internal/routing/route")
 async def internal_route(req: InternalRouteRequest, request: Request):
     cancel_event = threading.Event()
-    worker = asyncio.create_task(run_in_threadpool(_internal_route, req, cancel_event))
+    worker = asyncio.create_task(run_in_threadpool(_internal_route, req, cancel_event, time.perf_counter()))
     try:
         while not worker.done():
             if await request.is_disconnected():
@@ -1045,7 +1107,12 @@ def internal_resolve_restriction(req: RestrictionResolveRequest):
     directed = list(dict.fromkeys(directed))
     physical = list(dict.fromkeys(physical))
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-    print(f"Dynamic restriction resolved: edges={resolved_edge_count} directed={len(directed)} physical={len(physical)} elapsed_ms={elapsed_ms}")
+    print("RESTRICTION_RESOLVE_TIMING " + json.dumps({
+        "totalMs": elapsed_ms,
+        "edges": resolved_edge_count,
+        "directed": len(directed),
+        "physical": len(physical),
+    }, separators=(",", ":")), flush=True)
     return {
         "graphVersion": graph_version,
         "affectedDirectedEdgeIds": directed,

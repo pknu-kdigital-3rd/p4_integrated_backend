@@ -714,7 +714,7 @@ class OsmnxGraph:
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None,
-              initial_incoming_ways=None):
+              initial_incoming_ways=None, stats=None):
         # Hand-rolled edge-state A* instead of nx.astar_path. A node-only
         # search can discard a longer arrival at a junction even though its
         # incoming way permits a turn that the shorter arrival forbids. Keep
@@ -756,17 +756,27 @@ class OsmnxGraph:
         came_from = {}
         g_score = {start_state: 0.0}
         goal_state = None
+        # Search counters for timing logs; local ints keep the loop cheap.
+        expanded = stale_pops = pushes = blocked_hits = 0
+
+        def record_stats():
+            if stats is not None:
+                stats.update(expanded=expanded, stalePops=stale_pops, heapPushes=pushes,
+                             blockedEdgeHits=blocked_hits, found=goal_state is not None)
 
         while open_set:
             if cancel_event is not None and cancel_event.is_set():
+                record_stats()
                 return None
             _f, g, _order, state = heapq.heappop(open_set)
             current, incoming_osmids = state
             if g > g_score.get(state, float("inf")):
+                stale_pops += 1
                 continue
             if current == goal_id:
                 goal_state = state
                 break
+            expanded += 1
             # Incoming ways are kept only at via nodes, so a non-None value
             # always has a turn table.
             turn_table = turns_by_via[current] if incoming_osmids is not None else None
@@ -781,6 +791,7 @@ class OsmnxGraph:
                     continue
                 if has_overlay:
                     if raw_edge_id in blocked_lookup:
+                        blocked_hits += 1
                         continue
                     penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                 else:
@@ -797,7 +808,9 @@ class OsmnxGraph:
                     g_score[next_state] = tentative
                     came_from[next_state] = (state, attrs.get("length", 0), attrs, way_ids, edge_key, edge_time)
                     heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
+                    pushes += 1
 
+        record_stats()
         if goal_state is None:
             return None  # no path exists under this profile's constraints (or at all)
 
@@ -1003,7 +1016,7 @@ class PurePythonGraph:
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None,
-              initial_incoming_ways=None):
+              initial_incoming_ways=None, stats=None):
         import heapq
         from itertools import count
         coords = self.coords
@@ -1040,17 +1053,27 @@ class PurePythonGraph:
         came_from = {}
         g_score = {start_state: 0.0}
         goal_state = None
+        # Search counters for timing logs; local ints keep the loop cheap.
+        expanded = stale_pops = pushes = blocked_hits = 0
+
+        def record_stats():
+            if stats is not None:
+                stats.update(expanded=expanded, stalePops=stale_pops, heapPushes=pushes,
+                             blockedEdgeHits=blocked_hits, found=goal_state is not None)
 
         while open_set:
             if cancel_event is not None and cancel_event.is_set():
+                record_stats()
                 return None
             _f, g, _order, state = heapq.heappop(open_set)
             current, incoming_ways = state
             if g > g_score.get(state, float("inf")):
+                stale_pops += 1
                 continue
             if current == goal_id:
                 goal_state = state
                 break
+            expanded += 1
             turn_table = turns_by_via[current] if incoming_ways is not None else None
             avoid_reverse = state == start_state and reverse_from is not None and str(current) == reverse_from
             for neighbor, dist_m, geom, allowed_mask, times, way_ids, raw_edge_id in adjacency.get(current, ()):
@@ -1063,6 +1086,7 @@ class PurePythonGraph:
                     continue  # illegal turn (from the incoming way, via current, onto wid)
                 if has_overlay:
                     if raw_edge_id in blocked_lookup:
+                        blocked_hits += 1
                         continue
                     penalty = max(1.0, float(penalty_lookup.get(raw_edge_id, 1.0)))
                 else:
@@ -1074,7 +1098,9 @@ class PurePythonGraph:
                     g_score[next_state] = tentative
                     came_from[next_state] = (state, dist_m, geom, wid, edge_time)
                     heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
+                    pushes += 1
 
+        record_stats()
         if goal_state is None:
             return None  # no path exists under this profile's constraints (or at all)
 
