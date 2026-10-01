@@ -92,7 +92,10 @@ document.addEventListener('mousemove',event=>{
   const pan=rightButtonPan||leftButtonPan;
   if(!pan)return;
   const dx=event.clientX-pan.x,dy=event.clientY-pan.y;
-  if(Math.hypot(event.clientX-pan.startX,event.clientY-pan.startY)>5)pan.moved=true;
+  if(!pan.moved&&Math.hypot(event.clientX-pan.startX,event.clientY-pan.startY)>5){
+    pan.moved=true;
+    pauseLiveMapForManualPan();
+  }
   pan.x=event.clientX;
   pan.y=event.clientY;
   if(dx||dy)map.panBy([-dx,-dy],{animate:false});
@@ -359,7 +362,18 @@ const liveMapFollower=createLiveMapFollower({
   onFollowingChange:following=>{liveRecenterButton.hidden=following;liveRecenterButton.setAttribute('aria-pressed',String(following))},
 });
 const revealAndroidMarker=createAndroidMarkerRevealer({map});
-map.on('dragstart',()=>liveMapFollower.pause());
+function pauseLiveMapForManualPan(){
+  if(!liveMapFollower.isFollowing())return;
+  liveMapFollower.pause();
+  map.stop();
+}
+map.on('dragstart',pauseLiveMapForManualPan);
+// Pause before Leaflet starts the touch gesture: incoming live positions can
+// otherwise restart its pan animation while the finger is trying to drag.
+mapContainer.addEventListener('pointerdown',event=>{
+  if(event.pointerType!=='touch'||event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
+  pauseLiveMapForManualPan();
+},true);
 // Leaflet switches to the new zoom's projection as soon as its zoom animation
 // starts, while the route SVG is still being scaled from the old zoom: a path
 // redrawn meanwhile lands out of place, apart from the vehicle, until the zoom
