@@ -383,6 +383,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
         timing["snapMs"] += _elapsed_ms(snap_started)
         leg_stats: dict = {}
         search_started = time.perf_counter()
+        search_cpu_started = time.thread_time()
         result = graph.route(
             previous_node,
             node_id,
@@ -396,7 +397,14 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
             initial_incoming_ways=incoming_ways,
             stats=leg_stats,
         )
-        timing["legs"].append({"stopIndex": index, "searchMs": _elapsed_ms(search_started), **leg_stats})
+        timing["legs"].append({
+            "stopIndex": index,
+            "searchMs": _elapsed_ms(search_started),
+            # CPU time of this thread only. Far below searchMs means the
+            # search was waiting for the GIL behind other Python work.
+            "searchCpuMs": round((time.thread_time() - search_cpu_started) * 1000, 1),
+            **leg_stats,
+        })
         if cancel_event is not None and cancel_event.is_set():
             return None
         if result is None:
@@ -471,6 +479,9 @@ def _log_route_timing(req: InternalRouteRequest, timing: dict, outcome: str, tot
         "overlayReresolved": timing.get("overlayReresolved"),
         "snapMs": round(timing.get("snapMs", 0.0), 1),
         "searchMs": round(sum(leg.get("searchMs", 0.0) for leg in legs), 1),
+        "searchCpuMs": round(sum(leg.get("searchCpuMs", 0.0) for leg in legs), 1),
+        # Route requests running in this process when this one finished.
+        "concurrentRoutes": _active_route_requests,
         "expanded": sum(leg.get("expanded", 0) for leg in legs),
         "heapPushes": sum(leg.get("heapPushes", 0) for leg in legs),
         "blockedEdgeHits": sum(leg.get("blockedEdgeHits", 0) for leg in legs),
@@ -485,7 +496,22 @@ def _log_route_timing(req: InternalRouteRequest, timing: dict, outcome: str, tot
     }, separators=(",", ":")), flush=True)
 
 
+_active_route_requests = 0
+_active_route_requests_lock = threading.Lock()
+
+
 def _internal_route(req: InternalRouteRequest, cancel_event=None, enqueued_at: float | None = None):
+    global _active_route_requests
+    with _active_route_requests_lock:
+        _active_route_requests += 1
+    try:
+        return _timed_internal_route(req, cancel_event, enqueued_at)
+    finally:
+        with _active_route_requests_lock:
+            _active_route_requests -= 1
+
+
+def _timed_internal_route(req: InternalRouteRequest, cancel_event=None, enqueued_at: float | None = None):
     started_at = time.perf_counter()
     queue_ms = None if enqueued_at is None else round((started_at - enqueued_at) * 1000, 1)
     timing: dict = {}
