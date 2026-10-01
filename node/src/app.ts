@@ -30,6 +30,9 @@ export function createApp() {
 	app.use(
 		pinoHttp({
 			logger,
+			autoLogging: {
+				ignore: (req) => req.method === "GET" && /^\/api\/v1\/virtual\/scenarios\/\d+\/vehicles$/.test(req.url ?? ""),
+			},
 		}),
 	);
 
