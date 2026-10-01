@@ -8,7 +8,7 @@
   </title>
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
-  <link href="styles.css?v=27" rel="stylesheet"/>
+  <link href="styles.css?v=28" rel="stylesheet"/>
  </head>
  <body>
   <header class="app-header">
@@ -321,7 +321,7 @@
     <section class="ui-card" hidden="" id="settings-drawer">
      <div class="ui-card-header">
       <h2>
-       데이터 소스
+       설정
       </h2>
       <button aria-label="설정 닫기" id="close-settings" type="button">
        닫기
@@ -332,7 +332,7 @@
        데이터 소스
       </h2>
       <label for="telemetry-mode">
-       소스
+       데이터 소스
       </label>
       <select id="telemetry-mode">
        <option value="playback">
@@ -344,8 +344,8 @@
       </select>
       <label for="history-compensation"><input id="history-compensation" type="checkbox"/> 실시간 GPS 중단 시 기록 경로로 위치 보정</label>
       <small>기본값: 사용 안 함. 꺼져 있으면 마지막 수신 위치를 유지하고 지연 상태로 표시합니다. 실시간 BIMS 소스에 적용됩니다.</small>
-      <button id="telemetry-mode-apply" type="button">
-       소스 적용
+       <button id="telemetry-mode-apply" type="button">
+        데이터 소스 적용
       </button>
       <p aria-live="polite" id="telemetry-mode-status" role="status">
        데이터 소스 불러오는 중…
