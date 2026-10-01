@@ -1,5 +1,8 @@
-.virtual-point-icon{background:transparent;border:0;cursor:grab}
+.virtual-point-icon{position:relative;overflow:visible!important;background:transparent;border:0;cursor:grab}
 .virtual-point-icon:active{cursor:grabbing}
+.virtual-pin-remove{position:absolute;top:-5px;right:-5px;display:grid;width:19px;height:19px;padding:0;place-items:center;border:1px solid #fff;border-radius:50%;background:#202a36;color:#fff;font:700 15px/1 ui-sans-serif,system-ui,sans-serif;box-shadow:0 1px 4px #0008;opacity:0;pointer-events:none;transform:scale(.85);transition:opacity .12s ease,transform .12s ease;cursor:pointer}
+.virtual-point-icon:hover .virtual-pin-remove,.virtual-point-icon:focus-within .virtual-pin-remove{opacity:1;pointer-events:auto;transform:scale(1)}
+.virtual-pin-remove:hover{background:#dc2626}
 .virtual-endpoint-origin{--pin-fill:#00c853;--pin-border:#008d3c}
 .virtual-endpoint-destination{--pin-fill:#ff4149;--pin-border:#bd282f}
 .virtual-waypoint-icon{--pin-fill:#f59e0b;--pin-border:#b45309}

@@ -203,14 +203,14 @@ function pointIcon(kind, index) {
     const label = kind === 'origin' ? '출발' : '도착';
     return L.divIcon({
       className: `virtual-point-icon virtual-endpoint-icon virtual-endpoint-${kind}`,
-      html: `<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="34" text-anchor="middle">${label}</text></svg>`,
+      html: `<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="34" text-anchor="middle">${label}</text></svg><button type="button" class="virtual-pin-remove" aria-label="${label} 위치 제거" title="제거">×</button>`,
       iconSize: [42, 56],
       iconAnchor: [21, 54.6],
     });
   }
   return L.divIcon({
     className: 'virtual-point-icon virtual-endpoint-icon virtual-waypoint-icon',
-    html: `<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="35" text-anchor="middle">${index + 1}</text></svg>`,
+    html: `<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="35" text-anchor="middle">${index + 1}</text></svg><button type="button" class="virtual-pin-remove" aria-label="경유지 ${index + 1} 제거" title="제거">×</button>`,
     iconSize: [42, 56],
     iconAnchor: [21, 54.6],
   });
@@ -318,6 +318,13 @@ function markPointsChanged(message) {
   renderDraft();
   setStatus(message);
 }
+function removeRoutePoint(kind, index) {
+  if (kind === 'waypoint') points.waypoints.splice(index, 1);
+  else points[kind] = null;
+  renderPoints();
+  const label = kind === 'waypoint' ? `경유지 ${index + 1}` : kind === 'origin' ? '출발지' : '도착지';
+  void refreshPreviewAfterPointChange(`${label} 핀을 제거했습니다.`);
+}
 function selectedActiveTrip() {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
   const trip = vehicle?.state?.trip;
@@ -388,6 +395,16 @@ function drawPoint(kind, point, index = 0) {
     const position = marker.getLatLng();
     if (kind !== 'waypoint') finishEndpointDrag(marker);
     void snapAndSetRoutePoint(kind, { lat: position.lat, lon: position.lng }, index);
+  });
+  marker.on('add', () => {
+    const removeButton = marker.getElement()?.querySelector('.virtual-pin-remove');
+    if (!removeButton) return;
+    removeButton.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
+    removeButton.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation();
+      if (endpointDrag?.marker === marker) finishEndpointDrag(marker);
+      removeRoutePoint(kind, index);
+    });
   });
   pointLayerGroup.addLayer(marker);
 }
