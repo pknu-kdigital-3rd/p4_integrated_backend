@@ -622,7 +622,7 @@ class OsmnxGraph:
         points = min(candidates, key=lambda candidate: candidate[0])[1]
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
-    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
+    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None):
         # Hand-rolled edge-state A* instead of nx.astar_path. A node-only
         # search can discard a longer arrival at a junction even though its
         # incoming way permits a turn that the shorter arrival forbids. Keep
@@ -693,6 +693,8 @@ class OsmnxGraph:
         goal_state = None
 
         while open_set:
+            if cancel_event is not None and cancel_event.is_set():
+                return None
             _f, g, _order, state = heapq.heappop(open_set)
             current, incoming_osmids = state
             if g > g_score.get(state, float("inf")):
@@ -915,7 +917,7 @@ class PurePythonGraph:
         points = min(candidates, key=lambda candidate: candidate[0])[1]
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
-    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None):
+    def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None):
         import heapq
         from itertools import count
         coords = self.coords
@@ -953,6 +955,8 @@ class PurePythonGraph:
         goal_state = None
 
         while open_set:
+            if cancel_event is not None and cancel_event.is_set():
+                return None
             _f, g, _order, state = heapq.heappop(open_set)
             current, incoming_way = state
             if g > g_score.get(state, float("inf")):

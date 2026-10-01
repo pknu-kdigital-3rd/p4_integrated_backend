@@ -12,11 +12,13 @@ import json
 import math
 import os
 import threading
+import asyncio
 import time
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -298,7 +300,7 @@ def _graph_version() -> str:
     return version
 
 
-def _internal_route(req: InternalRouteRequest):
+def _internal_route(req: InternalRouteRequest, cancel_event=None):
     if graph is None:
         raise HTTPException(status_code=503, detail="Routing graph is not ready")
     profile = None if req.vehicleProfile in ("", "car", "unrestricted") else req.vehicleProfile
@@ -327,10 +329,16 @@ def _internal_route(req: InternalRouteRequest):
         )
         if not overlay_is_current:
             for geometry in req.blockedGeometries:
+                if cancel_event is not None and cancel_event.is_set():
+                    return None
                 for raw_id, _physical_id, _coords in _edges_intersecting_geometry(geometry):
+                    if cancel_event is not None and cancel_event.is_set():
+                        return None
                     blocked_edge_ids.append(f"{graph_version}:{raw_id}")
         blocked_edge_ids = list(dict.fromkeys(blocked_edge_ids))
     for index, stop in enumerate(stops):
+        if cancel_event is not None and cancel_event.is_set():
+            return None
         node_id = graph.nearest_node(stop.lat, stop.lon)
         if node_id is None:
             raise HTTPException(status_code=422, detail={"code": "POINT_TOO_FAR_FROM_ROAD", "stopIndex": index})
@@ -352,7 +360,10 @@ def _internal_route(req: InternalRouteRequest):
             blocked_edge_ids=blocked_edge_ids,
             penalty_edge_factors=req.penaltyEdgeFactors,
             avoid_initial_reverse_of_edge_id=req.avoidInitialReverseOfEdgeId if index == 1 else None,
+            cancel_event=cancel_event,
         )
+        if cancel_event is not None and cancel_event.is_set():
+            return None
         if result is None:
             previous = stops[index - 1]
             print(
@@ -937,8 +948,19 @@ def _nearby_road_geometry(lat, lon, radius_m=150):
 
 
 @app.post("/internal/routing/route")
-def internal_route(req: InternalRouteRequest):
-    return _internal_route(req)
+async def internal_route(req: InternalRouteRequest, request: Request):
+    cancel_event = threading.Event()
+    worker = asyncio.create_task(run_in_threadpool(_internal_route, req, cancel_event))
+    try:
+        while not worker.done():
+            if await request.is_disconnected():
+                cancel_event.set()
+                return None
+            await asyncio.sleep(0.05)
+        return await worker
+    finally:
+        if not worker.done():
+            cancel_event.set()
 
 
 # Node sends an anchor about every 150 m (up to 600) so bridges stay short.

@@ -50,7 +50,11 @@ export const virtualController = {
     },
 
     async previewRoute(req: Request<{ scenarioId: string }, {}, RoutePreviewBody>, res: Response) {
-        res.status(201).json({ data: await virtualService.previewRoute(BigInt(req.params.scenarioId), req.body, actorId(req)) });
+        const controller = new AbortController();
+        res.once("close", () => {
+            if (!res.writableEnded) controller.abort();
+        });
+        res.status(201).json({ data: await virtualService.previewRoute(BigInt(req.params.scenarioId), req.body, actorId(req), controller.signal) });
     },
 
     async snapRoutePoint(req: Request<{ scenarioId: string }, {}, SnapPointBody>, res: Response) {

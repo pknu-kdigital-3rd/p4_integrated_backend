@@ -520,7 +520,7 @@ export const virtualService = {
         });
     },
 
-    async previewRoute(scenarioId: bigint, input: RoutePreviewBody, actorId?: bigint) {
+    async previewRoute(scenarioId: bigint, input: RoutePreviewBody, actorId?: bigint, signal?: AbortSignal) {
         const scenario = await getScenario(scenarioId);
         const vehicleId = id(input.selectedVehicleId);
         const vehicle = await getVirtualVehicle(vehicleId);
@@ -539,7 +539,8 @@ export const virtualService = {
             waypoints: input.waypoints,
             vehicleProfile: profileForVehicle(vehicle),
             ...overlay,
-        });
+        }, 8000, signal);
+        if (signal?.aborted) return null;
         const draft = await prisma.virtualRouteDraft.create({
             data: {
                 scenarioId,

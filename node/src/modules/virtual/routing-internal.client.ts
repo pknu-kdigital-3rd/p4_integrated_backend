@@ -36,13 +36,13 @@ type RouteInput = {
 
 type SnapInput = Coordinate;
 
-async function request<T>(path: string, body?: unknown, timeoutMs = 8000): Promise<T> {
+async function request<T>(path: string, body?: unknown, timeoutMs = 8000, signal?: AbortSignal): Promise<T> {
     try {
         const headers: Record<string, string> = { "content-type": "application/json" };
         const init: RequestInit = {
             method: body === undefined ? "GET" : "POST",
             headers,
-            signal: AbortSignal.timeout(timeoutMs),
+            signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
         };
         if (body !== undefined) init.body = JSON.stringify(body);
         const response = await fetch(new URL(path, env.ROUTING_TRACKING_BASE_URL), init);
@@ -56,6 +56,7 @@ async function request<T>(path: string, body?: unknown, timeoutMs = 8000): Promi
         return payload as T;
     } catch (error) {
         if (error instanceof AppError) throw error;
+        if (signal?.aborted) throw error;
         throw new AppError(503, "Routing service unavailable", "ROUTING_UNAVAILABLE");
     }
 }
@@ -69,8 +70,8 @@ export const routingInternalClient = {
     async graphVersion() {
         return request<{ graphVersion: string }>("/internal/routing/graph-version");
     },
-    async route(input: RouteInput, timeoutMs = 8000): Promise<InternalRoute> {
-        return request<InternalRoute>("/internal/routing/route", input, timeoutMs);
+    async route(input: RouteInput, timeoutMs = 8000, signal?: AbortSignal): Promise<InternalRoute> {
+        return request<InternalRoute>("/internal/routing/route", input, timeoutMs, signal);
     },
     async matchPreview(points: Coordinate[]): Promise<InternalRoadMatch> {
         return request<InternalRoadMatch>("/internal/routing/match-preview", { points }, 60_000);
