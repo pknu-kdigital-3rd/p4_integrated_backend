@@ -1,5 +1,5 @@
 // Mouse painting uses left-drag; the shared map keeps right-drag panning.
-export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
+export function installRoadBrush(map, { isActive, onStroke, onStatus, onToolChange = () => {} }) {
   const container = map.getContainer();
   const preview = L.layerGroup().addTo(map);
   let tool = null, stroke = null, cursor = null, line = null, busy = false;
@@ -8,6 +8,7 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
   function cancel() { stroke = null; clearPreview(); }
   function setTool(next) {
     cancel(); tool = next;
+    onToolChange(next);
     container.style.cursor = next ? 'crosshair' : '';
     onStatus(next ? `${next === 'paint' ? '차단 브러시' : '차단 지우개'} · 왼쪽 버튼을 누르고 드래그하세요. Esc로 종료합니다.` : '차단 도구를 종료했습니다.');
   }
@@ -62,5 +63,5 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && tool) setTool(null); });
   window.addEventListener('blur', () => { if (stroke) void finish(); else clearPreview(); });
   map.on('zoomstart', () => { if (stroke) void finish(); else clearPreview(); });
-  return { setTool, handleMouseDown, reset() { cancel(); tool = null; container.style.cursor = ''; } };
+  return { setTool, handleMouseDown, reset() { cancel(); tool = null; onToolChange(null); container.style.cursor = ''; } };
 }

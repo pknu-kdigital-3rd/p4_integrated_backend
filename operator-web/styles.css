@@ -84,6 +84,9 @@ form { display: grid; gap: 10px; }
 #map.left-button-panning { cursor: grabbing; }
 .virtual-route-context-menu { position: absolute; z-index: 1200; min-width: 300px; padding: 6px; display: grid; gap: 5px; background: white; border: 1px solid var(--ui-border); border-radius: 8px; box-shadow: var(--ui-shadow-floating); }
 .virtual-route-context-menu[hidden] { display: none; }
+.virtual-brush-exit { position: absolute; z-index: 1201; top: 12px; right: 12px; display: flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px solid #efb1b1; border-radius: 8px; background: #fff; color: #8a1d2f; box-shadow: 0 3px 12px #14253630; font-size: 12px; font-weight: 700; cursor: pointer; }
+.virtual-brush-exit[hidden] { display: none; }
+.virtual-brush-exit span:first-child { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #8a1d2f; color: white; font-size: 16px; line-height: 1; }
 .virtual-routing-log { position: absolute; z-index: 850; left: 12px; bottom: 12px; width: min(430px,calc(100% - 24px)); max-height: 34%; overflow: auto; padding: 9px 11px; border: 1px solid #efb1b1; border-radius: 8px; background: #fffdfd; color: #7f1d1d; box-shadow: 0 3px 14px #14253630; font-size: 12px; }
 body:not(.virtual-mode) .virtual-routing-log { display: none; }
 .virtual-routing-log[hidden] { display: none; }
