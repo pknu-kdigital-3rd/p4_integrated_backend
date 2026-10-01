@@ -51,14 +51,18 @@ def _confidence_thresholds() -> dict[str, float | None] | None:
         return None
 
 
-def _model_classes(state: AppState) -> list[str]:
-    """Class names the loaded model can emit, for the viewer's class lists."""
-    names = getattr(state.yolo_model, "names", None)
-    if isinstance(names, dict):
-        return [str(names[key]) for key in sorted(names)]
-    if isinstance(names, (list, tuple)):
-        return [str(name) for name in names]
-    return []
+def _overlay_classes(state: AppState) -> list[str]:
+    """Classes offered in the viewer's per-class overlay menu.
+
+    Resolved once at model load from YOLO_CLASSES (or the default list);
+    computed here only when the model is not loaded yet.
+    """
+    resolved = getattr(state.yolo_model, "_p4_overlay_classes", None)
+    if isinstance(resolved, list):
+        return resolved
+    from app.services.yolo import overlay_class_names
+
+    return overlay_class_names(None, None)
 
 
 def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
@@ -230,7 +234,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                         "max_bytes": settings.BACKLOG_MAX_BYTES,
                     },
                     "android_live": state.android_live,
-                    "model_classes": _model_classes(state),
+                    "overlay_classes": _overlay_classes(state),
                 }
             )
         )

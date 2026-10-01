@@ -426,6 +426,8 @@ def load_yolo_model() -> YOLO:
         class_ids = _resolve_yolo_classes(settings.YOLO_CLASSES, model.names)
     model._p4_class_ids = class_ids
     print(f"YOLO class filter: {class_ids if class_ids is not None else 'all'}")
+    model._p4_overlay_classes = overlay_class_names(getattr(model, "names", None), class_ids)
+    print(f"Live View overlay classes: {', '.join(model._p4_overlay_classes)}")
     if settings.YOLO_TRACKING:
         # Validates YOLO_APPEAR/KEEP_CONFIDENCE at startup, like YOLO_CLASSES.
         tracker_path, thresholds = tracker_confidence_config()
@@ -492,6 +494,25 @@ def _model_confidence_floor() -> float:
     # threshold must lower the floor too or it would have no effect.
     keep = settings.YOLO_KEEP_CONFIDENCE
     return settings.CONF_THRESHOLD_LOW if keep is None else min(settings.CONF_THRESHOLD_LOW, keep)
+
+
+# Classes offered in the Live View per-class overlay menu when YOLO_CLASSES is
+# empty (every class kept): the road-relevant ones, not all 80 COCO labels.
+DEFAULT_OVERLAY_CLASSES = ("person", "bicycle", "car", "motorcycle", "bus", "truck")
+
+
+def overlay_class_names(names: dict[int, str] | None, class_ids: list[int] | None) -> list[str]:
+    """Class names for the Live View overlay menu, in the model's spelling.
+
+    These are the YOLO_CLASSES filter when set (the only classes the server
+    emits), otherwise DEFAULT_OVERLAY_CLASSES that the model has.
+    """
+    if not names:
+        return list(DEFAULT_OVERLAY_CLASSES)
+    if class_ids is not None:
+        return [str(names[class_id]) for class_id in class_ids if class_id in names]
+    by_name = {str(name).casefold(): str(name) for name in names.values()}
+    return [by_name[name] for name in DEFAULT_OVERLAY_CLASSES if name in by_name]
 
 
 def _resolve_yolo_classes(configured: str, names: dict[int, str]) -> list[int] | None:

@@ -33,10 +33,13 @@
     html.operator-live-view-fullscreen #stage { max-width: none; max-height: none; }
     #detailedSettings { margin: 8px 0; }
     #detailedSettings summary { cursor: pointer; }
-    #detailedSettings label { display: inline-block; margin: 4px 12px 4px 0; }
-    #detailedSettings input[type="text"] { width: 16em; }
-    #detailedSettings .detailed-hint, #modelClasses { font-size: 12px; opacity: 0.75; margin: 4px 0; }
-    #classListWarning { color: #f66; font-size: 12px; }
+    #detailedSettings .detailed-hint { font-size: 12px; opacity: 0.75; margin: 4px 0; }
+    .class-style-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+    .class-style-row .class-name { min-width: 8em; }
+    .class-style-options { display: inline-flex; border: 1px solid #666; border-radius: 6px; overflow: hidden; }
+    .class-style-options button { min-width: 52px; min-height: 36px; margin: 0; border: 0; border-right: 1px solid #666; border-radius: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; touch-action: manipulation; }
+    .class-style-options button:last-child { border-right: 0; }
+    .class-style-options button[aria-pressed="true"] { background: #2f6fd6; color: #fff; }
   </style>
 </head>
 <body>
@@ -79,23 +82,8 @@
   <div id="status">Stopped</div><div id="model-label">Segmentation model: --</div><div id="stats"></div>
   <details id="detailedSettings">
     <summary>Detailed settings</summary>
-    <p class="detailed-hint">Used when overlay style is "Per class". Comma-separated class names; a class in both lists gets a box and a mask.</p>
-    <label>box only classes
-      <input id="boxOnlyClasses" type="text" placeholder="person, bicycle" spellcheck="false" />
-    </label>
-    <label>segmentation only classes
-      <input id="maskOnlyClasses" type="text" placeholder="car, truck" spellcheck="false" />
-    </label>
-    <label>other classes
-      <select id="otherClassStyle">
-        <option value="segmentation">segmentation</option>
-        <option value="box">box</option>
-        <option value="both">box + segmentation</option>
-        <option value="hidden">hidden</option>
-      </select>
-    </label>
-    <div id="classListWarning" role="status"></div>
-    <div id="modelClasses"></div>
+    <p class="detailed-hint">Used when overlay style is "Per class". Tap how each class is drawn. The classes are the server's YOLO_CLASSES (or its default list).</p>
+    <div id="classStyleList"></div>
   </details>
   <section id="telemetry" aria-live="polite">
     <h3>Vehicle telemetry (presented frame)</h3>
@@ -117,11 +105,7 @@
   const boxesEl = document.getElementById('boxes');
   const masksEl = document.getElementById('masks');
   const overlayModeEl = document.getElementById('overlayMode');
-  const boxOnlyClassesEl = document.getElementById('boxOnlyClasses');
-  const maskOnlyClassesEl = document.getElementById('maskOnlyClasses');
-  const otherClassStyleEl = document.getElementById('otherClassStyle');
-  const classListWarningEl = document.getElementById('classListWarning');
-  const modelClassesEl = document.getElementById('modelClasses');
+  const classStyleListEl = document.getElementById('classStyleList');
   const compensationModeEl = document.getElementById('compensationMode');
   const trackPredictMsEl = document.getElementById('trackPredictMs');
   const trackHoldMsEl = document.getElementById('trackHoldMs');
@@ -150,10 +134,18 @@
   // mode with its default lists.
   if (overlayMode === 'person_box_other_segmentation') overlayMode = 'custom';
   // Per-class overlay style ("Per class" mode), edited in Detailed settings.
-  let boxOnlyClassesText = localStorage.getItem('playback-box-only-classes') ?? 'person';
-  let maskOnlyClassesText = localStorage.getItem('playback-mask-only-classes') ?? '';
+  // overlayClasses comes from the server (YOLO_CLASSES or its default list);
+  // the last list is remembered so the menu renders before connecting.
+  const CLASS_STYLES = ['box', 'segmentation', 'both', 'hidden'];
+  let overlayClasses = readStoredJson('playback-overlay-classes', ['person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck']);
+  let classStyles = readStoredJson('playback-class-styles', {});
   let otherClassStyle = localStorage.getItem('playback-other-class-style') || 'segmentation';
-  let modelClassNames = [];
+  function readStoredJson(key, fallback) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) ?? 'null');
+      return value && typeof value === 'object' ? value : fallback;
+    } catch { return fallback; }
+  }
   let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
   // Track hold/prediction timing in media milliseconds; see live-view-tracks.js.
   let temporalConfig = temporal.normalizeConfig({
@@ -329,45 +321,61 @@
   overlayModeEl.value = overlayMode;
   if (!['segmentation', 'box', 'both', 'hidden'].includes(otherClassStyle)) otherClassStyle = 'segmentation';
 
-  function parseClassList(text) {
-    return new Set(String(text || '').split(',').map((name) => name.trim().toLowerCase()).filter(Boolean));
+  if (!Array.isArray(overlayClasses)) overlayClasses = [];
+  // Default for a listed class without a choice yet: the former preset,
+  // person as a box and everything else as segmentation.
+  function selectedClassStyle(name) {
+    const chosen = classStyles[name];
+    if (CLASS_STYLES.includes(chosen)) return chosen;
+    return name === 'person' ? 'box' : 'segmentation';
   }
-  let boxOnlyClasses = parseClassList(boxOnlyClassesText);
-  let maskOnlyClasses = parseClassList(maskOnlyClassesText);
   // Which overlay parts to draw for a class under the current overlay style.
   function classStyle(className) {
     if (overlayMode === 'all') return { box: true, mask: true };
     if (overlayMode === 'boxes') return { box: true, mask: false };
     if (overlayMode === 'segmentation') return { box: false, mask: true };
-    const inBox = boxOnlyClasses.has(className), inMask = maskOnlyClasses.has(className);
-    if (inBox || inMask) return { box: inBox, mask: inMask };
-    if (otherClassStyle === 'hidden') return { box: false, mask: false };
-    return { box: otherClassStyle !== 'segmentation', mask: otherClassStyle !== 'box' };
+    const listed = overlayClasses.some((name) => name.toLowerCase() === className);
+    const style = listed ? selectedClassStyle(className) : otherClassStyle;
+    if (style === 'hidden') return { box: false, mask: false };
+    return { box: style !== 'segmentation', mask: style !== 'box' };
   }
-  function updateClassListWarning() {
-    if (!modelClassNames.length) { classListWarningEl.textContent = ''; return; }
-    const known = new Set(modelClassNames.map((name) => name.toLowerCase()));
-    const unknown = [...boxOnlyClasses, ...maskOnlyClasses].filter((name) => !known.has(name));
-    classListWarningEl.textContent = unknown.length ? `Not classes of this model: ${unknown.join(', ')}` : '';
-  }
-  function applyClassStyleControls(persist) {
-    boxOnlyClassesText = boxOnlyClassesEl.value;
-    maskOnlyClassesText = maskOnlyClassesEl.value;
-    otherClassStyle = otherClassStyleEl.value;
-    boxOnlyClasses = parseClassList(boxOnlyClassesText);
-    maskOnlyClasses = parseClassList(maskOnlyClassesText);
-    if (persist) {
-      localStorage.setItem('playback-box-only-classes', boxOnlyClassesText);
-      localStorage.setItem('playback-mask-only-classes', maskOnlyClassesText);
-      localStorage.setItem('playback-other-class-style', otherClassStyle);
+  const CLASS_STYLE_LABELS = { box: 'Box', segmentation: 'Seg', both: 'Both', hidden: 'Off' };
+  function renderClassStyleList() {
+    classStyleListEl.replaceChildren();
+    const rows = [...overlayClasses.map((name) => [name.toLowerCase(), name]), ['__other__', 'other classes']];
+    for (const [key, label] of rows) {
+      const current = key === '__other__' ? otherClassStyle : selectedClassStyle(key);
+      const row = document.createElement('div');
+      row.className = 'class-style-row';
+      const name = document.createElement('span');
+      name.className = 'class-name';
+      name.textContent = label;
+      const options = document.createElement('div');
+      options.className = 'class-style-options';
+      options.setAttribute('role', 'group');
+      options.setAttribute('aria-label', `${label} overlay`);
+      for (const style of CLASS_STYLES) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = CLASS_STYLE_LABELS[style];
+        button.setAttribute('aria-pressed', String(style === current));
+        button.addEventListener('click', () => {
+          if (key === '__other__') {
+            otherClassStyle = style;
+            localStorage.setItem('playback-other-class-style', style);
+          } else {
+            classStyles = { ...classStyles, [key]: style };
+            localStorage.setItem('playback-class-styles', JSON.stringify(classStyles));
+          }
+          renderClassStyleList();
+        });
+        options.append(button);
+      }
+      row.append(name, options);
+      classStyleListEl.append(row);
     }
-    updateClassListWarning();
   }
-  boxOnlyClassesEl.value = boxOnlyClassesText;
-  maskOnlyClassesEl.value = maskOnlyClassesText;
-  otherClassStyleEl.value = otherClassStyle;
-  for (const element of [boxOnlyClassesEl, maskOnlyClassesEl]) element.addEventListener('input', () => applyClassStyleControls(true));
-  otherClassStyleEl.addEventListener('change', () => applyClassStyleControls(true));
+  renderClassStyleList();
   if (!['global', 'local', 'raw'].includes(compensationMode)) compensationMode = 'global';
   compensationModeEl.value = compensationMode;
 
@@ -814,10 +822,10 @@
       if (socket !== ws) return;
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
-        if (message.type === 'session' && Array.isArray(message.model_classes) && message.model_classes.length) {
-          modelClassNames = message.model_classes.map(String);
-          modelClassesEl.textContent = `Model classes: ${modelClassNames.join(', ')}`;
-          updateClassListWarning();
+        if (message.type === 'session' && Array.isArray(message.overlay_classes)) {
+          overlayClasses = message.overlay_classes.map(String);
+          localStorage.setItem('playback-overlay-classes', JSON.stringify(overlayClasses));
+          renderClassStyleList();
         }
         if (message.type === 'session') { sessionId = message.session_id; epoch = message.epoch; targetSeconds = message.buffer.target_seconds; lowWatermarkSeconds = message.buffer.low_watermark_seconds; maxBufferBytes = message.buffer.client_max_bytes; sessionStorage.setItem('playback-session-id', sessionId); }
         else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); awaitingLiveEpoch = false; setStatus('Live IDR received; starting playback', '#4fdb8a'); updateStats(); }

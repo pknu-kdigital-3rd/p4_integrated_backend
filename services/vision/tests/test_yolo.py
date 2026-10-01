@@ -11,6 +11,7 @@ from app.core.settings import BASE_DIR, Settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
     _model_confidence_floor,
+    overlay_class_names,
     _resolve_yolo_classes,
     _tracker_config_cache,
     tracker_confidence_config,
@@ -627,6 +628,23 @@ class TrackerConfidenceConfigTests(unittest.TestCase):
         configured = Settings(YOLO_APPEAR_CONFIDENCE="", YOLO_KEEP_CONFIDENCE=" ")
         self.assertIsNone(configured.YOLO_APPEAR_CONFIDENCE)
         self.assertIsNone(configured.YOLO_KEEP_CONFIDENCE)
+
+
+
+class OverlayClassNamesTests(unittest.TestCase):
+    NAMES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck", 16: "dog"}
+
+    def test_yolo_classes_filter_defines_the_menu(self):
+        self.assertEqual(overlay_class_names(self.NAMES, [3, 0]), ["motorcycle", "person"])
+
+    def test_default_list_when_every_class_is_kept(self):
+        self.assertEqual(
+            overlay_class_names(self.NAMES, None),
+            ["person", "bicycle", "car", "motorcycle", "bus", "truck"],
+        )
+
+    def test_default_list_skips_classes_the_model_lacks(self):
+        self.assertEqual(overlay_class_names({0: "person", 16: "dog"}, None), ["person"])
 
 
 if __name__ == "__main__":
