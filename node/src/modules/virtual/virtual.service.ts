@@ -808,7 +808,7 @@ export const virtualService = {
                     durationSec: route.durationSec,
                     restrictionRevision: scenario.restrictionRevision,
                     graphVersion: route.graphVersion,
-                    reason: "FOLLOWING_ENABLED",
+                    reason: options.reason ?? "FOLLOWING_ENABLED",
                     activatedAt: new Date(),
                 },
             });
@@ -969,7 +969,11 @@ export const virtualService = {
                 payload: { revision, changed: prepared.length },
             });
         });
-        const routingFailures = await this.refreshFollowingTrips(scenarioId, { preserveMotionOnFailure: input.mode === "erase" });
+        const relaxingRoadState = input.mode === "erase";
+        const routingFailures = await this.refreshFollowingTrips(scenarioId, {
+            preserveMotionOnFailure: relaxingRoadState,
+            recoverStoppedTrips: relaxingRoadState,
+        });
         return { restrictionRevision: revision, changed: prepared.length, routingFailures };
     },
 
@@ -1010,7 +1014,7 @@ export const virtualService = {
             // step against the remaining active BLOCKED edges, so retaining
             // the last valid route is safe while a later road-state change or
             // operator action retries the calculation.
-            await this.refreshFollowingTrips(existing.scenarioId, { preserveMotionOnFailure: true });
+            await this.refreshFollowingTrips(existing.scenarioId, { preserveMotionOnFailure: true, recoverStoppedTrips: true });
             return deactivated;
         }
         const kind = input.kind ?? existing.kind;
@@ -1033,11 +1037,14 @@ export const virtualService = {
         return updated;
     },
 
-    async refreshFollowingTrips(scenarioId: bigint, options: { preserveMotionOnFailure?: boolean } = {}) {
+    async refreshFollowingTrips(scenarioId: bigint, options: { preserveMotionOnFailure?: boolean; recoverStoppedTrips?: boolean } = {}) {
         const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, include: { trip: { include: { routes: { where: { isCurrent: true } }, waypoints: { orderBy: { sequence: "asc" } } } } } });
         const settings = await prisma.virtualVehicleSettings.findMany({ where: { vehicleId: { in: states.map((state) => state.vehicleId) }, autoFollowEnabled: true } });
         const following = new Set(settings.map((item) => item.vehicleId.toString()));
-        const eligibleStates = states.filter((state) => following.has(state.vehicleId.toString()) && state.trip.state !== "PAUSED");
+        const eligibleStates = states.filter((state) => (
+            following.has(state.vehicleId.toString())
+            || (options.recoverStoppedTrips && ["BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"].includes(state.simStatus))
+        ) && state.trip.state !== "PAUSED");
         if (eligibleStates.length === 0) return [];
         // Fetch the restriction overlay once and share it across all vehicle
         // reroutes - all vehicles in the same scenario see the same restrictions,
@@ -1063,7 +1070,12 @@ export const virtualService = {
                 // command-version CAS is expected in that race; resnapshot
                 // once and solve from the newest authoritative position.
                 for (let attempt = 0; attempt < 2; attempt += 1) {
-                    const activated = await this.rerouteFromCurrentPosition(state.vehicleId, currentState, { preloadedOverlay });
+                    const activated = await this.rerouteFromCurrentPosition(state.vehicleId, currentState, {
+                        preloadedOverlay,
+                        ...(options.recoverStoppedTrips && ["BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"].includes(currentState.simStatus)
+                            ? { reason: "ROAD_REOPENED" }
+                            : {}),
+                    });
                     if (activated) return;
                     const latest = await activeVehicleState(state.vehicleId);
                     if (!latest || ["COMPLETED", "CANCELLED"].includes(latest.trip.state)) return;
