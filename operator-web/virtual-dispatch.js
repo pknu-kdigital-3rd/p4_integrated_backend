@@ -464,7 +464,6 @@ function queueEndpointSnapPreview(context, marker) {
   }, delay);
 }
 function startEndpointDrag(kind, marker, index = null) {
-  cancelInFlightRouteCalculation();
   endpointDrag = { kind, marker, index, requestId: 0, lastRequestAt: 0, timer: null };
   marker.setOpacity(0.65);
   endpointSnapPreviewLayerGroup.clearLayers();
@@ -1223,7 +1222,6 @@ async function applySelectedSpeed() {
   }
 }
 function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getCenter(), originalMarker = null) {
-  cancelInFlightRouteCalculation();
   roadBrush.reset();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   cancelPointPlacement();
@@ -1245,6 +1243,7 @@ map.on('mousemove', event => {
 });
 async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
   const previousDestination = kind === 'destination' ? points.destination : null;
+  const previousPoint = kind === 'waypoint' ? points.waypoints[waypointIndex] : points[kind];
   const label = kind === 'waypoint' ? `Waypoint ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind[0].toUpperCase() + kind.slice(1);
   const finishRouting = beginRouteCalculation('위치를 도로에 맞추고 경로를 계산하는 중…');
   setStatus(`Snapping ${label.toLowerCase()} to the nearest road…`);
@@ -1254,6 +1253,12 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
     });
     const point = { lat: Number(snapped.lat), lon: Number(snapped.lon) };
     if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) throw new Error('Routing returned an invalid snapped point.');
+    if (previousPoint && map.distance([previousPoint.lat, previousPoint.lon], [point.lat, point.lon]) < 1) {
+      renderPoints();
+      setStatus(`${label} stayed at the same snapped location.`);
+      return;
+    }
+    cancelInFlightRouteCalculation();
     if (kind === 'origin') points.origin = point;
     else if (kind === 'destination') points.destination = point;
     else if (waypointIndex === null) points.waypoints.push(point);
