@@ -77,6 +77,9 @@ export function createApp() {
 	app.use("/api/v1/virtual", virtualRouter);
 
 	const operatorWeb = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../operator-web");
+	app.get("/favicon.ico", (_req, res) => {
+		res.sendFile(path.join(operatorWeb, "favicon.svg"));
+	});
 	app.use("/operator", express.static(operatorWeb));
 
 	app.get("/openapi.json", (_req, res) => {
