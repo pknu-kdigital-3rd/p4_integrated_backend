@@ -1413,7 +1413,9 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
     const completedTripId = completedTrip?.virtualTripId ?? selectedVehicle?.state?.virtualTripId;
     if (completedTrip?.state === 'COMPLETED' && completedTripId) {
       dismissedCompletedTripIds.add(String(completedTripId));
-      renderVehicles({ updateVehicleSelect: false });
+      selectedVehicleId = '';
+      vehicleSelect.value = '';
+      renderVehicles();
     }
     renderPoints();
     const message = kind === 'waypoint' && waypointIndex === null
