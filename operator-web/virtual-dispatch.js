@@ -225,6 +225,7 @@ let hasLoadedEvents = false;
 const SPEED_PRESETS_KMH = [25, 50, 100, 200];
 const virtualVehicleMarkers = new Map();
 const cancelledVirtualTripIds = new Set();
+const dismissedCompletedTripIds = new Set();
 const virtualVehicleAnimationFrames = new Map();
 const roadBrush = installRoadBrush(map, {
   isActive: () => mode === 'virtual' && Boolean(scenarioId),
@@ -913,6 +914,13 @@ function renderDraft() {
 }
 function renderActiveTripRoute(vehicle) {
   const trip = vehicle?.state?.trip;
+  const tripId = trip?.virtualTripId ?? vehicle?.state?.virtualTripId;
+  if (trip?.state === 'COMPLETED' && tripId && dismissedCompletedTripIds.has(String(tripId))) {
+    if (activeRouteSignature) clearRouteGroup(activeRouteLayerGroup);
+    activeRouteSignature = '';
+    updateRouteSummary(draft);
+    return;
+  }
   const routes = Array.isArray(trip?.routes) ? trip.routes.filter((route) => route?.routeGeojson) : [];
   if (!routes.length) {
     updateRouteSummary(draft);
@@ -997,6 +1005,8 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     const virtualTripId = vehicle.state?.virtualTripId || vehicle.state?.trip?.virtualTripId;
     if (vehicle.state?.simStatus === 'CANCELLED' || vehicle.state?.trip?.state === 'CANCELLED'
       || (virtualTripId && cancelledVirtualTripIds.has(String(virtualTripId)))) continue;
+    if (vehicle.state?.trip?.state === 'COMPLETED' && virtualTripId
+      && dismissedCompletedTripIds.has(String(virtualTripId))) continue;
     const position = vehicle.state?.lastPosition;
     if (!position || !Number.isFinite(Number(position.lat)) || !Number.isFinite(Number(position.lon))) continue;
     const vehicleId = String(vehicle.vehicleId);
@@ -1332,6 +1342,13 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
     else if (kind === 'destination') points.destination = point;
     else if (waypointIndex === null) points.waypoints.push(point);
     else if (points.waypoints[waypointIndex]) points.waypoints[waypointIndex] = point;
+    const selectedVehicle = vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId);
+    const completedTrip = selectedVehicle?.state?.trip;
+    const completedTripId = completedTrip?.virtualTripId ?? selectedVehicle?.state?.virtualTripId;
+    if (completedTrip?.state === 'COMPLETED' && completedTripId) {
+      dismissedCompletedTripIds.add(String(completedTripId));
+      renderVehicles({ updateVehicleSelect: false });
+    }
     renderPoints();
     const message = kind === 'waypoint' && waypointIndex === null
       ? `${label} added and snapped to road.`
