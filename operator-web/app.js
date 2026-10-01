@@ -23,6 +23,7 @@ const cancelTouchMenu=()=>{
 };
 mapContainer.addEventListener('pointerdown',event=>{
   if(event.pointerType!=='touch')return;
+  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
   if(!event.target.closest('.virtual-point-icon')&&window.__operatorTouchRoadBrushPointerDown?.(event)){
     cancelTouchMenu();
     event.preventDefault();
