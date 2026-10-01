@@ -1,7 +1,7 @@
 import { prisma } from "../../infrastructure/database/prisma.ts";
 import { AppError } from "../../common/errors/app-error.ts";
 import { logger } from "../../config/logger.ts";
-import type { Prisma } from "../../generated/prisma/client.ts";
+import type { Prisma, VirtualRoute } from "../../generated/prisma/client.ts";
 import { routingInternalClient } from "./routing-internal.client.ts";
 import type {
     CommandBody,
@@ -32,7 +32,12 @@ type RerouteOptions = {
     reason?: string;
     actorId?: bigint;
     preloadedOverlay?: RestrictionOverlay;
+    transactionRetryCount?: number;
 };
+
+function isPrismaWriteConflict(error: unknown): boolean {
+    return typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
+}
 
 function id(value: string): bigint {
     return BigInt(value);
@@ -739,7 +744,7 @@ export const virtualService = {
         return { settings, state: await activeVehicleState(vehicleId) };
     },
 
-    async rerouteFromCurrentPosition(vehicleId: bigint, state?: Awaited<ReturnType<typeof activeVehicleState>>, options: RerouteOptions = {}) {
+    async rerouteFromCurrentPosition(vehicleId: bigint, state?: Awaited<ReturnType<typeof activeVehicleState>>, options: RerouteOptions = {}): Promise<VirtualRoute | null> {
         const current = state ?? await activeVehicleState(vehicleId);
         if (!current) return null;
         const vehicle = await getVirtualVehicle(vehicleId);
@@ -774,7 +779,8 @@ export const virtualService = {
         }
         route = anchorRerouteAtPosition(route, currentPosition, continuation);
         const scenario = await getScenario(current.scenarioId);
-        return prisma.$transaction(async (tx) => {
+        try {
+            return await prisma.$transaction(async (tx) => {
             const latestTrip = await tx.virtualTrip.findUnique({ where: { virtualTripId: current.virtualTripId }, include: { stateRecord: true } });
             if (!latestTrip || !latestTrip.stateRecord || latestTrip.stateRecord.commandVersion !== current.commandVersion
                 || (options.expectedTripRevision !== undefined && latestTrip.tripRevision !== options.expectedTripRevision)) return null;
@@ -811,7 +817,21 @@ export const virtualService = {
             await tx.virtualVehicleState.update({ where: { vehicleId }, data: { activeRouteId: nextRoute.routeId, routeVersion: nextVersion, graphVersion: route.graphVersion, simStatus: motionState, simElapsedMs: 0, currentEdgeId: nextEdgeId, currentPhysicalSegmentId: nextPhysicalSegmentId, offsetM: 0, lastCheckpointAt: new Date(), blockedReason: null, commandVersion: { increment: 1 } } });
             await createEvent(tx, { scenarioId: current.scenarioId, virtualTripId: current.virtualTripId, actorId: options.actorId ?? null, eventType: "ROUTE_RECALCULATED", payload: { reason: options.reason ?? "FOLLOWING_ENABLED", routeVersion: nextVersion } });
             return nextRoute;
-        }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 15000 });
+            }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 15000 });
+        } catch (error) {
+            const retryCount = options.transactionRetryCount ?? 0;
+            if (!isPrismaWriteConflict(error) || retryCount >= 3) throw error;
+            const latest = await activeVehicleState(vehicleId);
+            if (!latest || latest.virtualTripId !== current.virtualTripId || ["COMPLETED", "CANCELLED"].includes(latest.trip.state)) return null;
+            logger.warn({
+                scenarioId: current.scenarioId.toString(),
+                vehicleId: vehicleId.toString(),
+                tripId: current.virtualTripId.toString(),
+                retry: retryCount + 1,
+            }, "Retrying virtual route activation after a concurrent vehicle-state write");
+            await new Promise((resolve) => setTimeout(resolve, 40 * (2 ** retryCount)));
+            return this.rerouteFromCurrentPosition(vehicleId, latest, { ...options, transactionRetryCount: retryCount + 1 });
+        }
     },
 
     async replaceWaypoints(tripId: bigint, input: WaypointsBody, actorId?: bigint) {
@@ -1038,13 +1058,17 @@ export const virtualService = {
                     tripId: latest.virtualTripId.toString(),
                     previousStatus: latest.simStatus,
                     code: error instanceof AppError ? error.code ?? "APPLICATION_ERROR" : "ROUTING_ERROR",
-                    message: error instanceof Error ? error.message : String(error),
+                    message: isPrismaWriteConflict(error)
+                        ? "Database write conflict persisted after route activation retries (P2034)"
+                        : error instanceof Error ? error.message : String(error),
                     details: error instanceof AppError ? error.details : undefined,
                     blockedDirectedEdgeCount: preloadedOverlay.blockedEdgeIds.length,
                     blockedGeometryCount: preloadedOverlay.blockedGeometries.length,
+                    stateChangedToNoRoute: noViablePath,
                 };
                 routingFailures.push(failure);
-                logger.warn(failure, "Virtual trip entered NO_ROUTE after road-state update");
+                logger.warn({ ...failure, err: error }, noViablePath ? "Virtual trip entered NO_ROUTE after road-state update" : "Virtual route recalculation failed without a confirmed no-route result");
+                if (!noViablePath) return;
                 await prisma.$transaction([
                     prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: noViablePath ? "No viable path after road restriction" : "Routing failed after road-state change" } }),
                     prisma.virtualTrip.updateMany({ where: { virtualTripId: latest.virtualTripId, state: { in: ACTIVE_TRIP_STATES } }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),

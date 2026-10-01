@@ -87,9 +87,10 @@ function showRoutingLog(message, details = null, context = {}) {
   const vehicle = context.vehicleId ? `차량 ${context.vehicleId} · ` : '';
   const trip = context.tripId ? `운행 ${context.tripId} · ` : '';
   const edgeCount = Number.isInteger(context.blockedDirectedEdgeCount) ? ` · 차단 edge ${context.blockedDirectedEdgeCount}개` : '';
+  const noRoute = context.stateChangedToNoRoute ? ' · NO_ROUTE 전환' : '';
   const text = document.createElement('span');
   text.dataset.routingLogText = 'true';
-  text.textContent = `${new Date().toLocaleTimeString()} · ${vehicle}${trip}${leg} 실패: ${message}${edgeCount}`;
+  text.textContent = `${new Date().toLocaleTimeString()} · ${vehicle}${trip}${leg} 실패: ${message}${edgeCount}${noRoute}`;
   const copyButton = document.createElement('button');
   copyButton.type = 'button';
   copyButton.className = 'virtual-routing-log-copy';
@@ -1061,7 +1062,7 @@ async function setFollowing(enabled) {
     await loadScenarioData();
     if (result.state?.simStatus === 'NO_ROUTE') showRoutingLog(result.state.blockedReason || '경로 추종 중 경로 계산에 실패했습니다.', null, { vehicleId: selectedVehicleId, tripId: result.state.virtualTripId });
   }
-  catch (error) { if (error.code === 'ROUTE_NOT_FOUND') showRoutingLog(error.message, error.details, { vehicleId: selectedVehicleId }); setStatus(error.message, true); }
+  catch (error) { showRoutingLog(error.message, error.details, { vehicleId: selectedVehicleId }); setStatus(error.message, true); }
 }
 async function command(command, extra = {}) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
