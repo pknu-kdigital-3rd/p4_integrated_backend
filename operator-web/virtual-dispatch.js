@@ -43,16 +43,8 @@ routeContextMenu.className = 'virtual-route-context-menu';
 routeContextMenu.setAttribute('role', 'menu');
 routeContextMenu.setAttribute('aria-label', '경로 및 도로 차단');
 routeContextMenu.hidden = true;
-routeContextMenu.innerHTML = '<div class="route-point-menu-row"><button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button><button type="button" role="menuitem" data-route-point-kind="waypoint"><span aria-hidden="true" class="route-point-menu-icon waypoint">＋</span><span>경유지</span></button></div><div class="road-brush-heading"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단</span></div><div class="road-brush-submenu"><button type="button" role="menuitem" data-road-tool="paint">브러시</button><button type="button" role="menuitem" data-road-tool="erase">지우개</button></div>';
+routeContextMenu.innerHTML = '<div class="route-point-menu-row"><button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button><button type="button" role="menuitem" data-route-point-kind="waypoint"><span aria-hidden="true" class="route-point-menu-icon waypoint">＋</span><span>경유지</span></button></div><div class="road-brush-heading"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단</span></div><div class="road-brush-submenu"><button type="button" role="menuitem" data-road-tool="paint">브러시</button><button type="button" role="menuitem" data-road-tool="erase">지우개</button><button type="button" role="menuitem" data-road-tool="exit">종료</button></div>';
 map.getContainer().append(routeContextMenu);
-const roadBrushExit = document.createElement('button');
-roadBrushExit.type = 'button';
-roadBrushExit.className = 'virtual-brush-exit';
-roadBrushExit.hidden = true;
-roadBrushExit.innerHTML = '<span aria-hidden="true">×</span><span data-brush-exit-label></span>';
-roadBrushExit.setAttribute('aria-label', '차단 브러시 또는 지우개 종료');
-roadBrushExit.title = '차단 도구 종료';
-map.getContainer().append(roadBrushExit);
 const routingLogOverlay = document.createElement('section');
 routingLogOverlay.className = 'virtual-routing-log';
 routingLogOverlay.setAttribute('role', 'log');
@@ -283,10 +275,6 @@ const virtualVehicleAnimationFrames = new Map();
 const roadBrush = installRoadBrush(map, {
   isActive: () => mode === 'virtual' && Boolean(scenarioId),
   onStatus: setStatus,
-  onToolChange(tool) {
-    roadBrushExit.hidden = !tool;
-    roadBrushExit.querySelector('[data-brush-exit-label]').textContent = tool === 'erase' ? '지우개 종료' : '브러시 종료';
-  },
   async onStroke(stroke) {
     const finishRouting = beginRouteCalculation(stroke.mode === 'paint' ? '차단 구간을 적용하고 경로를 다시 계산하는 중…' : '차단 구간을 해제하고 경로를 다시 계산하는 중…');
     const targetScenario = scenarioId;
@@ -337,8 +325,6 @@ const roadBrush = installRoadBrush(map, {
     }
   },
 });
-roadBrushExit.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation(); });
-roadBrushExit.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); roadBrush.setTool(null); });
 window.__operatorRoadBrushPointerDown = roadBrush.handleMouseDown;
 
 
@@ -1577,6 +1563,7 @@ routeContextMenu.addEventListener('click', (event) => {
   const toolButton = event.target.closest('[data-road-tool]');
   if (toolButton) {
     hideRouteContextMenu();
+    if (toolButton.dataset.roadTool === 'exit') { roadBrush.setTool(null); return; }
     if (!scenarioId) { setStatus('시나리오를 먼저 선택하세요.', true); return; }
     cancelPointPlacement();
     roadBrush.setTool(toolButton.dataset.roadTool);
