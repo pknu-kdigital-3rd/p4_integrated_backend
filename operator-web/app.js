@@ -23,7 +23,7 @@ const cancelTouchMenu=()=>{
 };
 mapContainer.addEventListener('pointerdown',event=>{
   if(event.pointerType!=='touch')return;
-  if(window.__operatorTouchRoadBrushPointerDown?.(event)){
+  if(!event.target.closest('.virtual-point-icon')&&window.__operatorTouchRoadBrushPointerDown?.(event)){
     cancelTouchMenu();
     event.preventDefault();
     event.stopPropagation();
@@ -63,15 +63,18 @@ const finishTouchPress=event=>{
 };
 mapContainer.addEventListener('pointerup',finishTouchPress);
 mapContainer.addEventListener('pointercancel',finishTouchPress);
+mapContainer.addEventListener('operator-map-contextrequest',event=>{
+  if(event.detail?.touch)touchContextMenuOpened=true;
+});
 mapContainer.addEventListener('mousedown',event=>{
   // Chromium emits compatibility mouse events after touch input. Leave those
   // to Leaflet so touch taps and pinch gestures are not treated as mouse pans.
   if(event.sourceCapabilities?.firesTouchEvents)return;
   if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
+  if(event.target.closest('.virtual-point-icon'))return;
   if(window.__operatorRoadBrushPointerDown?.(event)){event.preventDefault();event.stopImmediatePropagation();return;}
   if(event.button===0){
     if(window.__operatorPointPlacementActive?.()){event.preventDefault();event.stopPropagation();return;}
-    if(event.target.closest('.virtual-point-icon'))return;
     event.preventDefault();event.stopPropagation();
     leftButtonPan={x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,moved:false};
     mapContainer.classList.add('left-button-panning');

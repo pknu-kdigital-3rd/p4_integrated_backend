@@ -1,8 +1,8 @@
 // Mouse painting uses left-drag; the shared map keeps right-drag panning.
-export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
+export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLongPress }) {
   const container = map.getContainer();
   const preview = L.layerGroup().addTo(map);
-  let tool = null, stroke = null, cursor = null, line = null, busy = false, touchPointerId = null;
+  let tool = null, stroke = null, cursor = null, line = null, busy = false, touchPointerId = null, pendingTouch = null;
   let previousMapDragging = null, previousTouchZoom = null;
 
   function clearPreview() { preview.clearLayers(); cursor = null; line = null; }
@@ -26,7 +26,7 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
     cancel(); tool = next;
     setMapGestureHandling(Boolean(next));
     container.style.cursor = next ? 'crosshair' : '';
-    onStatus(next ? `${next === 'paint' ? '차단 브러시' : '차단 지우개'} · 마우스 왼쪽 버튼 또는 터치로 드래그하세요. Esc로 종료합니다.` : '차단 도구를 종료했습니다.');
+    onStatus(next ? `${next === 'paint' ? '차단 브러시' : '차단 지우개'} · 마우스 왼쪽 버튼 또는 터치로 드래그하세요. 터치 길게 누르기로 메뉴를 엽니다.` : '차단 도구를 종료했습니다.');
   }
   function position(event) { return map.mouseEventToLatLng(event); }
   function radiusAt(point) {
@@ -78,19 +78,43 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
   }
   function handleTouchPointerDown(event) {
     if (event.pointerType !== 'touch' || !isActive() || !tool) return false;
+    if (touchPointerId !== null && touchPointerId !== event.pointerId) return true;
     touchPointerId = event.pointerId;
-    return startStroke(event);
+    pendingTouch = { pointerId: event.pointerId, event, x: event.clientX, y: event.clientY, timer: 0 };
+    pendingTouch.timer = window.setTimeout(() => {
+      if (pendingTouch?.pointerId !== event.pointerId) return;
+      pendingTouch = null;
+      touchPointerId = null;
+      onTouchLongPress?.({ clientX: event.clientX, clientY: event.clientY, touch: true });
+    }, 550);
+    return true;
   }
   document.addEventListener('pointermove', event => {
-    if (event.pointerType === 'touch' && event.pointerId === touchPointerId) appendStrokePoint(event);
+    if (event.pointerType !== 'touch' || event.pointerId !== touchPointerId) return;
+    if (pendingTouch) {
+      if (Math.hypot(event.clientX - pendingTouch.x, event.clientY - pendingTouch.y) <= 10) return;
+      window.clearTimeout(pendingTouch.timer);
+      const initialEvent = pendingTouch.event;
+      pendingTouch = null;
+      startStroke(initialEvent);
+    }
+    appendStrokePoint(event);
   });
   document.addEventListener('pointerup', event => {
     if (event.pointerType !== 'touch' || event.pointerId !== touchPointerId) return;
+    if (pendingTouch) {
+      window.clearTimeout(pendingTouch.timer);
+      const initialEvent = pendingTouch.event;
+      pendingTouch = null;
+      startStroke(initialEvent);
+    }
     touchPointerId = null;
     void finish();
   });
   document.addEventListener('pointercancel', event => {
     if (event.pointerType !== 'touch' || event.pointerId !== touchPointerId) return;
+    if (pendingTouch) window.clearTimeout(pendingTouch.timer);
+    pendingTouch = null;
     touchPointerId = null;
     void finish();
   });
@@ -101,5 +125,5 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus }) {
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && tool) setTool(null); });
   window.addEventListener('blur', () => { if (stroke) void finish(); else clearPreview(); });
   map.on('zoomstart', () => { if (stroke) void finish(); else clearPreview(); });
-  return { setTool, handleMouseDown, handleTouchPointerDown, reset() { cancel(); tool = null; touchPointerId = null; setMapGestureHandling(false); container.style.cursor = ''; } };
+  return { setTool, handleMouseDown, handleTouchPointerDown, reset() { cancel(); tool = null; touchPointerId = null; if (pendingTouch) window.clearTimeout(pendingTouch.timer); pendingTouch = null; setMapGestureHandling(false); container.style.cursor = ''; } };
 }

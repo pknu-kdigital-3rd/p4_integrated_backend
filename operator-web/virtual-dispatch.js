@@ -2,7 +2,7 @@ import {uiText, applyRoadHatch, vehicleIcon} from './dashboard-ui.js';
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
-import { installRoadBrush } from './road-brush.js?v=2';
+import { installRoadBrush } from './road-brush.js?v=3';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -276,6 +276,7 @@ const virtualVehicleAnimationFrames = new Map();
 const roadBrush = installRoadBrush(map, {
   isActive: () => mode === 'virtual' && Boolean(scenarioId),
   onStatus: setStatus,
+  onTouchLongPress: point => map.getContainer().dispatchEvent(new CustomEvent('operator-map-contextrequest', { detail: point })),
   async onStroke(stroke) {
     const finishRouting = beginRouteCalculation(stroke.mode === 'paint' ? '차단 구간을 적용하고 경로를 다시 계산하는 중…' : '차단 구간을 해제하고 경로를 다시 계산하는 중…');
     const targetScenario = scenarioId;
