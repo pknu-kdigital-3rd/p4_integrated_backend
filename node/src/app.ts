@@ -33,7 +33,8 @@ export function createApp() {
 			autoLogging: {
 				ignore: (req) => req.method === "GET" && (
 					/^\/api\/v1\/virtual\/scenarios\/\d+(?:\/(?:vehicles|dispatch-requests|events))?(?:\?.*)?$/.test(req.url ?? "") ||
-					req.url === "/api/v1/vehicles"
+					req.url === "/api/v1/vehicles" ||
+					req.url === "/api/v1/tracking/vehicles"
 				),
 			},
 		}),
