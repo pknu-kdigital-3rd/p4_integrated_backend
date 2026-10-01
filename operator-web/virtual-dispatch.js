@@ -515,6 +515,7 @@ function pointIcon(kind, index) {
 }
 function cancelPointPlacement() {
   if (!pointPlacement) return;
+  pointPlacementPointerStart = null;
   if (endpointDrag?.marker === movingPin) finishEndpointDrag(movingPin);
   movingPin?.remove();
   movingPin = null;
@@ -1461,6 +1462,7 @@ function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getC
   setStatus(`${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭하거나 탭해 놓으세요.`);
 }
 window.__operatorPointPlacementActive = () => Boolean(pointPlacement);
+let pointPlacementPointerStart = null;
 map.on('mousemove', event => {
   if (!pointPlacement || !movingPin) return;
   movingPin.setLatLng(event.latlng);
@@ -1626,7 +1628,12 @@ async function switchMode(next) {
 map.on('click', (event) => {
   hideRouteContextMenu();
   if (mode !== 'virtual' || !pickMode) return;
-  const point = { lat: event.latlng.lat, lon: event.latlng.lng };
+  commitRoutePointPlacement(event.latlng);
+});
+function commitRoutePointPlacement(latlng) {
+  if (mode !== 'virtual' || !pickMode || !pointPlacement) return;
+  pointPlacementPointerStart = null;
+  const point = { lat: latlng.lat, lon: latlng.lng };
   const selectedMode = pickMode;
   const selectedIndex = pointPlacement?.waypointIndex ?? null;
   const pin = movingPin;
@@ -1640,7 +1647,19 @@ map.on('click', (event) => {
   restoreRoutePlacementMapDragging();
   map.getContainer().style.cursor = '';
   void snapAndSetRoutePoint(selectedMode, point, selectedIndex);
+}
+map.getContainer().addEventListener('pointerdown', event => {
+  if (!pointPlacement || event.button !== 0) return;
+  pointPlacementPointerStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
 });
+map.getContainer().addEventListener('pointerup', event => {
+  const start = pointPlacementPointerStart;
+  pointPlacementPointerStart = null;
+  if (!start || start.id !== event.pointerId || !pointPlacement) return;
+  if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
+  commitRoutePointPlacement(map.mouseEventToLatLng(event));
+});
+map.getContainer().addEventListener('pointercancel', () => { pointPlacementPointerStart = null; });
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
 scenarioSelect.addEventListener('change', () => { cancelInFlightRouteCalculation(); roadBrush.reset(); cancelPointPlacement(); scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
