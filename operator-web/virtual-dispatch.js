@@ -53,18 +53,24 @@ routingLogOverlay.hidden = true;
 routingLogOverlay.innerHTML = '<header><strong>라우팅 로그</strong><div><button type="button" data-copy-routing-log>복사</button><button type="button" data-clear-routing-log aria-label="로그 지우기">지우기</button></div></header><ol></ol>';
 map.getContainer().append(routingLogOverlay);
 const routingLogList = routingLogOverlay.querySelector('ol');
-routingLogOverlay.querySelector('[data-copy-routing-log]').addEventListener('click', async () => {
-  const text = [...routingLogList.querySelectorAll('li')].map(item => item.textContent).join('\n');
+async function copyRoutingText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.style.position = 'fixed'; field.style.opacity = '0';
+  document.body.append(field);
   try {
-    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
-    else {
-      const field = document.createElement('textarea');
-      field.value = text;
-      field.style.position = 'fixed'; field.style.opacity = '0';
-      document.body.append(field); field.select();
-      if (!document.execCommand('copy')) throw new Error('Clipboard copy failed');
-      field.remove();
-    }
+    field.select();
+    if (!document.execCommand('copy')) throw new Error('Clipboard copy failed');
+  } finally { field.remove(); }
+}
+routingLogOverlay.querySelector('[data-copy-routing-log]').addEventListener('click', async () => {
+  const text = [...routingLogList.querySelectorAll('[data-routing-log-text]')].map(item => item.textContent).join('\n');
+  try {
+    await copyRoutingText(text);
     setStatus('라우팅 로그를 복사했습니다.');
   } catch { setStatus('라우팅 로그를 복사하지 못했습니다.', true); }
 });
@@ -81,7 +87,20 @@ function showRoutingLog(message, details = null, context = {}) {
   const vehicle = context.vehicleId ? `차량 ${context.vehicleId} · ` : '';
   const trip = context.tripId ? `운행 ${context.tripId} · ` : '';
   const edgeCount = Number.isInteger(context.blockedDirectedEdgeCount) ? ` · 차단 edge ${context.blockedDirectedEdgeCount}개` : '';
-  item.textContent = `${new Date().toLocaleTimeString()} · ${vehicle}${trip}${leg} 실패: ${message}${edgeCount}`;
+  const text = document.createElement('span');
+  text.dataset.routingLogText = 'true';
+  text.textContent = `${new Date().toLocaleTimeString()} · ${vehicle}${trip}${leg} 실패: ${message}${edgeCount}`;
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.className = 'virtual-routing-log-copy';
+  copyButton.setAttribute('aria-label', '이 로그 복사');
+  copyButton.title = '이 로그 복사';
+  copyButton.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="6.5" y="6.5" width="10" height="11" rx="1.5"/><path d="M13.5 6V4.8A1.8 1.8 0 0 0 11.7 3H4.8A1.8 1.8 0 0 0 3 4.8v8.4A1.8 1.8 0 0 0 4.8 15H6"/></svg>';
+  copyButton.addEventListener('click', async () => {
+    try { await copyRoutingText(text.textContent); setStatus('로그 메시지를 복사했습니다.'); }
+    catch { setStatus('로그 메시지를 복사하지 못했습니다.', true); }
+  });
+  item.append(text, copyButton);
   routingLogList.prepend(item);
   while (routingLogList.children.length > 6) routingLogList.lastElementChild.remove();
 }
