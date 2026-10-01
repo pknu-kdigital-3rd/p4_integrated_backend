@@ -128,6 +128,11 @@ export const restrictionUpdateSchema = z.object({
     if (value.kind === "HEAVY_PENALTY" && value.penaltyFactor === undefined) context.addIssue({ code: "custom", path: ["penaltyFactor"], message: "penaltyFactor is required when changing to HEAVY_PENALTY" });
 });
 
+export const restrictionBulkRemoveSchema = z.object({
+    restrictionIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1).max(500).refine(ids => new Set(ids).size === ids.length),
+    expectedRestrictionRevision: z.number().int().nonnegative(),
+});
+
 export type Coordinate = z.infer<typeof coordinate>;
 export type WaypointInput = z.infer<typeof waypoint>;
 export type CreateScenarioBody = z.infer<typeof createScenarioSchema>;
@@ -142,3 +147,4 @@ export type WaypointsBody = z.infer<typeof waypointsSchema>;
 export type DestinationBody = z.infer<typeof destinationSchema>;
 export type RestrictionBody = z.infer<typeof restrictionSchema>;
 export type RestrictionUpdateBody = z.infer<typeof restrictionUpdateSchema>;
+export type RestrictionBulkRemoveBody = z.infer<typeof restrictionBulkRemoveSchema>;

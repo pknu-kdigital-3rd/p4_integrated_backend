@@ -117,6 +117,8 @@ function syncRouteProgress() {
   routeProgressMessage.textContent = [...routeOperations.values()].at(-1) || '경로를 계산하는 중…';
   routeContextMenu.querySelectorAll('button').forEach((button) => { button.disabled = busy; });
   restrictionList.querySelectorAll('button').forEach((button) => { button.disabled = busy; });
+  [restrictionBulkToggle, restrictionSelectAll, restrictionBulkCancel].forEach((button) => { if (button) button.disabled = busy; });
+  restrictionBulkRemove.disabled = busy || selectedRestrictionIds.size === 0;
 }
 function beginRouteCalculation(message = '경로를 계산하는 중…') {
   const operation = Symbol('route calculation');
@@ -187,6 +189,11 @@ let draftRouteSignature = '';
 let activeRouteSignature = '';
 const requestList = document.querySelector('#virtual-requests');
 const restrictionList = document.querySelector('#virtual-restrictions');
+const restrictionBulkToggle = document.querySelector('#virtual-restrictions-bulk-toggle');
+const restrictionBulkActions = document.querySelector('#virtual-restrictions-bulk-actions');
+const restrictionSelectAll = document.querySelector('#virtual-restrictions-select-all');
+const restrictionBulkRemove = document.querySelector('#virtual-restrictions-bulk-remove');
+const restrictionBulkCancel = document.querySelector('#virtual-restrictions-bulk-cancel');
 const eventList = document.querySelector('#virtual-events');
 const normalSections = ['#login', '#selection-empty', '#details', '#telemetry-settings', '#trip-panel', '#recordings-panel', '#error'];
 const normalSectionVisibility = createSectionVisibility(
@@ -201,6 +208,8 @@ let pendingSpeedChange = null;
 let applyingSpeedChange = false;
 let vehicles = [];
 let restrictions = [];
+let restrictionBulkMode = false;
+const selectedRestrictionIds = new Set();
 let draft = null;
 let dispatchSubmitting = false;
 let points = { origin: null, destination: null, waypoints: [] };
@@ -619,13 +628,22 @@ function restrictionMapLabel(restriction) {
   return restriction?.kind === 'BLOCKED' ? String(restriction?.revision ?? '') : restrictionLabel(restriction);
 }
 function renderRestrictions(items) {
+  const scrollTop = restrictionList.scrollTop;
   restrictions = Array.isArray(items) ? items.filter((restriction) => restriction?.isActive !== false) : [];
+  const activeBlockedIds = new Set(restrictions.filter((item) => item.kind === 'BLOCKED').map((item) => String(item.restrictionId)));
+  for (const id of selectedRestrictionIds) if (!activeBlockedIds.has(id)) selectedRestrictionIds.delete(id);
+  restrictionBulkToggle.hidden = !activeBlockedIds.size;
+  restrictionBulkToggle.textContent = restrictionBulkMode ? '일괄 해제 종료' : '차단 일괄 해제';
+  restrictionBulkActions.hidden = !restrictionBulkMode;
+  restrictionBulkRemove.disabled = routeOperations.size > 0 || selectedRestrictionIds.size === 0;
+  restrictionSelectAll.textContent = activeBlockedIds.size > 0 && [...activeBlockedIds].every((id) => selectedRestrictionIds.has(id)) ? '선택 해제' : '전체 선택';
   restrictionLayerGroup.clearLayers();
   restrictionList.replaceChildren();
   if (!restrictions.length) {
     const empty = document.createElement('li');
     empty.textContent = 'No active regions.';
     restrictionList.append(empty);
+    restrictionList.scrollTop = scrollTop;
     return;
   }
   for (const restriction of restrictions) {
@@ -641,14 +659,30 @@ function renderRestrictions(items) {
     const row = document.createElement('li');
     const label = document.createElement('span');
     label.textContent = restrictionLabel(restriction);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.textContent = 'Remove';
-    remove.disabled = routeOperations.size > 0;
-    remove.addEventListener('click', () => void removeRestriction(restriction));
-    row.append(label, remove);
+    if (restrictionBulkMode && restriction.kind === 'BLOCKED') {
+      const select = document.createElement('input');
+      select.type = 'checkbox';
+      select.setAttribute('aria-label', `${restrictionLabel(restriction)} 선택`);
+      select.checked = selectedRestrictionIds.has(String(restriction.restrictionId));
+      select.addEventListener('change', () => {
+        const id = String(restriction.restrictionId);
+        if (select.checked) selectedRestrictionIds.add(id); else selectedRestrictionIds.delete(id);
+        restrictionBulkRemove.disabled = routeOperations.size > 0 || selectedRestrictionIds.size === 0;
+        const total = restrictions.filter((item) => item.kind === 'BLOCKED').length;
+        restrictionSelectAll.textContent = total > 0 && selectedRestrictionIds.size === total ? '선택 해제' : '전체 선택';
+      });
+      row.append(label, select);
+    } else {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.disabled = routeOperations.size > 0;
+      remove.addEventListener('click', () => void removeRestriction(restriction));
+      row.append(label, remove);
+    }
     restrictionList.append(row);
   }
+  restrictionList.scrollTop = scrollTop;
 }
 function routeDisplayMetrics(style = {}) {
   return {
@@ -1310,6 +1344,39 @@ async function removeRestriction(restriction) {
   } catch (error) { setStatus(error.message, true); }
   finally { finishRouting(); }
 }
+restrictionBulkToggle.addEventListener('click', () => {
+  restrictionBulkMode = !restrictionBulkMode;
+  selectedRestrictionIds.clear();
+  renderRestrictions(restrictions);
+});
+restrictionBulkCancel.addEventListener('click', () => {
+  restrictionBulkMode = false;
+  selectedRestrictionIds.clear();
+  renderRestrictions(restrictions);
+});
+restrictionSelectAll.addEventListener('click', () => {
+  const blockedIds = restrictions.filter((item) => item.kind === 'BLOCKED').map((item) => String(item.restrictionId));
+  if (blockedIds.length && blockedIds.every((id) => selectedRestrictionIds.has(id))) selectedRestrictionIds.clear();
+  else blockedIds.forEach((id) => selectedRestrictionIds.add(id));
+  renderRestrictions(restrictions);
+});
+restrictionBulkRemove.addEventListener('click', async () => {
+  if (!scenarioId || !selectedRestrictionIds.size || routeOperations.size > 0) return;
+  const ids = [...selectedRestrictionIds];
+  if (!window.confirm(`해당 차단 구간 ${ids.length}개를 모두 해제할까요? 영향을 받는 경로를 다시 계산합니다.`)) return;
+  const targetScenario = scenarioId;
+  const finishRouting = beginRouteCalculation('차단 구간을 일괄 해제하고 경로를 다시 계산하는 중…');
+  try {
+    const result = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(targetScenario)}/road-restrictions/bulk-remove`, {
+      method: 'POST',
+      body: JSON.stringify({ restrictionIds: ids, expectedRestrictionRevision: scenarioRevision }),
+    });
+    selectedRestrictionIds.clear();
+    restrictionBulkMode = false;
+    await refreshAfterRestrictionChange(`${result.changed ?? ids.length}개 차단 구간을 해제했습니다.`);
+  } catch (error) { setStatus(error.message, true); }
+  finally { finishRouting(); }
+});
 // Whether Live View was open when virtual mode closed it, so it can reopen.
 let liveViewBeforeVirtual = false;
 async function switchMode(next) {

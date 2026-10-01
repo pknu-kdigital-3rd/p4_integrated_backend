@@ -9,6 +9,7 @@ import type {
     FollowingBody,
     RestrictionBody,
     RestrictionBrushBody,
+    RestrictionBulkRemoveBody,
     RoutePreviewBody,
     WaypointsBody,
     RestrictionUpdateBody,
@@ -106,6 +107,10 @@ export const virtualController = {
     },
     async brushRestriction(req: Request<{ scenarioId: string }, {}, RestrictionBrushBody>, res: Response) {
         res.json({ data: await virtualService.brushRestriction(BigInt(req.params.scenarioId), req.body, actorId(req)) });
+    },
+
+    async bulkRemoveRestrictions(req: Request<{ scenarioId: string }, {}, RestrictionBulkRemoveBody>, res: Response) {
+        res.json({ data: await virtualService.bulkRemoveRestrictions(BigInt(req.params.scenarioId), req.body, actorId(req)) });
     },
 
     async createRestriction(req: Request<{ scenarioId: string }, {}, RestrictionBody>, res: Response) {

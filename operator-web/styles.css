@@ -300,6 +300,12 @@ body.virtual-mode #navigation-rail,body.virtual-mode #operator-sidebar,body.virt
 #virtual-workspace ul { list-style: none; padding: 0; margin: 0; max-height: 220px; overflow: auto; }
 #virtual-workspace li { background: var(--ui-surface-soft); font-size: 12px; padding: 9px; border-radius: 8px; margin-top: 6px; overflow-wrap: anywhere; }
 #virtual-workspace li button { padding: 4px 7px; margin: 5px 4px 0 0; font-size: 11px; }
+.restriction-bulk-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.restriction-bulk-tools > div { display: flex; gap: 5px; }
+.restriction-bulk-tools button { padding: 5px 8px; font-size: 11px; }
+#virtual-restrictions li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#virtual-restrictions li span { min-width: 0; }
+#virtual-restrictions li input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; margin: 0 3px; accent-color: var(--ui-primary); }
 #virtual-draft-summary { font-size: 12px; color: var(--ui-text-secondary); }
 #virtual-route-summary { position: absolute; z-index: 600; bottom: 36px; right: 18px; width: min(260px,45%); }
 #virtual-route-summary h2 { font-size: 15px; margin-bottom: 12px; }

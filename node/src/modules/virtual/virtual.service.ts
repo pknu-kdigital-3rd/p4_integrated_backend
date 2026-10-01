@@ -15,6 +15,7 @@ import type {
     FollowingBody,
     RestrictionBody,
     RestrictionBrushBody,
+    RestrictionBulkRemoveBody,
     RestrictionUpdateBody,
     RoutePreviewBody,
     WaypointsBody,
@@ -1112,6 +1113,38 @@ export const virtualService = {
         });
         await this.refreshFollowingTrips(existing.scenarioId, { previousOverlay });
         return updated;
+    },
+
+    async bulkRemoveRestrictions(scenarioId: bigint, input: RestrictionBulkRemoveBody, actorId?: bigint) {
+        const scenario = await getScenario(scenarioId);
+        if (input.expectedRestrictionRevision !== scenario.restrictionRevision) {
+            throw new AppError(409, "Scenario restrictions changed; refresh before bulk removal", "STALE_REVISION");
+        }
+        const previousOverlay = await restrictionOverlay(scenarioId);
+        const restrictionIds = input.restrictionIds.map(BigInt);
+        const revision = scenario.restrictionRevision + 1;
+        const changed = await prisma.$transaction(async (tx) => {
+            const result = await tx.virtualRoadRestriction.updateMany({
+                where: { scenarioId, restrictionId: { in: restrictionIds }, kind: "BLOCKED", isActive: true },
+                data: { isActive: false, revision, updatedAt: new Date() },
+            });
+            if (result.count > 0) {
+                await tx.virtualScenario.update({ where: { scenarioId }, data: { restrictionRevision: revision } });
+                await createEvent(tx, {
+                    scenarioId, actorId: actorId ?? null, eventType: "ROAD_RESTRICTION_DEACTIVATED",
+                    payload: { restrictionIds: restrictionIds.map(String), changed: result.count, revision, bulk: true },
+                });
+            }
+            return result.count;
+        });
+        if (changed > 0) {
+            await this.refreshFollowingTrips(scenarioId, {
+                preserveMotionOnFailure: true,
+                recoverStoppedTrips: true,
+                previousOverlay,
+            });
+        }
+        return { changed, restrictionRevision: changed > 0 ? revision : scenario.restrictionRevision };
     },
 
     async refreshFollowingTrips(scenarioId: bigint, options: {
