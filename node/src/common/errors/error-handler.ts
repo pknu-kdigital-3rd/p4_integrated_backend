@@ -25,6 +25,7 @@ export const errorHandler: ErrorRequestHandler = (
             error: {
                 code: err.code ?? "APPLICATION_ERROR",
                 message: err.message,
+                ...(err.details === undefined ? {} : { details: err.details }),
             },
         });
         return;

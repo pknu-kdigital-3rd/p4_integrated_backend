@@ -354,7 +354,26 @@ def _internal_route(req: InternalRouteRequest):
             avoid_initial_reverse_of_edge_id=req.avoidInitialReverseOfEdgeId if index == 1 else None,
         )
         if result is None:
-            raise HTTPException(status_code=422, detail={"code": "ROUTE_NOT_FOUND", "stopIndex": index})
+            previous = stops[index - 1]
+            print(
+                "ROUTE_NOT_FOUND " + json.dumps({
+                    "stopIndex": index,
+                    "leg": {"from": [previous.lat, previous.lon], "to": [stop.lat, stop.lon]},
+                    "fromNodeId": str(previous_node),
+                    "toNodeId": str(node_id),
+                    "vehicleProfile": profile or "car",
+                    "blockedDirectedEdgeCount": len(set(blocked_edge_ids)),
+                    "blockedGeometryCount": len(req.blockedGeometries),
+                    "penaltyEdgeCount": len(req.penaltyEdgeFactors),
+                    "graphVersion": graph_version,
+                }, separators=(",", ":")),
+                flush=True,
+            )
+            raise HTTPException(status_code=422, detail={
+                "code": "ROUTE_NOT_FOUND",
+                "message": f"No route found for stop index {index}",
+                "stopIndex": index,
+            })
         coords = result.coords
         if route_coords and coords:
             route_coords.extend(coords[1:])

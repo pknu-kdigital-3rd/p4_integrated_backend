@@ -133,9 +133,22 @@ async function advanceVehicles() {
         const currentEdgeId = itineraryEdgeAt(itinerary, position.offsetM, "edgeId");
         const currentPhysicalSegmentId = itineraryEdgeAt(itinerary, position.offsetM, "physicalSegmentId");
         if (currentEdgeId && blockedByScenario.get(state.scenarioId.toString())?.has(currentEdgeId)) {
+            logger.warn({
+                scenarioId: state.scenarioId.toString(),
+                vehicleId: state.vehicleId.toString(),
+                tripId: state.virtualTripId.toString(),
+                currentEdgeId,
+                currentPhysicalSegmentId,
+            }, "Virtual vehicle stopped before entering a blocked road edge");
             await prisma.$transaction([
                 prisma.virtualVehicleState.update({ where: { vehicleId: state.vehicleId }, data: { simStatus: "BLOCKED_AWAITING_OPERATOR", currentEdgeId, currentPhysicalSegmentId, blockedReason: "Blocked road ahead", lastCheckpointAt: new Date(now), updatedAt: new Date(now) } }),
                 prisma.virtualTrip.update({ where: { virtualTripId: state.virtualTripId }, data: { state: "BLOCKED_AWAITING_OPERATOR", commandVersion: { increment: 1 } } }),
+                prisma.virtualOperatorEvent.create({ data: {
+                    scenarioId: state.scenarioId,
+                    virtualTripId: state.virtualTripId,
+                    eventType: "VEHICLE_BLOCKED_BY_RESTRICTION",
+                    payload: { vehicleId: state.vehicleId.toString(), tripId: state.virtualTripId.toString(), currentEdgeId, currentPhysicalSegmentId },
+                } }),
             ]);
             continue;
         }

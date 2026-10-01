@@ -1,5 +1,6 @@
 import { prisma } from "../../infrastructure/database/prisma.ts";
 import { AppError } from "../../common/errors/app-error.ts";
+import { logger } from "../../config/logger.ts";
 import type { Prisma } from "../../generated/prisma/client.ts";
 import { routingInternalClient } from "./routing-internal.client.ts";
 import type {
@@ -720,6 +721,14 @@ export const virtualService = {
                 await this.rerouteFromCurrentPosition(vehicleId, state);
             } catch (error) {
                 if (!(error instanceof AppError) || error.code !== "ROUTE_NOT_FOUND") throw error;
+                logger.warn({
+                    scenarioId: state.scenarioId.toString(),
+                    vehicleId: vehicleId.toString(),
+                    tripId: state.virtualTripId.toString(),
+                    code: error.code,
+                    message: error.message,
+                    details: error.details,
+                }, "Virtual trip entered NO_ROUTE while enabling route following");
                 await prisma.$transaction([
                     prisma.virtualVehicleState.update({ where: { vehicleId }, data: { simStatus: "NO_ROUTE", blockedReason: "No legal route under the current road state" } }),
                     prisma.virtualTrip.update({ where: { virtualTripId: state.virtualTripId }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),
@@ -908,8 +917,8 @@ export const virtualService = {
                 payload: { revision, changed: prepared.length },
             });
         });
-        await this.refreshFollowingTrips(scenarioId, { preserveMotionOnFailure: input.mode === "erase" });
-        return { restrictionRevision: revision, changed: prepared.length };
+        const routingFailures = await this.refreshFollowingTrips(scenarioId, { preserveMotionOnFailure: input.mode === "erase" });
+        return { restrictionRevision: revision, changed: prepared.length, routingFailures };
     },
 
     async createRestriction(scenarioId: bigint, input: RestrictionBody, actorId?: bigint) {
@@ -977,11 +986,12 @@ export const virtualService = {
         const settings = await prisma.virtualVehicleSettings.findMany({ where: { vehicleId: { in: states.map((state) => state.vehicleId) }, autoFollowEnabled: true } });
         const following = new Set(settings.map((item) => item.vehicleId.toString()));
         const eligibleStates = states.filter((state) => following.has(state.vehicleId.toString()) && state.trip.state !== "PAUSED");
-        if (eligibleStates.length === 0) return;
+        if (eligibleStates.length === 0) return [];
         // Fetch the restriction overlay once and share it across all vehicle
         // reroutes - all vehicles in the same scenario see the same restrictions,
         // so N per-vehicle DB queries for identical data is pure waste.
         const preloadedOverlay = await restrictionOverlay(scenarioId);
+        const routingFailures: Array<Record<string, unknown>> = [];
         // A road-state change affects vehicles independently. Solving them
         // serially made the response time grow linearly with fleet size, but
         // firing an unbounded number of CPU-heavy A* requests would overload
@@ -1022,6 +1032,19 @@ export const virtualService = {
                     return;
                 }
                 const noViablePath = error instanceof AppError && error.code === "ROUTE_NOT_FOUND";
+                const failure = {
+                    scenarioId: scenarioId.toString(),
+                    vehicleId: state.vehicleId.toString(),
+                    tripId: latest.virtualTripId.toString(),
+                    previousStatus: latest.simStatus,
+                    code: error instanceof AppError ? error.code ?? "APPLICATION_ERROR" : "ROUTING_ERROR",
+                    message: error instanceof Error ? error.message : String(error),
+                    details: error instanceof AppError ? error.details : undefined,
+                    blockedDirectedEdgeCount: preloadedOverlay.blockedEdgeIds.length,
+                    blockedGeometryCount: preloadedOverlay.blockedGeometries.length,
+                };
+                routingFailures.push(failure);
+                logger.warn(failure, "Virtual trip entered NO_ROUTE after road-state update");
                 await prisma.$transaction([
                     prisma.virtualVehicleState.updateMany({ where: { vehicleId: state.vehicleId, simStatus: { in: ["DRIVING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"] } }, data: { simStatus: "NO_ROUTE", blockedReason: noViablePath ? "No viable path after road restriction" : "Routing failed after road-state change" } }),
                     prisma.virtualTrip.updateMany({ where: { virtualTripId: latest.virtualTripId, state: { in: ACTIVE_TRIP_STATES } }, data: { state: "NO_ROUTE", commandVersion: { increment: 1 } } }),
@@ -1036,6 +1059,7 @@ export const virtualService = {
                 await processState(eligibleStates[index]!);
             }
         }));
+        return routingFailures;
     },
 
     async listEvents(scenarioId: bigint, after?: bigint) {

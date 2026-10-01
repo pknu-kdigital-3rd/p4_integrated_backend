@@ -51,7 +51,7 @@ async function request<T>(path: string, body?: unknown, timeoutMs = 8000): Promi
             const detail = payload?.detail;
             const code = typeof payload?.code === "string" ? payload.code : typeof detail?.code === "string" ? detail.code : "ROUTING_UNAVAILABLE";
             const message = typeof payload?.message === "string" ? payload.message : typeof detail === "string" ? detail : typeof detail?.message === "string" ? detail.message : "Routing service unavailable";
-            throw new AppError(response.status === 404 || response.status === 422 || code === "ROUTE_NOT_FOUND" ? 422 : 503, message, code);
+            throw new AppError(response.status === 404 || response.status === 422 || code === "ROUTE_NOT_FOUND" ? 422 : 503, message, code, detail);
         }
         return payload as T;
     } catch (error) {

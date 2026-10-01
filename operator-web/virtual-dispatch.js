@@ -45,6 +45,31 @@ routeContextMenu.setAttribute('aria-label', '경로 및 도로 차단');
 routeContextMenu.hidden = true;
 routeContextMenu.innerHTML = '<div class="route-point-menu-row"><button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button><button type="button" role="menuitem" data-route-point-kind="waypoint"><span aria-hidden="true" class="route-point-menu-icon waypoint">＋</span><span>경유지</span></button></div><button type="button" role="menuitem" data-road-menu aria-expanded="false"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단</span><span aria-hidden="true">▾</span></button><div class="road-brush-submenu" hidden><button type="button" role="menuitem" data-road-tool="paint">브러시</button><button type="button" role="menuitem" data-road-tool="erase">지우개</button></div>';
 map.getContainer().append(routeContextMenu);
+const routingLogOverlay = document.createElement('section');
+routingLogOverlay.className = 'virtual-routing-log';
+routingLogOverlay.setAttribute('role', 'log');
+routingLogOverlay.setAttribute('aria-live', 'polite');
+routingLogOverlay.hidden = true;
+routingLogOverlay.innerHTML = '<header><strong>라우팅 로그</strong><button type="button" data-clear-routing-log aria-label="로그 지우기">지우기</button></header><ol></ol>';
+map.getContainer().append(routingLogOverlay);
+const routingLogList = routingLogOverlay.querySelector('ol');
+routingLogOverlay.querySelector('[data-clear-routing-log]').addEventListener('click', () => {
+  routingLogList.replaceChildren();
+  routingLogOverlay.hidden = true;
+});
+routingLogOverlay.addEventListener('click', event => event.stopPropagation());
+function showRoutingLog(message, details = null, context = {}) {
+  routingLogOverlay.hidden = false;
+  const item = document.createElement('li');
+  const stopIndex = details?.stopIndex ?? details?.detail?.stopIndex;
+  const leg = Number.isInteger(stopIndex) ? `도착 순번 ${stopIndex}로 향하는 구간` : '경로 계산';
+  const vehicle = context.vehicleId ? `차량 ${context.vehicleId} · ` : '';
+  const trip = context.tripId ? `운행 ${context.tripId} · ` : '';
+  const edgeCount = Number.isInteger(context.blockedDirectedEdgeCount) ? ` · 차단 edge ${context.blockedDirectedEdgeCount}개` : '';
+  item.textContent = `${new Date().toLocaleTimeString()} · ${vehicle}${trip}${leg} 실패: ${message}${edgeCount}`;
+  routingLogList.prepend(item);
+  while (routingLogList.children.length > 6) routingLogList.lastElementChild.remove();
+}
 let contextRoutePoint = null;
 const routeRenderer = L.canvas({ padding: 0.5 });
 const routeVisuals = new Set();
@@ -76,6 +101,8 @@ let endpointDrag = null;
 let pollTimer = null;
 let vehiclePollTimer = null;
 let lastEventId = '';
+let eventScenarioId = '';
+let hasLoadedEvents = false;
 const SPEED_PRESETS_KMH = [25, 50, 100, 200];
 const virtualVehicleMarkers = new Map();
 const virtualVehicleAnimationFrames = new Map();
@@ -91,6 +118,9 @@ const roadBrush = installRoadBrush(map, {
       });
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
       scenarioRevision = result.restrictionRevision;
+      for (const failure of result.routingFailures || []) {
+        showRoutingLog(failure.message || failure.code || '경로 계산에 실패했습니다.', failure.details, failure);
+      }
       await refreshAfterRestrictionChange(stroke.mode === 'paint' ? '도로 차단을 적용했습니다.' : '지운 영역의 도로 차단을 해제했습니다.');
     } catch (error) {
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
@@ -173,7 +203,12 @@ function token() { return sessionStorage.getItem('itsToken'); }
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...(token() ? { Authorization: `Bearer ${token()}` } : {}) } });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error?.message || body.detail || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(body.error?.message || body.detail?.message || body.detail || `HTTP ${response.status}`);
+    error.code = body.error?.code || body.detail?.code;
+    error.details = body.error?.details || body.detail;
+    throw error;
+  }
   return body.data ?? body;
 }
 function setStatus(message, isError = false) {
@@ -830,10 +865,18 @@ function renderRequests(requests) {
 }
 function renderEvents(events) {
   if (!events.length) return;
+  if (hasLoadedEvents) {
+    for (const event of events) {
+      if (event.eventType === 'VEHICLE_BLOCKED_BY_RESTRICTION') {
+        showRoutingLog('차량이 차단된 도로에 도달해 정지했습니다.', null, event.payload || {});
+      }
+    }
+  }
   eventList.replaceChildren(...events.slice(-30).map((event) => {
     const li = document.createElement('li'); li.textContent = `${new Date(event.createdAt).toLocaleTimeString()} · ${event.eventType}`; return li;
   }));
   const last = events.at(-1); if (last) lastEventId = String(last.eventId);
+  hasLoadedEvents = true;
 }
 async function loadScenarios() {
   const scenarios = await api('/api/v1/virtual/scenarios');
@@ -854,7 +897,15 @@ async function loadScenarioData() {
     renderVehicles();
     renderRequests([]);
     eventList.replaceChildren();
+    eventScenarioId = '';
+    lastEventId = '';
+    hasLoadedEvents = false;
     return;
+  }
+  if (eventScenarioId !== scenarioId) {
+    eventScenarioId = scenarioId;
+    lastEventId = '';
+    hasLoadedEvents = false;
   }
   const [scenario, scenarioVehicles, requests, events] = await Promise.all([
     api(`/api/v1/virtual/scenarios/${scenarioId}`),
@@ -868,6 +919,7 @@ async function loadScenarioData() {
   renderVehicles();
   renderRequests(requests);
   renderEvents(events);
+  hasLoadedEvents = true;
 }
 async function refreshVehiclePositions() {
   if (!scenarioId || mode !== 'virtual') return;
@@ -886,7 +938,7 @@ async function previewRoute() {
   try {
     draft = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/preview`, { method: 'POST', body: JSON.stringify({ selectedVehicleId, origin: points.origin, destination: points.destination, waypoints: points.waypoints, expectedRestrictionRevision: scenarioRevision }) });
     renderDraft(); setStatus(`Route preview ready for vehicle ${selectedVehicleId}.`);
-  } catch (error) { draft = null; renderDraft(); setStatus(error.message, true); }
+  } catch (error) { draft = null; renderDraft(); showRoutingLog(error.message, error.details); setStatus(error.message, true); }
 }
 async function generateRequest() {
   if (!draft || dispatchSubmitting) return;
@@ -970,8 +1022,12 @@ async function removeVehicle() {
 }
 async function setFollowing(enabled) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
-  try { await api(`/api/v1/virtual/vehicles/${selectedVehicleId}/following`, { method: 'PUT', body: JSON.stringify({ enabled, expectedPolicyVersion: vehicle?.following?.policyVersion, idempotencyKey: idempotency('follow') }) }); await loadScenarioData(); }
-  catch (error) { setStatus(error.message, true); }
+  try {
+    const result = await api(`/api/v1/virtual/vehicles/${selectedVehicleId}/following`, { method: 'PUT', body: JSON.stringify({ enabled, expectedPolicyVersion: vehicle?.following?.policyVersion, idempotencyKey: idempotency('follow') }) });
+    await loadScenarioData();
+    if (result.state?.simStatus === 'NO_ROUTE') showRoutingLog(result.state.blockedReason || '경로 추종 중 경로 계산에 실패했습니다.', null, { vehicleId: selectedVehicleId, tripId: result.state.virtualTripId });
+  }
+  catch (error) { if (error.code === 'ROUTE_NOT_FOUND') showRoutingLog(error.message, error.details, { vehicleId: selectedVehicleId }); setStatus(error.message, true); }
 }
 async function command(command, extra = {}) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
@@ -1195,7 +1251,7 @@ routeContextMenu.addEventListener('click', (event) => {
   const button = event.target.closest('[data-route-point-kind]');
   if (!button || !contextRoutePoint) return;
   const kind = button.dataset.routePointKind;
-  const point = { lat: contextRoutePoint.lat, lng: contextRoutePoint.lon };
+  const point = { lat: contextRoutePoint.lat, lng: contextRoutePoint.lng };
   hideRouteContextMenu();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   roadBrush.reset();
