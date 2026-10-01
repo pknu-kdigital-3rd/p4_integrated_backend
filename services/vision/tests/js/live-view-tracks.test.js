@@ -84,3 +84,82 @@ test('camera shift moves the box and its observation reference together', () => 
   assert.deepEqual(track.box.map((v) => +v.toFixed(6)), [0.5, 0.35, 0.6, 0.55]);
   assert.deepEqual(track.lastObservedBox.map((v) => +v.toFixed(6)), [0.5, 0.35, 0.6, 0.55]);
 });
+
+function center(box) {
+  return tracks.boxCenter(box).map((v) => +v.toFixed(4));
+}
+
+// Observe a box moving right by 0.01 per 33 ms frame (~0.3 widths/s).
+function movingTrack(frames = 10) {
+  const track = newTrack([0.40, 0.40, 0.50, 0.60], 0);
+  for (let i = 1; i <= frames; i += 1) {
+    const box = [0.40 + 0.01 * i, 0.40, 0.50 + 0.01 * i, 0.60];
+    tracks.recordObservation(track, box, i * 33, config);
+    track.box = box.slice();
+  }
+  return track;
+}
+
+test('velocity is learned from real observations and smoothed', () => {
+  const track = movingTrack();
+  // EMA approaches the true 0.303/s from below.
+  assert.ok(track.vx > 0.2 && track.vx < 0.31, `vx ${track.vx}`);
+  assert.equal(+track.vy.toFixed(6), 0);
+});
+
+test('several short misses move the centre by velocity, size held', () => {
+  const track = movingTrack();
+  const before = track.box.slice();
+  const t0 = track.lastObservedAtMs;
+  tracks.advanceMissingTrack(track, t0 + 33, config);
+  tracks.advanceMissingTrack(track, t0 + 66, config);
+  tracks.advanceMissingTrack(track, t0 + 99, config);
+  const moved = track.box[0] - before[0];
+  assert.ok(Math.abs(moved - track.vx * 0.099) < 1e-9, `moved ${moved}`);
+  assert.equal(+(track.box[2] - track.box[0]).toFixed(9), +(before[2] - before[0]).toFixed(9));
+  assert.equal(+(track.box[3] - track.box[1]).toFixed(9), +(before[3] - before[1]).toFixed(9));
+});
+
+test('prediction stops at the end of the window while holding', () => {
+  const track = movingTrack();
+  const t0 = track.lastObservedAtMs;
+  tracks.advanceMissingTrack(track, t0 + 150, config);
+  const atWindowEnd = track.box.slice();
+  assert.equal(tracks.advanceMissingTrack(track, t0 + 200, config), 'holding');
+  assert.deepEqual(track.box, atWindowEnd);
+  // A frame that straddles the window end only predicts up to the end.
+  const straddle = movingTrack();
+  const s0 = straddle.lastObservedAtMs;
+  const start = straddle.box[0];
+  tracks.advanceMissingTrack(straddle, s0 + 200, config);
+  assert.ok(Math.abs(straddle.box[0] - start - straddle.vx * 0.150) < 1e-9);
+});
+
+test('a detector jump cannot push velocity past the clamp', () => {
+  const track = newTrack([0.0, 0.4, 0.1, 0.6], 0);
+  tracks.recordObservation(track, [0.9, 0.4, 1.0, 0.6], 10, config);
+  assert.ok(Math.abs(track.vx) <= config.maxNormalizedSpeed);
+  for (let i = 0; i < 20; i += 1) tracks.recordObservation(track, i % 2 ? [0.0, 0.4, 0.1, 0.6] : [0.9, 0.4, 1.0, 0.6], 20 + i * 10, config);
+  assert.ok(Math.abs(track.vx) <= config.maxNormalizedSpeed);
+});
+
+test('camera pan is not learned as object velocity', () => {
+  // A static object while the camera pans: every frame shifts the track by
+  // the global motion, and the detector reports the object at the shifted spot.
+  const track = newTrack([0.40, 0.40, 0.50, 0.60], 0);
+  let box = [0.40, 0.40, 0.50, 0.60];
+  for (let i = 1; i <= 10; i += 1) {
+    tracks.shiftTrack(track, -0.02, 0);
+    box = tracks.translateBox(box, -0.02, 0);
+    tracks.recordObservation(track, box, i * 33, config);
+  }
+  assert.ok(Math.abs(track.vx) < 1e-9, `vx ${track.vx}`);
+});
+
+test('a gap longer than the sample limit resets velocity on reacquisition', () => {
+  const track = movingTrack();
+  const t0 = track.lastObservedAtMs;
+  tracks.recordObservation(track, [0.9, 0.4, 1.0, 0.6], t0 + 600, config);
+  assert.equal(track.vx, 0);
+  assert.equal(track.vy, 0);
+});

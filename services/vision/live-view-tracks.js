@@ -9,7 +9,8 @@
 // would not match the amount of video between two frames.
 //
 // Track lifecycle after the last real observation:
-//   age <= predictMs  -> 'predicting' (drawn like an observed box)
+//   age <= predictMs  -> 'predicting' (centre moves with the learned residual
+//                        velocity; drawn like an observed box)
 //   age <= holdMs     -> 'holding'    (dashed, fading, no distance)
 //   age >  holdMs     -> 'expired'    (caller deletes the track)
 (function (root, factory) {
@@ -59,12 +60,20 @@
     return clampBox([box[0] + dx, box[1] + dy, box[2] + dx, box[3] + dy]);
   }
 
+  function boxCenter(box) {
+    return [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+  }
+
   // Initialise temporal state on a newly created track.
   function startTrack(track, box, nowMs) {
     track.lastObservedBox = box.slice();
     track.lastObservedAtMs = nowMs;
     track.lastUpdatedAtMs = nowMs;
     track.state = 'observed';
+    // Residual centre velocity in normalised image units per second, i.e.
+    // object motion after camera compensation.
+    track.vx = 0;
+    track.vy = 0;
     return track;
   }
 
@@ -75,10 +84,35 @@
     if (track.lastObservedBox) track.lastObservedBox = translateBox(track.lastObservedBox, dx, dy);
   }
 
+  // Learn velocity from two real observations. lastObservedBox has been
+  // shifted with the camera every frame, so the difference is the object's
+  // own motion; camera pans are never learned as velocity.
+  function updateVelocity(track, observedBox, nowMs, config) {
+    const dtMs = nowMs - finiteOr(track.lastObservedAtMs, nowMs);
+    if (!track.lastObservedBox || dtMs <= 0) return;
+    if (dtMs > config.maxVelocitySampleGapMs) {
+      // Reacquisition after a long gap, not a continuous motion sample.
+      track.vx = 0;
+      track.vy = 0;
+      return;
+    }
+    const [oldX, oldY] = boxCenter(track.lastObservedBox);
+    const [newX, newY] = boxCenter(observedBox);
+    const rawVx = (newX - oldX) / (dtMs / 1000);
+    const rawVy = (newY - oldY) / (dtMs / 1000);
+    const weight = config.velocitySmoothing;
+    const limit = config.maxNormalizedSpeed;
+    track.vx = clamp(finiteOr(track.vx, 0) * (1 - weight) + rawVx * weight, -limit, limit);
+    track.vy = clamp(finiteOr(track.vy, 0) * (1 - weight) + rawVy * weight, -limit, limit);
+  }
+
   // Record a real detector observation. Returns true when the track was
-  // being predicted or held (a reacquisition).
-  function recordObservation(track, observedBox, nowMs) {
+  // being predicted or held (a reacquisition). The page then blends the
+  // displayed box toward the observation with its usual EMA, so a predicted
+  // box does not snap.
+  function recordObservation(track, observedBox, nowMs, config) {
     const reacquired = track.state === 'predicting' || track.state === 'holding';
+    updateVelocity(track, observedBox, nowMs, config || DEFAULTS);
     track.lastObservedBox = observedBox.slice();
     track.lastObservedAtMs = nowMs;
     track.lastUpdatedAtMs = nowMs;
@@ -97,6 +131,16 @@
     if (age > config.holdMs) {
       track.state = 'expired';
       return track.state;
+    }
+    // Extrapolate the centre (width and height held) only for the part of
+    // the elapsed interval that lies inside the prediction window, stepping
+    // from the last update so an already predicted box is not moved twice.
+    const windowEnd = finiteOr(track.lastObservedAtMs, nowMs) + config.predictMs;
+    const from = Math.max(finiteOr(track.lastUpdatedAtMs, nowMs), finiteOr(track.lastObservedAtMs, nowMs));
+    const to = Math.min(nowMs, windowEnd);
+    if (to > from) {
+      const stepSec = (to - from) / 1000;
+      track.box = translateBox(track.box, finiteOr(track.vx, 0) * stepSec, finiteOr(track.vy, 0) * stepSec);
     }
     track.state = age <= config.predictMs ? 'predicting' : 'holding';
     track.lastUpdatedAtMs = nowMs;
@@ -124,8 +168,10 @@
     normalizeConfig,
     clampBox,
     translateBox,
+    boxCenter,
     startTrack,
     shiftTrack,
+    updateVelocity,
     recordObservation,
     observationAgeMs,
     advanceMissingTrack,
