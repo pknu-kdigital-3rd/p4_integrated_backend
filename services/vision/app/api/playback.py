@@ -51,6 +51,16 @@ def _confidence_thresholds() -> dict[str, float | None] | None:
         return None
 
 
+def _model_classes(state: AppState) -> list[str]:
+    """Class names the loaded model can emit, for the viewer's class lists."""
+    names = getattr(state.yolo_model, "names", None)
+    if isinstance(names, dict):
+        return [str(names[key]) for key in sorted(names)]
+    if isinstance(names, (list, tuple)):
+        return [str(name) for name in names]
+    return []
+
+
 def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     result = item.result
     source = result.get("source", {})
@@ -220,6 +230,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                         "max_bytes": settings.BACKLOG_MAX_BYTES,
                     },
                     "android_live": state.android_live,
+                    "model_classes": _model_classes(state),
                 }
             )
         )

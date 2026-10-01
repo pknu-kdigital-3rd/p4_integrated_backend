@@ -57,6 +57,21 @@ class FreshViewerJoinsLiveTests(unittest.TestCase):
         command = self.state.feed_commands.get_nowait()
         self.assertEqual(command, {"type": "resync", "reason": "viewer_start"})
 
+    def test_session_lists_the_model_classes(self):
+        from types import SimpleNamespace
+
+        self.state.yolo_model = SimpleNamespace(names={1: "bicycle", 0: "person", 3: "motorcycle"})
+        with self.client.websocket_connect("/ws/playback") as ws:
+            ws.send_json({
+                "type": "open",
+                "session_id": None,
+                "epoch": 0,
+                "last_presented_seq": -1,
+                "decoder_state_preserved": False,
+            })
+            session = ws.receive_json()
+        self.assertEqual(session["model_classes"], ["person", "bicycle", "motorcycle"])
+
     def test_resumed_session_does_not_touch_the_backlog(self):
         self.state.session_id = "existing-session"
         with self.client.websocket_connect("/ws/playback") as ws:
