@@ -125,6 +125,37 @@ class LiveResyncTests(unittest.TestCase):
             self.assertEqual(self.state.result_store, {})
 
 
+class SingleViewerSlotTests(unittest.TestCase):
+    """A rejected second viewer must not release the active viewer's slot."""
+
+    def test_rejected_viewer_leaves_the_active_viewer_connected(self):
+        from starlette.websockets import WebSocketDisconnect
+
+        state = AppState()
+        state.current_epoch = 3
+        client = _make_client(state)
+        open_message = {
+            "type": "open",
+            "session_id": None,
+            "epoch": 0,
+            "last_presented_seq": -1,
+            "decoder_state_preserved": False,
+        }
+        with client.websocket_connect("/ws/playback") as active:
+            active.send_json(open_message)
+            self.assertEqual(active.receive_json()["type"], "session")
+            with client.websocket_connect("/ws/playback") as second:
+                second.send_json(open_message)
+                with self.assertRaises(WebSocketDisconnect) as closed:
+                    second.receive_json()
+                self.assertEqual(closed.exception.code, 1008)
+            self.assertTrue(state.viewer_connected)
+        deadline = time.monotonic() + 1
+        while state.viewer_connected and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(state.viewer_connected)
+
+
 class SequenceGapResyncTests(unittest.TestCase):
     """A missing sequence with later results present must not freeze playback."""
 

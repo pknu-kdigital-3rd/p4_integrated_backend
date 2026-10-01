@@ -179,6 +179,11 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
     await websocket.accept()
     logger.info("playback websocket accepted client=%s", websocket.client)
     control_task: asyncio.Task | None = None
+    # Only the connection that took the single viewer slot may release it.
+    # A rejected second viewer used to clear viewer_connected on its way out,
+    # which stopped the active viewer, and the two then knocked each other
+    # off in an endless reconnect loop.
+    owns_slot = False
     try:
         first = json.loads(await websocket.receive_text())
         if first.get("type") != "open":
@@ -200,6 +205,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
         if state.session_id is None:
             state.session_id = requested_session or uuid.uuid4().hex
         state.viewer_connected = True
+        owns_slot = True
 
         requested_epoch = int(first.get("epoch", state.current_epoch))
         requested_seq = int(first.get("last_presented_seq", -1)) + 1
@@ -357,5 +363,6 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
         if control_task is not None:
             control_task.cancel()
             await asyncio.gather(control_task, return_exceptions=True)
-        state.viewer_connected = False
+        if owns_slot:
+            state.viewer_connected = False
         logger.info("playback websocket closed client=%s", websocket.client)
