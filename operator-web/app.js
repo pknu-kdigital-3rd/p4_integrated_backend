@@ -23,6 +23,12 @@ const cancelTouchMenu=()=>{
 };
 mapContainer.addEventListener('pointerdown',event=>{
   if(event.pointerType!=='touch')return;
+  if(window.__operatorTouchRoadBrushPointerDown?.(event)){
+    cancelTouchMenu();
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   touchPresses.set(event.pointerId,{x:event.clientX,y:event.clientY});
   // A second finger means this is a map gesture (usually pinch zoom), not a
   // request for the right-click menu.

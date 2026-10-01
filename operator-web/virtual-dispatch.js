@@ -2,7 +2,7 @@ import {uiText, applyRoadHatch, vehicleIcon} from './dashboard-ui.js';
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
-import { installRoadBrush } from './road-brush.js';
+import { installRoadBrush } from './road-brush.js?v=2';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -262,6 +262,7 @@ let pickMode = null;
 let pointPlacement = null;
 let movingPin = null;
 let endpointDrag = null;
+let routePlacementMapDraggingWasEnabled = null;
 let pollTimer = null;
 let vehiclePollTimer = null;
 let lastEventId = '';
@@ -326,6 +327,7 @@ const roadBrush = installRoadBrush(map, {
   },
 });
 window.__operatorRoadBrushPointerDown = roadBrush.handleMouseDown;
+window.__operatorTouchRoadBrushPointerDown = roadBrush.handleTouchPointerDown;
 
 
 function speedPresetIndex(speedKmh) {
@@ -454,7 +456,14 @@ function cancelPointPlacement() {
   if (pointPlacement.originalMarker) pointPlacement.originalMarker.setOpacity(1);
   pointPlacement = null;
   pickMode = null;
+  restoreRoutePlacementMapDragging();
   map.getContainer().style.cursor = '';
+}
+function restoreRoutePlacementMapDragging() {
+  if (routePlacementMapDraggingWasEnabled === null) return;
+  if (routePlacementMapDraggingWasEnabled) map.dragging.enable();
+  else map.dragging.disable();
+  routePlacementMapDraggingWasEnabled = null;
 }
 function renderEndpointSnapPreview(context, snapped) {
   endpointSnapPreviewLayerGroup.eachLayer(layer => {
@@ -1356,6 +1365,8 @@ function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getC
   roadBrush.reset();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   cancelPointPlacement();
+  routePlacementMapDraggingWasEnabled = map.dragging.enabled();
+  map.dragging.disable();
   pickMode = kind;
   pointPlacement = { kind, waypointIndex, originalMarker };
   if (originalMarker) originalMarker.setOpacity(0);
@@ -1364,7 +1375,7 @@ function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getC
   startEndpointDrag(kind, movingPin, waypointIndex);
   const label = kind === 'waypoint' ? `경유지 ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind === 'origin' ? '출발지' : '도착지';
   map.getContainer().style.cursor = 'crosshair';
-  setStatus(`${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭해 놓으세요.`);
+  setStatus(`${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭하거나 탭해 놓으세요.`);
 }
 window.__operatorPointPlacementActive = () => Boolean(pointPlacement);
 map.on('mousemove', event => {
@@ -1444,6 +1455,12 @@ restrictionBulkToggle.addEventListener('click', () => {
   restrictionBulkMode = !restrictionBulkMode;
   selectedRestrictionIds.clear();
   renderRestrictions(restrictions);
+});
+map.getContainer().addEventListener('pointermove', event => {
+  if (event.pointerType !== 'touch' || !pointPlacement || !movingPin) return;
+  const point = map.mouseEventToLatLng(event);
+  movingPin.setLatLng(point);
+  if (endpointDrag?.marker === movingPin) queueEndpointSnapPreview(endpointDrag, movingPin);
 });
 restrictionBulkCancel.addEventListener('click', () => {
   restrictionBulkMode = false;
@@ -1534,6 +1551,7 @@ map.on('click', (event) => {
   movingPin = null;
   pointPlacement = null;
   pickMode = null;
+  restoreRoutePlacementMapDragging();
   map.getContainer().style.cursor = '';
   void snapAndSetRoutePoint(selectedMode, point, selectedIndex);
 });
