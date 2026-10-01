@@ -386,22 +386,41 @@ export const virtualService = {
         });
     },
 
-    async removeScenario(scenarioId: bigint, actorId?: bigint) {
+    async removeScenario(scenarioId: bigint, actorId?: bigint, attempt = 0): Promise<Awaited<ReturnType<typeof prisma.virtualScenario.update>>> {
+        try {
+            return await this.archiveScenario(scenarioId, actorId);
+        } catch (error) {
+            // The simulation worker checkpoints every moving vehicle each
+            // tick, so cancelling its trip can hit a serialization conflict.
+            if (!isPrismaWriteConflict(error) || attempt >= 4) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 30 * (2 ** attempt)));
+            return this.removeScenario(scenarioId, actorId, attempt + 1);
+        }
+    },
+
+    async archiveScenario(scenarioId: bigint, actorId?: bigint) {
         return prisma.$transaction(async (tx) => {
             const scenario = await tx.virtualScenario.findUnique({ where: { scenarioId } });
             if (!scenario) throw new AppError(404, "Virtual scenario not found", "SCENARIO_NOT_FOUND");
             if (scenario.state === "ARCHIVED") return scenario;
 
-            const activeTrip = await tx.virtualTrip.findFirst({
+            // Active trips are cancelled with the scenario, exactly as the
+            // CANCEL_TRIP command does: the vehicle becomes READY again, and
+            // the bumped commandVersion makes the worker and any in-flight
+            // reroute discard their stale writes for these trips.
+            const activeTrips = await tx.virtualTrip.findMany({
                 where: { scenarioId, state: { in: ACTIVE_TRIP_STATES } },
-                select: { virtualTripId: true },
+                select: { virtualTripId: true, vehicleId: true },
             });
-            if (activeTrip) {
-                throw new AppError(
-                    409,
-                    "Cancel all active virtual trips before removing this scenario",
-                    "SCENARIO_BUSY",
-                );
+            if (activeTrips.length) {
+                const tripIds = activeTrips.map((trip) => trip.virtualTripId);
+                const endedAt = new Date();
+                await tx.vehicle.updateMany({ where: { vehicleId: { in: activeTrips.map((trip) => trip.vehicleId) } }, data: { vehicleStatus: "READY" } });
+                await tx.virtualVehicleState.updateMany({ where: { virtualTripId: { in: tripIds } }, data: { simStatus: "CANCELLED", commandVersion: { increment: 1 } } });
+                await tx.virtualTrip.updateMany({ where: { virtualTripId: { in: tripIds } }, data: { state: "CANCELLED", endedAt, commandVersion: { increment: 1 } } });
+                for (const trip of activeTrips) {
+                    await createEvent(tx, { scenarioId, virtualTripId: trip.virtualTripId, actorId: actorId ?? null, eventType: "TRIP_CANCELLED", payload: { reason: "SCENARIO_ARCHIVED" } });
+                }
             }
 
             const rejected = await tx.virtualDispatchRequest.updateMany({
@@ -416,7 +435,7 @@ export const virtualService = {
                 scenarioId,
                 actorId: actorId ?? null,
                 eventType: "SCENARIO_ARCHIVED",
-                payload: { rejectedPendingRequests: rejected.count },
+                payload: { rejectedPendingRequests: rejected.count, cancelledTrips: activeTrips.length },
             });
             return archived;
         }, { isolationLevel: "Serializable", maxWait: 5000, timeout: 15000 });

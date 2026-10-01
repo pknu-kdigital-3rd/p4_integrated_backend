@@ -1122,7 +1122,7 @@ async function createScenario() {
 async function removeScenario() {
   if (!scenarioId) { setStatus(uiText('Select a scenario first.'), true); return; }
   const label = scenarioSelect.selectedOptions[0]?.textContent || `Scenario ${scenarioId}`;
-  if (!window.confirm(`Remove ${label}? Active trips must be cancelled first.`)) return;
+  if (!window.confirm(`Remove ${label}? Its active trips will be cancelled.`)) return;
   removeScenarioButton.disabled = true;
   try {
     await api(`/api/v1/virtual/scenarios/${encodeURIComponent(scenarioId)}`, { method: 'DELETE' });
