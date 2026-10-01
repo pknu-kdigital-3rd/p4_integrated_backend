@@ -8,6 +8,8 @@ type Point = { lat: number; lon: number };
 
 const TICK_MS = 250;
 
+class TripStopConflict extends Error {}
+
 function jsonValue(value: unknown): unknown {
     return value;
 }
@@ -165,11 +167,17 @@ async function advanceVehicles() {
                     },
                 });
                 if (!stateClaim.count) return false;
+                // The state claim above is the version check. The trip row
+                // has its own commandVersion, which drifts from the state's
+                // (a speed change bumps only the state, a waypoint change
+                // only the trip), so comparing it with the state's version
+                // failed every tick once they diverged and let the vehicle
+                // drive through the closure.
                 const tripClaim = await tx.virtualTrip.updateMany({
-                    where: { virtualTripId: state.virtualTripId, state: "DRIVING", commandVersion: state.commandVersion },
+                    where: { virtualTripId: state.virtualTripId, state: "DRIVING" },
                     data: { state: "BLOCKED_AWAITING_OPERATOR", commandVersion: { increment: 1 } },
                 });
-                if (!tripClaim.count) throw new Error("Trip changed while the simulation worker was stopping at a blocked road");
+                if (!tripClaim.count) throw new TripStopConflict();
                 await tx.virtualOperatorEvent.create({ data: {
                     scenarioId: state.scenarioId,
                     virtualTripId: state.virtualTripId,
@@ -177,6 +185,12 @@ async function advanceVehicles() {
                     payload: { vehicleId: state.vehicleId.toString(), tripId: state.virtualTripId.toString(), currentEdgeId, currentPhysicalSegmentId },
                 } });
                 return true;
+            }).catch((error: unknown) => {
+                // The trip left DRIVING concurrently (e.g. cancelled). Roll back
+                // this stop and leave the other vehicles' tick unaffected.
+                if (!(error instanceof TripStopConflict)) throw error;
+                logger.warn({ vehicleId: state.vehicleId.toString(), tripId: state.virtualTripId.toString() }, "Trip changed while the simulation worker was stopping at a blocked road");
+                return false;
             });
             if (!stopped) continue;
             continue;
