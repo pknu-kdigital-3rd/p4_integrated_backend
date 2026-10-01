@@ -224,6 +224,7 @@ let eventScenarioId = '';
 let hasLoadedEvents = false;
 const SPEED_PRESETS_KMH = [25, 50, 100, 200];
 const virtualVehicleMarkers = new Map();
+const cancelledVirtualTripIds = new Set();
 const virtualVehicleAnimationFrames = new Map();
 const roadBrush = installRoadBrush(map, {
   isActive: () => mode === 'virtual' && Boolean(scenarioId),
@@ -975,6 +976,9 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
   }
   const visibleVehicleIds = new Set();
   for (const vehicle of vehicles) {
+    const virtualTripId = vehicle.state?.virtualTripId || vehicle.state?.trip?.virtualTripId;
+    if (vehicle.state?.simStatus === 'CANCELLED' || vehicle.state?.trip?.state === 'CANCELLED'
+      || (virtualTripId && cancelledVirtualTripIds.has(String(virtualTripId)))) continue;
     const position = vehicle.state?.lastPosition;
     if (!position || !Number.isFinite(Number(position.lat)) || !Number.isFinite(Number(position.lon))) continue;
     const vehicleId = String(vehicle.vehicleId);
@@ -1220,6 +1224,10 @@ async function command(command, extra = {}) {
   if (!tripId) { setStatus('The selected virtual vehicle has no active trip.', true); return; }
   try {
     await api(`/api/v1/virtual/trips/${tripId}/commands`, { method: 'POST', body: JSON.stringify({ command, ...extra }) });
+    if (command === 'CANCEL_TRIP') {
+      cancelledVirtualTripIds.add(String(tripId));
+      renderVehicles({ updateVehicleSelect: false });
+    }
     if (command === 'SET_SPEED_KMH') speedControlEditing = false;
     await loadScenarioData();
   }
