@@ -71,13 +71,17 @@ function showNoRouteAlarm(vehicleId, tripId, message) {
   noRouteAlarmMessage.textContent = `${label}${tripId ? ` · 운행 ${tripId}` : ''} — ${message || '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.'}`;
   noRouteAlarm.hidden = false;
 }
+const NO_ROUTE_ALARM_REASONS = [
+  'No viable path after road restriction',
+  'No legal route under the current road state',
+];
+function isNoRouteAlarmReason(reason) {
+  return NO_ROUTE_ALARM_REASONS.includes(reason);
+}
 function syncNoRouteAlarms() {
   const currentKeys = new Set();
   for (const vehicle of vehicles) {
-    if (vehicle.state?.simStatus !== 'NO_ROUTE' || ![
-      'No viable path after road restriction',
-      'No legal route under the current road state',
-    ].includes(vehicle.state?.blockedReason)) continue;
+    if (vehicle.state?.simStatus !== 'NO_ROUTE' || !isNoRouteAlarmReason(vehicle.state?.blockedReason)) continue;
     const tripId = vehicle.state.virtualTripId || vehicle.state.trip?.virtualTripId || '';
     const key = `${scenarioId}:${vehicle.vehicleId}:${tripId}`;
     currentKeys.add(key);
@@ -226,7 +230,11 @@ const roadBrush = installRoadBrush(map, {
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
       scenarioRevision = result.restrictionRevision;
       for (const failure of result.routingFailures || []) {
-        showRoutingLog(failure.message || failure.code || '경로 계산에 실패했습니다.', failure.details, failure);
+        // A confirmed NO_ROUTE already raises the centre-top alarm; the log
+        // keeps only failures that left the trip state unchanged.
+        if (!failure.stateChangedToNoRoute) {
+          showRoutingLog(failure.message || failure.code || '경로 계산에 실패했습니다.', failure.details, failure);
+        }
         if (failure.stateChangedToNoRoute) {
           const key = `${targetScenario}:${failure.vehicleId}:${failure.tripId}`;
           seenNoRouteKeys.add(key);
@@ -1167,7 +1175,8 @@ async function setFollowing(enabled) {
   try {
     const result = await api(`/api/v1/virtual/vehicles/${selectedVehicleId}/following`, { method: 'PUT', body: JSON.stringify({ enabled, expectedPolicyVersion: vehicle?.following?.policyVersion, idempotencyKey: idempotency('follow') }) });
     await loadScenarioData();
-    if (result.state?.simStatus === 'NO_ROUTE') showRoutingLog(result.state.blockedReason || '경로 추종 중 경로 계산에 실패했습니다.', null, { vehicleId: selectedVehicleId, tripId: result.state.virtualTripId });
+    // loadScenarioData() raises the centre-top alarm for a no-route reason.
+    if (result.state?.simStatus === 'NO_ROUTE' && !isNoRouteAlarmReason(result.state.blockedReason)) showRoutingLog(result.state.blockedReason || '경로 추종 중 경로 계산에 실패했습니다.', null, { vehicleId: selectedVehicleId, tripId: result.state.virtualTripId });
   }
   catch (error) { showRoutingLog(error.message, error.details, { vehicleId: selectedVehicleId }); setStatus(error.message, true); }
 }
