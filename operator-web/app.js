@@ -1,4 +1,4 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=2';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=3';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS} from './live-telemetry.js';

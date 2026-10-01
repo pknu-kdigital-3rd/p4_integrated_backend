@@ -1,4 +1,4 @@
-import {uiText, applyRoadHatch, vehicleIcon} from './dashboard-ui.js?v=2';
+import {uiText, applyRoadHatch, vehicleIcon} from './dashboard-ui.js?v=3';
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
