@@ -94,6 +94,24 @@ lists) are generated deterministically by Node from the snapshot; the LLM
 only writes the narrative assessment and KOSHA-based recommendations, so
 report figures cannot be hallucinated.
 
+### 4b. Streaming over WebSocket
+
+The panel uses `/api/v1/assistant/ws` (p4-node), not the HTTP endpoint:
+
+```text
+client -> { type: "auth", token }                       first message, 10 s
+server -> { type: "ready" }
+client -> { type: "ask", requestId, mode, question? }   one answer at a time
+server -> start, meta (sources), delta*, done | error   each with requestId
+```
+
+p4-node relays p4-llm's `POST /v1/assistant/stream` NDJSON events (report
+mode sends the data-rendered figures as the first delta). One socket lives
+for the page: hiding the panel keeps answers streaming in the background
+(an unread dot marks a finished answer). 중지 closes the socket; p4-node
+aborts the upstream request and p4-llm closes the LLM stream, so generation
+stops. Node pings every 30 s; Nginx proxies the path with upgrade headers.
+
 ### 5. operator-web: assistant panel
 
 A collapsible panel: message list, input, **현황 보고서** button, KOSHA

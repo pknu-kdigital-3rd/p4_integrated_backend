@@ -147,6 +147,11 @@ body:not(.virtual-mode) .virtual-routing-log { display: none; }
 #assistant-form { display: grid; gap: 8px; }
 #assistant-question { width: 100%; resize: vertical; min-height: 44px; font: inherit; padding: 8px 10px; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); box-sizing: border-box; }
 .assistant-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#assistant-stop { color: var(--ui-danger); border-color: var(--ui-danger); }
+.assistant-message--streaming .assistant-markdown > :last-child::after { content: "▍"; margin-left: 2px; color: var(--ui-primary); animation: assistant-caret 1s steps(2) infinite; }
+@keyframes assistant-caret { 50% { opacity: 0; } }
+[data-rail=assistant] { position: relative; }
+[data-rail=assistant].has-unread::after { content: ""; position: absolute; top: 6px; right: 10px; width: 8px; height: 8px; border-radius: 50%; background: var(--ui-danger); box-shadow: 0 0 0 2px var(--ui-surface); }
 #telemetry-settings { display: grid; gap: 10px; margin-top: 18px; }
 #telemetry-settings h2 { display: none; }
 .route-mode-settings { display: grid; gap: 8px; margin-top: 18px; border-top: 1px solid var(--ui-border); padding-top: 14px; font-size: 12px; }

@@ -362,6 +362,21 @@ docker compose -f docker-compose.dev.yml exec p4-node \
 naming authentication means `LLM_PARENT_MONGO_URL` is wrong. Changing an
 `LLM_*` value requires `up -d --no-deps --force-recreate p4-llm`.
 
+The panel streams answers over a WebSocket at `/api/v1/assistant/ws` (p4-node),
+which Nginx proxies with upgrade headers on the operator port.
+`deploy/nginx/nginx.conf` is an individual file bind mount, so after pulling a
+change to it recreate Nginx (a reload or `restart` can keep reading the old
+file) and verify the effective configuration:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-nginx
+docker exec p4-nginx nginx -T | grep -A 3 "assistant/ws"
+```
+
+Each answer is logged by p4-llm as `assistant stream closed after N chars
+(cancelled=...)`; `cancelled=True` means the operator pressed 중지 (the socket
+was closed) and generation stopped.
+
 The guide index lives in the shared Qdrant/MongoDB and is rebuilt from a
 workstation with the KOSHA PDF folder (`python -m index.pipeline
 --recreate`, see `services/llm/README.md`), not by the container.

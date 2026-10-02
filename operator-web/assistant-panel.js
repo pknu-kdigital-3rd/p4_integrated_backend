@@ -1,8 +1,8 @@
 // AI 관제 도우미: questions and an on-demand fleet report, answered from the
-// current fleet snapshot and KOSHA transport safety guides
-// (POST /api/v1/assistant/chat). Answers are Markdown from an LLM, so they
-// are parsed into blocks and rendered by building DOM nodes from text,
-// never through innerHTML.
+// current fleet snapshot and KOSHA transport safety guides, streamed over
+// the assistant WebSocket (/api/v1/assistant/ws). Answers are Markdown from
+// an LLM, so they are parsed into blocks and rendered by building DOM nodes
+// from text, never through innerHTML.
 
 const MAX_MESSAGES = 30;
 
@@ -110,13 +110,76 @@ export function sourceLabel(source) {
   return `[S${source.rank}] ${source.doc_id || ''} ${source.heading_path || ''}${page}`.replace(/\s+/g, ' ').trim();
 }
 
-export function initializeAssistantPanel({ api }) {
+// Close code the panel uses for an explicit abort (중지).
+export const ABORT_CLOSE_CODE = 4000;
+
+function assistantSocketUrl() {
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/v1/assistant/ws`;
+}
+
+function newRequestId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+// One WebSocket per page. It is opened on the first question and kept open
+// while the panel is hidden, so answers keep arriving in the background.
+// abort() closes it, which makes the server cancel generation.
+function createAssistantConnection({ getToken, onEvent, onLost }) {
+  let socket = null;
+  let ready = null;
+  let abortedSocket = null;
+
+  function open() {
+    const token = getToken();
+    if (!token) return Promise.reject(new Error('로그인 후 사용할 수 있습니다.'));
+    const ws = new WebSocket(assistantSocketUrl());
+    socket = ws;
+    ready = new Promise((resolve, reject) => {
+      ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'auth', token })));
+      ws.addEventListener('message', (event) => {
+        let message;
+        try { message = JSON.parse(event.data); } catch { return; }
+        if (message.type === 'ready') { resolve(ws); return; }
+        onEvent(message);
+      });
+      ws.addEventListener('close', (event) => {
+        if (socket === ws) { socket = null; ready = null; }
+        const reason = event.code === 4401 || event.code === 4403 ? '인증이 만료되었거나 권한이 없습니다.' : '도우미 연결이 끊어졌습니다.';
+        reject(new Error(reason));
+        if (ws !== abortedSocket) onLost(reason);
+      });
+    });
+    ready.catch(() => {});
+    return ready;
+  }
+
+  return {
+    async send(message) {
+      const ws = await (socket && ready ? ready : open());
+      ws.send(JSON.stringify(message));
+    },
+    abort() {
+      if (!socket) return;
+      abortedSocket = socket;
+      socket.close(ABORT_CLOSE_CODE, 'aborted by operator');
+      socket = null;
+      ready = null;
+    },
+  };
+}
+
+export function initializeAssistantPanel({ getToken }) {
+  const drawer = document.querySelector('#assistant-drawer');
   const messages = document.querySelector('#assistant-messages');
   const form = document.querySelector('#assistant-form');
   const question = document.querySelector('#assistant-question');
   const reportButton = document.querySelector('#assistant-report');
+  const stopButton = document.querySelector('#assistant-stop');
   const submitButton = form.querySelector('button[type="submit"]');
-  let busy = false;
+  const railButton = document.querySelector('[data-rail=assistant]');
+  // requestId -> { element, content, text, sources, model, retrievalError, snapshotAt, renderQueued }
+  const answers = new Map();
+  let current = null;
 
   function append(element) {
     messages.append(element);
@@ -132,61 +195,133 @@ export function initializeAssistantPanel({ api }) {
     return element;
   }
 
-  function renderAnswer(target, data) {
-    target.replaceChildren(renderMarkdown(data.answer));
-    if (data.sources?.length) {
+  function setBusy(busy) {
+    submitButton.disabled = busy;
+    reportButton.disabled = busy;
+    stopButton.hidden = !busy;
+  }
+
+  function markUnread() {
+    if (drawer.hidden && railButton) railButton.classList.add('has-unread');
+  }
+
+  // Reopening the panel shows what arrived in the background.
+  new MutationObserver(() => {
+    if (!drawer.hidden && railButton) {
+      railButton.classList.remove('has-unread');
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }).observe(drawer, { attributes: true, attributeFilter: ['hidden'] });
+
+  function renderFooter(answer, note) {
+    if (answer.sources?.length) {
       const sources = document.createElement('details');
       sources.className = 'assistant-sources';
       const summary = document.createElement('summary');
-      summary.textContent = `근거 KOSHA 지침 ${data.sources.length}건`;
+      summary.textContent = `근거 KOSHA 지침 ${answer.sources.length}건`;
       const list = document.createElement('ul');
-      for (const source of data.sources) {
+      for (const source of answer.sources) {
         const li = document.createElement('li');
         li.textContent = sourceLabel(source);
         if (source.source_relpath) li.title = source.source_relpath;
         list.append(li);
       }
       sources.append(summary, list);
-      target.append(sources);
+      answer.element.append(sources);
     }
     const meta = document.createElement('p');
     meta.className = 'assistant-meta';
-    const at = new Date(data.snapshotAt);
+    const at = new Date(answer.snapshotAt);
     const parts = [`현황 기준 ${Number.isNaN(at.getTime()) ? '-' : at.toLocaleTimeString('ko-KR', { hour12: false })}`];
-    if (data.model) parts.push(data.model);
-    if (data.retrievalError) parts.push('지침 검색 실패: 현황만으로 답변');
+    if (answer.model) parts.push(answer.model);
+    if (answer.retrievalError) parts.push('지침 검색 실패: 현황만으로 답변');
+    if (note) parts.push(note);
     meta.textContent = parts.join(' · ');
-    target.append(meta);
+    answer.element.append(meta);
   }
 
+  function renderText(answer) {
+    answer.renderQueued = false;
+    answer.content.replaceChildren(renderMarkdown(answer.text));
+    if (!drawer.hidden) messages.scrollTop = messages.scrollHeight;
+  }
+
+  function queueRender(answer) {
+    if (answer.renderQueued) return;
+    answer.renderQueued = true;
+    requestAnimationFrame(() => renderText(answer));
+  }
+
+  function finish(answer, { error = null, note = null } = {}) {
+    answer.element.classList.remove('assistant-message--pending', 'assistant-message--streaming');
+    if (error && !answer.text) {
+      answer.element.classList.add('assistant-message--error');
+      answer.content.textContent = `답변을 받지 못했습니다: ${error}`;
+    } else {
+      renderText(answer);
+      renderFooter(answer, error ? `중단됨: ${error}` : note);
+    }
+    answers.delete(answer.requestId);
+    if (current === answer) { current = null; setBusy(false); }
+    markUnread();
+  }
+
+  const connection = createAssistantConnection({
+    getToken,
+    onEvent(message) {
+      const answer = answers.get(message.requestId);
+      if (!answer) return;
+      if (message.type === 'start') {
+        answer.snapshotAt = message.snapshotAt;
+        answer.element.classList.remove('assistant-message--pending');
+        answer.element.classList.add('assistant-message--streaming');
+        answer.content.textContent = '';
+      } else if (message.type === 'meta') {
+        Object.assign(answer, { sources: message.sources, model: message.model, retrievalError: message.retrievalError });
+      } else if (message.type === 'delta') {
+        answer.text += message.text;
+        queueRender(answer);
+      } else if (message.type === 'done') {
+        answer.model = message.model || answer.model;
+        finish(answer);
+      } else if (message.type === 'error') {
+        finish(answer, { error: message.message });
+      }
+    },
+    onLost(reason) {
+      for (const answer of [...answers.values()]) finish(answer, { error: reason });
+    },
+  });
+
   async function ask(body, label) {
-    if (busy) return;
-    busy = true;
-    submitButton.disabled = true;
-    reportButton.disabled = true;
+    if (current) return;
     bubble('user', label);
-    const pending = bubble('assistant', '현황을 확인하고 답변을 작성하는 중…');
-    pending.classList.add('assistant-message--pending');
+    const element = bubble('assistant', '');
+    element.classList.add('assistant-message--pending');
+    const content = document.createElement('div');
+    content.textContent = '현황을 확인하고 답변을 준비하는 중…';
+    element.append(content);
+    const requestId = newRequestId();
+    const answer = { requestId, element, content, text: '', sources: [], model: '', retrievalError: null, snapshotAt: null, renderQueued: false };
+    answers.set(requestId, answer);
+    current = answer;
+    setBusy(true);
     try {
-      const data = await api('/api/v1/assistant/chat', { method: 'POST', body: JSON.stringify(body) }, true);
-      pending.classList.remove('assistant-message--pending');
-      renderAnswer(pending, data);
+      await connection.send({ type: 'ask', requestId, ...body });
     } catch (error) {
-      pending.classList.remove('assistant-message--pending');
-      pending.classList.add('assistant-message--error');
-      pending.textContent = `답변을 받지 못했습니다: ${error.message}`;
-    } finally {
-      busy = false;
-      submitButton.disabled = false;
-      reportButton.disabled = false;
-      messages.scrollTop = messages.scrollHeight;
+      if (answers.has(requestId)) finish(answer, { error: error.message });
     }
   }
 
+  stopButton.addEventListener('click', () => {
+    const answer = current;
+    connection.abort();
+    if (answer) finish(answer, { note: '중지됨' });
+  });
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const text = question.value.trim();
-    if (!text) return;
+    if (!text || current) return;
     question.value = '';
     ask({ mode: 'qa', question: text }, text);
   });

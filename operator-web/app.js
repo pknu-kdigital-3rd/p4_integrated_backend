@@ -8,7 +8,7 @@ import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOn
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
-import {initializeAssistantPanel} from './assistant-panel.js?v=1';
+import {initializeAssistantPanel} from './assistant-panel.js?v=2';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
@@ -392,7 +392,7 @@ function drawWhenNotZooming(key,draw){
 function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:false}));}
 new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
 const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
-initializeAssistantPanel({api});
+initializeAssistantPanel({getToken:()=>token});
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 // Live View follows a stream, not a trip, so the trip is not part of the target.
 function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)}

@@ -3,6 +3,7 @@ import { env } from "./config/env.ts"
 import { prisma } from "./infrastructure/database/prisma.ts"
 import { logger } from "./config/logger.ts";
 import { startVirtualSimulationWorker } from "./modules/virtual/virtual-simulation.worker.ts";
+import { attachAssistantSocket } from "./modules/assistant/assistant.socket.ts";
 
 const app = createApp();
 
@@ -21,6 +22,7 @@ async function main() {
         }, "HTTP Server started");
     });
     const stopVirtualSimulation = startVirtualSimulationWorker();
+    const assistantSocket = attachAssistantSocket(server);
 
     const dbUrl = new URL(env.DATABASE_URL);
 
@@ -58,6 +60,8 @@ async function main() {
 
         // 1. Http server cleanup
         stopVirtualSimulation();
+        // Open assistant WebSockets would otherwise keep server.close() waiting.
+        assistantSocket.close();
         try {
             await closeHttpServer();
             logger.info("HTTP server closed")
