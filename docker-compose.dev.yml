@@ -77,9 +77,8 @@ services:
       JWT_KEY_ID: project4-2026-01
       PUBLIC_OPERATOR_URL: ${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
       ROUTING_TRACKING_BASE_URL: http://p4-routing:8000
-      # ITS fleet assistant API: the p4-assistant service below (profile
-      # "assistant"); unreachable or empty answers 503 in the operator panel.
-      ASSISTANT_BASE_URL: ${ASSISTANT_BASE_URL:-http://p4-assistant:18080}
+      # ITS fleet assistant API (p4-llm); unreachable answers 503 in the panel.
+      ASSISTANT_BASE_URL: ${ASSISTANT_BASE_URL:-http://p4-llm:18080}
       VISION_PUBLIC_BASE_URL: ${VISION_PUBLIC_BASE_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002}
       LIVE_VIEW_URL: ${LIVE_VIEW_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002/}
       OPERATOR_DEMO_PUBLIC: ${OPERATOR_DEMO_PUBLIC:-true}
@@ -135,22 +134,31 @@ services:
     expose: [ "8000" ]
     networks: [ p4 ]
 
-  p4-assistant:
-    # ITS fleet assistant API from the pce RAG repository (KOSHA transport
-    # guides + EXAONE). Opt-in: COMPOSE_PROFILES=assistant. Build context is
-    # a pce checkout next to this repository unless ASSISTANT_PCE_DIR is set.
-    # MongoDB credentials come from the host .env, never from the image.
-    profiles: [ "assistant" ]
+  p4-llm:
+    # ITS fleet assistant API (services/llm): KOSHA transport-guide RAG and
+    # EXAONE answers for the operator AI 도우미 panel. Settings come from the
+    # host LLM_* variables; the MongoDB URL carries credentials.
     build:
-      context: ${ASSISTANT_PCE_DIR:-../pce}
-    container_name: p4-assistant
+      context: ./services/llm
+      dockerfile: ../../docker/llm.Dockerfile
+    container_name: p4-llm
     restart: unless-stopped
     environment:
-      PCE_ASSISTANT_CONFIG: ${ASSISTANT_CONFIG:-config/its-kosha-transport.toml}
-      KINDEX_PARENT_MONGO_URL: ${ASSISTANT_PARENT_MONGO_URL:-}
-      LLM_API_KEY: ${ASSISTANT_LLM_API_KEY:-no_key}
+      LLM_ASSISTANT_CONFIG: config/its-kosha-transport.toml
+      KINDEX_QDRANT_URL: ${LLM_QDRANT_URL:-http://10.174.96.119:36333}
+      KINDEX_COLLECTION: ${LLM_COLLECTION:-its-kosha-transport}
+      KINDEX_EMBED_ENDPOINT: ${LLM_EMBED_ENDPOINT:-http://10.174.96.119:18001/v1}
+      KINDEX_EMBED_MODEL: ${LLM_EMBED_MODEL:-Qwen3-Embedding-8B}
+      KINDEX_PARENT_MONGO_URL: ${LLM_PARENT_MONGO_URL:-}
+      KINDEX_PARENT_MONGO_DATABASE: ${LLM_PARENT_MONGO_DATABASE:-its}
+      KINDEX_PARENT_MONGO_COLLECTION: ${LLM_PARENT_MONGO_COLLECTION:-kosha_transport_parents}
+      KSERVE_LLM_BASE_URL: ${LLM_CHAT_BASE_URL:-http://10.174.96.119:18000/v1}
+      KSERVE_LLM_MODEL: ${LLM_CHAT_MODEL:-EXAONE4.5}
+      LLM_API_KEY: ${LLM_API_KEY:-no_key}
+    command: [ "uvicorn", "serve.api:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "18080", "--reload", "--reload-dir", "/workspace/services/llm/src" ]
     volumes:
-      - p4_assistant_cache:/cache
+      - ./services/llm:/workspace/services/llm
+      - p4_llm_cache:/var/cache/p4-llm
     expose: [ "18080" ]
     networks: [ p4 ]
 
@@ -381,8 +389,8 @@ networks:
         - subnet: ${P4_DOCKER_SUBNET:-10.253.240.0/24}
 
 volumes:
-  p4_assistant_cache:
-    name: p4-assistant-cache
+  p4_llm_cache:
+    name: p4-llm-cache
   p4_relay_socket:
     name: p4-relay-socket
   p4_vision_compile_cache:

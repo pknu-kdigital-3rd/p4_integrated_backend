@@ -103,7 +103,7 @@ first uncached warmup can take minutes.
 
 ## Compose credentials
 
-The production Compose file requires these four variables from the host. The
+The production Compose file requires these five variables from the host. The
 development Compose file uses fixed development-only values so a local stack
 can start without a shell environment or an env file. Do not reuse the
 development values outside a local development stack.
@@ -114,6 +114,7 @@ development values outside a local development stack.
 | `MINIO_ROOT_PASSWORD` | MinIO and MinIO bootstrap | The MinIO root password used when the data directory is first initialized. Keep it stable for existing `data/minio_data`. |
 | `MINIO_SECRET_KEY` | Relay and MinIO bootstrap | Relay bucket-account secret; at least 12 characters and must not start with `replace-`. |
 | `MINIO_NODE_SECRET_KEY` | Node and MinIO bootstrap | Node bucket-account secret; at least 12 characters and must not start with `replace-`. |
+| `LLM_PARENT_MONGO_URL` | p4-llm (fleet assistant) | Authenticated MongoDB URL of the KOSHA guide parent store, e.g. `mongodb://USER:PASSWORD@10.174.96.119:37017/?authSource=admin`; URL-encode special characters in the password. In development it may be empty: the assistant then answers from search snippets and `/health` reports `parents_error`. |
 
 The MinIO access-key names are fixed in Compose (`p4-minio-root`, `p4-relay`,
 and `p4-node`). In development, the corresponding fixed secrets are shared by
@@ -139,6 +140,9 @@ Other commonly changed values are optional: `YOLO_MODEL`, `YOLO_CLASSES`, `YOLO_
 `YOLO_INFERENCE_SIZE`, `YOLO_USE_LAST_GPU`, `YOLO_GPU_INDEX`,
 `UNIDEPTH_GPU_INDEX`, `UNIDEPTH_COMPILE`,
 `CUDA_DEVICE_ORDER`, `ANDROID_TELEMETRY_ENABLED`, `TURN_URL`,
+the fleet assistant's `LLM_QDRANT_URL`, `LLM_COLLECTION`, `LLM_EMBED_ENDPOINT`,
+`LLM_EMBED_MODEL`, `LLM_PARENT_MONGO_DATABASE`, `LLM_PARENT_MONGO_COLLECTION`,
+`LLM_CHAT_BASE_URL`, `LLM_CHAT_MODEL`, `LLM_API_KEY`,
 `TURN_USERNAME`, `TURN_PASSWORD`, and the recording queue/sample settings.
 The Compose defaults are used when they are omitted.
 
@@ -325,53 +329,42 @@ Use `docker compose ... up -d p4-minio` when only MinIO should be started. A lat
 `docker compose ... up -d` for the whole stack recreates and runs the bootstrap
 service again; this is safe because the bootstrap script is idempotent.
 
-## Fleet assistant (optional `assistant` profile)
+## Fleet assistant (`p4-llm`)
 
 The operator dashboard's AI 도우미 panel calls `POST /api/v1/assistant/chat`
-on p4-node, which sends the current fleet snapshot to the `p4-assistant`
-service. That service is the ITS assistant API from the separate pce RAG
-repository (KOSHA transport guides in Qdrant/MongoDB, EXAONE4.5 for
-answers); see `docs/fleet_assistant_plan.md`.
+on p4-node, which sends the current fleet snapshot to `p4-llm`
+(`services/llm`, port 18080 on the Compose network only). p4-llm retrieves
+KOSHA transport-guide evidence from Qdrant and MongoDB and asks the chat LLM
+(EXAONE4.5); see `docs/fleet_assistant_plan.md` and `services/llm/README.md`.
 
-It runs as its own container on the same host and Compose network as
-p4-node, and only when the `assistant` profile is enabled:
+Its settings come from the host environment like the other services: Compose
+maps the host's `LLM_*` variables to the service's `KINDEX_*` / `KSERVE_*`
+variables. Only `LLM_PARENT_MONGO_URL` is required in production (see the
+credentials table); the defaults point at the shared Qdrant 36333, Qwen3
+embedding 18001 and EXAONE 18000 endpoints on 10.174.96.119.
 
-1. Clone the pce repository next to this one (`../pce`), or set
-   `ASSISTANT_PCE_DIR` to its path.
-2. Put the MongoDB credentials for the guide store in the host `.env`
-   (git-ignored) - never in a Compose file:
+Development (`.env` in the repository root is read automatically):
 
-   ```text
-   COMPOSE_PROFILES=assistant
-   ASSISTANT_PARENT_MONGO_URL=mongodb://USER:PASSWORD@10.174.96.119:37017/?authSource=admin
-   ```
+```bash
+echo 'LLM_PARENT_MONGO_URL=mongodb://USER:PASSWORD@10.174.96.119:37017/?authSource=admin' >> .env
+docker compose -f docker-compose.dev.yml up -d --build p4-llm
+docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-node
+```
 
-   URL-encode special characters in the password (`@` as `%40`, `:` as
-   `%3A`).
-3. Build and start it, then recreate p4-node so it picks up
-   `ASSISTANT_BASE_URL` (default `http://p4-assistant:18080`):
+Check it from the Node container (the service is not published to the host):
 
-   ```bash
-   docker compose -f docker-compose.dev.yml up -d --build p4-assistant
-   docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-node
-   ```
+```bash
+docker compose -f docker-compose.dev.yml exec p4-node \
+  node -e "fetch('http://p4-llm:18080/health').then(r=>r.json()).then(console.log)"
+```
 
-4. Check it from the Node container (the service is not published to the
-   host):
+`parents_loaded: true` appears after the first question; a `parents_error`
+naming authentication means `LLM_PARENT_MONGO_URL` is wrong. Changing an
+`LLM_*` value requires `up -d --no-deps --force-recreate p4-llm`.
 
-   ```bash
-   docker compose -f docker-compose.dev.yml exec p4-node      node -e "fetch('http://p4-assistant:18080/health').then(r=>r.json()).then(console.log)"
-   ```
-
-   `parents_loaded: true` appears after the first question; a
-   `parents_error` naming authentication means the MongoDB URL is wrong.
-
-The pce code is baked into the image: after pulling pce changes, rebuild
-with `up -d --build p4-assistant`. Without the profile, p4-node still
-starts and the panel answers with a 503 "Assistant service unavailable".
-The guide index itself is built from a workstation with
-`RAGPipeline(config='config/its-kosha-transport.toml')` in pce, not by
-the container.
+The guide index lives in the shared Qdrant/MongoDB and is rebuilt from a
+workstation with the KOSHA PDF folder (`python -m index.pipeline
+--recreate`, see `services/llm/README.md`), not by the container.
 
 ## Reload and rebuild methods
 
@@ -383,6 +376,8 @@ the container.
 | Operator web JavaScript/CSS/HTML | Edit `operator-web`; refresh the browser | No |
 | Routing Python | Edit `services/routing-tracking`; Uvicorn reloads it | No |
 | Vision Python | Edit `services/vision/app`; Uvicorn reloads it | No |
+| Fleet assistant Python | Edit `services/llm/src`; Uvicorn reloads it | No |
+| Fleet assistant dependencies (`services/llm/pyproject.toml`, `uv.lock`) | `up -d --build p4-llm` | Image rebuilt |
 | Vision model contents at the same path | Replace the mounted file, then `touch services/vision/app/main.py` to trigger Vision reload | No Docker restart; Vision process reloads |
 | Vision model path or `.pt`/`.engine` selection | Change `YOLO_MODEL`, then force-recreate Vision | Vision container recreated, no image rebuild |
 | Go relay source | Build and recreate only relay; there is no current Go watcher | Relay container recreated |
@@ -419,6 +414,7 @@ docker compose --env-file <secrets-file> run --rm p4-node-migrate
 docker compose --env-file <secrets-file> up -d --build p4-node
 docker compose --env-file <secrets-file> up -d --build p4-routing
 docker compose --env-file <secrets-file> up -d --build p4-vision
+docker compose --env-file <secrets-file> up -d --build p4-llm
 docker compose --env-file <secrets-file> build p4-relay
 docker compose --env-file <secrets-file> up -d --no-deps p4-relay
 ```

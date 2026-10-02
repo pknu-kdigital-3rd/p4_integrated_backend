@@ -1,6 +1,6 @@
 // Operator assistant: current fleet snapshot + KOSHA transport-guide RAG.
 //
-// The pce assistant API (ASSISTANT_BASE_URL) owns retrieval and the LLM;
+// The p4-llm assistant API (services/llm, ASSISTANT_BASE_URL) owns retrieval and the LLM;
 // this service supplies the fleet facts. In report mode the figures are
 // rendered here from the snapshot and the LLM only adds the assessment and
 // recommendations, so a report's numbers can never be invented.

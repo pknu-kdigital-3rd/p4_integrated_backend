@@ -23,7 +23,7 @@ operator-web  ──POST /api/v1/assistant/chat──►  p4 Node
                                                   │ 1. build fleet snapshot (read-only DB queries)
                                                   │ 2. render compact Korean snapshot text
                                                   ▼
-                                   pce assistant API  POST /v1/assistant/chat
+                                   p4-llm (services/llm)  POST /v1/assistant/chat
                                                   │ 3. hybrid search: KOSHA transport collection
                                                   │    (Qdrant dense+BM25, MongoDB parents)
                                                   │ 4. EXAONE4.5 with snapshot + guide context
@@ -31,13 +31,13 @@ operator-web  ──POST /api/v1/assistant/chat──►  p4 Node
                                    answer + KOSHA sources  ──►  Node  ──►  panel
 ```
 
-Responsibilities stay separated: p4 owns fleet data and access control; the
-RAG project (`E:\project_chatbot\pce`) owns documents, retrieval and the LLM.
+Responsibilities stay separated: p4-node owns fleet data and access control;
+`services/llm` owns documents, retrieval and the LLM.
 The RAG API accepts the snapshot as opaque text, so it stays domain-neutral.
 
 ## Components
 
-### 1. pce: KOSHA transport corpus (PDF ingestion)
+### 1. services/llm: KOSHA transport corpus (PDF ingestion)
 
 * PyMuPDF text extraction per page → `Block`s → existing
   `build_structure` / `chunk_document` (KOSHA guides use the numbered
@@ -52,7 +52,7 @@ The RAG API accepts the snapshot as opaque text, so it stays domain-neutral.
   `http://10.174.96.119:36333`, Qwen3-Embedding-8B, EXAONE4.5.
 * Indexing is run manually once the services are up.
 
-### 2. pce: assistant HTTP API
+### 2. services/llm: assistant HTTP API
 
 `POST /v1/assistant/chat`
 
@@ -88,7 +88,7 @@ for the LLM.
 ### 4. p4 Node: assistant proxy
 
 `POST /api/v1/assistant/chat` (ADMIN/OPERATOR/VIEWER) → builds the snapshot,
-calls `ASSISTANT_BASE_URL` (env; the pce API), returns the answer, sources
+calls `ASSISTANT_BASE_URL` (env; p4-llm), returns the answer, sources
 and the snapshot time. In **report** mode the numeric sections (counts,
 lists) are generated deterministically by Node from the snapshot; the LLM
 only writes the narrative assessment and KOSHA-based recommendations, so
@@ -107,16 +107,17 @@ chars, answer `max_tokens` 1,000.
 
 ## Deployment
 
-The pce API runs as a separate container, `p4-assistant`, on the same host
-and Compose network as p4-node (opt-in `assistant` profile, built from a
-pce checkout next to this repository). p4-node reaches it at
-`ASSISTANT_BASE_URL` (default `http://p4-assistant:18080`); MongoDB
-credentials come from the host `.env` as `ASSISTANT_PARENT_MONGO_URL`.
-See "Fleet assistant" in `docs/integration/DOCKER_OPERATIONS.md`.
+The assistant code lives in this repository as `services/llm` (vendored
+from the pce RAG project, ITS path only) and runs as the `p4-llm` Compose
+service on the same host and network as p4-node, which reaches it at
+`ASSISTANT_BASE_URL` (default `http://p4-llm:18080`). Settings come from
+the host's `LLM_*` variables like the other services; production requires
+`LLM_PARENT_MONGO_URL`. See "Fleet assistant" in
+`docs/integration/DOCKER_OPERATIONS.md`.
 
 ## Commits
 
-pce: (1) PDF ingestion + KOSHA transport config, (2) assistant API.
+pce (before vendoring into services/llm): (1) PDF ingestion + KOSHA transport config, (2) assistant API.
 p4: (3) fleet snapshot endpoint, (4) assistant proxy + report,
 (5) operator panel. Each with tests.
 
