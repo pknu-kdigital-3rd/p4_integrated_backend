@@ -109,6 +109,15 @@
        삭제
       </button>
      </span>
+     <div class="restriction-bulk-tools">
+      <button id="virtual-vehicles-bulk-toggle" type="button" hidden>차량 일괄 삭제</button>
+      <div id="virtual-vehicles-bulk-actions" hidden>
+       <ul id="virtual-vehicles-bulk-list"></ul>
+       <button id="virtual-vehicles-select-all" type="button">전체 선택</button>
+       <button id="virtual-vehicles-bulk-remove" type="button" disabled>선택 삭제</button>
+       <button id="virtual-vehicles-bulk-cancel" type="button">취소</button>
+      </div>
+     </div>
     </section>
     <section class="virtual-step ui-card">
      <h3>
@@ -507,6 +516,7 @@
          구간 삭제
         </button>
         <div hidden="" id="recording-delete-mode">
+         <button id="recording-delete-select-all" type="button">전체 구간 선택</button>
          <p>
           타임라인을 드래그하여 연속 구간을 선택하세요. Home/End로 끝 지점을 선택하고, 좌우 방향키로 범위를 확장합니다. Shift+방향키로 시작 지점을 조정합니다.
          </p>

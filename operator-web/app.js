@@ -1132,6 +1132,7 @@ function selectRecordingTrip(tripId){
 document.querySelector('#stop-recording').addEventListener('click',stopRecordingPlayback);
 document.querySelector('#recording-delete-toggle').addEventListener('click',event=>{const mode=document.querySelector('#recording-delete-mode');if(mode.hidden){openRecordingDeleteMode();document.querySelector('#recordings-status').textContent='Drag across the timeline to select a contiguous range of segments.'}else{closeRecordingDeleteMode();document.querySelector('#recordings-status').textContent='Delete mode closed.'}});
 document.querySelector('#recording-delete-cancel').addEventListener('click',()=>{closeRecordingDeleteMode();document.querySelector('#recordings-status').textContent='Delete mode closed.'});
+document.querySelector('#recording-delete-select-all').addEventListener('click',()=>{if(replayTimeline.length)setRecordingDeleteRange(0,replayTimeline.length-1)});
 document.querySelector('#recording-delete-selected').addEventListener('click',()=>void deleteSelectedRecordingSegments());
 const recordingDeleteRangeElement=document.querySelector('#recording-delete-range');
 recordingDeleteRangeElement.addEventListener('pointerdown',beginRecordingDeleteRange);

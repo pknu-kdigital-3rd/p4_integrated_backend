@@ -13,6 +13,12 @@ const scenarioSelect = document.querySelector('#virtual-scenario');
 const removeScenarioButton = document.querySelector('#virtual-remove-scenario');
 const vehicleSelect = document.querySelector('#virtual-vehicle');
 const removeVehicleButton = document.querySelector('#virtual-remove-vehicle');
+const vehicleBulkToggle = document.querySelector('#virtual-vehicles-bulk-toggle');
+const vehicleBulkActions = document.querySelector('#virtual-vehicles-bulk-actions');
+const vehicleBulkList = document.querySelector('#virtual-vehicles-bulk-list');
+const vehicleSelectAll = document.querySelector('#virtual-vehicles-select-all');
+const vehicleBulkRemove = document.querySelector('#virtual-vehicles-bulk-remove');
+const vehicleBulkCancel = document.querySelector('#virtual-vehicles-bulk-cancel');
 const routeLayerGroup = L.layerGroup().addTo(map);
 const activeRouteLayerGroup = L.layerGroup().addTo(map);
 const markerLayerGroup = L.layerGroup().addTo(map);
@@ -312,6 +318,8 @@ let mode = 'normal';
 let scenarioId = '';
 let scenarioRevision = 0;
 let selectedVehicleId = '';
+let vehicleBulkMode = false;
+const selectedVehicleIds = new Set();
 let speedControlEditing = false;
 let pendingSpeedChange = null;
 let applyingSpeedChange = false;
@@ -1103,6 +1111,31 @@ map.on?.('zoomend', () => {
   for (const visual of routeVisuals) applyRouteStrokeWidths(visual);
 });
 function renderVehicles({ updateVehicleSelect = true } = {}) {
+  const removableIds = new Set(vehicles.map((vehicle) => String(vehicle.vehicleId)));
+  for (const id of selectedVehicleIds) if (!removableIds.has(id)) selectedVehicleIds.delete(id);
+  vehicleBulkToggle.hidden = vehicles.length === 0;
+  vehicleBulkToggle.textContent = vehicleBulkMode ? '일괄 삭제 종료' : '차량 일괄 삭제';
+  vehicleBulkActions.hidden = !vehicleBulkMode;
+  vehicleBulkRemove.disabled = selectedVehicleIds.size === 0;
+  vehicleSelectAll.textContent = vehicles.length && vehicles.every((vehicle) => selectedVehicleIds.has(String(vehicle.vehicleId))) ? '선택 해제' : '전체 선택';
+  vehicleBulkList.replaceChildren();
+  if (vehicleBulkMode) for (const vehicle of vehicles) {
+    const row = document.createElement('li');
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selectedVehicleIds.has(String(vehicle.vehicleId));
+    checkbox.setAttribute('aria-label', `${vehicle.vehicleCode} 선택`);
+    checkbox.addEventListener('change', () => {
+      const id = String(vehicle.vehicleId);
+      if (checkbox.checked) selectedVehicleIds.add(id); else selectedVehicleIds.delete(id);
+      vehicleBulkRemove.disabled = selectedVehicleIds.size === 0;
+      vehicleSelectAll.textContent = vehicles.length && vehicles.every((item) => selectedVehicleIds.has(String(item.vehicleId))) ? '선택 해제' : '전체 선택';
+    });
+    label.append(checkbox, document.createTextNode(` ${vehicle.vehicleCode}${vehicle.vehicleName ? ` · ${vehicle.vehicleName}` : ''}`));
+    row.append(label);
+    vehicleBulkList.append(row);
+  }
   const selected = selectedVehicleId;
   if (updateVehicleSelect) {
     vehicleSelect.replaceChildren(new Option('가상 차량 선택', ''));
@@ -1398,6 +1431,40 @@ async function command(command, extra = {}) {
   }
   catch (error) { setStatus(error.message, true); return false; }
 }
+vehicleBulkToggle.addEventListener('click', () => {
+  vehicleBulkMode = !vehicleBulkMode;
+  selectedVehicleIds.clear();
+  renderVehicles({ updateVehicleSelect: false });
+});
+vehicleBulkCancel.addEventListener('click', () => {
+  vehicleBulkMode = false;
+  selectedVehicleIds.clear();
+  renderVehicles({ updateVehicleSelect: false });
+});
+vehicleSelectAll.addEventListener('click', () => {
+  if (vehicles.length && vehicles.every((vehicle) => selectedVehicleIds.has(String(vehicle.vehicleId)))) selectedVehicleIds.clear();
+  else vehicles.forEach((vehicle) => selectedVehicleIds.add(String(vehicle.vehicleId)));
+  renderVehicles({ updateVehicleSelect: false });
+});
+vehicleBulkRemove.addEventListener('click', async () => {
+  const ids = [...selectedVehicleIds];
+  const chosen = vehicles.filter((vehicle) => ids.includes(String(vehicle.vehicleId)));
+  if (!ids.length || !window.confirm(`Remove ${ids.length} selected virtual vehicle${ids.length === 1 ? '' : 's'}? Completed trip history will be preserved.`)) return;
+  vehicleBulkRemove.disabled = true;
+  let removed = 0;
+  const failures = [];
+  for (const vehicle of chosen) {
+    try {
+      await api(`/api/v1/virtual/vehicles/${encodeURIComponent(vehicle.vehicleId)}`, { method: 'PATCH', body: JSON.stringify({ isActive: false }) });
+      removed++;
+      if (selectedVehicleId === String(vehicle.vehicleId)) selectedVehicleId = '';
+    } catch (error) { failures.push(`${vehicle.vehicleCode}: ${error.message}`); }
+  }
+  selectedVehicleIds.clear();
+  if (!failures.length) vehicleBulkMode = false;
+  await loadScenarioData();
+  setStatus(failures.length ? `Removed ${removed} of ${chosen.length} vehicles. ${failures[0]}` : `Removed ${removed} virtual vehicle${removed === 1 ? '' : 's'}.` , failures.length > 0);
+});
 async function applySelectedSpeed() {
   const activeTrip = selectedActiveTrip();
   if (!activeTrip) {
