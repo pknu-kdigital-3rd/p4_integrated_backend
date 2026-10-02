@@ -822,12 +822,11 @@
           overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
           const labelWidth = overlayCtx.measureText(distanceLabel).width;
           const labelX = Math.max(0, Math.min(x + w / 2 - labelWidth / 2, overlayCanvas.width - labelWidth));
-          if (distanceColorMode) {
-            overlayCtx.lineJoin = 'round';
-            overlayCtx.lineWidth = 3;
-            overlayCtx.strokeStyle = labelBackgroundColor;
-            overlayCtx.strokeText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
-          }
+          overlayCtx.lineJoin = 'round';
+          overlayCtx.lineWidth = 3;
+          overlayCtx.strokeStyle = distanceColorMode
+            ? labelBackgroundColor : distanceColors.textColorForBackground(labelTextColor);
+          overlayCtx.strokeText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
           overlayCtx.fillStyle = labelTextColor;
           overlayCtx.fillText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
         }
