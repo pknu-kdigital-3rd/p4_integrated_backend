@@ -118,6 +118,18 @@ Existing `window.__liveFrameDebug`, `window.__replayDebug`, and telemetry match 
 - If traces identify telemetry queue age or unreliable QR association, fix that stage and measure again. Do not delay footage by an arbitrary amount or extend stale-data windows to conceal the problem.
 - Consider camera-follow changes only if camera motion still bothers the operator after marker synchronization meets the target.
 
+### Implementation status (first step)
+
+Implemented in the operator web client:
+
+- `glideMarker` moved to [live-map.js](../operator-web/live-map.js) with a per-marker ownership token. `cancelGlide` cancels the queued callback and invalidates the token, so a glide callback that was already dispatched cannot write again.
+- `createLiveMapFollower.update` (every frame-driven position, including free-replay estimates) and `drawReplayRouteAt` call `cancelGlide` before setting the marker.
+- The fleet poll's follow step only moves the camera (`follow`), so it no longer competes with its own glide.
+- `acceptLiveTelemetry` rejects superseded frames by `epoch`/`seq`: a newer epoch is accepted even when its sequence restarts at zero; an older epoch is rejected unless frames stopped for `LIVE_OVERRIDE_STALE_MS`. Frame ordering resets when the fleet poll moves the view to a new recording session.
+- Regression tests: `node/tests/live-marker-ownership.test.ts` (scenario 1 below, epoch/sequence/session cases). The overwrite test fails with the fix removed.
+
+Not done: the diagnostic trace, measurement of the remaining delay, and any calibration change (second and third steps).
+
 ## Verification and acceptance
 
 ### Regression scenarios for a subsequent implementation

@@ -27,6 +27,77 @@ export function fleetMarkerStyle(item) {
   return isAndroidGpsItem(item) ? ANDROID_GPS_MARKER_STYLE : FLEET_MARKER_STYLE;
 }
 
+// --- Marker position ownership -------------------------------------------
+// A fleet poll glides a marker to its new fix over the 3-second poll
+// interval, one animation callback per frame. A live-frame update must take
+// the marker over at once: before, update() set the frame position but the
+// glide's already-scheduled callbacks kept writing older interpolated
+// positions over it for the rest of the glide. Each glide now carries a
+// token; cancelGlide() both cancels the queued callback and invalidates the
+// token, so no callback of a superseded glide can write again.
+
+const GLIDE_JUMP_M = 1000;
+
+function scheduleFrame(callback) {
+  return typeof requestAnimationFrame === 'function' ? requestAnimationFrame(callback) : setTimeout(() => callback(performance.now()), 16);
+}
+
+function cancelFrame(id) {
+  if (id == null) return;
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id);
+  else clearTimeout(id);
+}
+
+function latLngPair(value) {
+  if (Array.isArray(value)) return [Number(value[0]), Number(value[1])];
+  return [Number(value?.lat), Number(value?.lng ?? value?.lon)];
+}
+
+function distanceM(a, b) {
+  const rad = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * rad, dLon = (b[1] - a[1]) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Stops the marker's glide for good; a queued callback finds its token stale. */
+export function cancelGlide(marker, cancel = cancelFrame) {
+  if (!marker) return;
+  cancel(marker.glideFrame);
+  marker.glideFrame = null;
+  marker.glideToken = (marker.glideToken ?? 0) + 1;
+}
+
+/**
+ * Moves a marker smoothly to target over durationMs instead of jumping; a
+ * hidden page or a jump over 1 km (a new vehicle, a seek) is applied at once.
+ * The scheduler is injectable for tests.
+ */
+export function glideMarker(marker, target, durationMs, {
+  schedule = scheduleFrame,
+  cancel = cancelFrame,
+  now = () => performance.now(),
+  hidden = () => typeof document !== 'undefined' && document.hidden,
+} = {}) {
+  cancelGlide(marker, cancel);
+  const to = latLngPair(target);
+  const current = marker.getLatLng?.();
+  const from = current ? latLngPair(current) : null;
+  if (!from || !from.every(Number.isFinite) || hidden() || distanceM(from, to) > GLIDE_JUMP_M) {
+    marker.setLatLng(to);
+    return;
+  }
+  const token = marker.glideToken;
+  const started = now();
+  const step = (time) => {
+    if (marker.glideToken !== token) return;
+    const t = Math.min(1, (time - started) / durationMs);
+    marker.setLatLng([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+    marker.glideFrame = t < 1 ? schedule(step) : null;
+  };
+  marker.glideFrame = schedule(step);
+}
+
 /** Centers the map on the first Android GPS marker for each recording session. */
 export function createAndroidMarkerRevealer({ map, minimumZoom = 15 }) {
   const revealedSessions = new Set();
@@ -102,6 +173,9 @@ export function createLiveMapFollower({
       markers.set(liveView.markerKey, entry);
     }
     entry.marker.setStyle?.(LIVE_MARKER_STYLE);
+    // The frame position owns the marker now; a fleet glide must not
+    // overwrite it with an older interpolated position.
+    cancelGlide(entry.marker);
     entry.marker.setLatLng(position);
     follow(position);
     return entry;

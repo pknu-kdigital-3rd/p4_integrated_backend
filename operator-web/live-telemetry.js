@@ -24,6 +24,8 @@ export function createLiveView(item, frameOrigin) {
     frameOrigin,
     lastUpdateAt: 0,
     lastStatus: null,
+    // { epoch, seq, at } of the last applied frame; see isSupersededFrame.
+    lastFrame: null,
   };
 }
 
@@ -35,7 +37,7 @@ export function createLiveView(item, frameOrigin) {
  * belongs to exactly one trip (or none), so the trip needs no separate check;
  * the fleet poll moves the view to a new session when the stream enters a trip.
  */
-export function acceptLiveTelemetry(liveView, event, frameWindow) {
+export function acceptLiveTelemetry(liveView, event, frameWindow, now = Date.now()) {
   if (!liveView || !event || !frameWindow) return null;
   if (event.origin !== liveView.frameOrigin) return null;
   if (event.source !== frameWindow) return null;
@@ -46,13 +48,42 @@ export function acceptLiveTelemetry(liveView, event, frameWindow) {
   if (!liveView.vehicleId || String(recording.vehicleId) !== liveView.vehicleId) return null;
   if (liveView.recordingSessionId && recording.recordingSessionId !== liveView.recordingSessionId) return null;
   if (!liveView.recordingSessionId && typeof recording.recordingSessionId !== 'string') return null;
-  return data.telemetry && typeof data.telemetry === 'object' ? data : null;
+  if (!data.telemetry || typeof data.telemetry !== 'object') return null;
+  return isSupersededFrame(liveView, data, now) ? null : data;
+}
+
+function frameOrder(message) {
+  if (message?.epoch == null || message?.seq == null) return null;
+  const epoch = Number(message.epoch), seq = Number(message.seq);
+  return Number.isFinite(epoch) && Number.isFinite(seq) ? { epoch, seq } : null;
+}
+
+/**
+ * True for a frame older than the last applied one: a late message from
+ * before a jump-to-live (older epoch) or out of order within an epoch. A newer
+ * epoch is accepted although its sequence restarts at zero. An older epoch is
+ * accepted again once frames have stopped for LIVE_OVERRIDE_STALE_MS, since
+ * a reloaded player may restart its numbering.
+ */
+export function isSupersededFrame(liveView, message, now) {
+  const frame = frameOrder(message), last = liveView?.lastFrame;
+  if (!frame || !last) return false;
+  if (frame.epoch > last.epoch) return false;
+  if (frame.epoch === last.epoch) return frame.seq <= last.seq;
+  return now - last.at <= LIVE_OVERRIDE_STALE_MS;
+}
+
+/** Forgets frame ordering, e.g. when the stream moves to a new session. */
+export function resetLiveFrameOrder(liveView) {
+  if (liveView) liveView.lastFrame = null;
 }
 
 /** Records an accepted update; returns the display position or null. */
 export function applyLiveTelemetry(liveView, message, now) {
   if (!liveView.recordingSessionId) liveView.recordingSessionId = message.recording.recordingSessionId;
   liveView.lastStatus = message.telemetry.status ?? null;
+  const frame = frameOrder(message);
+  if (frame) liveView.lastFrame = { ...frame, at: now };
   const gps = message.telemetry.gps;
   if (!gps || !Number.isFinite(gps.latitude) || !Number.isFinite(gps.longitude)) return null;
   liveView.lastUpdateAt = now;

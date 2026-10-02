@@ -1,8 +1,8 @@
 import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=5';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
-import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS} from './live-telemetry.js';
-import {createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js';
+import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder} from './live-telemetry.js?v=2';
+import {cancelGlide,createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,glideMarker,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js?v=2';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=13';
 import {installPanelDrag} from './panel-drag.js';
@@ -265,20 +265,6 @@ replayGpsLeadInput.addEventListener('change',()=>{
 function withReplayGpsLead(timestampNs){
   if(timestampNs==null||!/^\d+$/.test(String(timestampNs)))return timestampNs;
   return (BigInt(timestampNs)+BigInt(replayGpsLeadMs)*1_000_000n).toString();
-}
-// Moves a marker smoothly to its next position over one update interval
-// instead of jumping; a jump over 1 km (a new vehicle, a seek) is applied directly.
-function glideMarker(marker,target,durationMs){
-  const to=L.latLng(target),from=marker.getLatLng();
-  cancelAnimationFrame(marker.glideFrame);
-  if(!from||document.hidden||from.distanceTo(to)>1000){marker.setLatLng(to);return}
-  const started=performance.now();
-  const step=now=>{
-    const t=Math.min(1,(now-started)/durationMs);
-    marker.setLatLng([from.lat+(to.lat-from.lat)*t,from.lng+(to.lng-from.lng)*t]);
-    if(t<1)marker.glideFrame=requestAnimationFrame(step);
-  };
-  marker.glideFrame=requestAnimationFrame(step);
 }
 // Replacing a divIcon rebuilds its HTML and restarts the pulse animation, so
 // only replace it when it actually looks different.
@@ -682,7 +668,7 @@ function drawReplayRouteAt(layer,marker,position){
   // Path and vehicle move together, so both wait out a zoom animation.
   drawWhenNotZooming(layer,()=>{
     layer.setLatLngs(route.latLngs);
-    cancelAnimationFrame(marker.glideFrame);
+    cancelGlide(marker);
     marker.setLatLng(route.head);
   });
 }
@@ -876,11 +862,12 @@ function render(snapshot){
       // The replay vehicle is followed from its position on the route (route
       // tick); following its raw fix here would pull the camera back to it -
       // in a tunnel, to the entrance - every poll.
-      if(liveView?.markerKey===key&&liveMapFollower.isFollowing()&&!routeControlsMarker(item))liveMapFollower.update(pos);
+      // Camera only: the glide above moves the marker, and update() would cancel it.
+      if(liveView?.markerKey===key&&liveMapFollower.isFollowing()&&!routeControlsMarker(item))liveMapFollower.follow(pos);
     }
     const session=t.source_metadata?.recordingSessionId;
     // A new stream session supersedes the old one; reject its late frames.
-    if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId)liveView.recordingSessionId=session;
+    if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId){liveView.recordingSessionId=session;resetLiveFrameOrder(liveView)}
     syncVehicleMapLabel(entry);
   }
   dashboard.update(snapshot.vehicles);
