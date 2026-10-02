@@ -42,7 +42,9 @@ import {
     TELEMETRY_SOURCE_LABELS,
     TRIP_STATUS_LABELS,
     VEHICLE_SOURCE_LABELS,
+    VEHICLE_STATUS_GLOSSARY,
     VEHICLE_STATUS_LABELS,
+    displayVehicleStatus,
     label,
     reasonText,
 } from "../fleet/fleet.labels.ts";
@@ -222,7 +224,8 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         vehicleCode: vehicle.vehicleCode,
         vehicleName: vehicle.vehicleName,
         source: vehicle.vehicleSource,
-        status: vehicle.vehicleStatus,
+        // As the map shows it, so "대기" here is what the operator sees.
+        status: displayVehicleStatus(vehicle.vehicleStatus, trip?.tripStatus),
         fix: fix ? {
             recordedAt: fix.recorded_at.toISOString(), ageSeconds: ageSeconds(now, fix.recorded_at) ?? 0,
             lat: Number(fix.lat), lon: Number(fix.lon),
@@ -396,6 +399,7 @@ function nearbyText(nearby: NearbyVehicle[]): string {
 
 export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
     const lines = [`[선택 실차량] ${detail.vehicleCode}${detail.vehicleName ? ` (${detail.vehicleName})` : ""}: 출처 ${label(detail.source, VEHICLE_SOURCE_LABELS)}, 상태 ${label(detail.status, VEHICLE_STATUS_LABELS)}`];
+    lines.push(`  ${VEHICLE_STATUS_GLOSSARY}`);
     const fix = detail.fix;
     if (!fix) {
         lines.push("  위치: 수신 기록 없음");

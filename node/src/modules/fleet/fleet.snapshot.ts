@@ -14,7 +14,9 @@ import {
     SEVERITY_LABELS,
     SIM_STATUS_LABELS,
     VEHICLE_SOURCE_LABELS,
+    VEHICLE_STATUS_GLOSSARY,
     VEHICLE_STATUS_LABELS,
+    displayVehicleStatus,
     label,
     reasonText,
     type LabelMap,
@@ -115,7 +117,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
             WHERE v.is_active AND v.vehicle_source <> 'VIRTUAL'`,
         db.trip.findMany({
             where: { tripStatus: { in: ACTIVE_TRIP_STATES }, vehicle: { vehicleSource: { not: "VIRTUAL" } } },
-            select: { vehicleId: true, destinationName: true },
+            select: { vehicleId: true, destinationName: true, tripStatus: true },
         }),
         db.virtualScenario.findMany({
             where: { state: "ACTIVE" },
@@ -163,7 +165,8 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
         const expectedToReport = vehicle.vehicleStatus === "DRIVING" || tripByVehicle.has(vehicle.vehicleId.toString());
         if (reason && expectedToReport) {
             notable.push({
-                vehicleCode: vehicle.vehicleCode, source: vehicle.vehicleSource, status: vehicle.vehicleStatus,
+                vehicleCode: vehicle.vehicleCode, source: vehicle.vehicleSource,
+                status: displayVehicleStatus(vehicle.vehicleStatus, tripByVehicle.get(vehicle.vehicleId.toString())?.tripStatus),
                 lastFixAgeSeconds: ageSeconds, speedKmh: Number.isFinite(speed) ? speed : null,
                 tripDestination: tripByVehicle.get(vehicle.vehicleId.toString())?.destinationName ?? null, reason,
             });
@@ -177,7 +180,8 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
         realVehicles: {
             total: vehicles.length,
             bySource: count(vehicles, (vehicle) => vehicle.vehicleSource),
-            byStatus: count(vehicles, (vehicle) => vehicle.vehicleStatus),
+            // As the map shows it (대기/운행중/...), not the stored code.
+            byStatus: count(vehicles, (vehicle) => displayVehicleStatus(vehicle.vehicleStatus, tripByVehicle.get(vehicle.vehicleId.toString())?.tripStatus)),
             reporting, stale, noPosition,
             activeTrips: trips.length,
             notable: notable.slice(0, MAX_LISTED),
@@ -257,6 +261,7 @@ function renderRealLines(snapshot: FleetSnapshot): string[] {
     const real = snapshot.realVehicles;
     const lines = [
         `[실차량] 활성 ${real.total}대 (출처: ${formatCounts(real.bySource, VEHICLE_SOURCE_LABELS)}) / 상태: ${formatCounts(real.byStatus, VEHICLE_STATUS_LABELS)}`,
+        `  ${VEHICLE_STATUS_GLOSSARY}`,
         `  위치 수신: 정상 ${real.reporting}대, 지연(${STALE_FIX_SECONDS / 60}분 초과) ${real.stale}대, 기록 없음 ${real.noPosition}대 / 진행 중 운행 ${real.activeTrips}건`,
     ];
     if (real.reportingVehicles.length) {

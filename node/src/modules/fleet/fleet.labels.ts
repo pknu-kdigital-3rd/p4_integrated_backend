@@ -1,16 +1,35 @@
 // Korean names for the enum codes that appear in the assistant's live context.
 //
 // The LLM used to translate raw codes itself and got them wrong (vehicle
-// READY reported as "중지", i.e. stopped). Every code is now rendered as
-// "<Korean name>(<CODE>)" with the operator UI's wording, so the model can
-// copy the name instead of guessing. Unknown codes are left as they are.
+// READY reported as "중지"/"정지"). Codes are rendered as their Korean name
+// only, with the operator UI's wording: a code left next to the name still
+// invited the model to translate it. Unknown codes are left as they are.
 
 export type LabelMap = Readonly<Record<string, string>>;
 
-// vehicle.vehicle_status
+// vehicle.vehicle_status, bucketed exactly like operator-web dashboard-ui.js
+// vehicleStatus(): STOPPED/IDLE show as 대기 on the map, so the assistant
+// must not call them 정차.
 export const VEHICLE_STATUS_LABELS: LabelMap = {
-    READY: "대기", DRIVING: "운행중", STOPPED: "정차", MAINTENANCE: "점검", OFFLINE: "오프라인",
+    DRIVING: "운행중", IN_PROGRESS: "운행중", ACTIVE: "운행중", RUNNING: "운행중",
+    READY: "대기", STOPPED: "대기", IDLE: "대기", AVAILABLE: "대기",
+    MAINTENANCE: "점검", WARNING: "점검", INSPECTION: "점검",
+    OFFLINE: "오프라인",
 };
+
+// One line defining the vehicle states, placed in the live context.
+export const VEHICLE_STATUS_GLOSSARY =
+    "(상태 용어: 운행중=운행 중인 차량, 대기=운행 가능하며 배정을 기다리는 차량으로 정지·고장이 아님, 점검=정비 중, 오프라인=연결 끊김)";
+
+/**
+ * The vehicle's state as the operator map shows it: a trip in progress means
+ * driving whatever the stored status says (phone-tracked vehicles keep their
+ * seeded READY).
+ */
+export function displayVehicleStatus(status: string, tripStatus?: string | null): string {
+    if (tripStatus === "IN_PROGRESS") return "운행중";
+    return VEHICLE_STATUS_LABELS[String(status).toUpperCase()] ?? "미확인";
+}
 
 // trip.trip_status (operator-web TRIP_STATUS_LABELS)
 export const TRIP_STATUS_LABELS: LabelMap = {
@@ -81,8 +100,7 @@ export const BLOCKED_REASON_LABELS: LabelMap = {
 };
 
 export function label(code: string, labels: LabelMap): string {
-    const name = labels[code];
-    return name ? `${name}(${code})` : code;
+    return labels[code] ?? code;
 }
 
 // Free text such as blockedReason: just the Korean, the English adds nothing.

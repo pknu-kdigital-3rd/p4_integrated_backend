@@ -13,6 +13,7 @@ import {
     type VirtualVehicleDetail,
 } from "../src/modules/assistant/assistant.context.ts";
 import { assistantChatSchema } from "../src/modules/assistant/assistant.schema.ts";
+import { displayVehicleStatus } from "../src/modules/fleet/fleet.labels.ts";
 
 const NOW = new Date("2026-10-02T01:00:00Z"); // 10:00 KST
 
@@ -68,7 +69,7 @@ describe("assistant context rendering", () => {
         expect(context.liveText).toContain("속도 32.4 km/h, 진행 방향 118°");
         expect(context.liveText).toContain("최근 60초 속도: 최소 12.0, 평균 27.3, 최대 38.9 km/h");
         expect(context.liveText).toContain("TRUCK-5 43 m");
-        expect(context.liveText).toContain("가장 가까운 감지 객체: 보행자(person) 3.4 m (위험(DANGER)");
+        expect(context.liveText).toContain("가장 가까운 감지 객체: 보행자 3.4 m (위험");
         expect(context.liveText).toContain("피치 2.1°, 롤 -0.4°");
         expect(context.liveText).not.toContain("[가상 시나리오]");
         expect(context.reportFigures).toContain("## 차량 TRUCK-2 현황 보고서");
@@ -91,29 +92,34 @@ describe("assistant context rendering", () => {
         expect(vehicleOnly.reportFigures).toContain("### 시나리오 '도심 통제' (#7)");
 
         const withScenario = virtualVehicleContext(VIRTUAL, SCENARIO, NOW.toISOString(), true);
-        expect(withScenario.liveText).toContain("[가상 시나리오] '도심 통제'(#7, 진행 중(ACTIVE)): 차량 2대");
-        expect(withScenario.liveText).toContain("- SIM-2 경로 없음(NO_ROUTE)");
+        expect(withScenario.liveText).toContain("[가상 시나리오] '도심 통제'(#7, 진행 중): 차량 2대");
+        expect(withScenario.liveText).toContain("- SIM-2 경로 없음");
     });
 
     it("reports a selected scenario with its vehicles and restrictions", () => {
         const context = scenarioContext(SCENARIO, NOW.toISOString());
         expect(context.subject).toBe("시나리오 도심 통제");
         expect(context.liveText).toContain("차단 2건, 혼잡 가중 1건 (사유: 공사)");
-        expect(context.reportFigures).toContain("- SIM-2 경로 없음(NO_ROUTE) (No viable path)");
+        expect(context.reportFigures).toContain("- SIM-2 경로 없음 (No viable path)");
         expect(context.retrievalQuery).toContain("도로 통제");
     });
 
     it("names every status in Korean so the model does not translate codes", () => {
         const ready = { ...REAL, status: "READY", trip: { ...REAL.trip!, status: "READY" } };
         const text = realVehicleContext(ready, NOW.toISOString(), null).liveText;
-        expect(text).toContain("상태 대기(READY)");
-        expect(text).toContain("운행 #41 출발 대기(READY)");
-        expect(text).toContain("단말 GPS(DEVICE_GPS)");
-        expect(text).toContain("객체 근접(OBJECT_PROXIMITY) 심각(CRITICAL)");
+        expect(text).toContain("상태 대기");
+        expect(text).toContain("운행 #41 출발 대기");
+        expect(text).toContain("단말 GPS, 정확도");
+        expect(text).toContain("객체 근접 심각");
         const blocked = { ...VIRTUAL, state: { ...VIRTUAL.state!, simStatus: "BLOCKED_AWAITING_OPERATOR", blockedReason: "Blocked road ahead" } };
         const virtualText = virtualVehicleContext(blocked, SCENARIO, NOW.toISOString(), false).liveText;
-        expect(virtualText).toContain("상태 통제 구간 앞 정지, 관제 조치 대기(BLOCKED_AWAITING_OPERATOR) (앞쪽 도로가 통제됨)");
-        expect(virtualText).toContain("경로 재계산(ROUTE_RECALCULATED) 2");
+        expect(virtualText).toContain("상태 통제 구간 앞 정지, 관제 조치 대기 (앞쪽 도로가 통제됨)");
+        expect(virtualText).toContain("경로 재계산 2");
+        expect(text).not.toMatch(/READY|DEVICE_GPS|CRITICAL/);
+        // STOPPED shows as 대기 on the map; the assistant must say the same.
+        expect(realVehicleContext({ ...REAL, status: displayVehicleStatus("STOPPED", null) }, NOW.toISOString(), null).liveText).toContain("상태 대기");
+        expect(displayVehicleStatus("READY", "IN_PROGRESS")).toBe("운행중");
+        expect(text).toContain("대기=운행 가능하며 배정을 기다리는 차량으로 정지·고장이 아님");
         // Unknown codes pass through unchanged.
         expect(realVehicleContext({ ...REAL, status: "SOMETHING_NEW" }, NOW.toISOString(), null).liveText).toContain("상태 SOMETHING_NEW");
     });
@@ -196,7 +202,7 @@ describe("buildAssistantContext scope routing", () => {
         expect(scenario.subject).toBe("시나리오 도심 통제");
         const vehicle = await buildAssistantContext(db, { question: "q", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }, NOW);
         expect(vehicle.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
-        expect(vehicle.liveText).toContain("상태 도착 완료(COMPLETED)");
+        expect(vehicle.liveText).toContain("상태 도착 완료");
         expect(calls).toContain("vehicle:9");
     });
 

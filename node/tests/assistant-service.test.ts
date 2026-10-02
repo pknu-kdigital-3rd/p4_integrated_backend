@@ -33,7 +33,7 @@ describe("assistant service", () => {
         const { service, requests } = serviceWithRecorder();
         const result = await service.chat({ mode: "qa", question: "정지한 차량은?" });
         expect(requests[0]).toMatchObject({ question: "정지한 차량은?", mode: "qa", top_k: 5 });
-        expect(requests[0]!.live_context).toContain("V-2 경로 없음(NO_ROUTE)");
+        expect(requests[0]!.live_context).toContain("V-2 경로 없음");
         expect(requests[0]!.retrieval_query).toBeUndefined();
         expect(result.answer).toBe("평가 [S1]");
         expect(result.sources[0]!.doc_id).toBe("G-10-2023");

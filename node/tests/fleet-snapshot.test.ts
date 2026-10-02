@@ -60,6 +60,8 @@ describe("fleet snapshot", () => {
         const real = snapshot.realVehicles;
         expect(real.total).toBe(4);
         expect(real.bySource).toEqual({ BIMS: 1, CUSTOM: 3 });
+        // Bucketed as the map shows them; READY is 대기, never 정지/정차.
+        expect(real.byStatus).toEqual({ 운행중: 2, 대기: 2 });
         expect([real.reporting, real.stale, real.noPosition]).toEqual([1, 1, 2]);
         expect(real.activeTrips).toBe(1);
         // TRUCK-4 is READY without a trip, so missing positions are expected.
@@ -87,9 +89,9 @@ describe("fleet snapshot", () => {
         const text = renderSnapshotText(await collectFleetSnapshot(fakeDb(), NOW));
         expect(text).toContain("[기준 시각] 2026. 10. 02. 10:00 (KST)");
         expect(text).toContain("위치 수신: 정상 1대, 지연(2분 초과) 1대, 기록 없음 2대");
-        expect(text).toContain("TRUCK-2 (자체 등록(CUSTOM), 운행중(DRIVING)) 마지막 위치 10분 전");
-        expect(text).toContain("V-2 경로 없음(NO_ROUTE) (도로 통제 후 우회 경로 없음)");
-        expect(text).toContain("객체 근접(OBJECT_PROXIMITY) 심각(CRITICAL) TRUCK-2: 보행자 접근");
+        expect(text).toContain("TRUCK-2 (자체 등록, 운행중) 마지막 위치 10분 전");
+        expect(text).toContain("V-2 경로 없음 (도로 통제 후 우회 경로 없음)");
+        expect(text).toContain("객체 근접 심각 TRUCK-2: 보행자 접근");
     });
 
     it("caps the snapshot text", async () => {
@@ -106,7 +108,7 @@ describe("fleet snapshot", () => {
         const snapshot = await collectFleetSnapshot(fakeDb(), NOW);
         const figures = renderReportFigures(snapshot);
         expect(figures).toContain("| 활성 차량 | 4대 |");
-        expect(figures).toContain("| 도심 통제 (#7) | 2대 | 주행 중(DRIVING) 1, 경로 없음(NO_ROUTE) 1 | 2 / 1 |");
+        expect(figures).toContain("| 도심 통제 (#7) | 2대 | 주행 중 1, 경로 없음 1 | 2 / 1 |");
         expect(figures).toContain("| 미확인 경보 | 1건 |");
         const query = reportRetrievalQuery(snapshot);
         expect(query).toContain("도로 통제");
