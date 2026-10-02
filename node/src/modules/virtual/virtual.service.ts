@@ -4,6 +4,7 @@ import { logger } from "../../config/logger.ts";
 import type { Prisma, VirtualRoute } from "../../generated/prisma/client.ts";
 import { routingInternalClient } from "./routing-internal.client.ts";
 import { diffRoadState, rerouteReason, routeAffectedByChange } from "./virtual-reroute-scope.ts";
+import { occupiedVehicleIds } from "./virtual-occupancy.ts";
 import { shiftSnappedStops, waypointPassed, waypointRouteOffsets } from "./virtual-waypoint-progress.ts";
 import type {
     CommandBody,
@@ -407,18 +408,6 @@ async function activeVehicleState(vehicleId: bigint) {
         where: { vehicleId },
         include: { trip: { include: { routes: { where: { isCurrent: true } }, waypoints: { orderBy: { sequence: "asc" } } } } },
     });
-}
-
-function occupiedVehicleIds(
-    states: Array<{ vehicleId: bigint; currentEdgeId: string | null; currentPhysicalSegmentId: string | null }>,
-    resolved: { affectedDirectedEdgeIds: string[]; affectedPhysicalSegmentIds: string[] },
-) {
-    const directed = new Set(resolved.affectedDirectedEdgeIds);
-    const physical = new Set(resolved.affectedPhysicalSegmentIds);
-    return states
-        .filter((state) => (state.currentEdgeId !== null && directed.has(state.currentEdgeId))
-            || (state.currentPhysicalSegmentId !== null && physical.has(state.currentPhysicalSegmentId)))
-        .map((state) => state.vehicleId.toString());
 }
 
 export const virtualService = {
