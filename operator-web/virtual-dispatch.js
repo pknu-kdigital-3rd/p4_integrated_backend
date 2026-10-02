@@ -333,15 +333,42 @@ let applyingSpeedChange = false;
 let vehicles = [];
 // Read by the assistant panel (app.js) so questions in virtual mode are
 // about the selected scenario and vehicle.
+function scenarioOptionName(option) {
+  return (option?.textContent || '').replace(/\s·\srev\s\d+$/, '').trim();
+}
 window.__virtualAssistantScope = () => {
   if (!scenarioId) return { scope: { view: 'virtual' }, label: '가상 시나리오 전체' };
-  const scenarioName = scenarioSelect.selectedOptions[0]?.textContent?.trim() || `#${scenarioId}`;
+  const scenarioName = scenarioOptionName(scenarioSelect.selectedOptions[0]) || `#${scenarioId}`;
   if (!selectedVehicleId) return { scope: { view: 'virtual', scenarioId: String(scenarioId) }, label: `시나리오 ${scenarioName}` };
   const vehicle = vehicles.find((item) => String(item.vehicleId) === String(selectedVehicleId));
   return {
     scope: { view: 'virtual', scenarioId: String(scenarioId), vehicleId: String(selectedVehicleId) },
     label: `가상 차량 ${vehicle?.vehicleCode || `#${selectedVehicleId}`} · 시나리오 ${scenarioName}`,
   };
+};
+// Scenarios known to the scenario list (loaded once virtual mode was
+// opened) and the vehicles of the current scenario, for the assistant's
+// target list.
+window.__virtualAssistantTargets = () => {
+  const scenarios = [...scenarioSelect.options].filter((option) => option.value).map((option) => {
+    const name = scenarioOptionName(option) || `#${option.value}`;
+    return { value: `virtual:${option.value}`, text: name, label: `시나리오 ${name}`, scope: { view: 'virtual', scenarioId: option.value } };
+  });
+  if (!scenarios.length) return [];
+  const groups = [{ label: '가상 시나리오', options: scenarios }];
+  const current = scenarios.find((option) => option.scope.scenarioId === String(scenarioId));
+  if (current && vehicles.length) {
+    groups.push({
+      label: `가상 차량 · ${current.text}`,
+      options: vehicles.map((vehicle) => ({
+        value: `virtual:${scenarioId}:${vehicle.vehicleId}`,
+        text: vehicle.vehicleCode,
+        label: `가상 차량 ${vehicle.vehicleCode} · 시나리오 ${current.text}`,
+        scope: { view: 'virtual', scenarioId: String(scenarioId), vehicleId: String(vehicle.vehicleId) },
+      })),
+    });
+  }
+  return groups;
 };
 let restrictions = [];
 let restrictionBulkMode = false;

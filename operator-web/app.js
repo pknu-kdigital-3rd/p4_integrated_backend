@@ -8,7 +8,7 @@ import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOn
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
-import {initializeAssistantPanel} from './assistant-panel.js?v=3';
+import {initializeAssistantPanel} from './assistant-panel.js?v=4';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
@@ -378,9 +378,22 @@ function drawWhenNotZooming(key,draw){
 function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:false}));}
 new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
 const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
-initializeAssistantPanel({getToken:()=>token,getScope:assistantScope});
+initializeAssistantPanel({getToken:()=>token,getScope:assistantScope,getTargets:assistantTargets});
 // What the assistant answers about: the selected real vehicle in monitoring
 // mode, or the scenario/virtual vehicle selection in virtual mode.
+// Everything the operator can point the assistant at instead: every real
+// vehicle on the map, plus virtual scenarios and vehicles once loaded.
+function assistantTargets(){
+  const seen=new Set(),real=[];
+  for(const {item} of markers.values()){
+    if(item?.vehicleId==null||item.vehicleSource==='VIRTUAL'||seen.has(String(item.vehicleId)))continue;
+    seen.add(String(item.vehicleId));
+    const name=liveTargetLabel(item);
+    real.push({value:`real:${item.vehicleId}`,text:name,label:`실차량 ${name}`,scope:{view:'monitoring',vehicleId:String(item.vehicleId)}});
+  }
+  real.sort((a,b)=>a.text.localeCompare(b.text,'ko'));
+  return[{label:'실차량',options:real},...(window.__virtualAssistantTargets?.()??[])];
+}
 function assistantScope(){
   if(window.__virtualMode)return window.__virtualAssistantScope?.()??{scope:{view:'virtual'},label:'가상 시나리오 전체'};
   if(selected?.vehicleId==null)return{scope:{view:'monitoring'},label:'실차량 전체'};

@@ -168,9 +168,28 @@ function createAssistantConnection({ getToken, onEvent, onLost }) {
   };
 }
 
-// getScope() returns { scope, label }: the operator's current selection,
-// sent with each question so the answer is about what is on screen.
-export function initializeAssistantPanel({ getToken, getScope = () => ({ scope: undefined, label: '전체 현황' }) }) {
+export const AUTO_TARGET = 'auto';
+export const FLEET_TARGET = 'fleet';
+const FLEET = { scope: undefined, label: '전체 현황' };
+
+/**
+ * Scope for the target chosen in the panel. 'auto' follows the screen
+ * selection, 'fleet' is the whole fleet, anything else is an option from
+ * getTargets(). A chosen vehicle or scenario that no longer exists falls
+ * back to the screen selection.
+ */
+export function resolveTarget(value, auto, groups) {
+  if (value === FLEET_TARGET) return { ...FLEET, value };
+  for (const group of groups) {
+    for (const option of group.options) if (option.value === value) return { scope: option.scope, label: option.label, value };
+  }
+  return { ...auto, value: AUTO_TARGET };
+}
+
+// getScope() returns { scope, label } for the operator's current screen
+// selection. getTargets() returns [{ label, options: [{ value, text, label,
+// scope }] }]: every vehicle or scenario the operator can ask about instead.
+export function initializeAssistantPanel({ getToken, getScope = () => FLEET, getTargets = () => [] }) {
   const drawer = document.querySelector('#assistant-drawer');
   const messages = document.querySelector('#assistant-messages');
   const form = document.querySelector('#assistant-form');
@@ -179,7 +198,9 @@ export function initializeAssistantPanel({ getToken, getScope = () => ({ scope: 
   const stopButton = document.querySelector('#assistant-stop');
   const submitButton = form.querySelector('button[type="submit"]');
   const railButton = document.querySelector('[data-rail=assistant]');
-  const scopeLabel = document.querySelector('#assistant-scope');
+  const targetSelect = document.querySelector('#assistant-target');
+  let chosenTarget = AUTO_TARGET;
+  let renderedTargetsKey = '';
   // requestId -> { element, content, text, sources, model, retrievalError, snapshotAt, renderQueued }
   const answers = new Map();
   let current = null;
@@ -210,15 +231,51 @@ export function initializeAssistantPanel({ getToken, getScope = () => ({ scope: 
 
   function currentScope() {
     try {
-      return getScope() ?? { scope: undefined, label: '전체 현황' };
+      return getScope() ?? FLEET;
     } catch {
-      return { scope: undefined, label: '전체 현황' };
+      return FLEET;
     }
   }
 
-  function showScope() {
-    if (scopeLabel) scopeLabel.textContent = `질문 대상: ${currentScope().label}`;
+  function currentTargets() {
+    try {
+      return (getTargets() ?? []).filter((group) => group?.options?.length);
+    } catch {
+      return [];
+    }
   }
+
+  function chosenScope() {
+    return resolveTarget(chosenTarget, currentScope(), currentTargets());
+  }
+
+  // Rebuilds the target list when vehicles or scenarios change. Not while
+  // the list is focused: replacing options would close an open dropdown.
+  function showScope() {
+    if (!targetSelect) return;
+    const auto = currentScope();
+    const groups = currentTargets();
+    const key = JSON.stringify(groups.map((group) => [group.label, group.options.map((option) => [option.value, option.text ?? option.label])]));
+    if (key !== renderedTargetsKey && document.activeElement !== targetSelect) {
+      renderedTargetsKey = key;
+      const fixed = [new Option('', AUTO_TARGET), new Option('전체 현황', FLEET_TARGET)];
+      const optgroups = groups.map((group) => {
+        const element = document.createElement('optgroup');
+        element.label = group.label;
+        for (const option of group.options) element.append(new Option(option.text ?? option.label, option.value));
+        return element;
+      });
+      targetSelect.replaceChildren(...fixed, ...optgroups);
+    }
+    const autoOption = targetSelect.querySelector(`option[value="${AUTO_TARGET}"]`);
+    if (autoOption) autoOption.textContent = `현재 선택 따라가기: ${auto.label}`;
+    // A chosen vehicle that disappeared falls back to the screen selection.
+    chosenTarget = resolveTarget(chosenTarget, auto, groups).value;
+    if (targetSelect.value !== chosenTarget) targetSelect.value = chosenTarget;
+  }
+
+  targetSelect?.addEventListener('change', () => { chosenTarget = targetSelect.value || AUTO_TARGET; });
+  targetSelect?.addEventListener('blur', showScope);
 
   // Reopening the panel shows what arrived in the background.
   new MutationObserver(() => {
@@ -323,8 +380,8 @@ export function initializeAssistantPanel({ getToken, getScope = () => ({ scope: 
     content.textContent = '현황을 확인하고 답변을 준비하는 중…';
     element.append(content);
     const requestId = newRequestId();
-    const { scope, label: subject } = currentScope();
     showScope();
+    const { scope, label: subject } = chosenScope();
     const answer = { requestId, element, content, text: '', sources: [], model: '', retrievalError: null, snapshotAt: null, subject, renderQueued: false };
     answers.set(requestId, answer);
     current = answer;

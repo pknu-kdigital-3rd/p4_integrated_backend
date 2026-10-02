@@ -144,7 +144,8 @@ body:not(.virtual-mode) .virtual-routing-log { display: none; }
 .assistant-sources summary { cursor: pointer; }
 .assistant-sources ul { margin: 4px 0 0; padding-left: 18px; }
 .assistant-meta { margin: 6px 0 0; font-size: 11px; color: var(--ui-text-muted); }
-.assistant-scope { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ui-primary); }
+.assistant-target { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ui-primary); }
+.assistant-target select { flex: 1; min-width: 0; font: inherit; font-weight: 400; padding: 4px 6px; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); }
 #assistant-form { display: grid; gap: 8px; }
 #assistant-question { width: 100%; resize: vertical; min-height: 44px; font: inherit; padding: 8px 10px; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); box-sizing: border-box; }
 .assistant-actions { display: flex; justify-content: flex-end; gap: 8px; }

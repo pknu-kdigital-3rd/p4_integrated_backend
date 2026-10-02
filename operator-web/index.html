@@ -348,9 +348,13 @@
      <p class="assistant-hint">
       선택한 차량·시나리오의 현황과 KOSHA 운송 안전지침을 근거로 답합니다.
      </p>
-     <p class="assistant-scope" id="assistant-scope">
-      질문 대상: 전체 현황
-     </p>
+     <label class="assistant-target">
+      질문 대상
+      <select id="assistant-target">
+       <option value="auto">현재 선택 따라가기</option>
+       <option value="fleet">전체 현황</option>
+      </select>
+     </label>
      <div aria-live="polite" id="assistant-messages">
      </div>
      <form id="assistant-form">
@@ -700,9 +704,9 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js">
   </script>
-  <script src="app.js?v=56" type="module">
+  <script src="app.js?v=57" type="module">
   </script>
-  <script src="virtual-dispatch.js?v=43" type="module">
+  <script src="virtual-dispatch.js?v=44" type="module">
   </script>
  </body>
 </html>
