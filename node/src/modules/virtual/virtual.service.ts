@@ -1047,6 +1047,9 @@ export const virtualService = {
         const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { waypoints: true } });
         if (!trip) throw new AppError(404, "Virtual trip not found", "VIRTUAL_TRIP_NOT_FOUND");
         if (trip.tripRevision !== input.expectedTripRevision) throw new AppError(409, "Trip changed; refresh waypoints", "STALE_TRIP_REVISION");
+        if (["COMPLETED", "CANCELLED"].includes(trip.state)) throw new AppError(409, "Virtual trip is terminal", "TRIP_TERMINAL");
+        const currentState = await activeVehicleState(trip.vehicleId);
+        if (!currentState || currentState.virtualTripId !== tripId) throw new AppError(409, "Virtual trip is no longer active", "TRIP_NOT_ACTIVE");
         const reached = trip.waypoints.filter((item) => item.status === "REACHED");
         await prisma.$transaction(async (tx) => {
             await tx.virtualTripWaypoint.deleteMany({ where: { virtualTripId: tripId, status: "PENDING" } });
@@ -1054,8 +1057,12 @@ export const virtualService = {
             await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { tripRevision: { increment: 1 }, commandVersion: { increment: 1 } } });
             await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "WAYPOINTS_REPLACED", payload: { count: input.waypoints.length } });
         });
-        const settings = await ensureSettings(trip.vehicleId);
-        if (settings.autoFollowEnabled && trip.state === "DRIVING") await this.rerouteFromCurrentPosition(trip.vehicleId);
+        const route = await this.rerouteFromCurrentPosition(trip.vehicleId, undefined, {
+            expectedTripRevision: trip.tripRevision + 1,
+            reason: "WAYPOINTS_CHANGED",
+            ...(actorId === undefined ? {} : { actorId }),
+        });
+        if (!route) throw new AppError(409, "Trip changed while recalculating its waypoints", "STALE_TRIP_REVISION");
         return this.getTrip(tripId);
     },
 

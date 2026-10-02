@@ -650,11 +650,12 @@ function markPointsChanged(message) {
 }
 function removeRoutePoint(kind, index) {
   cancelInFlightRouteCalculation();
+  const previousWaypoints = kind === 'waypoint' ? points.waypoints.slice() : null;
   if (kind === 'waypoint') points.waypoints.splice(index, 1);
   else points[kind] = null;
   renderPoints();
   const label = kind === 'waypoint' ? `경유지 ${index + 1}` : kind === 'origin' ? '출발지' : '도착지';
-  void refreshPreviewAfterPointChange(`${label} 핀을 제거했습니다.`);
+  void refreshPreviewAfterPointChange(`${label} 핀을 제거했습니다.`, kind, previousWaypoints);
 }
 function selectedActiveTrip() {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
@@ -695,11 +696,46 @@ async function replaceActiveDestination(activeTrip, destination, previousDestina
     finishRouting();
   }
 }
+async function replaceActiveWaypoints(activeTrip, previousWaypoints) {
+  const expectedTripRevision = Number(activeTrip.trip.tripRevision);
+  if (!Number.isInteger(expectedTripRevision) || expectedTripRevision < 1) {
+    setStatus('The active trip revision is unavailable; refresh the virtual workspace.', true);
+    return;
+  }
+  cancelInFlightRouteCalculation();
+  const controller = new AbortController();
+  routeCalculationController = controller;
+  const finishRouting = beginRouteCalculation('경유지 변경에 맞춰 최적 경로를 다시 계산하는 중…');
+  try {
+    setStatus('Updating trip waypoints and recalculating the optimal path…');
+    await api(`/api/v1/virtual/trips/${encodeURIComponent(activeTrip.tripId)}/waypoints`, {
+      method: 'PUT',
+      body: JSON.stringify({ waypoints: points.waypoints, expectedTripRevision }),
+      signal: controller.signal,
+    });
+    if (routeCalculationController !== controller) return;
+    await loadScenarioData();
+    if (routeCalculationController !== controller) return;
+    setStatus('Waypoints updated and optimal path recalculated.');
+  } catch (error) {
+    if (controller.signal.aborted || routeCalculationController !== controller) return;
+    if (previousWaypoints) points.waypoints = previousWaypoints;
+    renderPoints();
+    setStatus(error.message, true);
+  } finally {
+    if (routeCalculationController === controller) routeCalculationController = null;
+    finishRouting();
+  }
+}
 async function refreshPreviewAfterPointChange(message, kind = null, previousPoint = null) {
   markPointsChanged(`${message} Recalculating optimal path…`);
   const activeTrip = selectedActiveTrip();
   if (kind === 'destination' && activeTrip && points.destination) {
     await replaceActiveDestination(activeTrip, points.destination, previousPoint);
+    return;
+  }
+  if (kind === 'waypoint' && activeTrip) {
+    await replaceActiveWaypoints(activeTrip, previousPoint);
     return;
   }
   if (activeTrip) return;
@@ -1529,6 +1565,7 @@ map.on('mousemove', event => {
 });
 async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
   const previousDestination = kind === 'destination' ? points.destination : null;
+  const previousWaypoints = kind === 'waypoint' ? points.waypoints.slice() : null;
   const previousPoint = kind === 'waypoint' ? points.waypoints[waypointIndex] : points[kind];
   const label = kind === 'waypoint' ? `Waypoint ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind[0].toUpperCase() + kind.slice(1);
   const finishRouting = beginRouteCalculation('위치를 도로에 맞추고 경로를 계산하는 중…');
@@ -1562,7 +1599,7 @@ async function snapAndSetRoutePoint(kind, rawPoint, waypointIndex = null) {
     const message = kind === 'waypoint' && waypointIndex === null
       ? `${label} added and snapped to road.`
       : `${label} snapped to road.`;
-    await refreshPreviewAfterPointChange(message, kind, previousDestination);
+    await refreshPreviewAfterPointChange(message, kind, kind === 'waypoint' ? previousWaypoints : previousDestination);
   } catch (error) {
     renderPoints();
     setStatus(`Could not snap ${label.toLowerCase()}: ${error.message}`, true);
