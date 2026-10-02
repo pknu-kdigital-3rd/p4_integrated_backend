@@ -1,19 +1,14 @@
-// Operator assistant: current fleet snapshot + KOSHA transport-guide RAG.
+// Operator assistant: live ITS context + KOSHA transport-guide RAG.
 //
 // The p4-llm assistant API (services/llm, ASSISTANT_BASE_URL) owns retrieval and the LLM;
-// this service supplies the fleet facts. In report mode the figures are
-// rendered here from the snapshot and the LLM only adds the assessment and
-// recommendations, so a report's numbers can never be invented.
+// this service supplies the live facts, scoped to the operator's current
+// selection (assistant.context.ts). In report mode the figures are rendered
+// here from data and the LLM only adds the assessment and recommendations,
+// so a report's numbers can never be invented.
 import { AppError } from "../../common/errors/app-error.ts";
 import { env } from "../../config/env.ts";
 import { prisma } from "../../infrastructure/database/prisma.ts";
-import {
-    collectFleetSnapshot,
-    renderReportFigures,
-    renderSnapshotText,
-    reportRetrievalQuery,
-    type FleetSnapshot,
-} from "../fleet/fleet.snapshot.ts";
+import { buildAssistantContext, type AssistantContext } from "./assistant.context.ts";
 import type { AssistantChatBody } from "./assistant.schema.ts";
 
 export const REPORT_QUESTION = "현재 차량 현황에 대한 보고서를 작성하세요.";
@@ -53,26 +48,26 @@ export type AssistantUpstreamEvent =
 
 // Events sent to the operator panel over the assistant WebSocket.
 export type AssistantClientEvent =
-    | { type: "start"; mode: "qa" | "report"; question: string; snapshotAt: string }
+    | { type: "start"; mode: "qa" | "report"; question: string; snapshotAt: string; subject: string }
     | { type: "meta"; sources: AssistantSource[]; model: string; retrievalError: string | null }
     | { type: "delta"; text: string }
     | { type: "done"; model: string; timingsMs: { retrieval: number; generation: number } }
     | { type: "error"; code: string; message: string };
 
 export type AssistantDeps = {
-    snapshot: () => Promise<FleetSnapshot>;
+    context: (body: AssistantChatBody) => Promise<AssistantContext>;
     // undefined when ASSISTANT_BASE_URL is not configured
     ask?: (request: AssistantUpstreamRequest) => Promise<AssistantUpstreamResponse>;
     stream?: (request: AssistantUpstreamRequest, signal: AbortSignal) => AsyncIterable<AssistantUpstreamEvent>;
 };
 
-function upstreamRequest(body: AssistantChatBody, snapshot: FleetSnapshot): AssistantUpstreamRequest {
+function upstreamRequest(body: AssistantChatBody, context: AssistantContext): AssistantUpstreamRequest {
     const report = body.mode === "report";
     return {
         question: body.question || REPORT_QUESTION,
         mode: body.mode,
-        live_context: renderSnapshotText(snapshot),
-        ...(report ? { retrieval_query: reportRetrievalQuery(snapshot) } : {}),
+        live_context: `[질문 대상] ${context.subject}\n${context.liveText}`,
+        ...(report ? { retrieval_query: context.retrievalQuery } : {}),
         top_k: report ? 6 : 5,
     };
 }
@@ -137,26 +132,20 @@ export function createAssistantService(deps: AssistantDeps) {
     return {
         async chat(body: AssistantChatBody) {
             if (!deps.ask) throw new AppError(503, "Assistant is not configured (ASSISTANT_BASE_URL)", "ASSISTANT_DISABLED");
-            const snapshot = await deps.snapshot();
-            const report = body.mode === "report";
-            const question = body.question || REPORT_QUESTION;
-            const upstream = await deps.ask({
-                question,
-                mode: body.mode,
-                live_context: renderSnapshotText(snapshot),
-                ...(report ? { retrieval_query: reportRetrievalQuery(snapshot) } : {}),
-                top_k: report ? 6 : 5,
-            });
-            const answer = report
-                ? `${renderReportFigures(snapshot)}\n\n### 평가 및 권고\n${upstream.answer}`
+            const context = await deps.context(body);
+            const request = upstreamRequest(body, context);
+            const upstream = await deps.ask(request);
+            const answer = body.mode === "report"
+                ? `${context.reportFigures}\n\n### 평가 및 권고\n${upstream.answer}`
                 : upstream.answer;
             return {
                 mode: body.mode,
-                question,
+                question: request.question,
+                subject: context.subject,
                 answer,
                 sources: upstream.sources ?? [],
                 model: upstream.model,
-                snapshotAt: snapshot.generatedAt,
+                snapshotAt: context.generatedAt,
                 retrievalError: upstream.retrieval_error ?? null,
                 timingsMs: { retrieval: upstream.retrieval_ms, generation: upstream.generation_ms },
             };
@@ -171,11 +160,11 @@ export function createAssistantService(deps: AssistantDeps) {
                 yield { type: "error", code: "ASSISTANT_DISABLED", message: "Assistant is not configured (ASSISTANT_BASE_URL)" };
                 return;
             }
-            const snapshot = await deps.snapshot();
-            const request = upstreamRequest(body, snapshot);
-            yield { type: "start", mode: body.mode, question: request.question, snapshotAt: snapshot.generatedAt };
+            const context = await deps.context(body);
+            const request = upstreamRequest(body, context);
+            yield { type: "start", mode: body.mode, question: request.question, snapshotAt: context.generatedAt, subject: context.subject };
             if (body.mode === "report") {
-                yield { type: "delta", text: `${renderReportFigures(snapshot)}\n\n### 평가 및 권고\n` };
+                yield { type: "delta", text: `${context.reportFigures}\n\n### 평가 및 권고\n` };
             }
             let model = "";
             let retrievalMs = 0;
@@ -211,6 +200,6 @@ export function createAssistantService(deps: AssistantDeps) {
 }
 
 export const assistantService = createAssistantService({
-    snapshot: () => collectFleetSnapshot(prisma),
+    context: (body) => buildAssistantContext(prisma, body),
     ...(env.ASSISTANT_BASE_URL ? { ask: postToAssistant, stream: streamFromAssistant } : {}),
 });

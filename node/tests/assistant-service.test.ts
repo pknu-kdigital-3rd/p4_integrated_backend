@@ -6,11 +6,12 @@ import {
     createAssistantService,
     type AssistantUpstreamRequest,
 } from "../src/modules/assistant/assistant.service.ts";
-import type { FleetSnapshot } from "../src/modules/fleet/fleet.snapshot.ts";
+import { ALL_SECTIONS, type FleetSnapshot } from "../src/modules/fleet/fleet.snapshot.ts";
+import { fleetContext } from "../src/modules/assistant/assistant.context.ts";
 
 const SNAPSHOT: FleetSnapshot = {
     generatedAt: "2026-10-02T01:00:00.000Z",
-    realVehicles: { total: 2, bySource: { CUSTOM: 2 }, byStatus: { DRIVING: 2 }, reporting: 2, stale: 0, noPosition: 0, activeTrips: 1, notable: [] },
+    realVehicles: { total: 2, bySource: { CUSTOM: 2 }, byStatus: { DRIVING: 2 }, reporting: 2, stale: 0, noPosition: 0, activeTrips: 1, notable: [], reportingVehicles: [] },
     virtual: { scenarios: [{ scenarioId: "7", name: "도심 통제", vehicles: 1, byStatus: { NO_ROUTE: 1 }, restrictions: { blocked: 1, penalty: 0 }, recentEvents: {}, problemVehicles: [{ vehicleCode: "V-2", simStatus: "NO_ROUTE", blockedReason: null }] }] },
     vision: { windowMinutes: 30, detections: 0, byRisk: {}, topClasses: [], unconfirmedAlerts: 0, recentAlerts: [] },
 };
@@ -18,7 +19,7 @@ const SNAPSHOT: FleetSnapshot = {
 function serviceWithRecorder() {
     const requests: AssistantUpstreamRequest[] = [];
     const service = createAssistantService({
-        snapshot: async () => SNAPSHOT,
+        context: async () => fleetContext(SNAPSHOT, ALL_SECTIONS, "전체 현황"),
         ask: async (request) => {
             requests.push(request);
             return { answer: "평가 [S1]", model: "EXAONE4.5", sources: [{ rank: 1, doc_id: "G-10-2023" }], retrieval_ms: 12, generation_ms: 900, retrieval_error: null };
@@ -50,7 +51,7 @@ describe("assistant service", () => {
     });
 
     it("is a 503 when the assistant is not configured", async () => {
-        const service = createAssistantService({ snapshot: async () => SNAPSHOT });
+        const service = createAssistantService({ context: async () => fleetContext(SNAPSHOT, ALL_SECTIONS, "전체 현황") });
         await expect(service.chat({ mode: "qa", question: "q" })).rejects.toMatchObject({ statusCode: 503, code: "ASSISTANT_DISABLED" });
     });
 

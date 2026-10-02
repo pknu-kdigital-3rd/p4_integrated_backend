@@ -3,7 +3,7 @@
 // Protocol (JSON text frames) on /api/v1/assistant/ws:
 //   client -> { type: "auth", token }                    first message, within 10 s
 //   server -> { type: "ready" }
-//   client -> { type: "ask", requestId, mode, question? }
+//   client -> { type: "ask", requestId, mode, question?, scope? }
 //   server -> { type: "start" | "meta" | "delta" | "done" | "error", requestId, ... }
 //
 // The panel keeps one socket for the page's lifetime, so hiding the panel
@@ -113,7 +113,7 @@ function handleConnection(socket: WebSocket, deps: AssistantSocketDeps) {
         }
         const requestId = typeof message.requestId === "string" ? message.requestId.slice(0, 64) : "";
         if (!requestId) { send(socket, { type: "error", code: "INVALID_MESSAGE", message: "requestId is required" }); return; }
-        const parsed = assistantChatSchema.safeParse({ mode: message.mode, question: message.question });
+        const parsed = assistantChatSchema.safeParse({ mode: message.mode, question: message.question, scope: message.scope });
         if (!parsed.success) {
             send(socket, { type: "error", requestId, code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid request" });
             return;

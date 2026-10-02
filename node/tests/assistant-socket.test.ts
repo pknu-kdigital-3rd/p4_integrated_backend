@@ -12,11 +12,12 @@ import {
     type AssistantSocketDeps,
 } from "../src/modules/assistant/assistant.socket.ts";
 import { createAssistantService, type AssistantUpstreamEvent } from "../src/modules/assistant/assistant.service.ts";
-import type { FleetSnapshot } from "../src/modules/fleet/fleet.snapshot.ts";
+import { ALL_SECTIONS, type FleetSnapshot } from "../src/modules/fleet/fleet.snapshot.ts";
+import { fleetContext } from "../src/modules/assistant/assistant.context.ts";
 
 const SNAPSHOT: FleetSnapshot = {
     generatedAt: "2026-10-02T01:00:00.000Z",
-    realVehicles: { total: 1, bySource: { CUSTOM: 1 }, byStatus: { DRIVING: 1 }, reporting: 1, stale: 0, noPosition: 0, activeTrips: 0, notable: [] },
+    realVehicles: { total: 1, bySource: { CUSTOM: 1 }, byStatus: { DRIVING: 1 }, reporting: 1, stale: 0, noPosition: 0, activeTrips: 0, notable: [], reportingVehicles: [] },
     virtual: { scenarios: [] },
     vision: { windowMinutes: 30, detections: 0, byRisk: {}, topClasses: [], unconfirmedAlerts: 0, recentAlerts: [] },
 };
@@ -55,7 +56,7 @@ function connect(url: string) {
 }
 
 function serviceWithUpstream(stream: (signal: AbortSignal) => AsyncIterable<AssistantUpstreamEvent>) {
-    return createAssistantService({ snapshot: async () => SNAPSHOT, stream: (_request, signal) => stream(signal) });
+    return createAssistantService({ context: async () => fleetContext(SNAPSHOT, ALL_SECTIONS, "전체 현황"), stream: (_request, signal) => stream(signal) });
 }
 
 const verifyOperator = async () => ({ role: "OPERATOR" });
@@ -79,6 +80,23 @@ describe("assistant websocket", () => {
         await driver.opened;
         driver.send({ type: "auth", token: "driver" });
         expect((await driver.closed).code).toBe(CLOSE_FORBIDDEN);
+    });
+
+    it("passes the operator's selection scope to the answer", async () => {
+        const bodies: unknown[] = [];
+        const url = await start({
+            verify: verifyOperator,
+            streamChat: async function* (body) { bodies.push(body); yield { type: "done", model: "m", timingsMs: { retrieval: 0, generation: 0 } }; },
+        });
+        const client = connect(url);
+        await client.opened;
+        client.send({ type: "auth", token: "t" });
+        await client.until((message) => message.type === "ready");
+        client.send({ type: "ask", requestId: "r1", mode: "qa", question: "이 차량 속도는?", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } });
+        await client.until((message) => message.type === "done");
+        expect(bodies).toEqual([{ mode: "qa", question: "이 차량 속도는?", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }]);
+        client.send({ type: "ask", requestId: "r2", mode: "qa", question: "q", scope: { view: "monitoring", vehicleId: "x" } });
+        expect(await client.until((message) => message.requestId === "r2")).toMatchObject({ type: "error", code: "VALIDATION_ERROR" });
     });
 
     it("streams start, meta, deltas and done for a question", async () => {

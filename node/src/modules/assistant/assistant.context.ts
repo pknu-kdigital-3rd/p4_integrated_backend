@@ -1,0 +1,593 @@
+// Assistant context scoped to what the operator is looking at.
+//
+// The panel sends its current selection: in monitoring mode the selected
+// real vehicle, in virtual mode the selected scenario and virtual vehicle.
+// The live text handed to the LLM then describes that subject in detail
+// (position, speed, trip, nearby vehicles, detections, alerts) instead of
+// only fleet-wide counts. A scenario summary is added whenever the question
+// asks about the scenario, and a request without a scope gets the
+// fleet-wide snapshot as before.
+//
+// Collectors only read. Renderers are pure so they can be tested without a
+// database.
+import type { PrismaClient } from "../../generated/prisma/client.ts";
+import {
+    ALL_SECTIONS,
+    EVENT_WINDOW_MINUTES,
+    STALE_FIX_SECONDS,
+    VISION_WINDOW_MINUTES,
+    capText,
+    collectFleetSnapshot,
+    formatAge,
+    formatCounts,
+    formatKst,
+    renderReportFigures,
+    renderScenarioTable,
+    renderSnapshotText,
+    renderVirtualLines,
+    reportRetrievalQuery,
+    type AlertNote,
+    type CountMap,
+    type FleetSnapshot,
+    type SnapshotSections,
+} from "../fleet/fleet.snapshot.ts";
+import type { AssistantChatBody, AssistantScope } from "./assistant.schema.ts";
+
+const ACTIVE_TRIP_STATES = ["READY", "IN_PROGRESS", "PAUSED"];
+const MOVING_SIM_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
+const SPEED_WINDOW_SECONDS = 60;
+const NEARBY_LIMIT = 3;
+const MAX_SCENARIO_VEHICLES = 12;
+const LAST_EVENTS = 5;
+
+export type AssistantContext = {
+    generatedAt: string;
+    // Short Korean label of what the answer is about, shown in the panel.
+    subject: string;
+    liveText: string;
+    reportFigures: string;
+    retrievalQuery: string;
+};
+
+export type NearbyVehicle = { vehicleCode: string; distanceM: number; speedKmh: number | null; ageSeconds: number | null };
+export type EventNote = { eventType: string; createdAt: string };
+
+export type RealVehicleDetail = {
+    vehicleCode: string;
+    vehicleName: string | null;
+    source: string;
+    status: string;
+    fix: {
+        recordedAt: string; ageSeconds: number; lat: number; lon: number;
+        speedKmh: number | null; headingDeg: number | null; accuracyM: number | null; telemetrySource: string;
+    } | null;
+    recentSpeed: { samples: number; minKmh: number; avgKmh: number; maxKmh: number } | null;
+    trip: { tripId: string; status: string; originName: string | null; destinationName: string; startedAt: string | null } | null;
+    nearby: NearbyVehicle[];
+    detections: {
+        total: number;
+        byRisk: CountMap;
+        topClasses: Array<{ className: string; count: number }>;
+        nearest: { className: string; distanceM: number; riskLevel: string; detectedAt: string } | null;
+        attitude: { pitchDeg: number | null; rollDeg: number | null; detectedAt: string } | null;
+    };
+    alerts: { unconfirmed: number; recent: AlertNote[] };
+};
+
+export type VirtualVehicleDetail = {
+    vehicleCode: string;
+    vehicleName: string | null;
+    state: {
+        simStatus: string; speedKmh: number | null; speedFactor: number; blockedReason: string | null;
+        lastCheckpointAt: string; position: { lat: number; lon: number } | null; routeVersion: number;
+    } | null;
+    trip: {
+        tripId: string; state: string; startedAt: string; endedAt: string | null;
+        waypointsReached: number; waypointsTotal: number;
+        route: { distanceM: number; durationSec: number; reason: string | null } | null;
+    } | null;
+    nearby: NearbyVehicle[];
+    recentEvents: CountMap;
+    lastEvents: EventNote[];
+};
+
+export type ScenarioDetail = {
+    scenarioId: string;
+    name: string;
+    state: string;
+    vehicles: Array<{ vehicleCode: string; simStatus: string; speedKmh: number | null; blockedReason: string | null }>;
+    byStatus: CountMap;
+    restrictions: { blocked: number; penalty: number; reasons: string[] };
+    recentEvents: CountMap;
+    lastEvents: EventNote[];
+};
+
+export function asksAboutScenario(question: string | undefined): boolean {
+    return Boolean(question && /시나리오|scenario/i.test(question));
+}
+
+function toNumber(value: unknown): number | null {
+    if (value === null || value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
+function ageSeconds(now: Date, at: Date | null): number | null {
+    return at ? Math.max(0, Math.round((now.getTime() - at.getTime()) / 1000)) : null;
+}
+
+function point(value: unknown): { lat: number; lon: number } | null {
+    const candidate = value as { lat?: unknown; lon?: unknown } | null;
+    const lat = toNumber(candidate?.lat), lon = toNumber(candidate?.lon);
+    return lat === null || lon === null || (lat === 0 && lon === 0) ? null : { lat, lon };
+}
+
+export function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+    const rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
+}
+
+// ---------------------------------------------------------------------------
+// Collectors (read-only)
+// ---------------------------------------------------------------------------
+
+export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigint, now = new Date()): Promise<RealVehicleDetail | null> {
+    const vehicle = await db.vehicle.findUnique({
+        where: { vehicleId },
+        select: { vehicleCode: true, vehicleName: true, vehicleSource: true, vehicleStatus: true },
+    });
+    if (!vehicle || vehicle.vehicleSource === "VIRTUAL") return null;
+    const visionSince = new Date(now.getTime() - VISION_WINDOW_MINUTES * 60_000);
+    const reportingSince = new Date(now.getTime() - STALE_FIX_SECONDS * 1000);
+
+    const [fixes, speeds, nearby, trip, byRisk, byClass, nearest, attitude, unconfirmed, recentAlerts] = await Promise.all([
+        db.$queryRaw<Array<{ recorded_at: Date; speed_kmh: unknown; heading_deg: unknown; horizontal_accuracy_m: unknown; telemetry_source: string; lat: number; lon: number }>>`
+            SELECT recorded_at, speed_kmh, heading_deg, horizontal_accuracy_m, telemetry_source,
+                   ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
+            FROM vehicle_position WHERE vehicle_id = ${vehicleId}
+            ORDER BY recorded_at DESC LIMIT 1`,
+        // Speed over the minute before the latest fix, so a momentary
+        // reading is not mistaken for the vehicle's pace.
+        db.$queryRaw<Array<{ samples: bigint; min_kmh: unknown; avg_kmh: unknown; max_kmh: unknown }>>`
+            SELECT count(speed_kmh) AS samples, min(speed_kmh) AS min_kmh, avg(speed_kmh) AS avg_kmh, max(speed_kmh) AS max_kmh
+            FROM vehicle_position
+            WHERE vehicle_id = ${vehicleId}
+              AND recorded_at >= (SELECT max(recorded_at) FROM vehicle_position WHERE vehicle_id = ${vehicleId}) - make_interval(secs => ${SPEED_WINDOW_SECONDS})`,
+        // Other real vehicles that are reporting now, nearest first.
+        db.$queryRaw<Array<{ vehicle_code: string; recorded_at: Date; speed_kmh: unknown; distance_m: number }>>`
+            WITH me AS (
+                SELECT location FROM vehicle_position WHERE vehicle_id = ${vehicleId}
+                ORDER BY recorded_at DESC LIMIT 1
+            )
+            SELECT v.vehicle_code, p.recorded_at, p.speed_kmh, ST_Distance(p.location, me.location) AS distance_m
+            FROM vehicle v
+            CROSS JOIN me
+            JOIN LATERAL (
+                SELECT location, recorded_at, speed_kmh FROM vehicle_position vp
+                WHERE vp.vehicle_id = v.vehicle_id
+                ORDER BY recorded_at DESC LIMIT 1
+            ) p ON true
+            WHERE v.is_active AND v.vehicle_source <> 'VIRTUAL' AND v.vehicle_id <> ${vehicleId}
+              AND p.recorded_at >= ${reportingSince}
+            ORDER BY distance_m ASC LIMIT ${NEARBY_LIMIT}`,
+        db.trip.findFirst({
+            where: { vehicleId, tripStatus: { in: ACTIVE_TRIP_STATES } },
+            orderBy: { tripId: "desc" },
+            select: { tripId: true, tripStatus: true, originName: true, destinationName: true, startedAt: true },
+        }),
+        db.detectionEvent.groupBy({ by: ["riskLevel"], where: { vehicleId, detectedAt: { gte: visionSince } }, _count: { _all: true } }),
+        db.detectionEvent.groupBy({
+            by: ["className"], where: { vehicleId, detectedAt: { gte: visionSince } }, _count: { _all: true },
+            orderBy: { _count: { className: "desc" } }, take: 5,
+        }),
+        db.detectionEvent.findFirst({
+            where: { vehicleId, detectedAt: { gte: visionSince }, distanceM: { not: null } },
+            orderBy: { distanceM: "asc" },
+            select: { className: true, distanceM: true, riskLevel: true, detectedAt: true },
+        }),
+        // Camera attitude from the device IMU, recorded with each detection.
+        db.detectionEvent.findFirst({
+            where: { vehicleId, detectedAt: { gte: visionSince }, OR: [{ pitchAtCaptureDeg: { not: null } }, { rollAtCaptureDeg: { not: null } }] },
+            orderBy: { detectedAt: "desc" },
+            select: { pitchAtCaptureDeg: true, rollAtCaptureDeg: true, detectedAt: true },
+        }),
+        db.alert.count({ where: { vehicleId, alertStatus: "UNCONFIRMED" } }),
+        db.alert.findMany({
+            where: { vehicleId, createdAt: { gte: visionSince } }, orderBy: { createdAt: "desc" }, take: 5,
+            select: { alertType: true, severity: true, alertMessage: true, createdAt: true },
+        }),
+    ]);
+
+    const fix = fixes[0];
+    const speed = speeds[0];
+    const samples = speed ? Number(speed.samples) : 0;
+    return {
+        vehicleCode: vehicle.vehicleCode,
+        vehicleName: vehicle.vehicleName,
+        source: vehicle.vehicleSource,
+        status: vehicle.vehicleStatus,
+        fix: fix ? {
+            recordedAt: fix.recorded_at.toISOString(), ageSeconds: ageSeconds(now, fix.recorded_at) ?? 0,
+            lat: Number(fix.lat), lon: Number(fix.lon),
+            speedKmh: toNumber(fix.speed_kmh), headingDeg: toNumber(fix.heading_deg),
+            accuracyM: toNumber(fix.horizontal_accuracy_m), telemetrySource: fix.telemetry_source,
+        } : null,
+        recentSpeed: samples > 0 ? {
+            samples, minKmh: toNumber(speed!.min_kmh) ?? 0, avgKmh: toNumber(speed!.avg_kmh) ?? 0, maxKmh: toNumber(speed!.max_kmh) ?? 0,
+        } : null,
+        trip: trip ? {
+            tripId: trip.tripId.toString(), status: trip.tripStatus, originName: trip.originName,
+            destinationName: trip.destinationName, startedAt: trip.startedAt?.toISOString() ?? null,
+        } : null,
+        nearby: nearby.map((row) => ({
+            vehicleCode: row.vehicle_code, distanceM: Number(row.distance_m),
+            speedKmh: toNumber(row.speed_kmh), ageSeconds: ageSeconds(now, row.recorded_at),
+        })),
+        detections: {
+            total: byRisk.reduce((sum, row) => sum + row._count._all, 0),
+            byRisk: Object.fromEntries(byRisk.map((row) => [row.riskLevel, row._count._all])),
+            topClasses: byClass.map((row) => ({ className: row.className, count: row._count._all })),
+            nearest: nearest?.distanceM != null ? {
+                className: nearest.className, distanceM: Number(nearest.distanceM),
+                riskLevel: nearest.riskLevel, detectedAt: nearest.detectedAt.toISOString(),
+            } : null,
+            attitude: attitude ? {
+                pitchDeg: toNumber(attitude.pitchAtCaptureDeg), rollDeg: toNumber(attitude.rollAtCaptureDeg),
+                detectedAt: attitude.detectedAt.toISOString(),
+            } : null,
+        },
+        alerts: {
+            unconfirmed,
+            recent: recentAlerts.map((alert) => ({
+                alertType: alert.alertType, severity: alert.severity, vehicleCode: vehicle.vehicleCode,
+                message: alert.alertMessage, createdAt: alert.createdAt.toISOString(),
+            })),
+        },
+    };
+}
+
+export async function collectScenarioDetail(db: PrismaClient, scenarioId: bigint, now = new Date()): Promise<ScenarioDetail | null> {
+    const eventsSince = new Date(now.getTime() - EVENT_WINDOW_MINUTES * 60_000);
+    const scenario = await db.virtualScenario.findUnique({
+        where: { scenarioId },
+        select: {
+            scenarioId: true, name: true, state: true,
+            vehicleStates: {
+                where: { vehicle: { isActive: true } },
+                select: { simStatus: true, speedKmh: true, blockedReason: true, vehicle: { select: { vehicleCode: true } } },
+            },
+            restrictions: { where: { isActive: true }, select: { kind: true, reason: true } },
+            events: { where: { createdAt: { gte: eventsSince } }, orderBy: { createdAt: "desc" }, select: { eventType: true, createdAt: true } },
+        },
+    });
+    if (!scenario) return null;
+    const states = [...scenario.vehicleStates].sort((a, b) =>
+        Number(MOVING_SIM_STATES.includes(b.simStatus)) - Number(MOVING_SIM_STATES.includes(a.simStatus))
+        || a.vehicle.vehicleCode.localeCompare(b.vehicle.vehicleCode));
+    return {
+        scenarioId: scenario.scenarioId.toString(),
+        name: scenario.name,
+        state: scenario.state,
+        vehicles: states.map((state) => ({
+            vehicleCode: state.vehicle.vehicleCode, simStatus: state.simStatus,
+            speedKmh: state.speedKmh, blockedReason: state.blockedReason,
+        })),
+        byStatus: countBy(states.map((state) => state.simStatus)),
+        restrictions: {
+            blocked: scenario.restrictions.filter((restriction) => restriction.kind === "BLOCKED").length,
+            penalty: scenario.restrictions.filter((restriction) => restriction.kind !== "BLOCKED").length,
+            reasons: [...new Set(scenario.restrictions.map((restriction) => restriction.reason).filter((reason): reason is string => Boolean(reason)))].slice(0, 5),
+        },
+        recentEvents: countBy(scenario.events.map((event) => event.eventType)),
+        lastEvents: scenario.events.slice(0, LAST_EVENTS).map((event) => ({ eventType: event.eventType, createdAt: event.createdAt.toISOString() })),
+    };
+}
+
+export async function collectVirtualVehicleDetail(db: PrismaClient, scenarioId: bigint, vehicleId: bigint, now = new Date()): Promise<VirtualVehicleDetail | null> {
+    const eventsSince = new Date(now.getTime() - EVENT_WINDOW_MINUTES * 60_000);
+    const vehicle = await db.vehicle.findUnique({
+        where: { vehicleId },
+        select: {
+            vehicleCode: true, vehicleName: true, vehicleSource: true,
+            virtualState: {
+                select: {
+                    scenarioId: true, simStatus: true, speedKmh: true, speedFactor: true, blockedReason: true,
+                    lastCheckpointAt: true, lastPosition: true, routeVersion: true,
+                    trip: {
+                        select: {
+                            virtualTripId: true, state: true, startedAt: true, endedAt: true,
+                            waypoints: { select: { status: true } },
+                            routes: { where: { isCurrent: true }, take: 1, select: { distanceM: true, durationSec: true, reason: true } },
+                            events: { where: { createdAt: { gte: eventsSince } }, orderBy: { createdAt: "desc" }, select: { eventType: true, createdAt: true } },
+                        },
+                    },
+                },
+            },
+        },
+    });
+    if (!vehicle || vehicle.vehicleSource !== "VIRTUAL") return null;
+    // A vehicle keeps one state row; it describes this scenario only if the
+    // vehicle's last trip ran here.
+    const state = vehicle.virtualState?.scenarioId === scenarioId ? vehicle.virtualState : null;
+    const position = state ? point(state.lastPosition) : null;
+    let nearby: NearbyVehicle[] = [];
+    if (position && MOVING_SIM_STATES.includes(state!.simStatus)) {
+        const others = await db.virtualVehicleState.findMany({
+            where: { scenarioId, vehicleId: { not: vehicleId }, simStatus: { in: MOVING_SIM_STATES }, vehicle: { isActive: true } },
+            select: { lastPosition: true, speedKmh: true, lastCheckpointAt: true, vehicle: { select: { vehicleCode: true } } },
+        });
+        nearby = others
+            .map((other) => ({ other, at: point(other.lastPosition) }))
+            .filter((item): item is { other: typeof others[number]; at: { lat: number; lon: number } } => item.at !== null)
+            .map(({ other, at }) => ({
+                vehicleCode: other.vehicle.vehicleCode, distanceM: haversineM(position, at),
+                speedKmh: other.speedKmh, ageSeconds: ageSeconds(now, other.lastCheckpointAt),
+            }))
+            .sort((a, b) => a.distanceM - b.distanceM)
+            .slice(0, NEARBY_LIMIT);
+    }
+    const trip = state?.trip ?? null;
+    const route = trip?.routes[0] ?? null;
+    return {
+        vehicleCode: vehicle.vehicleCode,
+        vehicleName: vehicle.vehicleName,
+        state: state ? {
+            simStatus: state.simStatus, speedKmh: state.speedKmh, speedFactor: state.speedFactor,
+            blockedReason: state.blockedReason, lastCheckpointAt: state.lastCheckpointAt.toISOString(),
+            position, routeVersion: state.routeVersion,
+        } : null,
+        trip: trip ? {
+            tripId: trip.virtualTripId.toString(), state: trip.state,
+            startedAt: trip.startedAt.toISOString(), endedAt: trip.endedAt?.toISOString() ?? null,
+            waypointsReached: trip.waypoints.filter((waypoint) => waypoint.status === "REACHED").length,
+            waypointsTotal: trip.waypoints.length,
+            route: route ? { distanceM: route.distanceM, durationSec: route.durationSec, reason: route.reason } : null,
+        } : null,
+        nearby,
+        recentEvents: countBy(trip?.events.map((event) => event.eventType) ?? []),
+        lastEvents: (trip?.events ?? []).slice(0, LAST_EVENTS).map((event) => ({ eventType: event.eventType, createdAt: event.createdAt.toISOString() })),
+    };
+}
+
+function countBy(values: string[]): CountMap {
+    const result: CountMap = {};
+    for (const value of values) result[value] = (result[value] ?? 0) + 1;
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Rendering (pure)
+// ---------------------------------------------------------------------------
+
+function km(value: number | null): string {
+    return value === null ? "미상" : `${value.toFixed(1)} km/h`;
+}
+
+function meters(value: number): string {
+    return value >= 1000 ? `${(value / 1000).toFixed(2)} km` : `${Math.round(value)} m`;
+}
+
+function kstTime(iso: string): string {
+    return formatKst(iso).replace(/^.*?(\d{2}:\d{2}).*$/, "$1");
+}
+
+function nearbyText(nearby: NearbyVehicle[]): string {
+    return nearby.length
+        ? nearby.map((item) => `${item.vehicleCode} ${meters(item.distanceM)} (속도 ${km(item.speedKmh)})`).join(", ")
+        : "없음";
+}
+
+export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
+    const lines = [`[선택 실차량] ${detail.vehicleCode}${detail.vehicleName ? ` (${detail.vehicleName})` : ""}: 출처 ${detail.source}, 상태 ${detail.status}`];
+    const fix = detail.fix;
+    if (!fix) {
+        lines.push("  위치: 수신 기록 없음");
+    } else {
+        const stale = fix.ageSeconds > STALE_FIX_SECONDS ? " — 위치 수신 지연" : "";
+        const accuracy = fix.accuracyM === null ? "" : `, 정확도 ±${Math.round(fix.accuracyM)} m`;
+        lines.push(`  위치: 위도 ${fix.lat.toFixed(5)}, 경도 ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)}, ${fix.telemetrySource}${accuracy})${stale}`);
+        lines.push(`  속도 ${km(fix.speedKmh)}${fix.headingDeg === null ? "" : `, 진행 방향 ${Math.round(fix.headingDeg)}°`}`);
+    }
+    if (detail.recentSpeed) {
+        const speed = detail.recentSpeed;
+        lines.push(`  최근 ${SPEED_WINDOW_SECONDS}초 속도: 최소 ${speed.minKmh.toFixed(1)}, 평균 ${speed.avgKmh.toFixed(1)}, 최대 ${speed.maxKmh.toFixed(1)} km/h (${speed.samples}건)`);
+    }
+    const trip = detail.trip;
+    lines.push(trip
+        ? `  운행 #${trip.tripId} ${trip.status}: ${trip.originName ?? "출발지 미상"} → ${trip.destinationName}${trip.startedAt ? `, 시작 ${kstTime(trip.startedAt)}` : ""}`
+        : "  진행 중 운행 없음");
+    lines.push(`  주변 실차량(위치 수신 중, 가까운 순): ${nearbyText(detail.nearby)}`);
+    const detections = detail.detections;
+    lines.push(`  [영상 감지 최근 ${VISION_WINDOW_MINUTES}분] 감지 ${detections.total}건 (위험도: ${formatCounts(detections.byRisk)}), 주요 객체: ${detections.topClasses.length ? detections.topClasses.map((item) => `${item.className} ${item.count}`).join(", ") : "없음"}`);
+    if (detections.nearest) {
+        const nearest = detections.nearest;
+        lines.push(`  가장 가까운 감지 객체: ${nearest.className} ${nearest.distanceM.toFixed(1)} m (${nearest.riskLevel}, ${kstTime(nearest.detectedAt)})`);
+    }
+    if (detections.attitude) {
+        const attitude = detections.attitude;
+        const parts = [attitude.pitchDeg === null ? null : `피치 ${attitude.pitchDeg.toFixed(1)}°`, attitude.rollDeg === null ? null : `롤 ${attitude.rollDeg.toFixed(1)}°`].filter(Boolean);
+        lines.push(`  차량 자세(IMU, ${kstTime(attitude.detectedAt)} 감지 시점): ${parts.join(", ")}`);
+    }
+    lines.push(`  경보: 미확인 ${detail.alerts.unconfirmed}건`);
+    for (const alert of detail.alerts.recent) {
+        lines.push(`  - ${kstTime(alert.createdAt)} ${alert.alertType} ${alert.severity}${alert.message ? `: ${alert.message}` : ""}`);
+    }
+    return lines;
+}
+
+export function renderVirtualVehicleLines(detail: VirtualVehicleDetail, scenarioName: string | null): string[] {
+    const lines = [`[선택 가상 차량] ${detail.vehicleCode}${detail.vehicleName ? ` (${detail.vehicleName})` : ""}${scenarioName ? `, 시나리오 '${scenarioName}'` : ""}`];
+    const state = detail.state;
+    if (!state) {
+        lines.push("  이 시나리오에서 운행 기록 없음 (대기 중)");
+        return lines;
+    }
+    lines.push(`  상태 ${state.simStatus}${state.blockedReason ? ` (${state.blockedReason})` : ""}, 속도 ${km(state.speedKmh)}${state.speedFactor !== 1 ? `, 속도 배율 ${state.speedFactor}×` : ""}`);
+    if (state.position) lines.push(`  위치: 위도 ${state.position.lat.toFixed(5)}, 경도 ${state.position.lon.toFixed(5)} (갱신 ${kstTime(state.lastCheckpointAt)})`);
+    const trip = detail.trip;
+    if (trip) {
+        const route = trip.route ? `, 현재 경로 ${meters(trip.route.distanceM)} / 예상 ${Math.round(trip.route.durationSec / 60)}분` : "";
+        lines.push(`  운행 #${trip.tripId} ${trip.state}: 시작 ${kstTime(trip.startedAt)}${trip.endedAt ? `, 종료 ${kstTime(trip.endedAt)}` : ""}, 경유지 ${trip.waypointsReached}/${trip.waypointsTotal} 도달${route}, 경로 재계산 ${Math.max(0, state.routeVersion - 1)}회`);
+    }
+    lines.push(`  같은 시나리오 주변 차량(가까운 순): ${nearbyText(detail.nearby)}`);
+    if (Object.keys(detail.recentEvents).length) lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(detail.recentEvents)}`);
+    for (const event of detail.lastEvents) lines.push(`  - ${kstTime(event.createdAt)} ${event.eventType}`);
+    return lines;
+}
+
+export function renderScenarioLines(detail: ScenarioDetail): string[] {
+    const lines = [
+        `[가상 시나리오] '${detail.name}'(#${detail.scenarioId}, ${detail.state}): 차량 ${detail.vehicles.length}대 (${formatCounts(detail.byStatus)})`,
+        `  도로 통제: 차단 ${detail.restrictions.blocked}건, 혼잡 가중 ${detail.restrictions.penalty}건${detail.restrictions.reasons.length ? ` (사유: ${detail.restrictions.reasons.join(", ")})` : ""}`,
+    ];
+    for (const vehicle of detail.vehicles.slice(0, MAX_SCENARIO_VEHICLES)) {
+        lines.push(`  - ${vehicle.vehicleCode} ${vehicle.simStatus}, 속도 ${km(vehicle.speedKmh)}${vehicle.blockedReason ? ` (${vehicle.blockedReason})` : ""}`);
+    }
+    if (detail.vehicles.length > MAX_SCENARIO_VEHICLES) lines.push(`  … 외 ${detail.vehicles.length - MAX_SCENARIO_VEHICLES}대`);
+    if (Object.keys(detail.recentEvents).length) lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(detail.recentEvents)}`);
+    for (const event of detail.lastEvents) lines.push(`  - ${kstTime(event.createdAt)} ${event.eventType}`);
+    return lines;
+}
+
+function realVehicleReport(detail: RealVehicleDetail): string {
+    const fix = detail.fix;
+    return [
+        `### 실차량 ${detail.vehicleCode}`,
+        "| 항목 | 값 |", "|---|---|",
+        `| 출처 / 상태 | ${detail.source} / ${detail.status} |`,
+        `| 마지막 위치 | ${fix ? `${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)})` : "기록 없음"} |`,
+        `| 현재 속도 | ${km(fix?.speedKmh ?? null)} |`,
+        `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
+        `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${detail.trip.status} → ${detail.trip.destinationName}` : "없음"} |`,
+        `| 가장 가까운 실차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,
+        `| 영상 감지 (${VISION_WINDOW_MINUTES}분) | ${detail.detections.total}건 (${formatCounts(detail.detections.byRisk)}) |`,
+        `| 가장 가까운 감지 객체 | ${detail.detections.nearest ? `${detail.detections.nearest.className} ${detail.detections.nearest.distanceM.toFixed(1)} m (${detail.detections.nearest.riskLevel})` : "없음"} |`,
+        `| 미확인 경보 | ${detail.alerts.unconfirmed}건 |`,
+    ].join("\n");
+}
+
+function virtualVehicleReport(detail: VirtualVehicleDetail): string {
+    const state = detail.state, trip = detail.trip;
+    return [
+        `### 가상 차량 ${detail.vehicleCode}`,
+        "| 항목 | 값 |", "|---|---|",
+        `| 상태 | ${state ? `${state.simStatus}${state.blockedReason ? ` (${state.blockedReason})` : ""}` : "대기"} |`,
+        `| 속도 | ${km(state?.speedKmh ?? null)} |`,
+        `| 운행 | ${trip ? `#${trip.tripId} ${trip.state}, 경유지 ${trip.waypointsReached}/${trip.waypointsTotal}` : "없음"} |`,
+        `| 현재 경로 | ${trip?.route ? `${meters(trip.route.distanceM)}, 예상 ${Math.round(trip.route.durationSec / 60)}분` : "-"} |`,
+        `| 경로 재계산 | ${state ? Math.max(0, state.routeVersion - 1) : 0}회 |`,
+        `| 가장 가까운 차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,
+    ].join("\n");
+}
+
+function scenarioReport(detail: ScenarioDetail): string {
+    return [
+        `### 시나리오 '${detail.name}' (#${detail.scenarioId})`,
+        "| 항목 | 값 |", "|---|---|",
+        `| 차량 | ${detail.vehicles.length}대 (${formatCounts(detail.byStatus)}) |`,
+        `| 도로 통제 | 차단 ${detail.restrictions.blocked}건 / 혼잡 가중 ${detail.restrictions.penalty}건 |`,
+        `| 최근 ${EVENT_WINDOW_MINUTES}분 이벤트 | ${formatCounts(detail.recentEvents)} |`,
+        ...detail.vehicles.filter((vehicle) => ["NO_ROUTE", "BLOCKED_AWAITING_OPERATOR"].includes(vehicle.simStatus))
+            .map((vehicle) => `- ${vehicle.vehicleCode} ${vehicle.simStatus}${vehicle.blockedReason ? ` (${vehicle.blockedReason})` : ""}`),
+    ].join("\n");
+}
+
+function reportHeader(title: string, generatedAt: string): string {
+    return `## ${title}\n기준 시각: ${formatKst(generatedAt)}`;
+}
+
+const SAFETY_TOPIC = "작업장 내 운반차량 운행 안전 수칙";
+
+export function realVehicleContext(detail: RealVehicleDetail, generatedAt: string, scenarios: Pick<FleetSnapshot, "virtual"> | null): AssistantContext {
+    const lines = [`[기준 시각] ${formatKst(generatedAt)}`, ...renderRealVehicleLines(detail)];
+    if (scenarios) lines.push(...renderVirtualLines(scenarios));
+    const topics = [SAFETY_TOPIC, "차량 간 안전거리 및 제한속도"];
+    if ((detail.detections.byRisk.DANGER ?? 0) > 0 || detail.alerts.unconfirmed > 0) topics.push("보행자 및 근로자 충돌 방지 접근 경보");
+    if (!detail.fix || detail.fix.ageSeconds > STALE_FIX_SECONDS) topics.push("운행 차량 관리 감독 및 연락 체계");
+    return {
+        generatedAt,
+        subject: `실차량 ${detail.vehicleCode}`,
+        liveText: capText(lines.join("\n")),
+        reportFigures: [reportHeader(`차량 ${detail.vehicleCode} 현황 보고서`, generatedAt), realVehicleReport(detail), ...(scenarios ? [renderScenarioTable(scenarios)] : [])].join("\n\n"),
+        retrievalQuery: topics.join(", "),
+    };
+}
+
+export function virtualVehicleContext(detail: VirtualVehicleDetail, scenario: ScenarioDetail, generatedAt: string, includeScenario: boolean): AssistantContext {
+    const lines = [`[기준 시각] ${formatKst(generatedAt)}`, ...renderVirtualVehicleLines(detail, scenario.name)];
+    if (includeScenario) lines.push(...renderScenarioLines(scenario));
+    const topics = [SAFETY_TOPIC, "차량 간 안전거리 및 제한속도"];
+    if (detail.state && ["NO_ROUTE", "BLOCKED_AWAITING_OPERATOR"].includes(detail.state.simStatus)) topics.push("도로 통제 시 차량 우회 운행 및 정차 안전");
+    return {
+        generatedAt,
+        subject: `가상 차량 ${detail.vehicleCode} · 시나리오 ${scenario.name}`,
+        liveText: capText(lines.join("\n")),
+        // A report always places the vehicle within its scenario.
+        reportFigures: [reportHeader(`가상 차량 ${detail.vehicleCode} 현황 보고서`, generatedAt), virtualVehicleReport(detail), scenarioReport(scenario)].join("\n\n"),
+        retrievalQuery: topics.join(", "),
+    };
+}
+
+export function scenarioContext(detail: ScenarioDetail, generatedAt: string): AssistantContext {
+    const topics = [SAFETY_TOPIC];
+    if (detail.restrictions.blocked || detail.vehicles.some((vehicle) => ["NO_ROUTE", "BLOCKED_AWAITING_OPERATOR"].includes(vehicle.simStatus))) {
+        topics.push("도로 통제 시 차량 우회 운행 및 정차 안전");
+    }
+    return {
+        generatedAt,
+        subject: `시나리오 ${detail.name}`,
+        liveText: capText([`[기준 시각] ${formatKst(generatedAt)}`, ...renderScenarioLines(detail)].join("\n")),
+        reportFigures: [reportHeader(`시나리오 '${detail.name}' 현황 보고서`, generatedAt), scenarioReport(detail)].join("\n\n"),
+        retrievalQuery: topics.join(", "),
+    };
+}
+
+export function fleetContext(snapshot: FleetSnapshot, sections: SnapshotSections, subject: string, note?: string): AssistantContext {
+    const liveText = renderSnapshotText(snapshot, sections);
+    return {
+        generatedAt: snapshot.generatedAt,
+        subject,
+        liveText: note ? capText(`${note}\n${liveText}`) : liveText,
+        reportFigures: renderReportFigures(snapshot, sections),
+        retrievalQuery: reportRetrievalQuery(snapshot, sections),
+    };
+}
+
+const MONITORING_SECTIONS: SnapshotSections = { real: true, virtual: false, vision: true };
+const VIRTUAL_SECTIONS: SnapshotSections = { real: false, virtual: true, vision: false };
+
+// Picks the context for a request from its scope.
+export async function buildAssistantContext(db: PrismaClient, body: Pick<AssistantChatBody, "question" | "scope">, now = new Date()): Promise<AssistantContext> {
+    const scope: AssistantScope | undefined = body.scope;
+    const generatedAt = now.toISOString();
+    const aboutScenario = asksAboutScenario(body.question);
+
+    if (!scope) return fleetContext(await collectFleetSnapshot(db, now), ALL_SECTIONS, "전체 현황");
+
+    if (scope.view === "monitoring") {
+        if (scope.vehicleId) {
+            const [detail, snapshot] = await Promise.all([
+                collectRealVehicleDetail(db, BigInt(scope.vehicleId), now),
+                aboutScenario ? collectFleetSnapshot(db, now) : Promise.resolve(null),
+            ]);
+            if (detail) return realVehicleContext(detail, generatedAt, snapshot);
+            return fleetContext(snapshot ?? await collectFleetSnapshot(db, now), { ...MONITORING_SECTIONS, virtual: aboutScenario }, "실차량 전체",
+                "[참고] 선택한 차량을 찾을 수 없어 전체 실차량 현황을 제공합니다.");
+        }
+        return fleetContext(await collectFleetSnapshot(db, now), { ...MONITORING_SECTIONS, virtual: aboutScenario }, "실차량 전체");
+    }
+
+    if (scope.scenarioId) {
+        const scenarioId = BigInt(scope.scenarioId);
+        const [scenario, vehicle] = await Promise.all([
+            collectScenarioDetail(db, scenarioId, now),
+            scope.vehicleId ? collectVirtualVehicleDetail(db, scenarioId, BigInt(scope.vehicleId), now) : Promise.resolve(null),
+        ]);
+        if (scenario && vehicle) return virtualVehicleContext(vehicle, scenario, generatedAt, aboutScenario);
+        if (scenario) return scenarioContext(scenario, generatedAt);
+    }
+    return fleetContext(await collectFleetSnapshot(db, now), VIRTUAL_SECTIONS, "가상 시나리오 전체",
+        scope.scenarioId ? "[참고] 선택한 시나리오를 찾을 수 없어 활성 시나리오 전체 현황을 제공합니다." : undefined);
+}

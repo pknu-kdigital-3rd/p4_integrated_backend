@@ -68,6 +68,8 @@ describe("fleet snapshot", () => {
             ["TRUCK-2", "STALE_POSITION"],
         ]);
         expect(real.notable[0]!.tripDestination).toBe("부산신항");
+        expect(real.reportingVehicles).toEqual([{ vehicleCode: "BIMS-1", speedKmh: 35.5, lastFixAgeSeconds: 20, tripDestination: null }]);
+        expect(renderSnapshotText(snapshot)).toContain("- BIMS-1 35.5 km/h, 마지막 위치 20초 전");
     });
 
     it("summarises virtual scenarios and vision", async () => {
