@@ -4,12 +4,23 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inference playback</title>
+  <script>
+    // Apply the embedded layout before the first paint, rather than waiting
+    // for the parent's iframe load event and postMessage round trip.
+    if (new URLSearchParams(location.search).get('embedded') === '1') {
+      document.documentElement.classList.add('operator-live-view-fullscreen', 'operator-live-view-hide-fps');
+    }
+  </script>
   <style>
     body { margin: 0; padding: 20px; color: #eee; background: #181818; font-family: system-ui, sans-serif; }
     main { width: 100%; max-width: 980px; margin: auto; }
     #stage { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }
     canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     #overlay { pointer-events: none; }
+    #playback-loading { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; gap: 12px; text-align: center; background: #08121e; color: #fff; }
+    #playback-loading[hidden] { display: none; }
+    #playback-loading::before { content: ''; width: 24px; height: 24px; margin: auto; border: 3px solid #ffffff40; border-top-color: #fff; border-radius: 50%; animation: loading-spin 1s linear infinite; }
+    @keyframes loading-spin { to { transform: rotate(360deg); } }
     #fps-overlay { position: absolute; top: 8px; left: 8px; z-index: 2; padding: 4px 7px; color: #fff; background: #000b; border-radius: 4px; font: 13px ui-monospace, monospace; pointer-events: none; }
     /* The operator page shows the FPS counter only while its preview is fullscreen. */
     html.operator-live-view-hide-fps #fps-overlay { display: none; }
@@ -49,7 +60,7 @@
 <body>
 <main>
   <h2>Android stream · YOLO inference</h2>
-  <div id="stage"><canvas id="video"></canvas><canvas id="overlay"></canvas><div id="fps-overlay">Browser FPS: --</div></div>
+  <div id="stage"><canvas id="video"></canvas><canvas id="overlay"></canvas><div id="fps-overlay">Browser FPS: --</div><div id="playback-loading" role="status" hidden>Connecting to live video…</div></div>
   <button id="start">Start</button><button id="stop">Stop</button><button id="live">Jump to Live</button>
   <label><input id="boxes" type="checkbox" checked /> boxes</label>
   <label><input id="masks" type="checkbox" checked /> segmentation</label>
@@ -117,6 +128,7 @@
   const fpsOverlayEl = document.getElementById('fps-overlay');
   const modelLabelEl = document.getElementById('model-label');
   const statusEl = document.getElementById('status');
+  const loadingEl = document.getElementById('playback-loading');
   const statsEl = document.getElementById('stats');
   const boxesEl = document.getElementById('boxes');
   const masksEl = document.getElementById('masks');
@@ -145,12 +157,14 @@
   let socket = null, reconnectTimer = null, reconnectAttempt = 0, stopped = true;
   let jumpPending = false, awaitingLiveEpoch = false, backgroundedWhilePlaying = false;
   let foregroundResumePending = false, foregroundResumeTimer = null, foregroundReconnectAttempts = 0;
+  let lastForegroundResumeAt = -Infinity;
   let sessionId = sessionStorage.getItem('playback-session-id');
   let epoch = Number(sessionStorage.getItem('playback-epoch') || 0);
   let lastPresentedSeq = Number(sessionStorage.getItem('playback-last-seq') || -1);
   let queue = [], known = new Set(), pending = new Map();
   let decoder = null, decoderGeneration = 0, decoding = false, playing = false, sourceEnded = false;
   let lastPresentedTs = null, lastInferenceMs = 0, presentedCount = 0;
+  let lastPaintedAt = null;
   let browserFps = 0, fpsWindowStarted = performance.now(), fpsWindowFrames = 0;
   let lastDepth = {};
   let modelFilename = '--';
@@ -220,8 +234,10 @@
   const TRACK_SMOOTHING = 0.45;
   const TRACK_CONFIRM_HITS = 2;
   let targetSeconds = 2, lowWatermarkSeconds = 0.5, maxBufferBytes = 64 * 1024 * 1024;
-  // Queued video beyond this is drained without source pacing (see the decoder output).
+  // Decode but omit stale rendering above this threshold; reset larger queues.
   const MAX_LIVE_LAG_S = 0.25;
+  const MAX_QUEUED_LIVE_SECONDS = 0.75;
+  const MAX_QUEUED_LIVE_FRAMES = 30;
   // pump() decodes one chunk at a time and waits for its frame. A chunk the
   // decoder never returns a frame for would leave it locked forever, so
   // rejoin live when a decode has been outstanding this long.
@@ -309,7 +325,15 @@
     return counts;
   }
 
-  function setStatus(text, color = '#aaa') { statusEl.textContent = text; statusEl.style.color = color; }
+  function setStatus(text, color = '#aaa') {
+    statusEl.textContent = text; statusEl.style.color = color;
+    if (!loadingEl.hidden) setLoading(true, text);
+  }
+  function setLoading(loading, text = 'Joining live video…') {
+    loadingEl.hidden = !loading;
+    loadingEl.textContent = text;
+    if (parentOrigin) window.parent.postMessage({ type: 'live-view-playback-state', loading, text }, parentOrigin);
+  }
   function updateStageSize() {
     const stage = document.getElementById('stage');
     const fullscreen = document.documentElement.classList.contains('operator-live-view-fullscreen');
@@ -551,6 +575,17 @@
         }
         pending.delete(frame.timestamp);
         if (!playing) { frame.close(); decoding = false; pump(); return; }
+        if (bufferedSeconds() > MAX_LIVE_LAG_S) {
+          // Decode dependencies, but omit stale rendering/overlay work. The
+          // next painted frame cumulatively ACKs these decoded frames; only
+          // that painted frame supplies map telemetry.
+          known.delete(`${pair.epoch}:${pair.seq}`);
+          frame.close();
+          decoding = false;
+          nextPaintAt = null;
+          pump();
+          return;
+        }
         // Inference has already completed before this pair is sent.  Waiting
         // for inference_ms here would charge that cost a second time and make
         // a 30 fps source play at roughly half speed when inference takes one
@@ -558,11 +593,9 @@
         // inference is slower, arrival/decode naturally becomes the pacing.
         const sourceDelta = lastPresentedTs == null ? 0 : Math.max(0, (pair.timestamp_us - lastPresentedTs) / 1000);
         const now = performance.now();
-        // Source pacing never plays faster than real time, so a backlog (a burst
-        // of results, a stall, a throttled background tab) stayed as a constant
-        // delay in every mode. While more than MAX_LIVE_LAG_S is queued, paint
-        // as soon as decoded until caught up; then pace by the source again.
-        if (lastPresentedTs == null || nextPaintAt == null || bufferedSeconds() > MAX_LIVE_LAG_S) nextPaintAt = now;
+        // Skipping stale rendering clears nextPaintAt, so the next fresh frame
+        // paints immediately instead of waiting out the skipped source time.
+        if (lastPresentedTs == null || nextPaintAt == null) nextPaintAt = now;
         else nextPaintAt = Math.max(nextPaintAt + sourceDelta, now);
         const delay = Math.max(0, nextPaintAt - now);
         setTimeout(() => requestAnimationFrame(() => {
@@ -583,7 +616,7 @@
       }
     });
     decoder = configuredDecoder;
-    decoder.configure({ codec: meta.codec || 'avc1.42E01F', codedWidth: meta.width || 1280, codedHeight: meta.height || 720, optimizeForLatency: false });
+    decoder.configure({ codec: meta.codec || 'avc1.42E01F', codedWidth: meta.width || 1280, codedHeight: meta.height || 720, optimizeForLatency: true });
   }
   function invalidateDecoder() {
     decoderGeneration++;
@@ -605,6 +638,15 @@
     // Media time, not the browser clock: a drained backlog paints many
     // frames within a few milliseconds.
     drawOverlay(pair.inference, pair.frame.width, pair.frame.height, Number(pair.timestamp_us) / 1000);
+    lastPaintedAt = performance.now();
+    // Receiving a packet is not success: keep the loader/watchdog until the
+    // current decoder has actually drawn its first fresh frame.
+    if (foregroundResumePending || !loadingEl.hidden) {
+      foregroundResumePending = false;
+      foregroundReconnectAttempts = 0;
+      clearForegroundResumeTimer();
+      setLoading(false);
+    }
     updateBrowserFps();
     lastPresentedTs = pair.timestamp_us;
     lastPresentedSeq = pair.seq;
@@ -897,9 +939,16 @@
     const pair = { epoch: meta.epoch, seq: meta.seq, timestamp_us: Number(meta.source.timestamp_us), keyframe: !!meta.encoded.keyframe, data, inference: meta.inference, frame: meta.frame, source: meta.source, telemetry: meta.telemetry };
     queue.push(pair);
     queue.sort((a, b) => a.seq - b.seq);
+    // Never try to paint an unbounded history at display refresh speed.
+    // H.264 delta frames cannot be skipped arbitrarily: request a new live
+    // keyframe/epoch and discard the old decoder and transport together.
+    if (bufferedSeconds() > MAX_QUEUED_LIVE_SECONDS || queue.length > MAX_QUEUED_LIVE_FRAMES
+        || queue.reduce((n, p) => n + p.data.byteLength, 0) > maxBufferBytes) {
+      reconnectAtLive('Playback fell behind; jumping to live…');
+      return;
+    }
     if (!decoder) configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height });
     updateStats();
-    if (queue.reduce((n, p) => n + p.data.byteLength, 0) > maxBufferBytes) setStatus('Client buffer full; waiting for playback', '#fc6');
     if (playing) pump();
     else maybeStart();
   }
@@ -919,8 +968,10 @@
       if (socket !== ws) return;
       reconnectAttempt = 0;
       setStatus('Connected; buffering inference results');
-      send({ type: 'open', session_id: sessionId, epoch, last_presented_seq: lastPresentedSeq, decoder_state_preserved: !!decoder });
-      if (jumpPending) { jumpPending = false; send({ type: 'jump_to_live' }); }
+      // Each new transport joins live, with one resync in the OPEN handshake.
+      // Do not first resume history and then queue a second resync behind it.
+      send({ type: 'open', live: true, session_id: sessionId, epoch, last_presented_seq: -1, decoder_state_preserved: false });
+      jumpPending = false;
       if (foregroundResumePending) armForegroundResumeWatchdog();
     };
     ws.onmessage = (event) => {
@@ -935,6 +986,7 @@
         if (message.type === 'session') { sessionId = message.session_id; epoch = message.epoch; targetSeconds = message.buffer.target_seconds; lowWatermarkSeconds = message.buffer.low_watermark_seconds; maxBufferBytes = message.buffer.client_max_bytes; sessionStorage.setItem('playback-session-id', sessionId); }
         else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); awaitingLiveEpoch = false; setStatus('Live IDR received; starting playback', '#4fdb8a'); updateStats(); }
         else if (message.type === 'fault') setStatus(message.detail, '#f66');
+        else if (message.type === 'resyncing') { resetPlayback(); setLoading(true, 'Playback fell behind; joining live video…'); foregroundResumePending = true; armForegroundResumeWatchdog(); }
         else if (message.type === 'resume_unavailable') { setStatus(`Resume unavailable: ${message.reason}; resyncing`, '#fc6'); awaitingLiveEpoch = true; queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); }
         return;
       }
@@ -942,11 +994,6 @@
       const bytes = new Uint8Array(event.data), view = new DataView(event.data);
       if (bytes.byteLength < 4) return;
       const metaLen = view.getUint32(0), meta = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + metaLen)));
-      if (foregroundResumePending) {
-        foregroundResumePending = false;
-        foregroundReconnectAttempts = 0;
-        clearForegroundResumeTimer();
-      }
       // Keep the WebSocket message's ArrayBuffer alive through decode instead
       // of copying the metadata and H.264 payload into two new buffers. The
       // queue/pending maps never mutate these views.
@@ -962,13 +1009,17 @@
         return;
       }
       const detail = event.reason ? ` ${event.code}: ${event.reason}` : ` (${event.code})`;
-      setStatus(`Playback connection lost${detail}; continuing local buffer`, '#fc6');
+      resetPlayback();
+      foregroundResumePending = true;
+      setLoading(true, `Playback connection lost${detail}; reconnecting…`);
       scheduleReconnect();
     };
     ws.onerror = () => { if (socket === ws) setStatus('Playback WebSocket error; waiting to reconnect', '#fc6'); };
   }
   function scheduleReconnect() { if (reconnectTimer || stopped) return; const delay = Math.min(3000, 250 * 2 ** reconnectAttempt++); reconnectTimer = setTimeout(() => { reconnectTimer = null; openSocket(); }, delay); }
   function start() {
+    if (!stopped) return;
+    setLoading(true, 'Connecting to live video…');
     if (!('VideoDecoder' in window) || !('EncodedVideoChunk' in window)) {
       if (window.isSecureContext === false) {
         setStatus('WebCodecs requires HTTPS (secure context). Please access via https://', '#f66');
@@ -978,8 +1029,12 @@
       return;
     }
     stopped = false;
+    resetPlayback();
+    foregroundResumePending = true;
+    foregroundReconnectAttempts = 0;
     setStatus('Connecting…');
     openSocket();
+    armForegroundResumeWatchdog();
   }
   function clearForegroundResumeTimer() {
     if (foregroundResumeTimer) clearTimeout(foregroundResumeTimer);
@@ -987,48 +1042,71 @@
   }
   function reconnectAfterForegroundStall() {
     if (stopped || document.hidden || !foregroundResumePending) return;
-    if (foregroundReconnectAttempts >= 2) {
-      setStatus('Live stream is still reconnecting; waiting for the next frame', '#fc6');
-      return;
-    }
     foregroundReconnectAttempts++;
-    setStatus('Live stream did not resume; reconnecting…', '#fc6');
+    reconnectAtLive('Live stream is still connecting; retrying…');
+  }
+  function reconnectAtLive(text = 'Joining live video…') {
+    if (stopped) return;
+    resetPlayback();
+    setLoading(true, text);
+    foregroundResumePending = true;
     const oldSocket = socket;
     socket = null;
     if (reconnectTimer) clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (!stopped) openSocket();
-    }, 250);
+    reconnectTimer = null;
     if (oldSocket && (oldSocket.readyState === WebSocket.OPEN || oldSocket.readyState === WebSocket.CONNECTING)) {
-      oldSocket.close(4000, 'foreground resume stalled');
+      oldSocket.close(4000, 'jump to live');
     }
+    openSocket();
+    armForegroundResumeWatchdog();
   }
   function armForegroundResumeWatchdog() {
     clearForegroundResumeTimer();
     foregroundResumeTimer = setTimeout(() => {
       foregroundResumeTimer = null;
       reconnectAfterForegroundStall();
-    }, 5000);
+    }, Math.min(15000, 2500 * 2 ** foregroundReconnectAttempts));
   }
   function stop() { stopped = true; jumpPending = false; awaitingLiveEpoch = false; backgroundedWhilePlaying = false; foregroundResumePending = false; clearForegroundResumeTimer(); playing = false; nextPaintAt = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; invalidateDecoder(); queue = []; known.clear(); pending.clear(); resetCompensation(); browserFps = 0; fpsWindowStarted = performance.now(); fpsWindowFrames = 0; fpsOverlayEl.textContent = 'Browser FPS: --'; updateStats(); setStatus('Stopped'); }
-  function jumpLive(allowStopped = true) {
-    if (awaitingLiveEpoch || (stopped && !allowStopped)) return;
+  function resetPlayback() {
     awaitingLiveEpoch = true;
+    lastPaintedAt = null;
     queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; sourceEnded = false; lastPresentedSeq = -1;
     sessionStorage.setItem('playback-last-seq', '-1');
     invalidateDecoder();
+  }
+  function jumpLive(allowStopped = true) {
+    if (stopped) { if (allowStopped) start(); return; }
+    if (awaitingLiveEpoch) return;
+    resetPlayback();
+    setLoading(true, 'Jumping to live video…');
+    foregroundResumePending = true;
+    armForegroundResumeWatchdog();
     jumpPending = !socket || socket.readyState !== WebSocket.OPEN;
     if (!jumpPending) send({ type: 'jump_to_live' });
     setStatus('Rejoining live stream…', '#fc6');
     updateStats();
   }
-  function resumeAtLive() {
-    if (stopped) return;
-    foregroundResumePending = true;
-    foregroundReconnectAttempts = 0;
+  function checkPlaybackHealth() {
+    if (stopped || !playing || document.hidden) return;
+    if (lastPaintedAt !== null && performance.now() - lastPaintedAt >= DECODE_STALL_MS) {
+      reconnectAtLive('No fresh frames; reconnecting to live video…');
+      return;
+    }
+    if (!decoding || performance.now() - decodeStartedAt < DECODE_STALL_MS) return;
     jumpLive(false);
-    armForegroundResumeWatchdog();
+    setStatus('Decoder stalled; rejoining live', '#f66');
+  }
+  function resumeAtLive() {
+    if (stopped) { setLoading(true, statusEl.textContent); return; }
+    const now = performance.now();
+    // Both the parent and iframe see visibility/focus events. Coalesce those,
+    // but retry a pending join after a long time away (its timer may have
+    // fired while hidden and intentionally done nothing).
+    if (foregroundResumePending && now - lastForegroundResumeAt < 1000) return;
+    lastForegroundResumeAt = now;
+    foregroundReconnectAttempts = 0;
+    reconnectAtLive();
   }
   function resumeFromBackground() {
     if (!backgroundedWhilePlaying || document.hidden) return;
@@ -1086,12 +1164,7 @@
   }
   applyMinConfidence(minConfidence, false);
   minConfidenceEl.addEventListener('input', () => applyMinConfidence(minConfidenceEl.value, true));
-  setInterval(() => {
-    if (stopped || !playing || !decoding || document.hidden) return;
-    if (performance.now() - decodeStartedAt < DECODE_STALL_MS) return;
-    jumpLive(false);
-    setStatus('Decoder stalled; rejoining live', '#f66');
-  }, 1000);
+  setInterval(checkPlaybackHealth, 1000);
   document.getElementById('start').onclick = start;
   document.getElementById('stop').onclick = stop;
   document.getElementById('live').onclick = jumpLive;

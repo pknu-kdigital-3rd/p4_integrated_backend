@@ -1162,6 +1162,12 @@ function renderLiveTelemetryStatus(){
     ?'Live telemetry: stale - showing last known position':status.text;
   element.dataset.level=status.level;
 }
+function setLiveViewLoading(loading,text='실시간 영상 연결 중…'){
+  const indicator=document.querySelector('#live-view-loading');
+  indicator.hidden=!loading;
+  indicator.textContent=text;
+  liveFrame.setAttribute('aria-busy',String(loading));
+}
 function stopLiveView(){
   if(document.fullscreenElement===livePanel)void document.exitFullscreen().catch(()=>{});
   releaseLiveMarker();
@@ -1188,6 +1194,10 @@ window.__operatorStopLiveView=stopLiveView;
 window.__operatorLiveViewOpen=()=>Boolean(liveView);
 window.__operatorResumeLiveView=()=>{if(!liveView&&matchesLiveTarget(selected))openLiveView()};
 window.addEventListener('message',event=>{
+  if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-playback-state'){
+    setLiveViewLoading(event.data.loading===true,typeof event.data.text==='string'?event.data.text:undefined);
+    return;
+  }
   if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-video-size'){
     const {width,height}=event.data;
     if(Number.isFinite(width)&&Number.isFinite(height)&&width>0&&height>0){liveVideoSize={width,height};fitLivePanelToVideo()}
@@ -1227,6 +1237,8 @@ window.addEventListener('message',event=>{
 });
 installForegroundResume(window,document,()=>{
   if(!liveView||document.hidden)return;
+  setLiveViewLoading(true,'최신 실시간 영상으로 연결 중…');
+  notifyLiveFrameFullscreen();
   liveFrame.contentWindow?.postMessage({type:FOREGROUND_RESUME_MESSAGE},liveView.frameOrigin);
 });
 // Keep the displayed road position moving briefly through a replay GPS gap.
@@ -1241,6 +1253,7 @@ function openLiveView(){
   if(!bootstrap||!matchesLiveTarget(selected))return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
   liveViewUrlObject.searchParams.set('autostart','1');
+  liveViewUrlObject.searchParams.set('embedded','1');
   const liveViewUrl=liveViewUrlObject.href;
   const diagnostic=document.querySelector('#live-view-diagnostic');
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
@@ -1251,6 +1264,7 @@ function openLiveView(){
   updateLiveTitle();
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
+  setLiveViewLoading(true);
   livePanel.hidden=false;
   // Restore the operator's saved docked or floating placement.
   placeLivePanel(liveDocked);

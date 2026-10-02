@@ -841,6 +841,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             if epoch and epoch != state.current_epoch:
                 async with state.result_condition:
                     state.current_epoch = epoch
+                    state.playback_reset_generation += 1
                     state.clear_all_results()
                     state.queued_sequences.clear()
                     state.clear_completed_sequences()
@@ -859,6 +860,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
             new_epoch = int(metadata.get("new_epoch", metadata.get("epoch", 0)))
             async with state.result_condition:
                 state.current_epoch = new_epoch
+                state.playback_reset_generation += 1
                 state.clear_all_results()
                 state.queued_sequences.clear()
                 state.clear_completed_sequences()

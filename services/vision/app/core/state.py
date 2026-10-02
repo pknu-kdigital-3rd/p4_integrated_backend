@@ -140,6 +140,8 @@ class AppState:
     viewer_websocket: Any | None = None
     last_presented: tuple[int, int] | None = None
     resync_generation: int = 0
+    # Relay reset notifications may reuse an epoch while waiting for an IDR.
+    playback_reset_generation: int = 0
     inference_queue: asyncio.Queue[InferenceFrame] = field(
         default_factory=_new_inference_queue
     )

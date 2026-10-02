@@ -26,6 +26,20 @@ WAIT_POLL_SECONDS = 0.5
 # Close code sent to a viewer replaced by a newer one. The page shows it as
 # "opened elsewhere" and does not reconnect, so two viewers cannot fight.
 VIEWER_REPLACED_CLOSE_CODE = 4001
+LIVE_BACKLOG_SECONDS = 1.0
+LIVE_SEND_WINDOW_FRAMES = 12
+
+
+def _live_backlog_exceeded(state: AppState) -> bool:
+    items = [item for item in state.result_store.values() if item.epoch == state.current_epoch]
+    if not items:
+        return False
+    timestamps = [item.timestamp_us for item in items]
+    return (
+        max(timestamps) - min(timestamps) > LIVE_BACKLOG_SECONDS * 1_000_000
+        or len(items) > 60
+        or sum(len(item.encoded) for item in items) > settings.CLIENT_BUFFER_MAX_BYTES
+    )
 
 
 def _owns_viewer_slot(state: AppState, token: int) -> bool:
@@ -235,13 +249,14 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
         state.viewer_websocket = websocket
 
         requested_epoch = int(first.get("epoch", state.current_epoch))
+        live_mode = first.get("live") is True
         requested_seq = int(first.get("last_presented_seq", -1)) + 1
         decoder_state_preserved = bool(first.get("decoder_state_preserved"))
         decoder_reset = bool(first.get("session_id")) and not decoder_state_preserved
         resume_unavailable = bool(first.get("session_id")) and (
             session_mismatch or requested_epoch != state.current_epoch or decoder_reset
         )
-        if session_mismatch or requested_epoch != state.current_epoch or decoder_reset:
+        if live_mode or session_mismatch or requested_epoch != state.current_epoch or decoder_reset:
             requested_epoch = state.current_epoch
             requested_seq = 0
             mode = "new"
@@ -271,8 +286,12 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                 }
             )
         )
+        seen_feed_reset_generation = state.playback_reset_generation
+        waiting_for_reset = mode == "new"
         if mode == "new":
-            if resume_unavailable:
+            if live_mode:
+                resync_reason = "jump_to_live"
+            elif resume_unavailable:
                 resume_reason = (
                     "decoder_state_not_preserved"
                     if decoder_reset
@@ -314,29 +333,44 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
         sent_sizes: dict[tuple[int, int], int] = {}
         seen_resync_generation = state.resync_generation
         while True:
-            # Bound the amount sent ahead of the browser without deleting any
-            # unseen result. ACKs release this window; a stalled viewer causes
-            # TCP/application backpressure instead of frame loss.
+            if not _owns_viewer_slot(state, token):
+                break
+            if state.resync_generation != seen_resync_generation:
+                sent_sizes.clear()
+                seen_resync_generation = state.resync_generation
+                waiting_for_reset = True
+                await websocket.send_json({"type": "resyncing"})
+            if (state.current_epoch != epoch_ref[0]
+                    or state.playback_reset_generation != seen_feed_reset_generation):
+                seen_feed_reset_generation = state.playback_reset_generation
+                epoch_ref[0] = state.current_epoch
+                next_seq = 0
+                gap_since = None
+                sent_sizes.clear()
+                waiting_for_reset = False
+                await websocket.send_json({"type": "epoch", "epoch": state.current_epoch, "reason": "resync"})
+            if waiting_for_reset:
+                # Do not send old inference completions while the relay is
+                # obtaining the new IDR. A reset may keep the same epoch.
+                await asyncio.sleep(0.05)
+                continue
+            if live_mode and _live_backlog_exceeded(state):
+                await _request_resync(state, "live_backlog")
+                continue
+            # Keep only a small window in the browser/network. Wake regularly
+            # to enforce the live limit even when a background viewer stops ACKs.
             async with state.result_condition:
-                if state.current_epoch != epoch_ref[0]:
-                    sent_sizes.clear()
-                if state.resync_generation != seen_resync_generation:
-                    sent_sizes.clear()
-                    seen_resync_generation = state.resync_generation
-                while _owns_viewer_slot(state, token):
-                    ack = state.last_presented
-                    if ack is not None:
-                        for key in list(sent_sizes):
-                            if key[0] == ack[0] and key[1] <= ack[1]:
-                                sent_sizes.pop(key, None)
-                    outstanding_bytes = sum(sent_sizes.values())
-                    outstanding_frames = len(sent_sizes)
-                    if (
-                        outstanding_bytes <= settings.CLIENT_BUFFER_MAX_BYTES
-                        and outstanding_frames <= 120
-                    ):
-                        break
-                    await state.result_condition.wait()
+                ack = state.last_presented
+                if ack is not None:
+                    for key in list(sent_sizes):
+                        if key[0] == ack[0] and key[1] <= ack[1]:
+                            sent_sizes.pop(key, None)
+                window_frames = LIVE_SEND_WINDOW_FRAMES if live_mode else 120
+                if (sum(sent_sizes.values()) >= settings.CLIENT_BUFFER_MAX_BYTES
+                        or len(sent_sizes) >= window_frames):
+                    with suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(state.result_condition.wait(), WAIT_POLL_SECONDS)
+                    continue
             item = await _wait_for_item(
                 state, epoch_ref[0], next_seq, timeout=WAIT_POLL_SECONDS, token=token
             )
@@ -354,17 +388,6 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                     continue
                 reported_fault = False
                 if state.current_epoch != epoch_ref[0]:
-                    epoch_ref[0] = state.current_epoch
-                    next_seq = 0
-                    await websocket.send_text(
-                        json.dumps(
-                            {
-                                "type": "epoch",
-                                "epoch": state.current_epoch,
-                                "reason": "resync",
-                            }
-                        )
-                    )
                     continue
                 if _has_later_result(state, epoch_ref[0], next_seq):
                     gap_since = gap_since if gap_since is not None else monotonic()
@@ -380,6 +403,12 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                 gap_since = None
                 continue
             gap_since = None
+            if (state.resync_generation != seen_resync_generation
+                    or state.playback_reset_generation != seen_feed_reset_generation):
+                continue
+            if live_mode and _live_backlog_exceeded(state):
+                await _request_resync(state, "live_backlog")
+                continue
             await websocket.send_bytes(_frame_message(state, item))
             state.metrics.websocket_frames_sent += 1
             sent_sizes[(item.epoch, item.seq)] = len(item.encoded)

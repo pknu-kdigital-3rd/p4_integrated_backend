@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 import time
 from unittest.mock import patch
@@ -8,6 +9,101 @@ from starlette.testclient import TestClient
 
 from app.api import playback
 from app.core.state import AppState, PlaybackItem, get_app_state
+
+
+class LivePreviewFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from types import SimpleNamespace
+
+        self.state = AppState(current_epoch=3, session_id="existing")
+        self.state.yolo_model = SimpleNamespace(_p4_overlay_classes=["person"])
+        self.controls = asyncio.Queue()
+        self.messages = asyncio.Queue()
+
+        async def accept():
+            pass
+
+        async def receive_text():
+            return json.dumps(await self.controls.get())
+
+        async def send_text(text):
+            await self.messages.put(json.loads(text))
+
+        self.ws = SimpleNamespace(
+            client="test", accept=accept, receive_text=receive_text,
+            send_text=send_text, send_json=self.messages.put, send_bytes=self.messages.put,
+        )
+        await self.controls.put({
+            "type": "open", "live": True, "session_id": "existing", "epoch": 3,
+            "last_presented_seq": 0, "decoder_state_preserved": True,
+        })
+        self.task = asyncio.create_task(playback.playback(self.ws, self.state))
+        self.assertEqual((await self.message())["mode"], "new")
+        command = await asyncio.wait_for(self.state.feed_commands.get(), 1)
+        self.assertEqual(command, {"type": "resync", "reason": "jump_to_live"})
+
+    async def asyncTearDown(self):
+        self.task.cancel()
+        try:
+            await self.task
+        except asyncio.CancelledError:
+            pass
+
+    async def message(self):
+        return await asyncio.wait_for(self.messages.get(), 1)
+
+    def frame(self, seq, timestamp_us=0):
+        return PlaybackItem(
+            epoch=self.state.current_epoch, seq=seq, timestamp_us=timestamp_us,
+            encoded=b"frame", keyframe=seq == 0,
+            result={"width": 1, "height": 1, "items": []},
+        )
+
+    async def reset(self, epoch=3):
+        async with self.state.result_condition:
+            self.state.current_epoch = epoch
+            self.state.playback_reset_generation += 1
+            self.state.clear_all_results()
+            self.state.result_condition.notify_all()
+        self.assertEqual((await self.message())["type"], "epoch")
+
+    async def test_live_open_waits_for_reset_even_when_epoch_number_is_reused(self):
+        # An old inference call can complete between the request and relay reset.
+        self.state.put_result(self.frame(0))
+        await asyncio.sleep(0.08)
+        self.assertTrue(self.messages.empty())
+        await self.reset()
+        async with self.state.result_condition:
+            self.state.put_result(self.frame(0))
+            self.state.result_condition.notify_all()
+        self.assertIsInstance(await self.message(), bytes)
+
+    async def test_live_backlog_requests_new_keyframe_instead_of_replaying_history(self):
+        await self.reset()
+        async with self.state.result_condition:
+            for seq in range(40):
+                self.state.put_result(self.frame(seq, seq * 33_333))
+            self.state.result_condition.notify_all()
+        command = await asyncio.wait_for(self.state.feed_commands.get(), 1)
+        self.assertEqual(command, {"type": "resync", "reason": "live_backlog"})
+        self.assertEqual((await self.message())["type"], "resyncing")
+        self.assertFalse(self.state.result_store)
+
+    async def test_epoch_reset_releases_a_full_unacknowledged_send_window(self):
+        await self.reset()
+        async with self.state.result_condition:
+            for seq in range(16):
+                self.state.put_result(self.frame(seq, seq * 33_333))
+            self.state.result_condition.notify_all()
+        for _ in range(playback.LIVE_SEND_WINDOW_FRAMES):
+            self.assertIsInstance(await self.message(), bytes)
+        await asyncio.sleep(0.08)
+        self.assertTrue(self.messages.empty())
+        await self.reset(epoch=4)
+        async with self.state.result_condition:
+            self.state.put_result(self.frame(0))
+            self.state.result_condition.notify_all()
+        self.assertIsInstance(await self.message(), bytes)
 
 
 def _make_client(state: AppState) -> TestClient:
