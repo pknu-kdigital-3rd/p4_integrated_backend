@@ -410,6 +410,17 @@ async function activeVehicleState(vehicleId: bigint) {
     });
 }
 
+// Vehicle states that can stand on a road. A cancelled trip keeps its last
+// currentEdgeId, and every vehicle keeps one state row across trips, so the
+// unfiltered scenario states made a vehicle that had already left "occupy"
+// the road where its trip was cancelled, refusing closures there.
+function occupyingVehicleStates(scenarioId: bigint) {
+    return prisma.virtualVehicleState.findMany({
+        where: { scenarioId, simStatus: { in: ACTIVE_TRIP_STATES }, vehicle: { isActive: true } },
+        select: { vehicleId: true, currentEdgeId: true },
+    });
+}
+
 export const virtualService = {
     async createScenario(input: CreateScenarioBody, actorId?: bigint) {
         return prisma.virtualScenario.create({
@@ -459,7 +470,7 @@ export const virtualService = {
                 const tripIds = activeTrips.map((trip) => trip.virtualTripId);
                 const endedAt = new Date();
                 await tx.vehicle.updateMany({ where: { vehicleId: { in: activeTrips.map((trip) => trip.vehicleId) } }, data: { vehicleStatus: "READY" } });
-                await tx.virtualVehicleState.updateMany({ where: { virtualTripId: { in: tripIds } }, data: { simStatus: "CANCELLED", commandVersion: { increment: 1 } } });
+                await tx.virtualVehicleState.updateMany({ where: { virtualTripId: { in: tripIds } }, data: { simStatus: "CANCELLED", currentEdgeId: null, currentPhysicalSegmentId: null, commandVersion: { increment: 1 } } });
                 await tx.virtualTrip.updateMany({ where: { virtualTripId: { in: tripIds } }, data: { state: "CANCELLED", endedAt, commandVersion: { increment: 1 } } });
                 for (const trip of activeTrips) {
                     await createEvent(tx, { scenarioId, virtualTripId: trip.virtualTripId, actorId: actorId ?? null, eventType: "TRIP_CANCELLED", payload: { reason: "SCENARIO_ARCHIVED" } });
@@ -778,7 +789,7 @@ export const virtualService = {
         if (input.command === "PAUSE") return prisma.$transaction(async (tx) => { const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "PAUSED", commandVersion: { increment: 1 } } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "PAUSED", lastCheckpointAt: new Date(), commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_PAUSED", payload: {} }); return result; });
         if (input.command === "RESUME") return prisma.$transaction(async (tx) => { const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "DRIVING", commandVersion: { increment: 1 } } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "DRIVING", blockedReason: null, commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_RESUMED", payload: {} }); return result; });
         if (input.command === "CANCEL_TRIP") {
-            return prisma.$transaction(async (tx) => { await tx.vehicle.update({ where: { vehicleId: trip.vehicleId }, data: { vehicleStatus: "READY" } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "CANCELLED", commandVersion: { increment: 1 } } }); const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "CANCELLED", endedAt: new Date(), commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_CANCELLED", payload: {} }); return result; });
+            return prisma.$transaction(async (tx) => { await tx.vehicle.update({ where: { vehicleId: trip.vehicleId }, data: { vehicleStatus: "READY" } }); await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { simStatus: "CANCELLED", currentEdgeId: null, currentPhysicalSegmentId: null, commandVersion: { increment: 1 } } }); const result = await tx.virtualTrip.update({ where: { virtualTripId: tripId }, data: { state: "CANCELLED", endedAt: new Date(), commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TRIP_CANCELLED", payload: {} }); return result; });
         }
         if (input.command === "SET_SPEED_FACTOR") return prisma.$transaction(async (tx) => { const result = await tx.virtualVehicleState.update({ where: { virtualTripId: tripId }, data: { speedFactor: input.speedFactor, commandVersion: { increment: 1 } } }); await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "SPEED_FACTOR_CHANGED", payload: { speedFactor: input.speedFactor } }); return result; });
         if (input.command === "SET_TURBO_MODE") return prisma.$transaction(async (tx) => {
@@ -1078,7 +1089,7 @@ export const virtualService = {
         const scenario = await getScenario(scenarioId);
         const restrictionInput = input.penaltyFactor === undefined ? { geometry: input.geometry } : { geometry: input.geometry, penaltyFactor: input.penaltyFactor };
         const resolved = await routingInternalClient.resolveRestriction(restrictionInput);
-        const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
+        const states = await occupyingVehicleStates(scenarioId);
         const occupied = occupiedVehicleIds(states, resolved);
         return { ...resolved, scenarioId, restrictionRevision: scenario.restrictionRevision, kind: input.kind, canActivate: input.kind !== "BLOCKED" || occupied.length === 0, occupyingVirtualVehicleIds: occupied };
     },
@@ -1105,7 +1116,7 @@ export const virtualService = {
         for (const change of changes) {
             const resolved = change.geometry ? await routingInternalClient.resolveRestriction({ geometry: change.geometry }) : null;
             if (input.mode === "paint" && resolved) {
-                const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
+                const states = await occupyingVehicleStates(scenarioId);
                 const occupied = occupiedVehicleIds(states, resolved);
                 if (occupied.length) throw new AppError(409, `Blocked road is occupied by virtual vehicles: ${occupied.join(", ")}`, "ROAD_OCCUPIED");
             }
@@ -1161,7 +1172,7 @@ export const virtualService = {
         if (input.expectedRestrictionRevision !== undefined && input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Scenario restrictions changed", "STALE_REVISION");
         const restrictionInput = input.penaltyFactor === undefined ? { geometry: input.geometry } : { geometry: input.geometry, penaltyFactor: input.penaltyFactor };
         const resolved = await routingInternalClient.resolveRestriction(restrictionInput);
-        const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
+        const states = await occupyingVehicleStates(scenarioId);
         const occupied = occupiedVehicleIds(states, resolved);
         if (input.kind === "BLOCKED" && occupied.length) throw new AppError(409, `Blocked road is occupied by virtual vehicles: ${occupied.join(", ")}`, "ROAD_OCCUPIED");
         const revision = scenario.restrictionRevision + 1;
@@ -1209,7 +1220,7 @@ export const virtualService = {
         if (kind === "BLOCKED" && penaltyFactor !== null) throw new AppError(400, "Blocked restrictions cannot have a penalty factor", "INVALID_RESTRICTION");
         if (kind === "HEAVY_PENALTY" && (penaltyFactor === null || penaltyFactor <= 1)) throw new AppError(400, "Heavy penalty requires a factor greater than one", "INVALID_RESTRICTION");
         const resolved = await routingInternalClient.resolveRestriction(penaltyFactor === null ? { geometry } : { geometry, penaltyFactor });
-        const states = await prisma.virtualVehicleState.findMany({ where: { scenarioId: existing.scenarioId }, select: { vehicleId: true, currentEdgeId: true, currentPhysicalSegmentId: true } });
+        const states = await occupyingVehicleStates(existing.scenarioId);
         const occupied = occupiedVehicleIds(states, resolved);
         if (kind === "BLOCKED" && occupied.length) throw new AppError(409, `Blocked road is occupied by virtual vehicles: ${occupied.join(", ")}`, "ROAD_OCCUPIED");
         const revision = scenario.restrictionRevision + 1;
