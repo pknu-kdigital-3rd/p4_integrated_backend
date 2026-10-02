@@ -775,17 +775,22 @@
         ? distanceColors.colorForDistance(rawDistance, distanceColorSettings)
         : colorForClass(item.class);
       const distanceColorMode = distanceColorSettings.enabled;
+      const className = String(item.class || 'object').toLowerCase();
+      const { box: drawBox, mask: drawMask } = classStyle(className);
+      if (!drawBox && !drawMask) { overlayCtx.globalAlpha = 1; continue; }
+      const showBox = boxesEl.checked && drawBox;
+      const whiteOutlinedDistanceLabel = distanceColorMode
+        && showBox
+        && ['person', 'bicycle', 'motorcycle'].includes(className);
       const labelBackgroundColor = distanceColorMode
-        ? distanceColors.textColorForBackground(color) : '#073b2b';
+        ? (whiteOutlinedDistanceLabel ? color : distanceColors.textColorForBackground(color))
+        : '#073b2b';
       const confidence = track.confidence;
       // Raw mode returns plain detections without temporal state.
       const ghost = track.state === 'holding';
       overlayCtx.globalAlpha = track.state ? temporal.trackAlpha(track, nowMs, temporalConfig) : 1;
-      const className = String(item.class || 'object').toLowerCase();
-      const labelTextColor = distanceColorMode ? color : (className === 'person' ? '#073b2b' : '#fff');
-      const { box: drawBox, mask: drawMask } = classStyle(className);
-      if (!drawBox && !drawMask) { overlayCtx.globalAlpha = 1; continue; }
-      const showBox = boxesEl.checked && drawBox;
+      const labelTextColor = whiteOutlinedDistanceLabel ? '#fff'
+        : distanceColorMode ? color : (className === 'person' ? '#073b2b' : '#fff');
       if (showBox) { overlayCtx.strokeStyle = color; overlayCtx.lineWidth = ghost ? 1.5 : 3; overlayCtx.setLineDash(ghost ? [5, 4] : []); overlayCtx.strokeRect(x, y, w, h); overlayCtx.setLineDash([]); }
       if (!ghost) {
         const distance = Number(rawDistance);
@@ -813,9 +818,16 @@
           overlayCtx.textBaseline = 'middle';
           const textY = labelY + labelHeight / 2;
           overlayCtx.font = `700 ${classFontSize}px sans-serif`;
+          if (whiteOutlinedDistanceLabel) {
+            overlayCtx.lineJoin = 'round';
+            overlayCtx.lineWidth = 1.25;
+            overlayCtx.strokeStyle = '#000';
+            overlayCtx.strokeText(classLabel, labelX + paddingX, textY);
+          }
           overlayCtx.fillText(classLabel, labelX + paddingX, textY);
           if (distanceLabel) {
             overlayCtx.font = `${meterFontWeight} ${meterFontSize}px sans-serif`;
+            if (whiteOutlinedDistanceLabel) overlayCtx.strokeText(distanceLabel, labelX + paddingX + classWidth + gap, textY);
             overlayCtx.fillText(distanceLabel, labelX + paddingX + classWidth + gap, textY);
           }
           overlayCtx.textBaseline = 'alphabetic';
