@@ -325,6 +325,54 @@ Use `docker compose ... up -d p4-minio` when only MinIO should be started. A lat
 `docker compose ... up -d` for the whole stack recreates and runs the bootstrap
 service again; this is safe because the bootstrap script is idempotent.
 
+## Fleet assistant (optional `assistant` profile)
+
+The operator dashboard's AI 도우미 panel calls `POST /api/v1/assistant/chat`
+on p4-node, which sends the current fleet snapshot to the `p4-assistant`
+service. That service is the ITS assistant API from the separate pce RAG
+repository (KOSHA transport guides in Qdrant/MongoDB, EXAONE4.5 for
+answers); see `docs/fleet_assistant_plan.md`.
+
+It runs as its own container on the same host and Compose network as
+p4-node, and only when the `assistant` profile is enabled:
+
+1. Clone the pce repository next to this one (`../pce`), or set
+   `ASSISTANT_PCE_DIR` to its path.
+2. Put the MongoDB credentials for the guide store in the host `.env`
+   (git-ignored) - never in a Compose file:
+
+   ```text
+   COMPOSE_PROFILES=assistant
+   ASSISTANT_PARENT_MONGO_URL=mongodb://USER:PASSWORD@10.174.96.119:37017/?authSource=admin
+   ```
+
+   URL-encode special characters in the password (`@` as `%40`, `:` as
+   `%3A`).
+3. Build and start it, then recreate p4-node so it picks up
+   `ASSISTANT_BASE_URL` (default `http://p4-assistant:18080`):
+
+   ```bash
+   docker compose -f docker-compose.dev.yml up -d --build p4-assistant
+   docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-node
+   ```
+
+4. Check it from the Node container (the service is not published to the
+   host):
+
+   ```bash
+   docker compose -f docker-compose.dev.yml exec p4-node      node -e "fetch('http://p4-assistant:18080/health').then(r=>r.json()).then(console.log)"
+   ```
+
+   `parents_loaded: true` appears after the first question; a
+   `parents_error` naming authentication means the MongoDB URL is wrong.
+
+The pce code is baked into the image: after pulling pce changes, rebuild
+with `up -d --build p4-assistant`. Without the profile, p4-node still
+starts and the panel answers with a 503 "Assistant service unavailable".
+The guide index itself is built from a workstation with
+`RAGPipeline(config='config/its-kosha-transport.toml')` in pce, not by
+the container.
+
 ## Reload and rebuild methods
 
 ### Development Compose

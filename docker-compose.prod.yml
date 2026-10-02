@@ -76,8 +76,9 @@ services:
       JWT_KEY_ID: project4-2026-01
       PUBLIC_OPERATOR_URL: ${PUBLIC_OPERATOR_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
       ROUTING_TRACKING_BASE_URL: http://p4-routing:8000
-      # pce ITS fleet assistant API (e.g. http://10.174.96.119:18080); empty disables the assistant.
-      ASSISTANT_BASE_URL: ${ASSISTANT_BASE_URL:-}
+      # ITS fleet assistant API: the p4-assistant service below (profile
+      # "assistant"); unreachable or empty answers 503 in the operator panel.
+      ASSISTANT_BASE_URL: ${ASSISTANT_BASE_URL:-http://p4-assistant:18080}
       VISION_PUBLIC_BASE_URL: ${VISION_PUBLIC_BASE_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002}
       LIVE_VIEW_URL: ${LIVE_VIEW_URL:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39002/}
       OPERATOR_DEMO_PUBLIC: ${OPERATOR_DEMO_PUBLIC:-true}
@@ -125,6 +126,25 @@ services:
         source: ./data/routing_state
         target: /var/lib/p4-routing
     expose: [ "8000" ]
+    networks: [ p4 ]
+
+  p4-assistant:
+    # ITS fleet assistant API from the pce RAG repository (KOSHA transport
+    # guides + EXAONE). Opt-in: COMPOSE_PROFILES=assistant. Build context is
+    # a pce checkout next to this repository unless ASSISTANT_PCE_DIR is set.
+    # MongoDB credentials come from the host .env, never from the image.
+    profiles: [ "assistant" ]
+    build:
+      context: ${ASSISTANT_PCE_DIR:-../pce}
+    container_name: p4-assistant
+    restart: unless-stopped
+    environment:
+      PCE_ASSISTANT_CONFIG: ${ASSISTANT_CONFIG:-config/its-kosha-transport.toml}
+      KINDEX_PARENT_MONGO_URL: ${ASSISTANT_PARENT_MONGO_URL:-}
+      LLM_API_KEY: ${ASSISTANT_LLM_API_KEY:-no_key}
+    volumes:
+      - p4_assistant_cache:/cache
+    expose: [ "18080" ]
     networks: [ p4 ]
 
   p4-relay:
@@ -350,6 +370,8 @@ networks:
         - subnet: ${P4_DOCKER_SUBNET:-10.253.240.0/24}
 
 volumes:
+  p4_assistant_cache:
+    name: p4-assistant-cache
   p4_relay_socket:
     name: p4-relay-socket
   p4_vision_compile_cache:

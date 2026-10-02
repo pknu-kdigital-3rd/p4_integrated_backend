@@ -107,10 +107,12 @@ chars, answer `max_tokens` 1,000.
 
 ## Deployment
 
-The pce API runs as its own process/container on the dev host (it is a
-separate repository); p4 reaches it through `ASSISTANT_BASE_URL`
-(added to both Compose files, empty = assistant disabled with a clear
-error). The p4 Node service needs no new dependency.
+The pce API runs as a separate container, `p4-assistant`, on the same host
+and Compose network as p4-node (opt-in `assistant` profile, built from a
+pce checkout next to this repository). p4-node reaches it at
+`ASSISTANT_BASE_URL` (default `http://p4-assistant:18080`); MongoDB
+credentials come from the host `.env` as `ASSISTANT_PARENT_MONGO_URL`.
+See "Fleet assistant" in `docs/integration/DOCKER_OPERATIONS.md`.
 
 ## Commits
 
