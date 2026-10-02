@@ -19,11 +19,11 @@ const vehicleBulkList = document.querySelector('#virtual-vehicles-bulk-list');
 const vehicleSelectAll = document.querySelector('#virtual-vehicles-select-all');
 const vehicleBulkRemove = document.querySelector('#virtual-vehicles-bulk-remove');
 const vehicleBulkCancel = document.querySelector('#virtual-vehicles-bulk-cancel');
-const routeLayerGroup = L.layerGroup().addTo(map);
-const activeRouteLayerGroup = L.layerGroup().addTo(map);
-const markerLayerGroup = L.layerGroup().addTo(map);
-const pointLayerGroup = L.layerGroup().addTo(map);
-const endpointSnapPreviewLayerGroup = L.layerGroup().addTo(map);
+const routeLayerGroup = L.layerGroup();
+const activeRouteLayerGroup = L.layerGroup();
+const markerLayerGroup = L.layerGroup();
+const pointLayerGroup = L.layerGroup();
+const endpointSnapPreviewLayerGroup = L.layerGroup();
 // Draw all nearby roads as one path, then erase all their interiors together.
 // This merges intersecting road outlines without painting borders back over
 // an adjacent road's cleared interior. Only this overlay's canvas is erased.
@@ -43,7 +43,13 @@ const snapPreviewPane = map.createPane('snapPreviewPane');
 snapPreviewPane.style.zIndex = '640';
 snapPreviewPane.style.pointerEvents = 'none';
 const endpointSnapCircleRenderer = L.svg({ pane: 'snapPreviewPane' });
-const restrictionLayerGroup = L.layerGroup().addTo(map);
+const restrictionLayerGroup = L.layerGroup();
+// Detach the whole workspace in monitoring mode, including layers populated
+// by a late asynchronous callback after switching away.
+const virtualMapLayers = L.layerGroup([
+  routeLayerGroup, activeRouteLayerGroup, markerLayerGroup,
+  pointLayerGroup, endpointSnapPreviewLayerGroup, restrictionLayerGroup,
+]);
 const routeContextMenu = document.createElement('div');
 routeContextMenu.className = 'virtual-route-context-menu';
 routeContextMenu.setAttribute('role', 'menu');
@@ -315,6 +321,7 @@ const normalSectionVisibility = createSectionVisibility(
   normalSections.map((selector) => document.querySelector(selector)).filter(Boolean),
 );
 let mode = 'normal';
+let modeGeneration = 0;
 let scenarioId = '';
 let scenarioRevision = 0;
 let selectedVehicleId = '';
@@ -1278,7 +1285,10 @@ function renderEvents(events) {
   hasLoadedEvents = true;
 }
 async function loadScenarios() {
+  if (mode !== 'virtual') return;
+  const requestedGeneration = modeGeneration;
   const scenarios = await api('/api/v1/virtual/scenarios');
+  if (mode !== 'virtual' || requestedGeneration !== modeGeneration) return;
   scenarioSelect.replaceChildren(new Option('Select scenario', ''));
   scenarios.forEach((scenario) => scenarioSelect.add(new Option(`${scenario.name} · rev ${scenario.restrictionRevision}`, String(scenario.scenarioId))));
   if (!scenarios.some((scenario) => String(scenario.scenarioId) === scenarioId)) scenarioId = scenarios[0] ? String(scenarios[0].scenarioId) : '';
@@ -1289,6 +1299,9 @@ async function loadScenarios() {
   if (!scenarioId) setStatus(uiText('Create a scenario to begin.'));
 }
 async function loadScenarioData() {
+  if (mode !== 'virtual') return;
+  const requestedGeneration = modeGeneration;
+  const requestedScenarioId = scenarioId;
   if (!scenarioId) {
     vehicles = [];
     selectedVehicleId = '';
@@ -1312,6 +1325,7 @@ async function loadScenarioData() {
     api(`/api/v1/virtual/scenarios/${scenarioId}/dispatch-requests`),
     api(`/api/v1/virtual/scenarios/${scenarioId}/events${lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : ''}`),
   ]);
+  if (mode !== 'virtual' || requestedGeneration !== modeGeneration || scenarioId !== requestedScenarioId) return;
   scenarioRevision = Number(scenario?.restrictionRevision || 0);
   renderRestrictions(scenario?.restrictions);
   vehicles = scenarioVehicles;
@@ -1324,9 +1338,10 @@ async function loadScenarioData() {
 }
 async function refreshVehiclePositions() {
   if (!scenarioId || mode !== 'virtual') return;
+  const requestedGeneration = modeGeneration;
   const requestedScenarioId = scenarioId;
   const latestVehicles = await api(`/api/v1/virtual/scenarios/${requestedScenarioId}/vehicles`);
-  if (mode !== 'virtual' || scenarioId !== requestedScenarioId) return;
+  if (mode !== 'virtual' || requestedGeneration !== modeGeneration || scenarioId !== requestedScenarioId) return;
   syncTripCompletions(latestVehicles);
   vehicles = latestVehicles;
   syncNoRouteAlarms();
@@ -1673,6 +1688,7 @@ restrictionBulkRemove.addEventListener('click', async () => {
 // Whether Live View was open when virtual mode closed it, so it can reopen.
 let liveViewBeforeVirtual = false;
 async function switchMode(next) {
+  const requestedGeneration = ++modeGeneration;
   cancelInFlightRouteCalculation();
   roadBrush.reset();
   cancelPointPlacement();
@@ -1681,6 +1697,8 @@ async function switchMode(next) {
   pickMode = null;
   map.getContainer().style.cursor = '';
   mode = next; window.__virtualMode = next === 'virtual';
+  if (next === 'virtual') virtualMapLayers.addTo(map);
+  else virtualMapLayers.remove();
   document.body.classList.toggle('virtual-mode', next === 'virtual');
   virtualPanel.hidden = next !== 'virtual';
   normalTab.setAttribute('aria-pressed', String(next === 'normal')); virtualTab.setAttribute('aria-pressed', String(next === 'virtual'));
@@ -1698,7 +1716,16 @@ async function switchMode(next) {
     // cached by external_id and only ever added to the map on creation, so the
     // fleet never reappeared after switching back.
     window.__operatorDetachMapLayers?.();
-    try { await loadScenarios(); await loadScenarioData(); setStatus('가상 경로·배차 준비 완료'); } catch (error) { setStatus(error.message, true); }
+    try {
+      await loadScenarios();
+      if (requestedGeneration !== modeGeneration) return;
+      await loadScenarioData();
+      if (requestedGeneration !== modeGeneration) return;
+      setStatus('가상 경로·배차 준비 완료');
+    } catch (error) {
+      if (requestedGeneration !== modeGeneration) return;
+      setStatus(error.message, true);
+    }
     if (!pollTimer) pollTimer = setInterval(() => void loadScenarioData().catch((error) => setStatus(error.message, true)), 1000);
     if (!vehiclePollTimer) vehiclePollTimer = setInterval(() => void refreshVehiclePositions().catch((error) => setStatus(error.message, true)), 250);
   } else {
