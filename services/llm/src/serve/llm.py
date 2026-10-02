@@ -124,6 +124,25 @@ class LLMRouter:
         if not self.clients:
             raise RuntimeError("no chat LLM endpoint is reachable: " + " | ".join(errors))
 
+    def stream(self, messages: list[dict], temperature: float,
+               max_tokens: int) -> "TextStream":
+        """Open a streaming completion on the first endpoint that accepts it.
+
+        Failover only happens before any text is produced; once a stream is
+        open, its errors surface to the caller.
+        """
+        errors: list[str] = []
+        for name, client, model in self.clients:
+            try:
+                response = client.chat.completions.create(
+                    model=model, messages=messages, stream=True,
+                    temperature=temperature, max_tokens=max_tokens,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+                return TextStream(response, model)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{name}: {exc}")
+        raise RuntimeError("all chat LLM endpoints failed: " + " | ".join(errors))
+
     def complete(self, messages: list[dict], temperature: float,
                  max_tokens: int) -> tuple[str, str]:
         """Return `(answer, model)` from the first endpoint that answers."""
@@ -141,3 +160,28 @@ class LLMRouter:
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{name}: {exc}")
         raise RuntimeError("all chat LLM endpoints failed: " + " | ".join(errors))
+
+
+class TextStream:
+    """Iterate the text deltas of an OpenAI-compatible streaming completion.
+
+    ``close()`` closes the HTTP response, which makes the server stop
+    generating; call it when the consumer goes away.
+    """
+
+    def __init__(self, response, model: str) -> None:
+        self._response = response
+        self.model = model
+
+    def __iter__(self):
+        for chunk in self._response:
+            choices = getattr(chunk, "choices", None) or []
+            delta = getattr(choices[0], "delta", None) if choices else None
+            text = getattr(delta, "content", None) if delta is not None else None
+            if text:
+                yield text
+
+    def close(self) -> None:
+        close = getattr(self._response, "close", None)
+        if close is not None:
+            close()

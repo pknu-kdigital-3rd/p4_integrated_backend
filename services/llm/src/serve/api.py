@@ -16,6 +16,7 @@ docs/integration/DOCKER_OPERATIONS.md, "Fleet assistant").
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -23,8 +24,9 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Iterator, Literal
 
+from fastapi import Request
 from pydantic import BaseModel, Field
 
 from core.config import IndexConfig
@@ -100,6 +102,11 @@ def _elapsed_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
+# Streamed text is held back by this many characters so a trailing
+# no-evidence sentence can still be dropped at the end of the answer.
+_STREAM_HOLDBACK = len(NO_EVIDENCE) + 8
+
+
 class AssistantService:
     """Retrieval + generation with injectable backends (for tests)."""
 
@@ -109,17 +116,20 @@ class AssistantService:
         retrieve: Callable[[str, int], list[dict]],
         complete: Callable[[list[dict], float, int], tuple[str, str]],
         health: Callable[[], dict] | None = None,
+        open_stream: Callable[[list[dict], float, int], Any] | None = None,
     ) -> None:
         self.serve_cfg = serve_cfg
         self._retrieve = retrieve
         self._complete = complete
         self._health = health or (lambda: {})
+        self._open_stream = open_stream
 
     def health(self) -> dict:
         return self._health()
 
-    def answer(self, question: str, mode: str, live_context: str, top_k: int,
-               retrieval_query: str | None = None) -> AnswerResult:
+    def _prepare(self, question: str, mode: str, live_context: str, top_k: int,
+                 retrieval_query: str | None) -> tuple[list[dict], list[dict], float, str | None]:
+        """Retrieve guide evidence and build the chat messages."""
         retrieval_started = time.perf_counter()
         context, sources, retrieval_error = "", [], None
         try:
@@ -136,13 +146,57 @@ class AssistantService:
         user = (f"실시간 차량 현황:\n{live_block}\n\n"
                 f"질문:\n{question}\n\n"
                 f"안전 지침 문맥:\n{guide_block}")
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user}]
+        return messages, sources, retrieval_ms, retrieval_error
+
+    def answer(self, question: str, mode: str, live_context: str, top_k: int,
+               retrieval_query: str | None = None) -> AnswerResult:
+        messages, sources, retrieval_ms, retrieval_error = self._prepare(
+            question, mode, live_context, top_k, retrieval_query)
         generation_started = time.perf_counter()
-        answer, model = self._complete(
-            [{"role": "system", "content": system_prompt}, {"role": "user", "content": user}],
-            self.serve_cfg.temperature, self.serve_cfg.max_tokens,
-        )
+        answer, model = self._complete(messages, self.serve_cfg.temperature, self.serve_cfg.max_tokens)
         return AnswerResult(strip_trailing_no_evidence(answer), model, sources, retrieval_ms,
                             _elapsed_ms(generation_started), retrieval_error)
+
+    def stream_events(self, question: str, mode: str, live_context: str, top_k: int,
+                      retrieval_query: str | None = None) -> Iterator[dict]:
+        """Yield meta, delta and done (or error) events for one answer.
+
+        Closing the generator (consumer gone) closes the LLM stream, which
+        stops generation on the model server.
+        """
+        if self._open_stream is None:
+            yield {"type": "error", "code": "ASSISTANT_UNAVAILABLE", "message": "streaming is not configured"}
+            return
+        messages, sources, retrieval_ms, retrieval_error = self._prepare(
+            question, mode, live_context, top_k, retrieval_query)
+        generation_started = time.perf_counter()
+        try:
+            stream = self._open_stream(messages, self.serve_cfg.temperature, self.serve_cfg.max_tokens)
+        except Exception as exc:  # noqa: BLE001 -- reported to the client as an event
+            yield {"type": "error", "code": "ASSISTANT_UNAVAILABLE", "message": str(exc)}
+            return
+        try:
+            yield {"type": "meta", "sources": sources, "model": getattr(stream, "model", ""),
+                   "retrieval_ms": retrieval_ms, "retrieval_error": retrieval_error}
+            full, sent = "", 0
+            for text in stream:
+                full += text
+                ready = len(full) - _STREAM_HOLDBACK
+                if ready > sent:
+                    yield {"type": "delta", "text": full[sent:ready]}
+                    sent = ready
+            final = strip_trailing_no_evidence(full)
+            if len(final) > sent:
+                yield {"type": "delta", "text": final[sent:]}
+            yield {"type": "done", "generation_ms": _elapsed_ms(generation_started)}
+        except Exception as exc:  # noqa: BLE001 -- mid-stream failure
+            logger.warning("assistant stream failed: %s", exc)
+            yield {"type": "error", "code": "ASSISTANT_UNAVAILABLE", "message": str(exc)}
+        finally:
+            close = getattr(stream, "close", None)
+            if close is not None:
+                close()
 
 
 def _config_path() -> Path:
@@ -187,12 +241,17 @@ def build_default_service() -> AssistantService:
         cfg = replace(index_cfg, top_k=top_k)
         return retrieval.retrieve(client, cfg, query, parents())
 
-    def complete(messages: list[dict], temperature: float, max_tokens: int) -> tuple[str, str]:
+    def router() -> LLMRouter:
         with lock:
             if state["llm"] is None:
                 state["llm"] = LLMRouter(serve_cfg)
-            llm = state["llm"]
-        return llm.complete(messages, temperature=temperature, max_tokens=max_tokens)
+            return state["llm"]
+
+    def complete(messages: list[dict], temperature: float, max_tokens: int) -> tuple[str, str]:
+        return router().complete(messages, temperature=temperature, max_tokens=max_tokens)
+
+    def open_stream(messages: list[dict], temperature: float, max_tokens: int):
+        return router().stream(messages, temperature=temperature, max_tokens=max_tokens)
 
     def health() -> dict:
         return {
@@ -203,11 +262,13 @@ def build_default_service() -> AssistantService:
             "llm_endpoints": [endpoint.name for endpoint in serve_cfg.endpoints],
         }
 
-    return AssistantService(serve_cfg, retrieve, complete, health)
+    return AssistantService(serve_cfg, retrieve, complete, health, open_stream)
 
 
 def create_app(service: AssistantService | None = None):
     from fastapi import FastAPI, HTTPException
+    from fastapi.responses import StreamingResponse
+    from starlette.concurrency import run_in_threadpool
 
     app = FastAPI(title="ITS fleet assistant", version="0.1.0")
     holder: dict[str, AssistantService | None] = {"service": service}
@@ -236,6 +297,31 @@ def create_app(service: AssistantService | None = None):
             "generation_ms": result.generation_ms,
             "retrieval_error": result.retrieval_error,
         }
+
+    @app.post("/v1/assistant/stream")
+    async def stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
+        """Newline-delimited JSON events: meta, delta*, then done or error.
+
+        When the client disconnects (p4-node aborts after the operator stops
+        the answer), the event generator is closed, which closes the LLM
+        stream and stops generation.
+        """
+        events = current().stream_events(request.question, request.mode, request.live_context,
+                                         request.top_k, request.retrieval_query)
+
+        async def body():
+            try:
+                while True:
+                    if await http_request.is_disconnected():
+                        break
+                    event = await run_in_threadpool(next, events, None)
+                    if event is None:
+                        break
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+            finally:
+                await run_in_threadpool(events.close)
+
+        return StreamingResponse(body(), media_type="application/x-ndjson")
 
     return app
 
