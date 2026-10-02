@@ -31,6 +31,21 @@ import {
     type FleetSnapshot,
     type SnapshotSections,
 } from "../fleet/fleet.snapshot.ts";
+import {
+    ALERT_TYPE_LABELS,
+    EVENT_TYPE_LABELS,
+    OBJECT_CLASS_LABELS,
+    RISK_LABELS,
+    SCENARIO_STATE_LABELS,
+    SEVERITY_LABELS,
+    SIM_STATUS_LABELS,
+    TELEMETRY_SOURCE_LABELS,
+    TRIP_STATUS_LABELS,
+    VEHICLE_SOURCE_LABELS,
+    VEHICLE_STATUS_LABELS,
+    label,
+    reasonText,
+} from "../fleet/fleet.labels.ts";
 import type { AssistantChatBody, AssistantScope } from "./assistant.schema.ts";
 
 const ACTIVE_TRIP_STATES = ["READY", "IN_PROGRESS", "PAUSED"];
@@ -380,14 +395,14 @@ function nearbyText(nearby: NearbyVehicle[]): string {
 }
 
 export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
-    const lines = [`[선택 실차량] ${detail.vehicleCode}${detail.vehicleName ? ` (${detail.vehicleName})` : ""}: 출처 ${detail.source}, 상태 ${detail.status}`];
+    const lines = [`[선택 실차량] ${detail.vehicleCode}${detail.vehicleName ? ` (${detail.vehicleName})` : ""}: 출처 ${label(detail.source, VEHICLE_SOURCE_LABELS)}, 상태 ${label(detail.status, VEHICLE_STATUS_LABELS)}`];
     const fix = detail.fix;
     if (!fix) {
         lines.push("  위치: 수신 기록 없음");
     } else {
         const stale = fix.ageSeconds > STALE_FIX_SECONDS ? " — 위치 수신 지연" : "";
         const accuracy = fix.accuracyM === null ? "" : `, 정확도 ±${Math.round(fix.accuracyM)} m`;
-        lines.push(`  위치: 위도 ${fix.lat.toFixed(5)}, 경도 ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)}, ${fix.telemetrySource}${accuracy})${stale}`);
+        lines.push(`  위치: 위도 ${fix.lat.toFixed(5)}, 경도 ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)}, ${label(fix.telemetrySource, TELEMETRY_SOURCE_LABELS)}${accuracy})${stale}`);
         lines.push(`  속도 ${km(fix.speedKmh)}${fix.headingDeg === null ? "" : `, 진행 방향 ${Math.round(fix.headingDeg)}°`}`);
     }
     if (detail.recentSpeed) {
@@ -396,14 +411,14 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
     }
     const trip = detail.trip;
     lines.push(trip
-        ? `  운행 #${trip.tripId} ${trip.status}: ${trip.originName ?? "출발지 미상"} → ${trip.destinationName}${trip.startedAt ? `, 시작 ${kstTime(trip.startedAt)}` : ""}`
+        ? `  운행 #${trip.tripId} ${label(trip.status, TRIP_STATUS_LABELS)}: ${trip.originName ?? "출발지 미상"} → ${trip.destinationName}${trip.startedAt ? `, 시작 ${kstTime(trip.startedAt)}` : ""}`
         : "  진행 중 운행 없음");
     lines.push(`  주변 실차량(위치 수신 중, 가까운 순): ${nearbyText(detail.nearby)}`);
     const detections = detail.detections;
-    lines.push(`  [영상 감지 최근 ${VISION_WINDOW_MINUTES}분] 감지 ${detections.total}건 (위험도: ${formatCounts(detections.byRisk)}), 주요 객체: ${detections.topClasses.length ? detections.topClasses.map((item) => `${item.className} ${item.count}`).join(", ") : "없음"}`);
+    lines.push(`  [영상 감지 최근 ${VISION_WINDOW_MINUTES}분] 감지 ${detections.total}건 (위험도: ${formatCounts(detections.byRisk, RISK_LABELS)}), 주요 객체: ${detections.topClasses.length ? detections.topClasses.map((item) => `${label(item.className, OBJECT_CLASS_LABELS)} ${item.count}`).join(", ") : "없음"}`);
     if (detections.nearest) {
         const nearest = detections.nearest;
-        lines.push(`  가장 가까운 감지 객체: ${nearest.className} ${nearest.distanceM.toFixed(1)} m (${nearest.riskLevel}, ${kstTime(nearest.detectedAt)})`);
+        lines.push(`  가장 가까운 감지 객체: ${label(nearest.className, OBJECT_CLASS_LABELS)} ${nearest.distanceM.toFixed(1)} m (${label(nearest.riskLevel, RISK_LABELS)}, ${kstTime(nearest.detectedAt)})`);
     }
     if (detections.attitude) {
         const attitude = detections.attitude;
@@ -412,7 +427,7 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
     }
     lines.push(`  경보: 미확인 ${detail.alerts.unconfirmed}건`);
     for (const alert of detail.alerts.recent) {
-        lines.push(`  - ${kstTime(alert.createdAt)} ${alert.alertType} ${alert.severity}${alert.message ? `: ${alert.message}` : ""}`);
+        lines.push(`  - ${kstTime(alert.createdAt)} ${label(alert.alertType, ALERT_TYPE_LABELS)} ${label(alert.severity, SEVERITY_LABELS)}${alert.message ? `: ${alert.message}` : ""}`);
     }
     return lines;
 }
@@ -424,30 +439,30 @@ export function renderVirtualVehicleLines(detail: VirtualVehicleDetail, scenario
         lines.push("  이 시나리오에서 운행 기록 없음 (대기 중)");
         return lines;
     }
-    lines.push(`  상태 ${state.simStatus}${state.blockedReason ? ` (${state.blockedReason})` : ""}, 속도 ${km(state.speedKmh)}${state.speedFactor !== 1 ? `, 속도 배율 ${state.speedFactor}×` : ""}`);
+    lines.push(`  상태 ${label(state.simStatus, SIM_STATUS_LABELS)}${state.blockedReason ? ` (${reasonText(state.blockedReason)})` : ""}, 속도 ${km(state.speedKmh)}${state.speedFactor !== 1 ? `, 속도 배율 ${state.speedFactor}×` : ""}`);
     if (state.position) lines.push(`  위치: 위도 ${state.position.lat.toFixed(5)}, 경도 ${state.position.lon.toFixed(5)} (갱신 ${kstTime(state.lastCheckpointAt)})`);
     const trip = detail.trip;
     if (trip) {
         const route = trip.route ? `, 현재 경로 ${meters(trip.route.distanceM)} / 예상 ${Math.round(trip.route.durationSec / 60)}분` : "";
-        lines.push(`  운행 #${trip.tripId} ${trip.state}: 시작 ${kstTime(trip.startedAt)}${trip.endedAt ? `, 종료 ${kstTime(trip.endedAt)}` : ""}, 경유지 ${trip.waypointsReached}/${trip.waypointsTotal} 도달${route}, 경로 재계산 ${Math.max(0, state.routeVersion - 1)}회`);
+        lines.push(`  운행 #${trip.tripId} ${label(trip.state, SIM_STATUS_LABELS)}: 시작 ${kstTime(trip.startedAt)}${trip.endedAt ? `, 종료 ${kstTime(trip.endedAt)}` : ""}, 경유지 ${trip.waypointsReached}/${trip.waypointsTotal} 도달${route}, 경로 재계산 ${Math.max(0, state.routeVersion - 1)}회`);
     }
     lines.push(`  같은 시나리오 주변 차량(가까운 순): ${nearbyText(detail.nearby)}`);
-    if (Object.keys(detail.recentEvents).length) lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(detail.recentEvents)}`);
-    for (const event of detail.lastEvents) lines.push(`  - ${kstTime(event.createdAt)} ${event.eventType}`);
+    if (Object.keys(detail.recentEvents).length) lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(detail.recentEvents, EVENT_TYPE_LABELS)}`);
+    for (const event of detail.lastEvents) lines.push(`  - ${kstTime(event.createdAt)} ${label(event.eventType, EVENT_TYPE_LABELS)}`);
     return lines;
 }
 
 export function renderScenarioLines(detail: ScenarioDetail): string[] {
     const lines = [
-        `[가상 시나리오] '${detail.name}'(#${detail.scenarioId}, ${detail.state}): 차량 ${detail.vehicles.length}대 (${formatCounts(detail.byStatus)})`,
+        `[가상 시나리오] '${detail.name}'(#${detail.scenarioId}, ${label(detail.state, SCENARIO_STATE_LABELS)}): 차량 ${detail.vehicles.length}대 (${formatCounts(detail.byStatus, SIM_STATUS_LABELS)})`,
         `  도로 통제: 차단 ${detail.restrictions.blocked}건, 혼잡 가중 ${detail.restrictions.penalty}건${detail.restrictions.reasons.length ? ` (사유: ${detail.restrictions.reasons.join(", ")})` : ""}`,
     ];
     for (const vehicle of detail.vehicles.slice(0, MAX_SCENARIO_VEHICLES)) {
-        lines.push(`  - ${vehicle.vehicleCode} ${vehicle.simStatus}, 속도 ${km(vehicle.speedKmh)}${vehicle.blockedReason ? ` (${vehicle.blockedReason})` : ""}`);
+        lines.push(`  - ${vehicle.vehicleCode} ${label(vehicle.simStatus, SIM_STATUS_LABELS)}, 속도 ${km(vehicle.speedKmh)}${vehicle.blockedReason ? ` (${reasonText(vehicle.blockedReason)})` : ""}`);
     }
     if (detail.vehicles.length > MAX_SCENARIO_VEHICLES) lines.push(`  … 외 ${detail.vehicles.length - MAX_SCENARIO_VEHICLES}대`);
-    if (Object.keys(detail.recentEvents).length) lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(detail.recentEvents)}`);
-    for (const event of detail.lastEvents) lines.push(`  - ${kstTime(event.createdAt)} ${event.eventType}`);
+    if (Object.keys(detail.recentEvents).length) lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(detail.recentEvents, EVENT_TYPE_LABELS)}`);
+    for (const event of detail.lastEvents) lines.push(`  - ${kstTime(event.createdAt)} ${label(event.eventType, EVENT_TYPE_LABELS)}`);
     return lines;
 }
 
@@ -456,14 +471,14 @@ function realVehicleReport(detail: RealVehicleDetail): string {
     return [
         `### 실차량 ${detail.vehicleCode}`,
         "| 항목 | 값 |", "|---|---|",
-        `| 출처 / 상태 | ${detail.source} / ${detail.status} |`,
+        `| 출처 / 상태 | ${label(detail.source, VEHICLE_SOURCE_LABELS)} / ${label(detail.status, VEHICLE_STATUS_LABELS)} |`,
         `| 마지막 위치 | ${fix ? `${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)})` : "기록 없음"} |`,
         `| 현재 속도 | ${km(fix?.speedKmh ?? null)} |`,
         `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
-        `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${detail.trip.status} → ${detail.trip.destinationName}` : "없음"} |`,
+        `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${label(detail.trip.status, TRIP_STATUS_LABELS)} → ${detail.trip.destinationName}` : "없음"} |`,
         `| 가장 가까운 실차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,
-        `| 영상 감지 (${VISION_WINDOW_MINUTES}분) | ${detail.detections.total}건 (${formatCounts(detail.detections.byRisk)}) |`,
-        `| 가장 가까운 감지 객체 | ${detail.detections.nearest ? `${detail.detections.nearest.className} ${detail.detections.nearest.distanceM.toFixed(1)} m (${detail.detections.nearest.riskLevel})` : "없음"} |`,
+        `| 영상 감지 (${VISION_WINDOW_MINUTES}분) | ${detail.detections.total}건 (${formatCounts(detail.detections.byRisk, RISK_LABELS)}) |`,
+        `| 가장 가까운 감지 객체 | ${detail.detections.nearest ? `${label(detail.detections.nearest.className, OBJECT_CLASS_LABELS)} ${detail.detections.nearest.distanceM.toFixed(1)} m (${label(detail.detections.nearest.riskLevel, RISK_LABELS)})` : "없음"} |`,
         `| 미확인 경보 | ${detail.alerts.unconfirmed}건 |`,
     ].join("\n");
 }
@@ -473,9 +488,9 @@ function virtualVehicleReport(detail: VirtualVehicleDetail): string {
     return [
         `### 가상 차량 ${detail.vehicleCode}`,
         "| 항목 | 값 |", "|---|---|",
-        `| 상태 | ${state ? `${state.simStatus}${state.blockedReason ? ` (${state.blockedReason})` : ""}` : "대기"} |`,
+        `| 상태 | ${state ? `${label(state.simStatus, SIM_STATUS_LABELS)}${state.blockedReason ? ` (${reasonText(state.blockedReason)})` : ""}` : "대기"} |`,
         `| 속도 | ${km(state?.speedKmh ?? null)} |`,
-        `| 운행 | ${trip ? `#${trip.tripId} ${trip.state}, 경유지 ${trip.waypointsReached}/${trip.waypointsTotal}` : "없음"} |`,
+        `| 운행 | ${trip ? `#${trip.tripId} ${label(trip.state, SIM_STATUS_LABELS)}, 경유지 ${trip.waypointsReached}/${trip.waypointsTotal}` : "없음"} |`,
         `| 현재 경로 | ${trip?.route ? `${meters(trip.route.distanceM)}, 예상 ${Math.round(trip.route.durationSec / 60)}분` : "-"} |`,
         `| 경로 재계산 | ${state ? Math.max(0, state.routeVersion - 1) : 0}회 |`,
         `| 가장 가까운 차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,
@@ -486,11 +501,11 @@ function scenarioReport(detail: ScenarioDetail): string {
     return [
         `### 시나리오 '${detail.name}' (#${detail.scenarioId})`,
         "| 항목 | 값 |", "|---|---|",
-        `| 차량 | ${detail.vehicles.length}대 (${formatCounts(detail.byStatus)}) |`,
+        `| 차량 | ${detail.vehicles.length}대 (${formatCounts(detail.byStatus, SIM_STATUS_LABELS)}) |`,
         `| 도로 통제 | 차단 ${detail.restrictions.blocked}건 / 혼잡 가중 ${detail.restrictions.penalty}건 |`,
-        `| 최근 ${EVENT_WINDOW_MINUTES}분 이벤트 | ${formatCounts(detail.recentEvents)} |`,
+        `| 최근 ${EVENT_WINDOW_MINUTES}분 이벤트 | ${formatCounts(detail.recentEvents, EVENT_TYPE_LABELS)} |`,
         ...detail.vehicles.filter((vehicle) => ["NO_ROUTE", "BLOCKED_AWAITING_OPERATOR"].includes(vehicle.simStatus))
-            .map((vehicle) => `- ${vehicle.vehicleCode} ${vehicle.simStatus}${vehicle.blockedReason ? ` (${vehicle.blockedReason})` : ""}`),
+            .map((vehicle) => `- ${vehicle.vehicleCode} ${label(vehicle.simStatus, SIM_STATUS_LABELS)}${vehicle.blockedReason ? ` (${reasonText(vehicle.blockedReason)})` : ""}`),
     ].join("\n");
 }
 

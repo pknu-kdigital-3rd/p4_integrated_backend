@@ -6,6 +6,19 @@
 // database, and every list is capped so the text fits the assistant LLM's
 // context (EXAONE4.5, 8k tokens shared with guide evidence and the answer).
 import type { PrismaClient } from "../../generated/prisma/client.ts";
+import {
+    ALERT_TYPE_LABELS,
+    EVENT_TYPE_LABELS,
+    OBJECT_CLASS_LABELS,
+    RISK_LABELS,
+    SEVERITY_LABELS,
+    SIM_STATUS_LABELS,
+    VEHICLE_SOURCE_LABELS,
+    VEHICLE_STATUS_LABELS,
+    label,
+    reasonText,
+    type LabelMap,
+} from "./fleet.labels.ts";
 
 export const STALE_FIX_SECONDS = 120;
 export const VISION_WINDOW_MINUTES = 30;
@@ -214,9 +227,9 @@ export function formatKst(iso: string): string {
     return `${kstFormat.format(new Date(iso))} (KST)`;
 }
 
-export function formatCounts(counts: CountMap): string {
+export function formatCounts(counts: CountMap, labels: LabelMap = {}): string {
     const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    return entries.length ? entries.map(([name, value]) => `${name} ${value}`).join(", ") : "없음";
+    return entries.length ? entries.map(([name, value]) => `${label(name, labels)} ${value}`).join(", ") : "없음";
 }
 
 export function formatAge(seconds: number | null): string {
@@ -243,7 +256,7 @@ export function capText(text: string): string {
 function renderRealLines(snapshot: FleetSnapshot): string[] {
     const real = snapshot.realVehicles;
     const lines = [
-        `[실차량] 활성 ${real.total}대 (출처: ${formatCounts(real.bySource)}) / 상태: ${formatCounts(real.byStatus)}`,
+        `[실차량] 활성 ${real.total}대 (출처: ${formatCounts(real.bySource, VEHICLE_SOURCE_LABELS)}) / 상태: ${formatCounts(real.byStatus, VEHICLE_STATUS_LABELS)}`,
         `  위치 수신: 정상 ${real.reporting}대, 지연(${STALE_FIX_SECONDS / 60}분 초과) ${real.stale}대, 기록 없음 ${real.noPosition}대 / 진행 중 운행 ${real.activeTrips}건`,
     ];
     if (real.reportingVehicles.length) {
@@ -257,7 +270,7 @@ function renderRealLines(snapshot: FleetSnapshot): string[] {
         lines.push("  주의 차량(운행 중인데 위치 지연·없음):");
         for (const note of real.notable) {
             const trip = note.tripDestination ? `, 목적지 ${note.tripDestination}` : "";
-            lines.push(`  - ${note.vehicleCode} (${note.source}, ${note.status}${trip}) ${formatAge(note.lastFixAgeSeconds)}`);
+            lines.push(`  - ${note.vehicleCode} (${label(note.source, VEHICLE_SOURCE_LABELS)}, ${label(note.status, VEHICLE_STATUS_LABELS)}${trip}) ${formatAge(note.lastFixAgeSeconds)}`);
         }
     }
     return lines;
@@ -267,12 +280,12 @@ export function renderVirtualLines(snapshot: Pick<FleetSnapshot, "virtual">): st
     const lines: string[] = [];
     if (!snapshot.virtual.scenarios.length) lines.push("[가상 시나리오] 활성 시나리오 없음");
     for (const scenario of snapshot.virtual.scenarios) {
-        lines.push(`[가상 시나리오] '${scenario.name}'(#${scenario.scenarioId}): 차량 ${scenario.vehicles}대 (${formatCounts(scenario.byStatus)}), 도로 통제: 차단 ${scenario.restrictions.blocked}건, 혼잡 가중 ${scenario.restrictions.penalty}건`);
+        lines.push(`[가상 시나리오] '${scenario.name}'(#${scenario.scenarioId}): 차량 ${scenario.vehicles}대 (${formatCounts(scenario.byStatus, SIM_STATUS_LABELS)}), 도로 통제: 차단 ${scenario.restrictions.blocked}건, 혼잡 가중 ${scenario.restrictions.penalty}건`);
         for (const vehicle of scenario.problemVehicles) {
-            lines.push(`  - ${vehicle.vehicleCode} ${vehicle.simStatus}${vehicle.blockedReason ? ` (${vehicle.blockedReason})` : ""}`);
+            lines.push(`  - ${vehicle.vehicleCode} ${label(vehicle.simStatus, SIM_STATUS_LABELS)}${vehicle.blockedReason ? ` (${reasonText(vehicle.blockedReason)})` : ""}`);
         }
         if (Object.keys(scenario.recentEvents).length) {
-            lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(scenario.recentEvents)}`);
+            lines.push(`  최근 ${EVENT_WINDOW_MINUTES}분 이벤트: ${formatCounts(scenario.recentEvents, EVENT_TYPE_LABELS)}`);
         }
     }
     return lines;
@@ -281,10 +294,10 @@ export function renderVirtualLines(snapshot: Pick<FleetSnapshot, "virtual">): st
 function renderVisionLines(snapshot: FleetSnapshot): string[] {
     const vision = snapshot.vision;
     const lines: string[] = [];
-    lines.push(`[영상 감지 최근 ${vision.windowMinutes}분] 감지 ${vision.detections}건 (위험도: ${formatCounts(vision.byRisk)}), 주요 객체: ${vision.topClasses.length ? vision.topClasses.map((item) => `${item.className} ${item.count}`).join(", ") : "없음"}`);
+    lines.push(`[영상 감지 최근 ${vision.windowMinutes}분] 감지 ${vision.detections}건 (위험도: ${formatCounts(vision.byRisk, RISK_LABELS)}), 주요 객체: ${vision.topClasses.length ? vision.topClasses.map((item) => `${label(item.className, OBJECT_CLASS_LABELS)} ${item.count}`).join(", ") : "없음"}`);
     lines.push(`  미확인 경보 ${vision.unconfirmedAlerts}건`);
     for (const alert of vision.recentAlerts) {
-        lines.push(`  - ${formatKst(alert.createdAt)} ${alert.alertType} ${alert.severity} ${alert.vehicleCode}${alert.message ? `: ${alert.message}` : ""}`);
+        lines.push(`  - ${formatKst(alert.createdAt)} ${label(alert.alertType, ALERT_TYPE_LABELS)} ${label(alert.severity, SEVERITY_LABELS)} ${alert.vehicleCode}${alert.message ? `: ${alert.message}` : ""}`);
     }
     return lines;
 }
@@ -300,11 +313,11 @@ export function renderReportFigures(snapshot: FleetSnapshot, include: SnapshotSe
             "### 실차량",
             "| 항목 | 값 |", "|---|---|",
             `| 활성 차량 | ${real.total}대 |`,
-            `| 출처별 | ${formatCounts(real.bySource)} |`,
-            `| 상태별 | ${formatCounts(real.byStatus)} |`,
+            `| 출처별 | ${formatCounts(real.bySource, VEHICLE_SOURCE_LABELS)} |`,
+            `| 상태별 | ${formatCounts(real.byStatus, VEHICLE_STATUS_LABELS)} |`,
             `| 위치 수신 정상 / 지연 / 없음 | ${real.reporting} / ${real.stale} / ${real.noPosition} |`,
             `| 진행 중 운행 | ${real.activeTrips}건 |`,
-            ...(real.notable.length ? ["", "주의 차량:", ...real.notable.map((note) => `- ${note.vehicleCode} (${note.status}) ${formatAge(note.lastFixAgeSeconds)}${note.tripDestination ? `, 목적지 ${note.tripDestination}` : ""}`)] : []),
+            ...(real.notable.length ? ["", "주의 차량:", ...real.notable.map((note) => `- ${note.vehicleCode} (${label(note.status, VEHICLE_STATUS_LABELS)}) ${formatAge(note.lastFixAgeSeconds)}${note.tripDestination ? `, 목적지 ${note.tripDestination}` : ""}`)] : []),
         ].join("\n"));
     if (include.virtual) sections.push(renderScenarioTable(snapshot));
     if (include.vision) sections.push(
@@ -312,8 +325,8 @@ export function renderReportFigures(snapshot: FleetSnapshot, include: SnapshotSe
             `### 영상 감지·경보 (최근 ${vision.windowMinutes}분)`,
             "| 항목 | 값 |", "|---|---|",
             `| 감지 | ${vision.detections}건 |`,
-            `| 위험도별 | ${formatCounts(vision.byRisk)} |`,
-            `| 주요 객체 | ${vision.topClasses.length ? vision.topClasses.map((item) => `${item.className} ${item.count}`).join(", ") : "없음"} |`,
+            `| 위험도별 | ${formatCounts(vision.byRisk, RISK_LABELS)} |`,
+            `| 주요 객체 | ${vision.topClasses.length ? vision.topClasses.map((item) => `${label(item.className, OBJECT_CLASS_LABELS)} ${item.count}`).join(", ") : "없음"} |`,
             `| 미확인 경보 | ${vision.unconfirmedAlerts}건 |`,
         ].join("\n"));
     return sections.join("\n\n");
@@ -324,8 +337,8 @@ export function renderScenarioTable(snapshot: Pick<FleetSnapshot, "virtual">): s
         "### 가상 시나리오",
         ...(snapshot.virtual.scenarios.length ? [
             "| 시나리오 | 차량 | 상태 | 차단 / 혼잡 가중 |", "|---|---|---|---|",
-            ...snapshot.virtual.scenarios.map((scenario) => `| ${scenario.name} (#${scenario.scenarioId}) | ${scenario.vehicles}대 | ${formatCounts(scenario.byStatus)} | ${scenario.restrictions.blocked} / ${scenario.restrictions.penalty} |`),
-            ...snapshot.virtual.scenarios.flatMap((scenario) => scenario.problemVehicles.map((vehicle) => `- ${scenario.name}: ${vehicle.vehicleCode} ${vehicle.simStatus}${vehicle.blockedReason ? ` (${vehicle.blockedReason})` : ""}`)),
+            ...snapshot.virtual.scenarios.map((scenario) => `| ${scenario.name} (#${scenario.scenarioId}) | ${scenario.vehicles}대 | ${formatCounts(scenario.byStatus, SIM_STATUS_LABELS)} | ${scenario.restrictions.blocked} / ${scenario.restrictions.penalty} |`),
+            ...snapshot.virtual.scenarios.flatMap((scenario) => scenario.problemVehicles.map((vehicle) => `- ${scenario.name}: ${vehicle.vehicleCode} ${label(vehicle.simStatus, SIM_STATUS_LABELS)}${vehicle.blockedReason ? ` (${reasonText(vehicle.blockedReason)})` : ""}`)),
         ] : ["활성 시나리오 없음"]),
     ].join("\n");
 }
