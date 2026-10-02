@@ -168,7 +168,9 @@ function createAssistantConnection({ getToken, onEvent, onLost }) {
   };
 }
 
-export function initializeAssistantPanel({ getToken }) {
+// getScope() returns { scope, label }: the operator's current selection,
+// sent with each question so the answer is about what is on screen.
+export function initializeAssistantPanel({ getToken, getScope = () => ({ scope: undefined, label: '전체 현황' }) }) {
   const drawer = document.querySelector('#assistant-drawer');
   const messages = document.querySelector('#assistant-messages');
   const form = document.querySelector('#assistant-form');
@@ -177,6 +179,7 @@ export function initializeAssistantPanel({ getToken }) {
   const stopButton = document.querySelector('#assistant-stop');
   const submitButton = form.querySelector('button[type="submit"]');
   const railButton = document.querySelector('[data-rail=assistant]');
+  const scopeLabel = document.querySelector('#assistant-scope');
   // requestId -> { element, content, text, sources, model, retrievalError, snapshotAt, renderQueued }
   const answers = new Map();
   let current = null;
@@ -205,13 +208,28 @@ export function initializeAssistantPanel({ getToken }) {
     if (drawer.hidden && railButton) railButton.classList.add('has-unread');
   }
 
+  function currentScope() {
+    try {
+      return getScope() ?? { scope: undefined, label: '전체 현황' };
+    } catch {
+      return { scope: undefined, label: '전체 현황' };
+    }
+  }
+
+  function showScope() {
+    if (scopeLabel) scopeLabel.textContent = `질문 대상: ${currentScope().label}`;
+  }
+
   // Reopening the panel shows what arrived in the background.
   new MutationObserver(() => {
-    if (!drawer.hidden && railButton) {
-      railButton.classList.remove('has-unread');
+    if (!drawer.hidden) {
+      showScope();
+      if (railButton) railButton.classList.remove('has-unread');
       messages.scrollTop = messages.scrollHeight;
     }
   }).observe(drawer, { attributes: true, attributeFilter: ['hidden'] });
+  // Selection changes while the panel is open (map clicks, mode switch).
+  setInterval(() => { if (!drawer.hidden) showScope(); }, 1000);
 
   function renderFooter(answer, note) {
     if (answer.sources?.length) {
@@ -232,7 +250,9 @@ export function initializeAssistantPanel({ getToken }) {
     const meta = document.createElement('p');
     meta.className = 'assistant-meta';
     const at = new Date(answer.snapshotAt);
-    const parts = [`현황 기준 ${Number.isNaN(at.getTime()) ? '-' : at.toLocaleTimeString('ko-KR', { hour12: false })}`];
+    const parts = [];
+    if (answer.subject) parts.push(answer.subject);
+    parts.push(`현황 기준 ${Number.isNaN(at.getTime()) ? '-' : at.toLocaleTimeString('ko-KR', { hour12: false })}`);
     if (answer.model) parts.push(answer.model);
     if (answer.retrievalError) parts.push('지침 검색 실패: 현황만으로 답변');
     if (note) parts.push(note);
@@ -273,6 +293,7 @@ export function initializeAssistantPanel({ getToken }) {
       if (!answer) return;
       if (message.type === 'start') {
         answer.snapshotAt = message.snapshotAt;
+        answer.subject = message.subject || answer.subject;
         answer.element.classList.remove('assistant-message--pending');
         answer.element.classList.add('assistant-message--streaming');
         answer.content.textContent = '';
@@ -302,12 +323,14 @@ export function initializeAssistantPanel({ getToken }) {
     content.textContent = '현황을 확인하고 답변을 준비하는 중…';
     element.append(content);
     const requestId = newRequestId();
-    const answer = { requestId, element, content, text: '', sources: [], model: '', retrievalError: null, snapshotAt: null, renderQueued: false };
+    const { scope, label: subject } = currentScope();
+    showScope();
+    const answer = { requestId, element, content, text: '', sources: [], model: '', retrievalError: null, snapshotAt: null, subject, renderQueued: false };
     answers.set(requestId, answer);
     current = answer;
     setBusy(true);
     try {
-      await connection.send({ type: 'ask', requestId, ...body });
+      await connection.send({ type: 'ask', requestId, ...body, ...(scope ? { scope } : {}) });
     } catch (error) {
       if (answers.has(requestId)) finish(answer, { error: error.message });
     }

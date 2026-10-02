@@ -331,6 +331,18 @@ let speedControlEditing = false;
 let pendingSpeedChange = null;
 let applyingSpeedChange = false;
 let vehicles = [];
+// Read by the assistant panel (app.js) so questions in virtual mode are
+// about the selected scenario and vehicle.
+window.__virtualAssistantScope = () => {
+  if (!scenarioId) return { scope: { view: 'virtual' }, label: '가상 시나리오 전체' };
+  const scenarioName = scenarioSelect.selectedOptions[0]?.textContent?.trim() || `#${scenarioId}`;
+  if (!selectedVehicleId) return { scope: { view: 'virtual', scenarioId: String(scenarioId) }, label: `시나리오 ${scenarioName}` };
+  const vehicle = vehicles.find((item) => String(item.vehicleId) === String(selectedVehicleId));
+  return {
+    scope: { view: 'virtual', scenarioId: String(scenarioId), vehicleId: String(selectedVehicleId) },
+    label: `가상 차량 ${vehicle?.vehicleCode || `#${selectedVehicleId}`} · 시나리오 ${scenarioName}`,
+  };
+};
 let restrictions = [];
 let restrictionBulkMode = false;
 const selectedRestrictionIds = new Set();

@@ -8,7 +8,7 @@ import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOn
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
-import {initializeAssistantPanel} from './assistant-panel.js?v=2';
+import {initializeAssistantPanel} from './assistant-panel.js?v=3';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
@@ -392,7 +392,14 @@ function drawWhenNotZooming(key,draw){
 function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:false}));}
 new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
 const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
-initializeAssistantPanel({getToken:()=>token});
+initializeAssistantPanel({getToken:()=>token,getScope:assistantScope});
+// What the assistant answers about: the selected real vehicle in monitoring
+// mode, or the scenario/virtual vehicle selection in virtual mode.
+function assistantScope(){
+  if(window.__virtualMode)return window.__virtualAssistantScope?.()??{scope:{view:'virtual'},label:'가상 시나리오 전체'};
+  if(selected?.vehicleId==null)return{scope:{view:'monitoring'},label:'실차량 전체'};
+  return{scope:{view:'monitoring',vehicleId:String(selected.vehicleId)},label:`실차량 ${liveTargetLabel(selected)}`};
+}
 async function api(path,options={},raw=false){const requestPath=demoMode&&!raw?path.replace('/api/v1/','/api/v1/demo/'):path;const response=await fetch(requestPath,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error?.message||`HTTP ${response.status}`);return (await response.json()).data}
 // Live View follows a stream, not a trip, so the trip is not part of the target.
 function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.telemetry?.external_id??null)&&liveTarget?.vehicleId===(item?.vehicleId!=null?String(item.vehicleId):null)}
