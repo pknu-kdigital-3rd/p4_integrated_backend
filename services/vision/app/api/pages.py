@@ -8,6 +8,7 @@ from app.core.settings import BASE_DIR, INDEX_HTML_PATH, settings
 router = APIRouter()
 
 LIVE_VIEW_TRACKS_JS_PATH = BASE_DIR / "live-view-tracks.js"
+LIVE_VIEW_DISTANCE_COLORS_JS_PATH = BASE_DIR / "live-view-distance-colors.js"
 
 PARENT_ORIGINS_PLACEHOLDER = "__LIVE_VIEW_PARENT_ORIGINS__"
 
@@ -30,6 +31,17 @@ async def live_view_tracks_js():
     # unit-tested with node; no-cache so a page reload picks up changes.
     return FileResponse(
         LIVE_VIEW_TRACKS_JS_PATH,
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/live-view-distance-colors.js")
+async def live_view_distance_colors_js():
+    # Keep the browser classifier available at the same explicit route as the
+    # other Live View overlay helper; no-cache ensures updated settings logic loads.
+    return FileResponse(
+        LIVE_VIEW_DISTANCE_COLORS_JS_PATH,
         media_type="text/javascript",
         headers={"Cache-Control": "no-cache"},
     )
