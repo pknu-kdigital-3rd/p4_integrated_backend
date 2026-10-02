@@ -83,6 +83,7 @@
   <details id="detailedSettings">
     <summary>Detailed settings</summary>
     <p class="detailed-hint">Used when overlay style is "Per class". Tap how each class is drawn. The classes are the server's YOLO_CLASSES (or its default list).</p>
+    <label><input id="translateClassesToKorean" type="checkbox" /> 클래스명을 한국어로 표시</label>
     <div id="classStyleList"></div>
   </details>
   <section id="telemetry" aria-live="polite">
@@ -106,6 +107,7 @@
   const masksEl = document.getElementById('masks');
   const overlayModeEl = document.getElementById('overlayMode');
   const classStyleListEl = document.getElementById('classStyleList');
+  const translateClassesToKoreanEl = document.getElementById('translateClassesToKorean');
   const compensationModeEl = document.getElementById('compensationMode');
   const trackPredictMsEl = document.getElementById('trackPredictMs');
   const trackHoldMsEl = document.getElementById('trackHoldMs');
@@ -139,6 +141,22 @@
   const CLASS_STYLES = ['box', 'segmentation', 'both', 'hidden'];
   let overlayClasses = readStoredJson('playback-overlay-classes', ['person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck']);
   let classStyles = readStoredJson('playback-class-styles', {});
+  let translateClassesToKorean = localStorage.getItem('playback-translate-classes-to-korean') === 'true';
+  const KOREAN_CLASS_NAMES = {
+    person: '사람', bicycle: '자전거', car: '자동차', motorcycle: '오토바이', airplane: '비행기', bus: '버스', train: '기차', truck: '트럭', boat: '배',
+    'traffic light': '신호등', 'fire hydrant': '소화전', 'stop sign': '정지 표지판', 'parking meter': '주차 요금기', bench: '벤치', bird: '새', cat: '고양이', dog: '개', horse: '말', sheep: '양', cow: '소', elephant: '코끼리', bear: '곰', zebra: '얼룩말', giraffe: '기린',
+    backpack: '배낭', umbrella: '우산', handbag: '핸드백', tie: '넥타이', suitcase: '여행 가방', frisbee: '원반', skis: '스키', snowboard: '스노보드', 'sports ball': '공', kite: '연', 'baseball bat': '야구 방망이', 'baseball glove': '야구 글러브', skateboard: '스케이트보드', surfboard: '서핑보드', 'tennis racket': '테니스 라켓', bottle: '병', 'wine glass': '와인잔', cup: '컵', fork: '포크', knife: '칼', spoon: '숟가락', bowl: '그릇', banana: '바나나', apple: '사과', sandwich: '샌드위치', orange: '오렌지', broccoli: '브로콜리', carrot: '당근', 'hot dog': '핫도그', pizza: '피자', donut: '도넛', cake: '케이크', chair: '의자', couch: '소파', 'potted plant': '화분', bed: '침대', 'dining table': '식탁', toilet: '변기', tv: 'TV', laptop: '노트북', mouse: '마우스', remote: '리모컨', keyboard: '키보드', 'cell phone': '휴대전화', microwave: '전자레인지', oven: '오븐', toaster: '토스터', sink: '싱크대', refrigerator: '냉장고', book: '책', clock: '시계', vase: '꽃병', scissors: '가위', 'teddy bear': '테디베어', 'hair drier': '헤어드라이어', toothbrush: '칫솔', object: '물체',
+  };
+  function classDisplayName(name) {
+    const value = String(name || 'object');
+    return translateClassesToKorean ? (KOREAN_CLASS_NAMES[value.toLowerCase()] || value) : value;
+  }
+  translateClassesToKoreanEl.checked = translateClassesToKorean;
+  translateClassesToKoreanEl.addEventListener('change', () => {
+    translateClassesToKorean = translateClassesToKoreanEl.checked;
+    localStorage.setItem('playback-translate-classes-to-korean', String(translateClassesToKorean));
+    renderClassStyleList();
+  });
   let otherClassStyle = localStorage.getItem('playback-other-class-style') || 'segmentation';
   function readStoredJson(key, fallback) {
     try {
@@ -344,7 +362,7 @@
   const CLASS_STYLE_LABELS = { box: 'Box', segmentation: 'Seg', both: 'Both', hidden: 'Off' };
   function renderClassStyleList() {
     classStyleListEl.replaceChildren();
-    const rows = [...overlayClasses.map((name) => [name.toLowerCase(), name]), ['__other__', 'other classes']];
+    const rows = [...overlayClasses.map((name) => [name.toLowerCase(), classDisplayName(name)]), ['__other__', 'other classes']];
     for (const [key, label] of rows) {
       const current = key === '__other__' ? otherClassStyle : selectedClassStyle(key);
       const row = document.createElement('div');
@@ -704,7 +722,7 @@
         const rawDistance = skipped ? item.held_distance_m : item.distance_m;
         const distance = Number(rawDistance);
         const distanceLabel = rawDistance != null && Number.isFinite(distance) ? `${Math.round(distance)} m` : '';
-        const classLabel = item.class || 'object';
+        const classLabel = classDisplayName(item.class || 'object');
         const meterFontSize = distanceLabel
           ? Math.round(14 + 6 * Math.max(0, Math.min(1, 1 - Math.max(0, distance) / 50)))
           : 14;
