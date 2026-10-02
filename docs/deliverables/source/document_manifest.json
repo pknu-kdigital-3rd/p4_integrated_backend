@@ -1,0 +1,77 @@
+{
+  "project": "AI 기반 지능형 교통·차량 통합 관제 시스템",
+  "documents": [
+    {
+      "file": "4차_프로젝트_기획서.docx",
+      "planned_body_pages": 9,
+      "tables": 9,
+      "figures": 2,
+      "chapters": [
+        {
+          "title": "1. 프로젝트 개요",
+          "page": 1
+        },
+        {
+          "title": "2. 요구사항 분석",
+          "page": 2
+        },
+        {
+          "title": "3. 시스템 설계",
+          "page": 3
+        },
+        {
+          "title": "4. 개발 환경",
+          "page": 5
+        },
+        {
+          "title": "5. 개발 계획",
+          "page": 7
+        },
+        {
+          "title": "6. 시연 시나리오",
+          "page": 8
+        },
+        {
+          "title": "7. 결론",
+          "page": 9
+        }
+      ]
+    },
+    {
+      "file": "4차_프로젝트_결과_보고서.docx",
+      "planned_body_pages": 33,
+      "tables": 40,
+      "figures": 11,
+      "chapters": [
+        {
+          "title": "1. 프로젝트 개요",
+          "page": 2
+        },
+        {
+          "title": "2. 개발 환경",
+          "page": 4
+        },
+        {
+          "title": "3. 시스템 설계",
+          "page": 6
+        },
+        {
+          "title": "4. AI 모델 및 구현",
+          "page": 11
+        },
+        {
+          "title": "5. 성능 평가",
+          "page": 16
+        },
+        {
+          "title": "6. 프로젝트 결과",
+          "page": 28
+        },
+        {
+          "title": "7. 결론 및 향후 계획",
+          "page": 32
+        }
+      ]
+    }
+  ]
+}

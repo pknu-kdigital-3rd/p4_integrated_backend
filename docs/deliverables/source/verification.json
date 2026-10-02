@@ -1,0 +1,18 @@
+[
+  {
+    "file": "4차_프로젝트_기획서.docx",
+    "pages": 10,
+    "body_tables": 9,
+    "figures": 2,
+    "docx_bytes": 362456,
+    "checks": "DOCX/XML, headings/TOC page numbers, no blank pages, blank UniDepth cells, source metrics"
+  },
+  {
+    "file": "4차_프로젝트_결과_보고서.docx",
+    "pages": 34,
+    "body_tables": 40,
+    "figures": 11,
+    "docx_bytes": 2029460,
+    "checks": "DOCX/XML, headings/TOC page numbers, no blank pages, blank UniDepth cells, source metrics"
+  }
+]
