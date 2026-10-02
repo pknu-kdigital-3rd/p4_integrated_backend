@@ -180,6 +180,27 @@ class VirtualRestrictionGeometryTests(unittest.TestCase):
         self.assertEqual(semi.edge_ids, ["1:2:1", "2:4:3"])
         self.assertAlmostEqual(semi.time_s, 2 * 1000.0 / (30 / 3.6))
 
+    def test_snapping_skips_a_node_that_only_touches_closed_roads(self):
+        graph = object.__new__(PurePythonGraph)
+        graph.coords = {1: (0.0, 0.0), 2: (0.0, 0.010), 3: (0.0, 0.012)}
+        graph.turn_restrictions = set()
+        graph.adjacency = defaultdict(list)
+        graph.grid_size = 1.0
+        graph.grid = defaultdict(list)
+        graph.grid[(0, 0)].extend(graph.coords)
+        busway = {**empty_restrictions(), "access": "no"}
+        graph.adjacency[1].append((2, 1000.0, 40.0, [], empty_restrictions(), 10))
+        graph.adjacency[3].append((2, 200.0, 40.0, [], busway, 11))
+        graph.adjacency[2].append((3, 200.0, 40.0, [], busway, 12))
+
+        # Node 3 is nearest to the click but only touches access=no roads;
+        # node 2 is the closest node a vehicle can reach.
+        self.assertEqual(graph.nearest_node(0.0, 0.0125), 2)
+        self.assertIsNotNone(graph.route(1, graph.nearest_node(0.0, 0.0125)))
+        # The road-matching graph ignores access and keeps the plain nearest node.
+        graph.ignore_access_restrictions = True
+        self.assertEqual(graph.nearest_node(0.0, 0.0125), 3)
+
     def test_reversed_edge_curve_is_normalised_to_directed_travel(self):
         graph = object.__new__(PurePythonGraph)
         graph.coords = {

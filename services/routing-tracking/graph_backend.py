@@ -505,6 +505,37 @@ def _profile_times(length_m, base_speed_kmh):
     return tuple(length_m / (min(base_speed_kmh, cap) * 1000 / 3600) for cap in _PROFILE_SPEED_CAPS)
 
 
+# Number of nearest graph nodes considered when the closest one cannot be
+# used by a vehicle (see _routable_node_set).
+NEAREST_NODE_CANDIDATES = 32
+
+
+def _routable_node_set(graph):
+    """Nodes with at least one access-permitted edge, in either direction.
+
+    Snapping to the plain nearest node could pick a node that only touches
+    access=no/private roads (for example a busway). Every route to or from it
+    is then impossible, and a route request between two ordinary points
+    failed with ROUTE_NOT_FOUND after searching the whole network. Either
+    direction is enough: the ends of one-way roads are valid origins or
+    destinations. Built from
+    the routing adjacency (both backends store allowed_mask at index 3 and the
+    neighbour at index 0); bit 0 is the unrestricted car with access respected.
+    """
+    adjacency = graph._routing_adjacency()
+    cached = getattr(graph, "_routable_nodes_cache", None)
+    if cached is not None and cached[0] is adjacency:
+        return cached[1]
+    routable = set()
+    for current, entries in adjacency.items():
+        for entry in entries:
+            if entry[3] & 1:
+                routable.add(current)
+                routable.add(entry[0])
+    graph._routable_nodes_cache = (adjacency, routable)
+    return routable
+
+
 def _osmnx_edge_restrictions(data):
     return {
         "max_height_m": _parse_float_tag(data.get("maxheight")),
@@ -641,6 +672,7 @@ class OsmnxGraph:
         from sklearn.neighbors import BallTree
         self._nearest_node_ids = list(self._node_coords)
         self._nearest_node_tree = BallTree(np.radians(list(self._node_coords.values())), metric="haversine")
+        _routable_node_set(self)
 
     def _routing_adjacency(self):
         """Return {node: [(neighbor, edge_key, attrs, allowed_mask, times,
@@ -679,8 +711,21 @@ class OsmnxGraph:
         return adjacency
 
     def nearest_node(self, lat, lon):
-        _distances, indices = self._nearest_node_tree.query([[math.radians(lat), math.radians(lon)]], k=1)
-        return self._nearest_node_ids[int(indices[0][0])]
+        """Nearest node a vehicle can use; see _routable_node_set.
+
+        The road-matching graph ignores access restrictions, so it keeps the
+        plain nearest node. If none of the nearest candidates is routable,
+        the nearest node is returned as before.
+        """
+        point = [[math.radians(lat), math.radians(lon)]]
+        if getattr(self, "ignore_access_restrictions", False):
+            _distances, indices = self._nearest_node_tree.query(point, k=1)
+            return self._nearest_node_ids[int(indices[0][0])]
+        k = min(NEAREST_NODE_CANDIDATES, len(self._nearest_node_ids))
+        _distances, indices = self._nearest_node_tree.query(point, k=k)
+        candidates = [self._nearest_node_ids[int(index)] for index in indices[0]]
+        routable = _routable_node_set(self)
+        return next((node for node in candidates if node in routable), candidates[0])
 
     def nearest_coords(self, lat, lon):
         """Returns [lat, lon] of the graph vertex nearest to the given point -
@@ -983,7 +1028,12 @@ class PurePythonGraph:
         return adjacency
 
     def nearest_node(self, lat, lon):
+        """Nearest node a vehicle can use (see _routable_node_set), else the
+        nearest node; the road-matching graph ignores access and keeps the
+        plain nearest node."""
+        routable = None if getattr(self, "ignore_access_restrictions", False) else _routable_node_set(self)
         best, best_d = None, float("inf")
+        best_routable, best_routable_d = None, float("inf")
         gx, gy = int(lat / self.grid_size), int(lon / self.grid_size)
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
@@ -992,7 +1042,9 @@ class PurePythonGraph:
                     d = (vlat - lat) ** 2 + (vlon - lon) ** 2
                     if d < best_d:
                         best_d, best = d, vid
-        return best
+                    if routable is not None and vid in routable and d < best_routable_d:
+                        best_routable_d, best_routable = d, vid
+        return best_routable if best_routable is not None else best
 
     def nearest_coords(self, lat, lon):
         """Returns [lat, lon] of the graph vertex nearest to the given point -
