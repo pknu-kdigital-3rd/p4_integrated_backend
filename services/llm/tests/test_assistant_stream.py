@@ -69,6 +69,19 @@ class AssistantStreamTests(unittest.TestCase):
         events.close()  # the client went away
         self.assertTrue(stream.closed)
 
+    def test_cancel_flag_ends_the_answer_and_closes_the_llm_stream(self):
+        import threading
+
+        stream = FakeStream(["가" * 200, "나" * 200, "다" * 200])
+        service, _ = service_with(stream)
+        cancel = threading.Event()
+        events = service.stream_events("q", "qa", "", 3, None, cancel)
+        self.assertEqual(next(events)["type"], "meta")
+        self.assertEqual(next(events)["type"], "delta")
+        cancel.set()  # the HTTP client disconnected
+        self.assertEqual(list(events), [])
+        self.assertTrue(stream.closed)
+
     def test_open_failure_is_an_error_event(self):
         def failing(*_args):
             raise RuntimeError("all chat LLM endpoints failed")
