@@ -794,11 +794,12 @@
         const meterFontSize = distanceLabel
           ? Math.round(14 + 6 * Math.max(0, Math.min(1, 1 - Math.max(0, distance) / 50)))
           : 14;
+        const meterFontWeight = distanceColorMode ? 600 : 700;
         if (showBox) {
           const paddingX = 5, gap = distanceLabel ? 5 : 0, classFontSize = 13;
           overlayCtx.font = `700 ${classFontSize}px sans-serif`;
           const classWidth = overlayCtx.measureText(classLabel).width;
-          overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
+          overlayCtx.font = `${meterFontWeight} ${meterFontSize}px sans-serif`;
           const meterWidth = distanceLabel ? overlayCtx.measureText(distanceLabel).width : 0;
           const labelHeight = Math.max(classFontSize, meterFontSize) + 6;
           const labelWidth = classWidth + meterWidth + gap + paddingX * 2;
@@ -814,16 +815,16 @@
           overlayCtx.font = `700 ${classFontSize}px sans-serif`;
           overlayCtx.fillText(classLabel, labelX + paddingX, textY);
           if (distanceLabel) {
-            overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
+            overlayCtx.font = `${meterFontWeight} ${meterFontSize}px sans-serif`;
             overlayCtx.fillText(distanceLabel, labelX + paddingX + classWidth + gap, textY);
           }
           overlayCtx.textBaseline = 'alphabetic';
         } else if (distanceLabel) {
-          overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
+          overlayCtx.font = `${meterFontWeight} ${meterFontSize}px sans-serif`;
           const labelWidth = overlayCtx.measureText(distanceLabel).width;
           const labelX = Math.max(0, Math.min(x + w / 2 - labelWidth / 2, overlayCanvas.width - labelWidth));
           overlayCtx.lineJoin = 'round';
-          overlayCtx.lineWidth = 2;
+          overlayCtx.lineWidth = distanceColorMode ? 1.25 : 2;
           overlayCtx.strokeStyle = distanceColorMode
             ? labelBackgroundColor : color;
           overlayCtx.strokeText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
