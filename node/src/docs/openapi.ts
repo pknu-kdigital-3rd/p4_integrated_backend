@@ -14,6 +14,7 @@ import "../modules/recording/recording.openapi.ts";
 import "../modules/telemetry/telemetry.openapi.ts";
 import "../modules/virtual/virtual.openapi.ts";
 import "../modules/fleet/fleet.openapi.ts";
+import "../modules/assistant/assistant.openapi.ts";
 
 const generator = new OpenApiGeneratorV3(
     registry.definitions,

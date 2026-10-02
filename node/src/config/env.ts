@@ -38,6 +38,10 @@ const envSchema = z.object({
     VISION_PUBLIC_BASE_URL: z.url().default("https://127.0.0.1:39002"),
     LIVE_VIEW_URL: z.url().optional(),
     ROUTING_TRACKING_BASE_URL: z.url().default("http://127.0.0.1:8000"),
+    // pce ITS fleet assistant API (KOSHA transport-guide RAG). Empty disables
+    // POST /api/v1/assistant/chat with a 503.
+    ASSISTANT_BASE_URL: z.preprocess((value) => value === "" ? undefined : value, z.url().optional()),
+    ASSISTANT_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600000).default(120000),
     OPERATOR_DEMO_PUBLIC: envBoolean,
     TRUST_PROXY: envBoolean,
     RECORDING_ENABLED: envBoolean,
