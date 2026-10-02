@@ -40,6 +40,10 @@
     .class-style-options button { min-width: 52px; min-height: 36px; margin: 0; border: 0; border-right: 1px solid #666; border-radius: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; touch-action: manipulation; }
     .class-style-options button:last-child { border-right: 0; }
     .class-style-options button[aria-pressed="true"] { background: #2f6fd6; color: #fff; }
+    #distanceColorSettings { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 14px; margin: 8px 0; }
+    #distanceColorSettings label { display: flex; align-items: center; gap: 8px; }
+    #distanceColorSettings input[type="number"] { width: 6em; }
+    #distanceColorSettings input[type="color"] { width: 42px; height: 32px; padding: 2px; }
   </style>
 </head>
 <body>
@@ -84,6 +88,16 @@
     <summary>Detailed settings</summary>
     <p class="detailed-hint">Used when overlay style is "Per class". Tap how each class is drawn. The classes are the server's YOLO_CLASSES (or its default list).</p>
     <label><input id="translateClassesToKorean" type="checkbox" /> 클래스명을 한국어로 표시</label>
+    <p class="detailed-hint">Distance coloring overrides per-class colors. Near: at or below its limit; other: above near through the other limit; far: above the other limit.</p>
+    <label><input id="distanceColoringEnabled" type="checkbox" /> Color detections by distance</label>
+    <div id="distanceColorSettings">
+      <label>Near maximum (m) <input id="distanceNearMax" type="number" min="0.1" max="200" step="0.1" /></label>
+      <label>Near color <input id="distanceNearColor" type="color" /></label>
+      <label>Other maximum (m) <input id="distanceMidMax" type="number" min="0.1" max="200" step="0.1" /></label>
+      <label>Other color <input id="distanceMidColor" type="color" /></label>
+      <label>Far color <input id="distanceFarColor" type="color" /></label>
+      <label>Unknown distance color <input id="distanceUnknownColor" type="color" /></label>
+    </div>
     <div id="classStyleList"></div>
   </details>
   <section id="telemetry" aria-live="polite">
@@ -93,6 +107,7 @@
   </section>
 </main>
 <script src="live-view-tracks.js"></script>
+<script src="live-view-distance-colors.js"></script>
 <script>
 (() => {
   const videoCanvas = document.getElementById('video');
@@ -108,12 +123,22 @@
   const overlayModeEl = document.getElementById('overlayMode');
   const classStyleListEl = document.getElementById('classStyleList');
   const translateClassesToKoreanEl = document.getElementById('translateClassesToKorean');
+  const distanceColoringEnabledEl = document.getElementById('distanceColoringEnabled');
+  const distanceNearMaxEl = document.getElementById('distanceNearMax');
+  const distanceMidMaxEl = document.getElementById('distanceMidMax');
+  const distanceColorInputs = {
+    NEAR: document.getElementById('distanceNearColor'),
+    MID: document.getElementById('distanceMidColor'),
+    FAR: document.getElementById('distanceFarColor'),
+    UNKNOWN: document.getElementById('distanceUnknownColor'),
+  };
   const compensationModeEl = document.getElementById('compensationMode');
   const trackPredictMsEl = document.getElementById('trackPredictMs');
   const trackHoldMsEl = document.getElementById('trackHoldMs');
   const maskPredictMsEl = document.getElementById('maskPredictMs');
   const trackDebugEl = document.getElementById('trackDebug');
   const temporal = window.LiveViewTracks;
+  const distanceColors = window.LiveViewDistanceColors;
   const minConfidenceEl = document.getElementById('minConfidence');
   const minConfidenceValueEl = document.getElementById('minConfidenceValue');
   const serverThresholdsEl = document.getElementById('serverThresholds');
@@ -164,6 +189,8 @@
       return value && typeof value === 'object' ? value : fallback;
     } catch { return fallback; }
   }
+  let distanceColorSettings = distanceColors.normalizeSettings(readStoredJson(
+    'playback-distance-colors', distanceColors.DEFAULTS));
   let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
   // Track hold/prediction timing in media milliseconds; see live-view-tracks.js.
   let temporalConfig = temporal.normalizeConfig({
@@ -396,6 +423,42 @@
     }
   }
   renderClassStyleList();
+  function syncDistanceColorControls() {
+    distanceColoringEnabledEl.checked = distanceColorSettings.enabled;
+    distanceNearMaxEl.value = String(distanceColorSettings.nearMaxM);
+    distanceMidMaxEl.value = String(distanceColorSettings.midMaxM);
+    for (const zone of distanceColors.ZONES) distanceColorInputs[zone].value = distanceColorSettings.colors[zone];
+  }
+  function saveDistanceColorSettings() {
+    localStorage.setItem('playback-distance-colors', JSON.stringify(distanceColorSettings));
+  }
+  function commitDistanceThresholds() {
+    const nearMaxM = Number(distanceNearMaxEl.value);
+    const midMaxM = Number(distanceMidMaxEl.value);
+    if (!distanceColors.isValidThresholds(nearMaxM, midMaxM)) {
+      syncDistanceColorControls();
+      setStatus('Distance limits must be between 0.1 and 200 m, with near below other.', '#f66');
+      return;
+    }
+    distanceColorSettings = distanceColors.normalizeSettings({ ...distanceColorSettings, nearMaxM, midMaxM });
+    syncDistanceColorControls();
+    saveDistanceColorSettings();
+  }
+  syncDistanceColorControls();
+  distanceColoringEnabledEl.addEventListener('change', () => {
+    distanceColorSettings = distanceColors.normalizeSettings({ ...distanceColorSettings, enabled: distanceColoringEnabledEl.checked });
+    saveDistanceColorSettings();
+  });
+  distanceNearMaxEl.addEventListener('change', commitDistanceThresholds);
+  distanceMidMaxEl.addEventListener('change', commitDistanceThresholds);
+  for (const zone of distanceColors.ZONES) distanceColorInputs[zone].addEventListener('change', () => {
+    distanceColorSettings = distanceColors.normalizeSettings({
+      ...distanceColorSettings,
+      colors: { ...distanceColorSettings.colors, [zone]: distanceColorInputs[zone].value },
+    });
+    syncDistanceColorControls();
+    saveDistanceColorSettings();
+  });
   if (!['global', 'local', 'raw'].includes(compensationMode)) compensationMode = 'global';
   compensationModeEl.value = compensationMode;
 
@@ -706,7 +769,13 @@
       const [x1, y1, x2, y2] = track.box;
       const x = x1 * overlayCanvas.width, y = y1 * overlayCanvas.height;
       const w = (x2 - x1) * overlayCanvas.width, h = (y2 - y1) * overlayCanvas.height;
-      const color = colorForClass(item.class);
+      const skipped = item.distance_status === 'inference_skipped';
+      const rawDistance = skipped ? item.held_distance_m : item.distance_m;
+      const color = distanceColorSettings.enabled
+        ? distanceColors.colorForDistance(rawDistance, distanceColorSettings)
+        : colorForClass(item.class);
+      const labelColor = distanceColorSettings.enabled
+        ? distanceColors.textColorForBackground(color) : '#073b2b';
       const confidence = track.confidence;
       // Raw mode returns plain detections without temporal state.
       const ghost = track.state === 'holding';
@@ -718,8 +787,6 @@
       const showBox = boxesEl.checked && drawBox;
       if (showBox) { overlayCtx.strokeStyle = color; overlayCtx.lineWidth = ghost ? 1.5 : 3; overlayCtx.setLineDash(ghost ? [5, 4] : []); overlayCtx.strokeRect(x, y, w, h); overlayCtx.setLineDash([]); }
       if (!ghost) {
-        const skipped = item.distance_status === 'inference_skipped';
-        const rawDistance = skipped ? item.held_distance_m : item.distance_m;
         const distance = Number(rawDistance);
         const distanceLabel = rawDistance != null && Number.isFinite(distance) ? `${Math.round(distance)} m` : '';
         const classLabel = classDisplayName(item.class || 'object');
@@ -740,7 +807,7 @@
           if (typeof overlayCtx.roundRect === 'function') {
             overlayCtx.beginPath(); overlayCtx.roundRect(labelX, labelY, labelWidth, labelHeight, 4); overlayCtx.fill();
           } else overlayCtx.fillRect(labelX, labelY, labelWidth, labelHeight);
-          overlayCtx.fillStyle = '#073b2b';
+          overlayCtx.fillStyle = labelColor;
           overlayCtx.textBaseline = 'middle';
           const textY = labelY + labelHeight / 2;
           overlayCtx.font = `700 ${classFontSize}px sans-serif`;
@@ -752,7 +819,7 @@
           overlayCtx.textBaseline = 'alphabetic';
         } else if (distanceLabel) {
           overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
-          overlayCtx.fillStyle = labelTextColor;
+          overlayCtx.fillStyle = distanceColorSettings.enabled ? labelColor : labelTextColor;
           const labelWidth = overlayCtx.measureText(distanceLabel).width;
           const labelX = Math.max(0, Math.min(x + w / 2 - labelWidth / 2, overlayCanvas.width - labelWidth));
           overlayCtx.fillText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
@@ -767,7 +834,7 @@
       }
       // A retained mask follows its box briefly, then only the box is drawn.
       const mask = track.state ? temporal.maskForTrack(track, item.mask, nowMs, temporalConfig) : item.mask;
-      if (masksEl.checked && drawMask && mask && mask.length > 2) { overlayCtx.beginPath(); mask.forEach((point, i) => { const px = point[0] * overlayCanvas.width, py = point[1] * overlayCanvas.height; i ? overlayCtx.lineTo(px, py) : overlayCtx.moveTo(px, py); }); overlayCtx.closePath(); overlayCtx.fillStyle = color + '44'; overlayCtx.fill(); overlayCtx.strokeStyle = color; overlayCtx.stroke(); }
+      if (masksEl.checked && drawMask && mask && mask.length > 2) { overlayCtx.beginPath(); mask.forEach((point, i) => { const px = point[0] * overlayCanvas.width, py = point[1] * overlayCanvas.height; i ? overlayCtx.lineTo(px, py) : overlayCtx.moveTo(px, py); }); overlayCtx.closePath(); overlayCtx.fillStyle = distanceColors.maskColor(color); overlayCtx.fill(); overlayCtx.strokeStyle = color; overlayCtx.stroke(); }
       overlayCtx.globalAlpha = 1;
     }
   }
