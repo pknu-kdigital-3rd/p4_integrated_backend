@@ -123,6 +123,30 @@ body:not(.virtual-mode) .virtual-routing-log { display: none; }
 .legend-dot.stale { background: #b86b08; }
 .running { background: #0868dd; }.ready { background: #13ad72; }.maintenance { background: #ed3d4f; }.congestion { background: #f59a23; }
 #settings-drawer { position: absolute; top: 20px; left: 20px; z-index: 900; width: min(340px,calc(100% - 40px)); }
+#assistant-drawer { position: absolute; top: 20px; left: 20px; bottom: 20px; z-index: 900; width: min(460px,calc(100% - 40px)); display: flex; flex-direction: column; gap: 10px; }
+#assistant-drawer[hidden] { display: none; }
+.assistant-hint { margin: 0; font-size: 12px; color: var(--ui-text-secondary); }
+#assistant-messages { flex: 1; min-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+.assistant-message { padding: 10px 12px; border-radius: var(--ui-radius-md); font-size: 13px; line-height: 1.55; word-break: keep-all; overflow-wrap: anywhere; }
+.assistant-message--user { align-self: flex-end; max-width: 85%; background: var(--ui-primary); color: #fff; white-space: pre-wrap; }
+.assistant-message--assistant { align-self: stretch; background: var(--ui-surface-soft); border: 1px solid var(--ui-border); }
+.assistant-message--pending { color: var(--ui-text-secondary); font-style: italic; }
+.assistant-message--error { background: var(--ui-danger-soft); border-color: var(--ui-danger); color: #8a1622; }
+.assistant-markdown h3, .assistant-markdown h4, .assistant-markdown h5 { margin: 10px 0 6px; font-size: 14px; }
+.assistant-markdown h3:first-child, .assistant-markdown h4:first-child { margin-top: 0; }
+.assistant-markdown p { margin: 6px 0; }
+.assistant-markdown ul, .assistant-markdown ol { margin: 6px 0; padding-left: 20px; }
+.assistant-markdown table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 12px; }
+.assistant-markdown th, .assistant-markdown td { border: 1px solid var(--ui-border); padding: 4px 6px; text-align: left; vertical-align: top; }
+.assistant-markdown th { background: var(--ui-primary-soft); }
+.assistant-cite { color: var(--ui-primary); font-weight: 600; font-size: 11px; }
+.assistant-sources { margin-top: 8px; font-size: 12px; color: var(--ui-text-secondary); }
+.assistant-sources summary { cursor: pointer; }
+.assistant-sources ul { margin: 4px 0 0; padding-left: 18px; }
+.assistant-meta { margin: 6px 0 0; font-size: 11px; color: var(--ui-text-muted); }
+#assistant-form { display: grid; gap: 8px; }
+#assistant-question { width: 100%; resize: vertical; min-height: 44px; font: inherit; padding: 8px 10px; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm); box-sizing: border-box; }
+.assistant-actions { display: flex; justify-content: flex-end; gap: 8px; }
 #telemetry-settings { display: grid; gap: 10px; margin-top: 18px; }
 #telemetry-settings h2 { display: none; }
 .route-mode-settings { display: grid; gap: 8px; margin-top: 18px; border-top: 1px solid var(--ui-border); padding-top: 14px; font-size: 12px; }

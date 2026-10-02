@@ -72,7 +72,8 @@ const paths = {
   pin: '<path d="M19 9c0 5-7 12-7 12S5 14 5 9a7 7 0 1 1 14 0Z"/><circle cx="12" cy="9" r="2"/>',
   time: '<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 3"/>',
   fullscreen: '<path d="M3 9V3h6m6 0h6v6m0 6v6h-6m-6 0H3v-6"/>',
-  warning: '<path d="m12 3 10 18H2Zm0 6v5m0 3v1"/>'
+  warning: '<path d="m12 3 10 18H2Zm0 6v5m0 3v1"/>',
+  assistant: '<path d="M4 5h16v11H9l-5 4Z"/><path d="M8 9h8M8 12h5"/>'
 };
 export const icon = name => `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || paths.bus}</svg>`;
 export function vehicleIcon(item, selected = false, virtual = false, livePreview = false) {
@@ -140,7 +141,9 @@ export function initializeDashboard({ map, markers, selectVehicle, showFleet }) 
     const view=button.dataset.rail;
     document.querySelectorAll('[data-rail]').forEach(el=>el.setAttribute('aria-pressed',String(el===button)));
     document.querySelector('#settings-drawer').hidden=view!=='settings'; drawerOpen=view==='fleet'; render();
+    const assistant=document.querySelector('#assistant-drawer'); if(assistant)assistant.hidden=view!=='assistant';
     if(view==='fleet')search.focus();
+    if(view==='assistant')document.querySelector('#assistant-question')?.focus();
   });
   document.querySelector('#close-settings').onclick=()=>document.querySelector('[data-rail=map]').click();
   const clock=()=>{ const now=new Date();const el=document.querySelector('#local-clock');el.dateTime=now.toISOString();el.textContent=now.toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false}); };

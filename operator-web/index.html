@@ -53,6 +53,9 @@
     <button aria-pressed="false" data-icon="bus" data-rail="fleet" type="button">
      차량 목록
     </button>
+    <button aria-pressed="false" data-icon="assistant" data-rail="assistant" type="button">
+     AI 도우미
+    </button>
     <button data-icon="bell" disabled="" title="알림 데이터 미연결" type="button">
      알림
     </button>
@@ -331,6 +334,32 @@
      <p aria-live="off" id="live-detection-status" role="status">
       YOLO 객체 탐지 대기 중
      </p>
+    </section>
+    <section aria-labelledby="assistant-title" class="ui-card" hidden="" id="assistant-drawer">
+     <div class="ui-card-header">
+      <h2 id="assistant-title">
+       AI 관제 도우미
+      </h2>
+      <button aria-label="도우미 닫기" id="close-assistant" type="button">
+       닫기
+      </button>
+     </div>
+     <p class="assistant-hint">
+      현재 차량 현황과 KOSHA 운송 안전지침을 근거로 답합니다.
+     </p>
+     <div aria-live="polite" id="assistant-messages">
+     </div>
+     <form id="assistant-form">
+      <textarea aria-label="질문" id="assistant-question" maxlength="1000" placeholder="예: 경로 없음 상태인 가상 차량이 있나요?" rows="2"></textarea>
+      <div class="assistant-actions">
+       <button id="assistant-report" type="button">
+        현황 보고서
+       </button>
+       <button type="submit">
+        질문
+       </button>
+      </div>
+     </form>
     </section>
     <section class="ui-card" hidden="" id="settings-drawer">
      <div class="ui-card-header">
@@ -664,9 +693,9 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js">
   </script>
-  <script src="app.js?v=52" type="module">
+  <script src="app.js?v=53" type="module">
   </script>
-  <script src="virtual-dispatch.js?v=41" type="module">
+  <script src="virtual-dispatch.js?v=42" type="module">
   </script>
  </body>
 </html>
