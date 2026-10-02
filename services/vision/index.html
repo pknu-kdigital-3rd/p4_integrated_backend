@@ -823,9 +823,9 @@
           const labelWidth = overlayCtx.measureText(distanceLabel).width;
           const labelX = Math.max(0, Math.min(x + w / 2 - labelWidth / 2, overlayCanvas.width - labelWidth));
           overlayCtx.lineJoin = 'round';
-          overlayCtx.lineWidth = 3;
+          overlayCtx.lineWidth = 2;
           overlayCtx.strokeStyle = distanceColorMode
-            ? labelBackgroundColor : distanceColors.textColorForBackground(labelTextColor);
+            ? labelBackgroundColor : color;
           overlayCtx.strokeText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
           overlayCtx.fillStyle = labelTextColor;
           overlayCtx.fillText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
