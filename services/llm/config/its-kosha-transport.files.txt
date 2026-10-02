@@ -1,0 +1,40 @@
+# KOSHA GUIDE documents indexed for the ITS fleet assistant: vehicle and
+# road transport operation, trucks, forklifts, loading/unloading, port and
+# logistics handling, hazardous-material transport, and driver fitness.
+# One file name per line, relative to [paths].corpus_dir. Lines starting
+# with '#' are comments.
+
+# Vehicle and road transport operation
+G-10-2023 작업장 내 운반차량의 운행에 관한 안전지침.pdf
+C-114-2020 덤프트럭 및 화물자동차 안전작업 지침.pdf
+M-48-2012 안전운송을 위한 작업장에 관한 기술지침.pdf
+G-101-2013 운송용 차량에서의 작업 시 떨어짐 사고를 방지하기 위한 기술지침.pdf
+G-90-2015 운반구에 관한 안전지침.pdf
+B-M-22-2026 생활폐기물 수거차량의 구조 등에 관한 기술지원규정.pdf
+B-M-29-2026 자동차 안전작업에 대한 기술지원규정.pdf
+G-55-2012 차량경정비작업안전에관한기술지침.pdf
+C-48-2022 건설기계 안전보건작업지침.pdf
+C-85-2013 트럭 탑재형 크레인(Cargo Crane) 안전보건작업지침.pdf
+A-G-3-2025 오토바이 배달작업 시 안전에 관한 기술지원규정.pdf
+X-45-2014 도로 및 선로작업에서 리스크 감소를 위한 반사조끼 사용에 관한 지침.pdf
+P-47-2021 자동차용 수소연료 전지시스템의 안전에 관한 기술지침.pdf
+
+# Forklifts, loading and unloading, ports and logistics
+B-M-11-2025 지게차의 안전작업에 관한 기술지원규정.pdf
+G-100-2013 지게차 운전자의 안전교육훈련에 관한 기술지침.pdf
+M-49-2023 작업장내 안전한 적재 및 하역작업을 위한 기술지침.pdf
+B-M-32-2026 철강제품의 적재에 관한 안전기술지원규정.pdf
+A-G-18-2026 항만하역작업 안전에 관한 기술지원규정.pdf
+G-40-2012 해상운송을 위한 포장·운반 및 선적에 관한 기술지침.pdf
+X-66-2013 생산관련 물류작업 시의 리스크 평가지침.pdf
+
+# Hazardous-material transport
+P-31-2012 인화성 액체 이송용 탱크 차량의 안전에 관한 기술지침.pdf
+P-39-2012 위험물질의 운송사고시 비상대응에 관한 기술지침.pdf
+X-49-2018 위험물 운송 시 탱크트럭의 정량적 리스크 분석에 관한 기술지침.pdf
+K-1-2023 유해화학물질 저장 운반 및 취급에 관한 기술지침.pdf
+
+# Driver fitness and fatigue
+H-222-2023 운전직 근로자의 업무적합성평가 기술지침.pdf
+H-91-2021 피로도 평가 및 관리지침.pdf
+C-52-2016 야간 건설공사 안전보건작업 지침.pdf

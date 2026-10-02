@@ -1,0 +1,58 @@
+# ITS fleet assistant: KOSHA GUIDE documents on vehicle/road transport,
+# loading and unloading, hazardous-material transport and driver fitness,
+# indexed for the p4 operator dashboard assistant (docs/fleet_assistant_plan.md).
+# Deployment overrides these values with KINDEX_* / KSERVE_* environment
+# variables set by Compose from the host's LLM_* variables. MongoDB requires
+# authentication: the credentialed URL is KINDEX_PARENT_MONGO_URL, never this file.
+
+[paths]
+corpus_dir   = "E:/project3/kosha/kosha_pdfs_current"
+include_file = "config/its-kosha-transport.files.txt"
+out_dir      = "out/its_kosha_transport"
+
+[chunk]
+child_target = 512
+child_max    = 768
+parent_max   = 3000
+min_chars    = 150
+parent_scope = "parent_clause"
+
+[index]
+qdrant_url  = "http://10.174.96.119:36333"
+collection  = "its-kosha-transport"
+
+embed_model    = "Qwen3-Embedding-8B"
+embed_dim      = 4096
+embed_batch    = 8
+embed_endpoint = "http://10.174.96.119:18001/v1"
+
+query_instruction = "주어진 질의에 답이 되는 KOSHA 운송·차량 안전지침 구절을 검색한다"
+sparse_model   = "Qdrant/bm25"
+upsert_batch   = 64
+qdrant_timeout = 60
+upsert_retries = 5
+
+prefetch = 40
+top_k    = 6
+
+parent_store            = "mongodb"
+parent_mongo_url        = "mongodb://10.174.96.119:37017"
+parent_mongo_database   = "its"
+parent_mongo_collection = "kosha_transport_parents"
+parent_mongo_timeout_ms = 5000
+
+[serve]
+# EXAONE4.5 is served with max_model_len 8192: the fleet snapshot, the guide
+# context and the answer share that budget.
+temperature          = 0.1
+max_tokens           = 1000
+context_max_chars    = 4000
+startup_health_check = true
+timeout_seconds      = 120.0
+max_retries          = 1
+api_key_env          = "LLM_API_KEY"
+
+[[serve.endpoints]]
+name     = "exaone45"
+base_url = "http://10.174.96.119:18000/v1"
+model    = "EXAONE4.5"

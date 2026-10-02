@@ -1,0 +1,25 @@
+[project]
+name = "p4-llm"
+version = "0.1.0"
+description = "ITS fleet assistant: KOSHA transport-guide RAG (Qdrant + MongoDB) and EXAONE answers for the operator dashboard."
+requires-python = ">=3.11"
+dependencies = [
+    "qdrant-client>=1.10",
+    "fastembed>=0.3",               # CPU sparse BM25 vectors
+    "kiwipiepy>=0.18",              # Korean tokenizer for sparse retrieval
+    "pymongo>=4.8",                 # MongoDB parent store
+    "openai>=1.40",                 # OpenAI-compatible chat LLM client
+    "requests>=2.31",               # OpenAI-compatible embedding endpoint
+    "pymupdf>=1.26",                # KOSHA GUIDE PDF parsing (indexing)
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",                  # fastapi.testclient
+]
+
+[tool.uv]
+# Not an installable package: run with --app-dir src / python -m from src.
+package = false
