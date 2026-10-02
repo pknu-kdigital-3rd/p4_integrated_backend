@@ -88,7 +88,7 @@
     <summary>Detailed settings</summary>
     <p class="detailed-hint">Used when overlay style is "Per class". Tap how each class is drawn. The classes are the server's YOLO_CLASSES (or its default list).</p>
     <label><input id="translateClassesToKorean" type="checkbox" /> 클래스명을 한국어로 표시</label>
-    <p class="detailed-hint">Distance coloring overrides per-class colors. Near: at or below its limit; other: above near through the other limit; far: above the other limit.</p>
+    <p class="detailed-hint">Distance coloring overrides per-class colors for outlines, masks, and text. Near: at or below its limit; other: above near through the other limit; far: above the other limit.</p>
     <label><input id="distanceColoringEnabled" type="checkbox" /> Color detections by distance</label>
     <div id="distanceColorSettings">
       <label>Near maximum (m) <input id="distanceNearMax" type="number" min="0.1" max="200" step="0.1" /></label>
@@ -774,14 +774,15 @@
       const color = distanceColorSettings.enabled
         ? distanceColors.colorForDistance(rawDistance, distanceColorSettings)
         : colorForClass(item.class);
-      const labelColor = distanceColorSettings.enabled
+      const distanceColorMode = distanceColorSettings.enabled;
+      const labelBackgroundColor = distanceColorMode
         ? distanceColors.textColorForBackground(color) : '#073b2b';
       const confidence = track.confidence;
       // Raw mode returns plain detections without temporal state.
       const ghost = track.state === 'holding';
       overlayCtx.globalAlpha = track.state ? temporal.trackAlpha(track, nowMs, temporalConfig) : 1;
       const className = String(item.class || 'object').toLowerCase();
-      const labelTextColor = className === 'person' ? '#073b2b' : '#fff';
+      const labelTextColor = distanceColorMode ? color : (className === 'person' ? '#073b2b' : '#fff');
       const { box: drawBox, mask: drawMask } = classStyle(className);
       if (!drawBox && !drawMask) { overlayCtx.globalAlpha = 1; continue; }
       const showBox = boxesEl.checked && drawBox;
@@ -803,11 +804,11 @@
           const labelWidth = classWidth + meterWidth + gap + paddingX * 2;
           const labelX = Math.max(0, Math.min(x, overlayCanvas.width - labelWidth));
           const labelY = y >= labelHeight ? y - labelHeight : y;
-          overlayCtx.fillStyle = color;
+          overlayCtx.fillStyle = distanceColorMode ? labelBackgroundColor : color;
           if (typeof overlayCtx.roundRect === 'function') {
             overlayCtx.beginPath(); overlayCtx.roundRect(labelX, labelY, labelWidth, labelHeight, 4); overlayCtx.fill();
           } else overlayCtx.fillRect(labelX, labelY, labelWidth, labelHeight);
-          overlayCtx.fillStyle = labelColor;
+          overlayCtx.fillStyle = labelTextColor;
           overlayCtx.textBaseline = 'middle';
           const textY = labelY + labelHeight / 2;
           overlayCtx.font = `700 ${classFontSize}px sans-serif`;
@@ -819,9 +820,15 @@
           overlayCtx.textBaseline = 'alphabetic';
         } else if (distanceLabel) {
           overlayCtx.font = `700 ${meterFontSize}px sans-serif`;
-          overlayCtx.fillStyle = distanceColorSettings.enabled ? labelColor : labelTextColor;
           const labelWidth = overlayCtx.measureText(distanceLabel).width;
           const labelX = Math.max(0, Math.min(x + w / 2 - labelWidth / 2, overlayCanvas.width - labelWidth));
+          if (distanceColorMode) {
+            overlayCtx.lineJoin = 'round';
+            overlayCtx.lineWidth = 3;
+            overlayCtx.strokeStyle = labelBackgroundColor;
+            overlayCtx.strokeText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
+          }
+          overlayCtx.fillStyle = labelTextColor;
           overlayCtx.fillText(distanceLabel, labelX, Math.max(meterFontSize, y - 4));
         }
       }
