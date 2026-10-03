@@ -92,6 +92,23 @@ while GPU work completes. Default CUDA events can busy-wait and consume a CPU
 core even though contour tracing itself runs on the GPU. Compare both
 `process_cpu_mean` and wall latency: reduced CPU waiting need not reduce latency.
 
+The service uses `RealtimeSegmentationPredictor` for its in-memory frames.
+CUDA stage timings use events on the inference stream and one blocking wait
+after postprocessing, instead of six device-wide timing synchronizations.
+Mask filtering reads one reduced validity flag rather than one scalar per mask.
+The ordinary predictor remains available for file sources and visualization.
+Depth completion also uses a blocking event while preserving safe input reuse.
+Service box and depth-result copies use the same blocking transfer helper;
+empty-mask presence flags are batched with the depth results instead of read
+one at a time.
+
+Contour metadata and vertices have separate pinned staging buffers, each
+retaining only the current shape. The compact contour path still needs two
+host waits: metadata determines the occupied vertex ranges for the second copy.
+Tracking CPU transfers and variable-sized depth filtering remain synchronization
+boundaries. The contour benchmark does not include those inference operations;
+only staging-buffer changes affect that benchmark.
+
 Run in the existing dev container to match its GPU visibility and dependencies:
 
 ```bash

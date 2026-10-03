@@ -17,6 +17,7 @@ import numpy as np
 
 from app.core.settings import settings
 from app.services.depth_path import DepthOnlyPath
+from app.services.mask_transfer import _copy_tensor_to_host
 
 
 SOURCE_REVISION = "8d8cfe4c7ee15297099983607febf0d4f32eb3d6"
@@ -117,6 +118,10 @@ class DepthEstimator:
             if self._device.type == "cuda"
             else None
         )
+        self._ready = None
+        if self._stream is not None:
+            with torch.cuda.device(self._device):
+                self._ready = torch.cuda.Event(blocking=True)
 
     def predict(self, frame_bgr: np.ndarray, camera_intrinsic: np.ndarray) -> DepthFrame:
         torch = self._torch
@@ -218,7 +223,8 @@ class DepthEstimator:
                 if self._stream is not None:
                     # max_workers=1 and synchronization even on failure keep
                     # retries from overwriting an in-flight pinned H2D copy.
-                    self._stream.synchronize()
+                    self._ready.record(self._stream)
+                    self._ready.synchronize()
         return output
 
 
@@ -307,7 +313,7 @@ def box_median_distances(
         medians.append(median if median is not None else
                        torch.full((), float("nan"), device=depth_tensor.device))
     # One transfer for all detection medians, as in the mask path.
-    values = torch.stack(medians).detach().cpu().tolist()
+    values = _copy_tensor_to_host(torch.stack(medians), slot="depth").tolist()
     return [(float(value), status) if status == "ok" and math.isfinite(value)
             else (None, status if status != "ok" else "no_valid_depth")
             for value, status in zip(values, statuses)]
@@ -347,6 +353,8 @@ def masked_median_distances(
     valid_depth = torch.isfinite(depth_tensor) & (depth_tensor > 0)
     statuses: list[str] = []
     medians: list[Any] = []
+    empty_indices: list[int] = []
+    mask_presence: list[Any] = []
     for detection_index in detection_indices:
         if detection_index < 0 or detection_index >= int(masks_data.shape[0]):
             statuses.append("mask_unavailable")
@@ -357,13 +365,22 @@ def masked_median_distances(
             raise ValueError("instance mask could not be aligned with the depth map")
         values = depth_tensor[mask & valid_depth]
         if not values.numel():
-            statuses.append("no_valid_depth" if bool(mask.any()) else "empty_mask")
+            empty_indices.append(len(statuses))
+            mask_presence.append(mask.any())
+            statuses.append("empty_mask")  # Resolve presence with the final host copy.
             medians.append(torch.full((), float("nan"), device=depth_tensor.device))
             continue
         statuses.append("ok")
         medians.append(_exact_median(values, torch))
 
-    host_values = torch.stack(medians).detach().cpu().tolist()
+    output = torch.stack(medians)
+    if mask_presence:
+        output = torch.cat((output, torch.stack(mask_presence).to(dtype=output.dtype)))
+    host_output = _copy_tensor_to_host(output, slot="depth").tolist()
+    host_values = host_output[:len(medians)]
+    for index, present in zip(empty_indices, host_output[len(medians):]):
+        if present:
+            statuses[index] = "no_valid_depth"
     result = []
     for status, value in zip(statuses, host_values):
         distance = float(value) if status == "ok" and np.isfinite(value) else None

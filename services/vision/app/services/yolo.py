@@ -22,7 +22,7 @@ from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.depth import box_median_distances, masked_median_distances, predict_timed, scale_camera_intrinsic
 from app.services.gc_runtime import _freeze_loaded_objects
-from app.services.mask_transfer import compact_mask_polygons
+from app.services.mask_transfer import compact_mask_polygons, _copy_tensor_to_host
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
 # one-byte record kind and the kind-specific body.
@@ -186,7 +186,7 @@ def _box_rows(boxes: object, coordinate_field: str, tracking: bool) -> list:
             columns.append(track_ids.unsqueeze(1))
         # Boxes fields are floating tensors. Retain their precision when a
         # wrapper supplies float64 instead of the usual float32 data.
-        return torch.cat(columns, dim=1).detach().cpu().tolist()
+        return _copy_tensor_to_host(torch.cat(columns, dim=1), slot="boxes").tolist()
 
     confidence_values = _box_field_values(boxes, "conf")
     class_values = _box_field_values(boxes, "cls")
@@ -700,6 +700,8 @@ def run_yolo(
     model_start = perf_counter()
     try:
         with torch.inference_mode():
+            from app.services.realtime_predictor import RealtimeSegmentationPredictor
+
             if tracking:
                 results = yolo_model.track(
                     img,
@@ -715,6 +717,7 @@ def run_yolo(
                     persist=True,
                     verbose=False,
                     retina_masks=settings.YOLO_RETINA_MASKS,
+                    predictor=RealtimeSegmentationPredictor,
                 )
             else:
                 results = yolo_model(
@@ -726,6 +729,7 @@ def run_yolo(
                     classes=class_ids,
                     verbose=False,
                     retina_masks=settings.YOLO_RETINA_MASKS,
+                    predictor=RealtimeSegmentationPredictor,
                 )
     except BaseException:
         if depth_future is not None:
