@@ -7,7 +7,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "dev": "dotenv -e .env.dev -- tsx watch src/server.ts",
     "dev:once": "dotenv -e .env.dev -- tsx src/server.ts",
     "test": "dotenv -e .env.test -- vitest run --pool=threads --maxWorkers=1",

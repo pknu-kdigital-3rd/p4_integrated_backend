@@ -24,6 +24,7 @@ RUN DATABASE_URL=postgresql://app:app@127.0.0.1:5432/vehicle_platform?schema=pub
 COPY node/ ./
 COPY operator-web/ /workspace/operator-web/
 RUN npm run build \
+    && test -s /workspace/node/dist/server.js \
     && rm -rf vendor/zod-to-openapi/node_modules
 
 FROM node:22-bookworm-slim AS runtime
