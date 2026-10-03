@@ -1,4 +1,4 @@
-"""Exercise the bounded production inference queue with a 1080p video at 30 FPS.
+"""Exercise the bounded production inference queue at the configured input FPS.
 
 Run on the deployment GPU with ``YOLO_MODEL`` set to the TensorRT ``.engine``
 file. The script warms the model, paces decoded frames at the configured input
@@ -92,7 +92,7 @@ async def _run(args: argparse.Namespace) -> None:
     if source_fps is not None and abs(source_fps - args.input_fps) > 0.5:
         container.close()
         raise SystemExit(
-            f"source is {source_fps:.3f} FPS; expected a 30 FPS source"
+            f"source is {source_fps:.3f} FPS; expected {args.input_fps:.3f} FPS"
         )
 
     decoder = iter(container.decode(video_stream))
@@ -101,12 +101,6 @@ async def _run(args: argparse.Namespace) -> None:
     except StopIteration as exc:
         container.close()
         raise SystemExit("video contains no decodable frames") from exc
-    if (first_frame.width, first_frame.height) != (1920, 1080):
-        container.close()
-        raise SystemExit(
-            f"source is {first_frame.width}x{first_frame.height}; expected 1920x1080"
-        )
-
     model = load_yolo_model()
     depth_model = load_depth_estimator()
     depth_executor = make_depth_executor()
@@ -146,6 +140,9 @@ async def _run(args: argparse.Namespace) -> None:
     args.csv.parent.mkdir(parents=True, exist_ok=True)
     columns = [
         "elapsed_seconds",
+        "source_width",
+        "source_height",
+        "source_fps",
         "input_frames",
         "input_fps",
         "inferred_frames",
@@ -198,6 +195,9 @@ async def _run(args: argparse.Namespace) -> None:
         )
         row = {
             "elapsed_seconds": round(now - feed_started, 1),
+            "source_width": first_frame.width,
+            "source_height": first_frame.height,
+            "source_fps": source_fps,
             "input_frames": input_frames,
             "input_fps": round(
                 (input_frames - int(previous["decoded_frames_received"])) / elapsed,
@@ -398,7 +398,7 @@ async def _run(args: argparse.Namespace) -> None:
     print(f"  peak sampled RSS    : {peak_rss / 1024**2:.1f} MiB")
     print(f"  CSV samples         : {args.csv.resolve()}")
     if totals["inference_frames_dropped"] == 0:
-        print("  load note           : this engine kept up with the offered 30 FPS stream")
+        print(f"  load note           : this engine kept up with the offered {args.input_fps:.3f} FPS stream")
 
 
 def main() -> None:

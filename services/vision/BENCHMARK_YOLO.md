@@ -113,6 +113,98 @@ CSV stage timings are interval averages, not per-frame p99 measurements. Save
 the baseline before applying the later optimization phases in
 `docs/vision-gc-allocation-guide.md`.
 
+### Running the baseline with Docker dependencies
+
+If Python dependencies are installed only in Docker, run the benchmarks in a
+temporary Vision container. From the repository root on the GPU host, use the
+same Compose file and `--env-file` options as the deployment. The examples below
+use production Compose; substitute `docker-compose.dev.yml` for development.
+
+Production bakes app code and benchmark scripts into the application image;
+only models and compiler caches are mounted. Development mounts the Vision
+source directory and overrides the server command with Uvicorn reload. Both
+use the application Dockerfile, whose default command is `python run.py --no-tls`.
+`compose run` overrides that command with the benchmark while preserving the
+entrypoint's GPU selection and the service environment. It does not start the
+server in the temporary container.
+
+After checking out Phase 0, build the application image so it includes the new
+scripts and the existing GCC/G++/Python development headers. This uses the
+existing dependency image; no dependency-image rebuild is needed for Phase 0:
+
+```bash
+docker compose -f docker-compose.prod.yml build p4-vision
+
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T p4-vision \
+  python -c 'import sys, sysconfig; from pathlib import Path; p = Path(sysconfig.get_path("include")) / "Python.h"; print("interpreter:", sys.executable, "headers:", p, "exists:", p.is_file()); assert p.is_file(), "Python headers missing for this interpreter"'
+
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T p4-vision \
+  python benchmark_yolo.py --help
+```
+
+If compilation reports `fatal error: Python.h: No such file or directory`, save
+the interpreter/header check output. The application Dockerfile installs
+`python3.12-dev`; an older app image or a different Python interpreter can still
+leave the actual include path missing. Installing headers on the host does not
+fix a container's compiler. A passing header check verifies file availability,
+not successful CUDA compilation or inference; those require the warmup below.
+
+Create `benchmark-input` on the host containing `street.jpg` and `recording.mp4`,
+then capture logs and CSV on the host. The pipeline accepts the recording's
+decoded resolution, including 1280x720, and records source dimensions/FPS in the
+CSV. The default offered rate is 30 FPS; for another recording rate, set
+`--input-fps` to match. Keep the source resolution identical between comparison
+runs; 720p measurements do not establish throughput for a 1080p workload.
+
+```bash
+mkdir -p benchmark-input benchmark-results
+set -o pipefail
+BENCH_RESULTS="$PWD/benchmark-results"
+test -w "$BENCH_RESULTS" || exit 1
+printf 'Saving results on the GPU host in: %s\n' "$BENCH_RESULTS"
+git rev-parse HEAD > "$BENCH_RESULTS/baseline-commit.txt"
+nvidia-smi > "$BENCH_RESULTS/baseline-gpu.txt"
+
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
+  -v "$PWD/benchmark-input:/benchmark-input:ro" \
+  -v "$BENCH_RESULTS:/benchmark-results" \
+  p4-vision python benchmark_yolo.py \
+  --device cuda:0 --imgsz 640 --width 1920 --height 1080 \
+  --warmup 30 --iterations 500 --image /benchmark-input/street.jpg \
+  --gc enabled --alloc-trace 100 \
+  2>&1 | tee "$BENCH_RESULTS/baseline-yolo.log"
+
+ls -lh "$BENCH_RESULTS/baseline-yolo.log"
+
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
+  -v "$PWD/benchmark-input:/benchmark-input:ro" \
+  -v "$BENCH_RESULTS:/benchmark-results" \
+  p4-vision python benchmark_pipeline.py \
+  --video /benchmark-input/recording.mp4 --duration-seconds 600 \
+  --csv /benchmark-results/baseline-pipeline.csv \
+  2>&1 | tee "$BENCH_RESULTS/baseline-pipeline.log"
+
+ls -lh "$BENCH_RESULTS/baseline-pipeline.log" "$BENCH_RESULTS/baseline-pipeline.csv"
+```
+
+Run the entire command, including `2>&1 | tee ...`, in the **GPU host's shell**.
+`benchmark_yolo.py` prints its report to stdout; it does not automatically create
+a log file. The host's `tee` creates the log immediately and saves both stdout
+and stderr, while the bind mount preserves the pipeline CSV. Files written
+only inside a temporary `--rm` container disappear when Docker removes it.
+If no output was captured and that container has already been removed, its
+Docker logs are unavailable; terminal scrollback may still contain the report.
+The result directory is on the remote GPU host, not the local developer machine.
+
+Repeat the YOLO command with `--gc frozen` and the two enabled-GC threshold
+overrides, saving each run under a different log filename. `YOLO_MODEL` and
+UniDepth settings come from Compose. Keep GPU selection and compile mode the
+same between runs, and use GPUs without another inference workload for isolated
+measurements. Verify warmup logs for `UniDepth depth-only validation passed` and
+the reported compiled/eager mode. `UNIDEPTH_COMPILE=false` is an eager-mode
+comparison, not a compiled-mode baseline. These commands do not replace or
+verify the running Vision service's deployment.
+
 ## Mask detail settings
 
 The live service defaults to detail-first masks:
@@ -205,8 +297,9 @@ uv run python benchmark_pipeline.py \
   --csv /data/results/light-tensor-rt-10min.csv
 ```
 
-The harness requires a 1920x1080 source whose declared frame rate is within
-0.5 FPS of 30. It records source, inference, skip and published counts, maximum
+The harness accepts any decoded source resolution. Its declared frame rate
+must be within 0.5 FPS of `--input-fps` (30 by default). It records source
+dimensions/FPS, inference, skip and published counts, maximum
 observed queue depth, process RSS, CUDA allocation, and frame conversion/model/
 postprocessing timings. Confirm the queue maximum never exceeds its configured
 size, all input frames are published, playback output stays near 30 FPS, and
