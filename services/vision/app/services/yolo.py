@@ -22,6 +22,7 @@ from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.depth import box_median_distances, masked_median_distances, predict_timed, scale_camera_intrinsic
 from app.services.gc_runtime import _freeze_loaded_objects
+from app.services.mask_transfer import compact_mask_polygons
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
 # one-byte record kind and the kind-specific body.
@@ -240,9 +241,8 @@ def _bounded_mask_polygon(polygon, max_points: int):
 def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
     """Convert only retained result masks to normalized polygons.
 
-    ``Masks.xyn`` performs a GPU-to-CPU copy and contour extraction for every
-    mask on first access. Selecting the retained masks first avoids paying that
-    cost for detections filtered by the service.
+    Select and reduce retained masks on their inference device. CUDA masks use
+    lossless bit-packing before host transfer; contours remain on CPU.
     """
 
     if not box_indices:
@@ -265,7 +265,7 @@ def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
         or mask_data.ndim != 3
         or max(int(mask_data.shape[-2]), int(mask_data.shape[-1])) <= contour_size
     ):
-        return selected_masks.xyn
+        return _mask_polygons_for_transfer(selected_masks)
 
     mask_height, mask_width = map(int, mask_data.shape[-2:])
     scale = contour_size / max(mask_height, mask_width)
@@ -287,7 +287,18 @@ def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
         .gt_(0)
     )
     reduced_masks = selected_masks.__class__(reduced_data, selected_masks.orig_shape)
-    return reduced_masks.xyn
+    return _mask_polygons_for_transfer(reduced_masks)
+
+
+def _mask_polygons_for_transfer(masks: object) -> list:
+    data = getattr(masks, "data", None)
+    if (
+        settings.YOLO_MASK_TRANSFER == "packed"
+        and isinstance(data, torch.Tensor)
+        and data.is_cuda
+    ):
+        return compact_mask_polygons(data, masks.orig_shape)
+    return masks.xyn
 
 
 def _skipped_frame_result(
@@ -1078,7 +1089,8 @@ async def yolo_worker(state: AppState) -> None:
         "YOLO mask settings: "
         f"retina_masks={settings.YOLO_RETINA_MASKS}; "
         f"max_det={settings.YOLO_MAX_DETECTIONS}; "
-        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}",
+        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}; "
+        f"mask_transfer={settings.YOLO_MASK_TRANSFER}",
         flush=True,
     )
     print(

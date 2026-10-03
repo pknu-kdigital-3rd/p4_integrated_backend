@@ -201,7 +201,8 @@ def main() -> None:
     print(
         f"input={args.width}x{args.height}, imgsz={args.imgsz}, "
         f"precision={args.precision}, retina_masks={settings.YOLO_RETINA_MASKS}, "
-        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}"
+        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}, "
+        f"mask_transfer={settings.YOLO_MASK_TRANSFER}"
     )
 
     if args.image is None:

@@ -113,7 +113,8 @@ async def _run(args: argparse.Namespace) -> None:
         f"source={first_frame.width}x{first_frame.height}@{source_fps or args.input_fps:.3f} "
         f"offered_fps={args.input_fps:.3f} queue={settings.YOLO_INFERENCE_QUEUE_SIZE} "
         f"retina_masks={settings.YOLO_RETINA_MASKS} "
-        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}",
+        f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE} "
+        f"mask_transfer={settings.YOLO_MASK_TRANSFER}",
         flush=True,
     )
     warmup_frame = InferenceFrame(
