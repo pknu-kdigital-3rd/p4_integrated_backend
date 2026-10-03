@@ -20,7 +20,7 @@ from ultralytics import YOLO
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
-from app.services.depth import masked_median_distances, predict_timed, scale_camera_intrinsic
+from app.services.depth import box_median_distances, masked_median_distances, predict_timed, scale_camera_intrinsic
 from app.services.gc_runtime import _freeze_loaded_objects
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
@@ -738,6 +738,8 @@ def run_yolo(
     simplify_masks = settings.YOLO_MASK_POLYGON_SIMPLIFY
     polygon_epsilon_ratio = settings.YOLO_MASK_POLYGON_EPSILON_RATIO
     max_polygon_points = settings.YOLO_MASK_MAX_POINTS
+    distance_region = settings.UNIDEPTH_DISTANCE_REGION
+    distance_box_scale = settings.UNIDEPTH_DISTANCE_BOX_SCALE
     names = yolo_model.names
     for result in results:
         boxes = result.boxes
@@ -752,6 +754,12 @@ def run_yolo(
         masks_data = getattr(masks, "data", None) if masks is not None else None
         if depth_frame is None:
             item_distances = [(None, depth_status) for _ in retained_indices]
+        elif distance_region == "inner_box":
+            item_distances = box_median_distances(
+                depth_frame.tensor, rows, retained_indices,
+                bbox_format=bbox_format, image_width=frame_width,
+                image_height=frame_height, scale=distance_box_scale,
+            )
         else:
             item_distances = masked_median_distances(
                 depth_frame.tensor, masks_data, retained_indices
@@ -807,6 +815,8 @@ def run_yolo(
             "model": "unidepth-v2-vitb14",
             "status": depth_status,
             "duration_ms": round(depth_ms, 1),
+            "distance_region": distance_region,
+            "box_scale": distance_box_scale if distance_region == "inner_box" else None,
         },
     }
 
@@ -1074,6 +1084,11 @@ async def yolo_worker(state: AppState) -> None:
     print(
         f"YOLO inference size: {settings.YOLO_INFERENCE_SIZE} "
         f"(max_imgsz={settings.YOLO_MAX_IMGSZ})",
+        flush=True,
+    )
+    print(
+        f"UniDepth distance sampling: region={settings.UNIDEPTH_DISTANCE_REGION}; "
+        f"box_scale={settings.UNIDEPTH_DISTANCE_BOX_SCALE}",
         flush=True,
     )
     run_inference = partial(

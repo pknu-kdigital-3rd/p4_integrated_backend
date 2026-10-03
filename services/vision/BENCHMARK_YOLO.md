@@ -364,6 +364,51 @@ Use the GPU report to attribute the observed runtime garbage before changing
 third-party model internals. Repeat the long pipeline benchmark and verify the
 `UniDepth depth-only validation passed` log for the new staging path.
 
+## Optional inner-box distance sampling
+
+`UNIDEPTH_DISTANCE_REGION=mask` retains the segmentation median behavior.
+To calculate median depth from a centered rectangle inside each detection box:
+
+```dotenv
+UNIDEPTH_DISTANCE_REGION=inner_box
+UNIDEPTH_DISTANCE_BOX_SCALE=0.5
+```
+
+The scale is the fraction of both box width and height: 0.5 samples the central
+25% of box area; 1.0 samples the full box. Allowed scales are greater than zero
+and at most one. Box sampling works without segmentation masks, ignores
+non-finite/non-positive depth values, and uses the same exact median as the mask
+path. Boxes are mapped into depth coordinates from the model input dimensions,
+before source/display coordinate scaling. All four BBOX_FORMAT values work.
+The scaled rectangle is clipped to image bounds; invalid, empty or entirely
+invalid-depth regions return no distance with `invalid_box`, `empty_box`, or
+`no_valid_depth`. There is no silent switch between sampling methods.
+
+This uses a rectangular tensor view and a validity selection for that region;
+it avoids a full-frame boolean box mask. Valid-value selection and median
+operations still allocate temporary tensors. Segmentation overlays are
+unchanged. The frame's depth metadata reports `distance_region` and `box_scale`,
+and the worker logs its sampling settings at startup. Compare measured distance
+error and jitter on the same footage; stability does not prove accuracy.
+
+Both Compose files pass these settings. In development the source directory is
+bind mounted and Uvicorn runs with reload; recreate Vision to apply environment
+changes (and refresh its individual entrypoint mount):
+
+```bash
+export UNIDEPTH_DISTANCE_REGION=inner_box
+export UNIDEPTH_DISTANCE_BOX_SCALE=0.5
+docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-vision
+docker compose -f docker-compose.dev.yml exec -T p4-vision python -c \
+  'from app.core.settings import settings as s; print(s.UNIDEPTH_DISTANCE_REGION, s.UNIDEPTH_DISTANCE_BOX_SCALE)'
+```
+
+Use the same `--env-file` options as your existing deployment. Persist the two
+values in that file if desired. Production bakes the source into the app image,
+so rebuild the app image before recreating production Vision for this change.
+No dependency-image rebuild is needed. To return to masks, set the region to
+`mask` and recreate the container.
+
 ## Recording-specific UniDepth intrinsics
 
 The current UniDepth inference path uses `UNIDEPTH_CAMERA_INTRINSIC` with

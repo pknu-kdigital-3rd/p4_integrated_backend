@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from importlib.metadata import distribution
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -241,6 +242,75 @@ def _exact_median(values: Any, torch: Any) -> Any:
         return low
     high = values.kthvalue(upper + 1).values
     return low + (high - low) * (position - lower)
+
+
+def box_median_distances(
+    depth_tensor: Any,
+    box_rows: list,
+    detection_indices: list[int],
+    *,
+    bbox_format: str,
+    image_width: int,
+    image_height: int,
+    scale: float,
+) -> list[tuple[float | None, str]]:
+    """Median valid depth in a centered, scaled box, without full-image masks.
+
+    Rows are the already materialized model boxes, before source-image scaling.
+    A scale of 1 uses the full box; 0.5 uses half its width and half its height.
+    """
+    import torch
+
+    if not isinstance(depth_tensor, torch.Tensor) or depth_tensor.ndim != 2:
+        raise ValueError("depth map must be a two-dimensional torch tensor")
+    if bbox_format not in {"xyxy_normalized", "xyxy_pixels", "xywh_normalized", "xywh_pixels"}:
+        raise ValueError("unsupported box format for depth sampling")
+    if not math.isfinite(scale) or not 0 < scale <= 1:
+        raise ValueError("box scale must be finite and in (0, 1]")
+    if image_width <= 0 or image_height <= 0:
+        raise ValueError("box image dimensions must be positive")
+    if not detection_indices:
+        return []
+    height, width = map(int, depth_tensor.shape)
+    pixel_boxes = bbox_format.endswith("_pixels")
+    sx = width / image_width if pixel_boxes else width
+    sy = height / image_height if pixel_boxes else height
+    statuses = []
+    medians = []
+    for index in detection_indices:
+        status = "invalid_box"
+        median = None
+        if 0 <= index < len(box_rows):
+            row = box_rows[index]
+            x0, y0, x1, y1 = (float(row[i]) for i in range(4))
+            if all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+                if bbox_format.startswith("xywh"):
+                    cx, cy, bw, bh = x0, y0, x1, y1
+                    x0, x1 = cx - bw / 2, cx + bw / 2
+                    y0, y1 = cy - bh / 2, cy + bh / 2
+                if x1 > x0 and y1 > y0:
+                    cx, cy = (x0 + x1) * sx / 2, (y0 + y1) * sy / 2
+                    half_w, half_h = (x1 - x0) * sx * scale / 2, (y1 - y0) * sy * scale / 2
+                    left = max(0, min(width, math.floor(cx - half_w)))
+                    right = max(0, min(width, math.ceil(cx + half_w)))
+                    top = max(0, min(height, math.floor(cy - half_h)))
+                    bottom = max(0, min(height, math.ceil(cy + half_h)))
+                    region = depth_tensor[top:bottom, left:right]
+                    status = "empty_box"
+                    if region.numel():
+                        values = region[torch.isfinite(region) & (region > 0)]
+                        status = "no_valid_depth"
+                        if values.numel():
+                            median = _exact_median(values, torch)
+                            status = "ok"
+        statuses.append(status)
+        medians.append(median if median is not None else
+                       torch.full((), float("nan"), device=depth_tensor.device))
+    # One transfer for all detection medians, as in the mask path.
+    values = torch.stack(medians).detach().cpu().tolist()
+    return [(float(value), status) if status == "ok" and math.isfinite(value)
+            else (None, status if status != "ok" else "no_valid_depth")
+            for value, status in zip(values, statuses)]
 
 
 def masked_median_distances(

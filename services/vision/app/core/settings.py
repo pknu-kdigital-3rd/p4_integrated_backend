@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     # Level 2 trades some fine depth detail for lower per-frame latency.
     UNIDEPTH_RESOLUTION_LEVEL: int = Field(default=2, ge=0, le=9)
     UNIDEPTH_COMPILE: bool = True
+    UNIDEPTH_DISTANCE_REGION: Literal["mask", "inner_box"] = "mask"
+    UNIDEPTH_DISTANCE_BOX_SCALE: float = Field(default=0.5, gt=0.0, le=1.0)
     # Fixed calibration from 20260827_longtrip_merged/intrinsics.json.
     UNIDEPTH_CAMERA_INTRINSIC: tuple[tuple[float, float, float], ...] = (
         (920.0, 0.0, 640.0),
