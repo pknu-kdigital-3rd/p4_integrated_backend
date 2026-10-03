@@ -161,6 +161,10 @@ def _has_later_result(state: AppState, epoch: int, seq: int) -> bool:
 
 async def _request_resync(state: AppState, reason: str) -> None:
     """Drop queued results and ask the relay for a new live epoch."""
+    logger.warning(
+        "playback resync: reason=%s epoch=%s retained_frames=%s fault=%s",
+        reason, state.current_epoch, len(state.result_store), state.fault,
+    )
     async with state.result_condition:
         state.clear_all_results()
         state.fault = None

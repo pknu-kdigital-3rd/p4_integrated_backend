@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import traceback
 import struct
 import uuid
 from collections import deque
@@ -1151,6 +1152,20 @@ async def yolo_worker(state: AppState) -> None:
         if result is None:
             retry_frame = inference_frame
             state.fault = f"inference failed at epoch={inference_frame.epoch} seq={inference_frame.seq}: {last_error}"
+            # The browser's recovery can hide this message almost immediately.
+            # Keep the root exception in container logs, once per failed retry
+            # batch, before waiting for an operator/relay reset.
+            print(state.fault, flush=True)
+            print(
+                f"inference configuration: model={settings.YOLO_MODEL}; "
+                f"input_size={settings.YOLO_INFERENCE_SIZE}; "
+                f"source={getattr(inference_frame.frame, 'width', 0)}x"
+                f"{getattr(inference_frame.frame, 'height', 0)}; "
+                f"device={settings.YOLO_DEVICE}",
+                flush=True,
+            )
+            if last_error is not None:
+                traceback.print_exception(last_error)
             async with state.result_condition:
                 state.result_condition.notify_all()
             continue
