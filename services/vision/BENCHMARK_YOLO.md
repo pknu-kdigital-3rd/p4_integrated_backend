@@ -366,6 +366,17 @@ third-party model internals. Repeat the long pipeline benchmark and verify the
 
 ## Optional inner-box distance sampling
 
+The Live View page's Detailed settings also has a browser-local Distance
+multiplier (default 1.0). Values below one reduce overlay distances; for example,
+0.5 displays a server distance of 20 m as 10 m. The multiplier applies to
+distance labels, held distances and distance color categories in every overlay
+style. Values must be from 0.01 to 10, in 0.01 steps. It is saved in localStorage
+and can be reset to one. Changes take effect on subsequent rendered frames.
+It does not change UniDepth tensors, backend sampling, frame metadata or
+recorded detections. For a proportional correction, estimate the factor as
+measured distance divided by reported distance across several objects/ranges;
+a single multiplier cannot correct errors that vary with depth or scene.
+
 `UNIDEPTH_DISTANCE_REGION=mask` retains the segmentation median behavior.
 To calculate median depth from a centered rectangle inside each detection box:
 

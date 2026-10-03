@@ -99,6 +99,9 @@
     <summary>Detailed settings</summary>
     <p class="detailed-hint">Used when overlay style is "Per class". Tap how each class is drawn. The classes are the server's YOLO_CLASSES (or its default list).</p>
     <label><input id="translateClassesToKorean" type="checkbox" /> 클래스명을 한국어로 표시</label>
+    <p class="detailed-hint">Distance multiplier applies to displayed distances and distance colors in every overlay style. Use a value below 1 to reduce distances (0.5 turns 20 m into 10 m). Saved in this browser; server measurements and recorded detections remain unchanged.</p>
+    <label>Distance multiplier <input id="distanceMultiplier" type="number" min="0.01" max="10" step="0.01" value="1" aria-label="Distance multiplier" /></label>
+    <button id="resetDistanceMultiplier" type="button">Reset multiplier to 1</button>
     <p class="detailed-hint">Distance coloring overrides per-class colors for outlines, masks, and text. Near: at or below its limit; other: above near through the other limit; far: above the other limit.</p>
     <label><input id="distanceColoringEnabled" type="checkbox" /> Color detections by distance</label>
     <div id="distanceColorSettings">
@@ -136,6 +139,8 @@
   const classStyleListEl = document.getElementById('classStyleList');
   const translateClassesToKoreanEl = document.getElementById('translateClassesToKorean');
   const distanceColoringEnabledEl = document.getElementById('distanceColoringEnabled');
+  const distanceMultiplierEl = document.getElementById('distanceMultiplier');
+  const resetDistanceMultiplierEl = document.getElementById('resetDistanceMultiplier');
   const distanceNearMaxEl = document.getElementById('distanceNearMax');
   const distanceMidMaxEl = document.getElementById('distanceMidMax');
   const distanceColorInputs = {
@@ -205,6 +210,25 @@
   }
   let distanceColorSettings = distanceColors.normalizeSettings(readStoredJson(
     'playback-distance-colors', distanceColors.DEFAULTS));
+  const storedDistanceMultiplier = Number(localStorage.getItem('playback-distance-multiplier') ?? '1');
+  let distanceMultiplier = Number.isFinite(storedDistanceMultiplier)
+    && storedDistanceMultiplier >= 0.01 && storedDistanceMultiplier <= 10 ? storedDistanceMultiplier : 1;
+  distanceMultiplierEl.value = String(distanceMultiplier);
+  distanceMultiplierEl.addEventListener('change', () => {
+    const value = Number(distanceMultiplierEl.value);
+    if (!distanceMultiplierEl.checkValidity() || !Number.isFinite(value) || value < 0.01 || value > 10) {
+      distanceMultiplierEl.reportValidity();
+      distanceMultiplierEl.value = String(distanceMultiplier);
+      return;
+    }
+    distanceMultiplier = value;
+    localStorage.setItem('playback-distance-multiplier', String(value));
+  });
+  resetDistanceMultiplierEl.addEventListener('click', () => {
+    distanceMultiplier = 1;
+    distanceMultiplierEl.value = '1';
+    localStorage.setItem('playback-distance-multiplier', '1');
+  });
   let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
   // Track hold/prediction timing in media milliseconds; see live-view-tracks.js.
   let temporalConfig = temporal.normalizeConfig({
@@ -813,8 +837,12 @@
       const w = (x2 - x1) * overlayCanvas.width, h = (y2 - y1) * overlayCanvas.height;
       const skipped = item.distance_status === 'inference_skipped';
       const rawDistance = skipped ? item.held_distance_m : item.distance_m;
+      const numericDistance = Number(rawDistance);
+      const displayDistance = rawDistance != null && rawDistance !== ''
+        && Number.isFinite(numericDistance) && numericDistance > 0
+        ? numericDistance * distanceMultiplier : null;
       const color = distanceColorSettings.enabled
-        ? distanceColors.colorForDistance(rawDistance, distanceColorSettings)
+        ? distanceColors.colorForDistance(displayDistance, distanceColorSettings)
         : colorForClass(item.class);
       const distanceColorMode = distanceColorSettings.enabled;
       const className = String(item.class || 'object').toLowerCase();
@@ -834,8 +862,8 @@
         : distanceColorMode ? color : (className === 'person' ? '#073b2b' : '#fff');
       if (showBox) { overlayCtx.strokeStyle = color; overlayCtx.lineWidth = ghost ? 1.5 : 3; overlayCtx.setLineDash(ghost ? [5, 4] : []); overlayCtx.strokeRect(x, y, w, h); overlayCtx.setLineDash([]); }
       if (!ghost) {
-        const distance = Number(rawDistance);
-        const distanceLabel = rawDistance != null && Number.isFinite(distance) ? `${Math.round(distance)} m` : '';
+        const distance = Number(displayDistance);
+        const distanceLabel = displayDistance != null && Number.isFinite(distance) ? `${Math.round(distance)} m` : '';
         const classLabel = classDisplayName(item.class || 'object');
         const meterFontSize = distanceLabel
           ? Math.round(14 + 6 * Math.max(0, Math.min(1, 1 - Math.max(0, distance) / 50)))
