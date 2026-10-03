@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import uuid
+import orjson
 from contextlib import suppress
 from pathlib import Path
 from time import monotonic
@@ -122,7 +123,7 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
             "depth": result.get("depth", {}),
         },
     }
-    metadata_bytes = json.dumps(metadata, separators=(",", ":")).encode()
+    metadata_bytes = orjson.dumps(metadata, option=orjson.OPT_SERIALIZE_NUMPY)
     return len(metadata_bytes).to_bytes(4, "big") + metadata_bytes + item.encoded
 
 

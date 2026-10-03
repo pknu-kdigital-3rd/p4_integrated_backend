@@ -167,6 +167,8 @@ class AppState:
     # when the bounded inference handoff evicts an older decoded frame.
     last_inference_result: dict[str, Any] | None = None
     last_inference_result_epoch: int | None = None
+    # One source result, its immutable held detections, and their mask count.
+    held_items_cache: tuple[dict[str, Any] | None, list, int] | None = None
     metrics: VisionMetrics = field(default_factory=VisionMetrics)
     recording_writer: Any | None = None
     telemetry_store: TelemetryStore = field(default_factory=TelemetryStore)
@@ -220,6 +222,7 @@ class AppState:
 
     def clear_all_results(self) -> None:
         self.result_store.clear()
+        self.held_items_cache = None
 
 
 def get_app_state(conn: HTTPConnection) -> AppState:

@@ -1,5 +1,8 @@
 import asyncio
 import json
+import math
+import numpy as np
+import orjson
 import unittest
 import time
 from unittest.mock import patch
@@ -9,6 +12,46 @@ from starlette.testclient import TestClient
 
 from app.api import playback
 from app.core.state import AppState, PlaybackItem, get_app_state
+
+
+class NumpyFrameSerializationTests(unittest.TestCase):
+    def test_numpy_masks_preserve_metadata_shape_and_encoded_video(self):
+        polygon = np.array([[0.123456789, 0.234567891], [0.9, 0.8], [0.4, 0.7]], dtype=np.float32)
+        state = AppState(session_id="session")
+        result = {"source": {"seq": 1, "resolved_source_timestamp_ns": "1000000000000000000"},
+                  "width": 1280, "height": 720, "inference_ms": 12.3,
+                  "items": [{"class": "차", "confidence": 0.91, "bbox": [0.1, 0.2, 0.9, 0.8],
+                             "mask": polygon, "distance_m": None}]}
+        item = PlaybackItem(epoch=1, seq=1, encoded=b"\x00\x00\x01video", timestamp_us=1,
+                            keyframe=True, result=result)
+        with patch("app.api.playback._confidence_thresholds", return_value=None):
+            actual_message = playback._frame_message(state, item)
+            item.result = {**result, "items": [{**result["items"][0], "mask": polygon.tolist()}]}
+            with patch("app.api.playback.orjson.dumps", side_effect=lambda value, **kwargs:
+                       json.dumps(value, separators=(",", ":")).encode()):
+                old_message = playback._frame_message(state, item)
+        size = int.from_bytes(actual_message[:4], "big")
+        old_size = int.from_bytes(old_message[:4], "big")
+        actual = orjson.loads(actual_message[4:4 + size])
+        expected = json.loads(old_message[4:4 + old_size])
+        actual_mask = actual["inference"]["items"][0].pop("mask")
+        expected_mask = expected["inference"]["items"][0].pop("mask")
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(actual_mask), len(expected_mask))
+        for a_point, e_point in zip(actual_mask, expected_mask):
+            self.assertEqual(len(a_point), 2)
+            for a, e in zip(a_point, e_point):
+                self.assertTrue(math.isclose(a, e, rel_tol=1e-6, abs_tol=1e-7))
+        self.assertEqual(actual_message[4 + size:], item.encoded)
+
+    def test_nonfinite_values_are_valid_json_null(self):
+        item = PlaybackItem(epoch=1, seq=1, encoded=b"video", timestamp_us=1, keyframe=False,
+                            result={"items": [{"mask": np.array([[np.nan, np.inf], [0, 0], [1, 1]],
+                                                                 dtype=np.float32)}]})
+        message = playback._frame_message(AppState(), item)
+        size = int.from_bytes(message[:4], "big")
+        result = json.loads(message[4:4 + size])
+        self.assertEqual(result["inference"]["items"][0]["mask"][0], [None, None])
 
 
 class LivePreviewFlowTests(unittest.IsolatedAsyncioTestCase):

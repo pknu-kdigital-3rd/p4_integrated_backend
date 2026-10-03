@@ -6,10 +6,15 @@ from unittest.mock import Mock, patch
 
 import av
 import numpy as np
+import torch
+from ultralytics.engine.results import Boxes, Masks
 
 from app.core.settings import BASE_DIR, Settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
+    _box_field_values,
+    _box_rows,
+    _skipped_frame_result,
     _model_confidence_floor,
     overlay_class_names,
     _resolve_yolo_classes,
@@ -157,6 +162,8 @@ class RunYoloTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["class"], "dog")
         self.assertEqual(result["items"][0]["mask_format"], "polygon_normalized")
         self.assertTrue(np.allclose(result["items"][0]["mask"], polygons[1]))
+        self.assertIs(result["items"][0]["mask"], polygons[1])
+        self.assertTrue(result["items"][0]["mask"].flags.c_contiguous)
         self.assertTrue(model.predict_kwargs["retina_masks"])
         self.assertEqual(model.predict_kwargs["max_det"], 100)
 
@@ -324,6 +331,114 @@ class VisionSettingsDefaultsTests(unittest.TestCase):
             settings.YOLO_MODEL,
             str(BASE_DIR / "models" / "a4_best.engine"),
         )
+
+
+class AllocationReductionTests(unittest.TestCase):
+    def test_mask_storage_converts_noncontiguous_arrays_and_preserves_lists(self):
+        array = (np.arange(12, dtype=np.float64).reshape(3, 4) / 12)[:, ::2]
+        self.assertFalse(array.flags.c_contiguous)
+        for polygon in (array, array.tolist()):
+            model = _SegmentationModel(SimpleNamespace(
+                boxes=[_Box(0.9, 0, [0.1, 0.1, 0.8, 0.8])],
+                masks=SimpleNamespace(xyn=[polygon]),
+            ))
+            frame = InferenceFrame(seq=1, frame=_SourceFrame(100, 100), pts=0, time_base=None, media_time=0)
+            with patch("app.services.yolo.settings.YOLO_DEVICE", "cpu"), patch(
+                "app.services.yolo.settings.YOLO_MASK_POLYGON_SIMPLIFY", False
+            ):
+                result = run_yolo(frame, model)
+            mask = result["items"][0]["mask"]
+            self.assertEqual(result["mask_count"], 1)
+            if isinstance(polygon, np.ndarray):
+                self.assertEqual(mask.dtype, np.float32)
+                self.assertTrue(mask.flags.c_contiguous)
+                np.testing.assert_allclose(mask, polygon, rtol=1e-6)
+            else:
+                self.assertIs(mask, polygon)
+
+    def test_tensor_rows_match_original_fields_for_all_formats_and_tracking_modes(self):
+        for dtype in (torch.float32, torch.float64):
+            for tracking, with_ids in ((False, False), (True, False), (True, True), (False, True)):
+                data = [[10, 20, 50, 60, 0.123456789, 0], [30, 40, 70, 80, 0.9, 1]]
+                if with_ids:
+                    data = [row[:4] + [index + 42] + row[4:] for index, row in enumerate(data)]
+                boxes = Boxes(torch.tensor(data, dtype=dtype), orig_shape=(100, 100))
+                for field in ("xyxy", "xyxyn", "xywh", "xywhn"):
+                    with self.subTest(dtype=dtype, tracking=tracking, ids=with_ids, field=field):
+                        expected_coords = _box_field_values(boxes, field)
+                        expected_conf = _box_field_values(boxes, "conf")
+                        expected_cls = _box_field_values(boxes, "cls")
+                        expected_ids = boxes.id.tolist() if tracking and boxes.id is not None else None
+                        original_cpu = torch.Tensor.cpu
+                        transfers = []
+
+                        def cpu(tensor, *args, **kwargs):
+                            transfers.append(tensor.shape)
+                            return original_cpu(tensor, *args, **kwargs)
+
+                        with patch.object(torch.Tensor, "cpu", new=cpu):
+                            rows = _box_rows(boxes, field, tracking)
+                        self.assertEqual(len(transfers), 1)
+                        for index, row in enumerate(rows):
+                            self.assertEqual(row[:4], expected_coords[index])
+                            self.assertEqual(row[4], expected_conf[index])
+                            self.assertEqual(row[5], expected_cls[index])
+                            self.assertEqual(row[6:] or None, [expected_ids[index]] if expected_ids else None)
+
+    def test_tensor_and_test_double_paths_emit_identical_detections(self):
+        frame = InferenceFrame(seq=1, frame=_SourceFrame(100, 100), pts=0, time_base=None, media_time=0)
+        for tracking, with_ids in ((False, False), (True, False), (True, True)):
+            data = [[10, 10, 20, 20, 0.2, 0], [40, 40, 80, 80, 0.9, 1]]
+            if with_ids:
+                data = [row[:4] + [index + 42] + row[4:] for index, row in enumerate(data)]
+            boxes = Boxes(torch.tensor(data), orig_shape=(100, 100))
+            double = [_Box(float(boxes.conf[i]), int(boxes.cls[i]), boxes.xyxyn[i].tolist(),
+                           int(boxes.id[i]) if with_ids else None) for i in range(2)]
+            with patch("app.services.yolo.settings.YOLO_DEVICE", "cpu"), patch(
+                "app.services.yolo.settings.YOLO_TRACKING", tracking
+            ), patch("app.services.yolo.settings.CONF_THRESHOLD_LOW", 0.3), patch(
+                "app.services.yolo.settings.BBOX_FORMAT", "xyxy_normalized"
+            ):
+                actual = run_yolo(frame, _SegmentationModel(SimpleNamespace(boxes=boxes, masks=None)))
+                expected = run_yolo(frame, _SegmentationModel(SimpleNamespace(boxes=double, masks=None)))
+            self.assertEqual(actual["items"], expected["items"])
+
+    def test_custom_fork_masks_are_contiguous_float32(self):
+        data = torch.zeros((1, 16, 16))
+        data[:, 2:12, 3:13] = 1
+        polygon = Masks(data, orig_shape=(16, 16)).xyn[0]
+        self.assertEqual(polygon.dtype, np.float32)
+        self.assertEqual(polygon.shape[1], 2)
+        self.assertTrue(polygon.flags.c_contiguous)
+        self.assertIs(np.ascontiguousarray(polygon, dtype=np.float32), polygon)
+
+    def test_held_items_are_cached_without_modifying_source(self):
+        mask = np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], dtype=np.float32)
+        item = {"class": "car", "mask": mask, "distance_m": 12.3,
+                "distance_status": "ok", "distance_anchor": [0.5, 0.6]}
+        source = {"items": [item], "width": 100, "height": 100}
+        state = AppState()
+        frames = [InferenceFrame(seq=i, frame=None, pts=i, time_base=None, media_time=0) for i in (1, 2)]
+        first = _skipped_frame_result(frames[0], source, state)
+        second = _skipped_frame_result(frames[1], source, state)
+        self.assertIsNot(first, second)
+        self.assertIs(first["items"], second["items"])
+        self.assertEqual(first["mask_count"], 1)
+        self.assertIs(first["items"][0]["mask"], mask)
+        self.assertEqual(first["items"][0]["held_distance_m"], 12.3)
+        self.assertNotIn("distance_m", first["items"][0])
+        self.assertNotIn("distance_anchor", first["items"][0])
+        self.assertEqual(item["distance_status"], "ok")
+        self.assertEqual(item["distance_m"], 12.3)
+        self.assertEqual(second["source"]["seq"], 2)
+        new_source = dict(source)
+        third = _skipped_frame_result(frames[1], new_source, state)
+        self.assertIsNot(first["items"], third["items"])
+        empty = _skipped_frame_result(frames[1], None, state)
+        self.assertEqual(empty["items"], [])
+        self.assertEqual(empty["mask_count"], 0)
+        state.clear_all_results()
+        self.assertIsNone(state.held_items_cache)
 
 
 class CompletedSequenceHistoryTests(unittest.TestCase):

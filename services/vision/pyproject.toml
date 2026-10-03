@@ -10,6 +10,7 @@ dependencies = [
     "lap>=0.5.12",
     "openai",
     "opencv-python-headless",
+    "orjson",
     "psutil",
     "pydantic-settings",
     "tensorrt-cu13",

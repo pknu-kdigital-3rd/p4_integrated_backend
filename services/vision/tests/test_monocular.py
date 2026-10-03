@@ -1,15 +1,24 @@
 import unittest
+import numpy as np
 from pathlib import Path
 
 from app.services.monocular import (
     MonocularTimeline,
     QRResolver,
     annotate_result,
+    _ground_anchor,
 )
 from app.core.state import InferenceFrame
 
 
 class MonocularTests(unittest.TestCase):
+    def test_numpy_mask_uses_same_ground_anchor_as_list(self):
+        mask = np.array([[0.1, 0.2], [0.4, 0.8], [0.6, 0.8]], dtype=np.float32)
+        item = {"class": "car", "bbox": [0, 0, 1, 1], "mask": mask}
+        self.assertEqual(_ground_anchor(item, 1280, 720),
+                         _ground_anchor({**item, "mask": mask.tolist()}, 1280, 720))
+        self.assertAlmostEqual(_ground_anchor(item, 1280, 720)[1], 0.8)
+
     def _dataset(self) -> Path:
         return Path(__file__).resolve().parent / "fixtures" / "monocular"
 

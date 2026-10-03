@@ -229,6 +229,79 @@ The existing light-scene baseline cannot bound latency under larger mask counts.
 Compare maximum GC pause and frame latency as well as aggregate GC percentage.
 Monitor memory because raising the threshold delays cyclic garbage collection.
 
+## Phase 2 dependencies and verification
+
+Phase 2 stores production mask polygons as contiguous float32 NumPy arrays and
+serializes frame metadata with `orjson.OPT_SERIALIZE_NUMPY`. The browser still
+receives `[[x, y], ...]`; float32 coordinates use their shortest float32 decimal
+representation. Nonfinite values become JSON `null` rather than the invalid
+JSON `NaN`/`Infinity` tokens emitted by stdlib JSON. Depth distance calculation
+already maps invalid values to `None`. Optional unconstrained telemetry altitude
+can also be nonfinite and now serializes as `null`.
+
+`orjson` is now direct in `pyproject.toml` and `requirements.txt`. The existing
+lock remains at 3.12.0; `uv lock --offline` changed only the project's dependency
+and requires-dist entries, leaving all other package/wheel records unchanged.
+Its PyPI wheel covers CPython 3.12 and Linux x86_64/manylinux 2.17. It has no
+PyTorch/CUDA ABI dependency; the locked PyTorch 2.12.1+cu130 and xFormers 0.0.35
+were not changed. No packages were installed in the local environment, at the
+user's request; actual serialization checks and the full suite require Docker.
+
+Both Vision Compose services build `docker/vision.Dockerfile` on top of the
+dependency image, with the venv under `/opt/vision-venv`. Development bind-mounts
+the source directory, the custom fork directory, and the entrypoint file and
+runs Uvicorn reload. Production bakes code into the image, uses the Dockerfile's
+`python run.py --no-tls` command, and mounts models/cache/socket only. Source
+reload cannot add the new package. Rebuild the dependency image and application
+image, using the same Compose/environment options and custom fork as before:
+
+```bash
+# From the repository root on the GPU host; adapt image tags to your build workflow.
+docker buildx build --load \
+  --build-context ultralytics=./services/vision/.ultralytics-custom \
+  -f docker/vision-deps.Dockerfile -t p4-vision-deps:gc-phase2 \
+  ./services/vision
+export VISION_DEPS_IMAGE=p4-vision-deps:gc-phase2
+docker compose -f docker-compose.dev.yml build p4-vision
+docker compose -f docker-compose.dev.yml run --rm --no-deps -T \
+  -e YOLO_DEVICE=cpu -e YOLO_GPU_INDEX= -e UNIDEPTH_GPU_INDEX= \
+  -e YOLO_CLASSES= -e YOLO_INFERENCE_SIZE=auto -e YOLO_MAX_IMGSZ=640 \
+  -e YOLO_APPEAR_CONFIDENCE= -e YOLO_KEEP_CONFIDENCE= \
+  p4-vision python -m unittest discover -s tests -q
+```
+
+The unit-test command uses CPU stubs and clears deployment class/inference
+overrides that would otherwise conflict with the test fixtures. The benchmark
+commands continue to use your actual production GPU/model settings.
+
+For a live deployment, recreate the service with the rebuilt image, then check
+the actual frame serialization operation in the running container:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-vision
+docker compose -f docker-compose.dev.yml exec -T p4-vision python - <<'PY'
+import numpy as np
+import orjson
+from app.api.playback import _frame_message
+from app.core.state import AppState, PlaybackItem
+mask = np.array([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], dtype=np.float32)
+item = PlaybackItem(epoch=1, seq=1, encoded=b"video", timestamp_us=0,
+                    keyframe=True, result={"items": [{"mask": mask}]})
+wire = _frame_message(AppState(), item)
+n = int.from_bytes(wire[:4], "big")
+decoded = orjson.loads(wire[4:4+n])
+np.testing.assert_allclose(decoded["inference"]["items"][0]["mask"], mask, rtol=1e-6)
+assert wire[4+n:] == b"video"
+print("NumPy frame serialization passed; orjson", orjson.__version__)
+PY
+```
+
+Substitute production Compose when applicable. Neither a rebuild nor this
+encoder check verifies GPU inference or Live View rendering. Open Live View
+and check masks, boxes, labels and distances, then rerun the same dense image
+and video benchmarks with new result filenames. Compare GC counts/maximum
+pause, p99, postprocessing, publication and memory before proceeding to Phase 3.
+
 ## Mask detail settings
 
 The live service defaults to detail-first masks:

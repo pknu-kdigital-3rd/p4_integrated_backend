@@ -16,6 +16,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+import numpy as np
+
 
 NANOSECONDS_PER_MS = 1_000_000
 QR_REWIND_TOLERANCE_NS = 2 * NANOSECONDS_PER_MS
@@ -335,10 +337,14 @@ def _ground_anchor(item: dict[str, Any], width: int, height: int) -> tuple[float
     class_name = str(item.get("class", "")).lower()
     if class_name != "person":
         points = item.get("mask")
-        if isinstance(points, list):
+        if isinstance(points, (list, tuple, np.ndarray)):
             valid: list[tuple[float, float]] = []
             for point in points:
-                if not isinstance(point, (list, tuple)) or len(point) < 2:
+                if (
+                    not isinstance(point, (list, tuple, np.ndarray))
+                    or (isinstance(point, np.ndarray) and point.ndim == 0)
+                    or len(point) < 2
+                ):
                     continue
                 try:
                     px, py = float(point[0]), float(point[1])

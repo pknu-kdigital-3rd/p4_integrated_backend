@@ -12,6 +12,7 @@ from time import perf_counter
 from pathlib import Path
 
 import av
+import numpy as np
 import torch
 import torch.nn.functional as F
 from ultralytics import YOLO
@@ -36,6 +37,12 @@ K_STOP = 14
 RTP_VIDEO_TIME_BASE = Fraction(1, 90000)
 MAX_RECORD_BYTES = 256 * 1024 * 1024
 GC_FREEZE_AFTER_INFERENCES = 30
+BOX_COORDINATE_FIELDS = {
+    "xyxy_normalized": "xyxyn",
+    "xyxy_pixels": "xyxy",
+    "xywh_normalized": "xywhn",
+    "xywh_pixels": "xywh",
+}
 
 
 def _discard_inference_queue(state: AppState) -> None:
@@ -160,8 +167,46 @@ def _scalar(value: object) -> object:
     return value
 
 
-def _simplify_mask_polygon(polygon: object) -> object:
-    if not settings.YOLO_MASK_POLYGON_SIMPLIFY:
+def _box_rows(boxes: object, coordinate_field: str, tracking: bool) -> list:
+    """Materialize coordinates/confidence/class/ID with one device transfer."""
+    coords = getattr(boxes, coordinate_field, None)
+    confidence = getattr(boxes, "conf", None)
+    classes = getattr(boxes, "cls", None)
+    track_ids = getattr(boxes, "id", None) if tracking else None
+    if (
+        isinstance(coords, torch.Tensor)
+        and isinstance(confidence, torch.Tensor)
+        and isinstance(classes, torch.Tensor)
+        and (track_ids is None or isinstance(track_ids, torch.Tensor))
+    ):
+        columns = [coords, confidence.unsqueeze(1), classes.unsqueeze(1)]
+        if track_ids is not None:
+            columns.append(track_ids.unsqueeze(1))
+        # Boxes fields are floating tensors. Retain their precision when a
+        # wrapper supplies float64 instead of the usual float32 data.
+        return torch.cat(columns, dim=1).detach().cpu().tolist()
+
+    confidence_values = _box_field_values(boxes, "conf")
+    class_values = _box_field_values(boxes, "cls")
+    coordinate_values = _box_field_values(boxes, coordinate_field)
+    track_values = _box_field_values(boxes, "id") if tracking else []
+    return [
+        [
+            *coordinate_values[index],
+            _scalar(confidence_values[index]),
+            _scalar(class_values[index]),
+            _scalar(track_values[index]) if index < len(track_values) else None,
+        ]
+        for index in range(len(boxes))
+    ]
+
+
+def _simplify_mask_polygon(
+    polygon: object, simplify: bool | None = None, epsilon_ratio: float | None = None,
+) -> object:
+    if simplify is None:
+        simplify = settings.YOLO_MASK_POLYGON_SIMPLIFY
+    if not simplify:
         return polygon
     try:
         if len(polygon) < 4:
@@ -171,10 +216,11 @@ def _simplify_mask_polygon(polygon: object) -> object:
 
     # Keep OpenCV out of the hot import path when simplification is disabled.
     import cv2
-    import numpy as np
 
     contour = np.asarray(polygon, dtype=np.float32).reshape(-1, 1, 2)
-    epsilon = settings.YOLO_MASK_POLYGON_EPSILON_RATIO * cv2.arcLength(contour, True)
+    if epsilon_ratio is None:
+        epsilon_ratio = settings.YOLO_MASK_POLYGON_EPSILON_RATIO
+    epsilon = epsilon_ratio * cv2.arcLength(contour, True)
     if epsilon <= 0:
         return polygon
     simplified = cv2.approxPolyDP(contour, epsilon, True).reshape(-1, 2)
@@ -235,7 +281,8 @@ def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
 
 
 def _skipped_frame_result(
-    inference_frame: InferenceFrame, previous_result: dict | None
+    inference_frame: InferenceFrame, previous_result: dict | None,
+    state: AppState | None = None,
 ) -> dict:
     """Build a cheap playback item for a frame not sent through the model."""
 
@@ -244,21 +291,22 @@ def _skipped_frame_result(
     height = int(
         (previous_result or {}).get("height") or getattr(frame, "height", 0) or 0
     )
-    previous_items = (previous_result or {}).get("items", [])
-    if not isinstance(previous_items, (list, tuple)):
-        previous_items = []
-    # Inference results are immutable after they are stored. Reuse the item
-    # dictionaries and only copy the outer list so a skipped media frame does
-    # not spend time cloning every detection while the model is overloaded.
-    items = list(previous_items)
-    if previous_result:
+    cached = state.held_items_cache if state is not None else None
+    if cached is not None and cached[0] is previous_result:
+        items, mask_count = cached[1], cached[2]
+    else:
+        previous_items = (previous_result or {}).get("items", [])
+        if not isinstance(previous_items, (list, tuple)):
+            previous_items = []
         # Distance belongs to the inferred frame's depth map. Keep the last
         # value in a separate field for display, without presenting it as a
         # measurement made on this skipped frame.
+        # Results are immutable after storage. Cache these shallow copies once
+        # per source result; mask arrays remain shared without conversion.
         items = []
         for item in previous_items:
             copied = dict(item) if isinstance(item, dict) else item
-            if isinstance(copied, dict):
+            if previous_result and isinstance(copied, dict):
                 held_distance = copied.get("distance_m")
                 for key in ("distance_m", "distance_status", "distance_anchor"):
                     copied.pop(key, None)
@@ -266,14 +314,15 @@ def _skipped_frame_result(
                     copied["held_distance_m"] = held_distance
                 copied["distance_status"] = "inference_skipped"
             items.append(copied)
+        mask_count = sum(1 for item in items if isinstance(item, dict) and "mask" in item)
+        if state is not None:
+            state.held_items_cache = (previous_result, items, mask_count)
     return {
         "source": _source_metadata(inference_frame),
         "width": width,
         "height": height,
         "items": items,
-        "mask_count": sum(
-            1 for item in items if isinstance(item, dict) and "mask" in item
-        ),
+        "mask_count": mask_count,
         "inference_ms": 0.0,
         "inference_skipped": True,
         "depth": {"status": "inference_skipped", "model": "unidepth-v2-vitb14"},
@@ -305,6 +354,7 @@ async def _publish_skipped_frames(
                     if previous_result_epoch == inference_frame.epoch
                     else None
                 ),
+                state,
             )
             state.mark_completed(*key)
             state.put_result(
@@ -666,22 +716,22 @@ def run_yolo(
             print(f"UniDepth inference failed: {type(exc).__name__}: {exc}", flush=True)
     postprocess_start = perf_counter()
     detections = []
-    coordinate_field = {
-        "xyxy_normalized": "xyxyn",
-        "xyxy_pixels": "xyxy",
-        "xywh_normalized": "xywhn",
-        "xywh_pixels": "xywh",
-    }[settings.BBOX_FORMAT]
+    bbox_format = settings.BBOX_FORMAT
+    coordinate_field = BOX_COORDINATE_FIELDS[bbox_format]
+    pixel_boxes = bbox_format.endswith("_pixels")
+    scale_x = source_width / max(frame_width, 1)
+    scale_y = source_height / max(frame_height, 1)
+    confidence_floor = settings.CONF_THRESHOLD_LOW
+    simplify_masks = settings.YOLO_MASK_POLYGON_SIMPLIFY
+    polygon_epsilon_ratio = settings.YOLO_MASK_POLYGON_EPSILON_RATIO
+    names = yolo_model.names
     for result in results:
         boxes = result.boxes
-        confidence_values = _box_field_values(boxes, "conf")
-        class_values = _box_field_values(boxes, "cls")
-        coordinate_values = _box_field_values(boxes, coordinate_field)
-        track_values = _box_field_values(boxes, "id") if tracking else []
+        rows = _box_rows(boxes, coordinate_field, tracking)
         retained_indices = []
         for box_index in range(len(boxes)):
-            conf = float(_scalar(confidence_values[box_index]))
-            if not tracking and conf <= settings.CONF_THRESHOLD_LOW:
+            conf = float(rows[box_index][4])
+            if not tracking and conf <= confidence_floor:
                 continue
             retained_indices.append(box_index)
         masks = getattr(result, "masks", None)
@@ -696,41 +746,34 @@ def run_yolo(
         for polygon_index, (box_index, (distance, distance_status)) in enumerate(
             zip(retained_indices, item_distances)
         ):
-            conf = float(_scalar(confidence_values[box_index]))
-            cls_id = int(_scalar(class_values[box_index]))
-            bbox = [float(value) for value in coordinate_values[box_index]]
-            if settings.BBOX_FORMAT.endswith("_pixels"):
-                scale_x = source_width / max(frame_width, 1)
-                scale_y = source_height / max(frame_height, 1)
-                if settings.BBOX_FORMAT == "xyxy_pixels":
-                    bbox[0] *= scale_x
-                    bbox[1] *= scale_y
-                    bbox[2] *= scale_x
-                    bbox[3] *= scale_y
-                else:
-                    bbox[0] *= scale_x
-                    bbox[1] *= scale_y
-                    bbox[2] *= scale_x
-                    bbox[3] *= scale_y
+            row = rows[box_index]
+            conf = float(row[4])
+            cls_id = int(row[5])
+            bbox = [float(row[0]), float(row[1]), float(row[2]), float(row[3])]
+            if pixel_boxes:
+                bbox[0] *= scale_x
+                bbox[1] *= scale_y
+                bbox[2] *= scale_x
+                bbox[3] *= scale_y
             detection = {
-                "class": yolo_model.names[cls_id],
+                "class": names[cls_id],
                 "confidence": round(conf, 2),
                 "bbox": bbox,
-                "bbox_format": settings.BBOX_FORMAT,
+                "bbox_format": bbox_format,
                 "distance_m": round(distance, 2) if distance is not None else None,
                 "distance_status": distance_status,
             }
-            track_id = (
-                track_values[box_index] if box_index < len(track_values) else None
-            )
-            track_id = _scalar(track_id)
+            track_id = row[6] if len(row) > 6 else None
             if track_id is not None:
                 detection["track_id"] = int(track_id)
             if polygon_index < len(normalized_polygons):
-                polygon = _simplify_mask_polygon(normalized_polygons[polygon_index])
+                polygon = _simplify_mask_polygon(
+                    normalized_polygons[polygon_index], simplify_masks, polygon_epsilon_ratio,
+                )
                 if len(polygon) >= 3:
                     detection["mask"] = (
-                        polygon.tolist() if hasattr(polygon, "tolist") else polygon
+                        np.ascontiguousarray(polygon, dtype=np.float32)
+                        if isinstance(polygon, np.ndarray) else polygon
                     )
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
@@ -1114,6 +1157,7 @@ async def yolo_worker(state: AppState) -> None:
         previous_result_epoch = inference_frame.epoch
         state.last_inference_result = result
         state.last_inference_result_epoch = inference_frame.epoch
+        state.held_items_cache = None
         if state.recording_writer is not None:
             state.recording_writer.offer(result, state.metrics)
 
