@@ -56,9 +56,10 @@ class Settings(BaseSettings):
     # Bound the device-side grid used for contour extraction. 640 preserves
     # detail by default; reduce this to trade polygon fidelity for latency.
     YOLO_MASK_CONTOUR_SIZE: int = Field(default=640, ge=32, le=640)
-    # Lossless device-side packing reduces CUDA mask transfer to one bit/pixel.
-    # CPU inference keeps the ordinary contour path. Legacy enables GPU A/B runs.
-    YOLO_MASK_TRANSFER: Literal["packed", "legacy"] = "packed"
+    # GPU mode traces contours before transfer. Packed/legacy retain CPU tracing
+    # for comparisons. CPU inference keeps the ordinary contour path.
+    YOLO_MASK_TRANSFER: Literal["gpu", "packed", "legacy"] = "gpu"
+    YOLO_GPU_CONTOUR_MAX_COMPONENTS: int = Field(default=32, ge=1, le=256)
     YOLO_MASK_MAX_POINTS: int = Field(default=256, ge=3, le=4096)
     # Optional contour simplification reduces JSON and browser work for masks
     # with noisy boundaries. Keep it off by default so polygon fidelity stays

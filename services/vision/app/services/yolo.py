@@ -241,8 +241,8 @@ def _bounded_mask_polygon(polygon, max_points: int):
 def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
     """Convert only retained result masks to normalized polygons.
 
-    Select and reduce retained masks on their inference device. CUDA masks use
-    lossless bit-packing before host transfer; contours remain on CPU.
+    Select and reduce retained masks on their inference device. GPU mode traces
+    external contours before host transfer; packed/legacy modes trace on CPU.
     """
 
     if not box_indices:
@@ -273,10 +273,9 @@ def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
         max(1, round(mask_height * scale)),
         max(1, round(mask_width * scale)),
     )
-    # Masks.xyn calls cv2.findContours on CPU. Reduce the binary mask while it
-    # is still on the inference device, so only a small grid crosses the
-    # device boundary and contour work scales with contour_size, not camera
-    # resolution.
+    # Bound contour work on the inference device, independent of camera
+    # resolution. GPU mode transfers vertices; packed/legacy modes transfer
+    # the reduced mask grid for CPU contour extraction.
     reduced_data = (
         F.interpolate(
             mask_data.unsqueeze(1).float(),
@@ -292,6 +291,13 @@ def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
 
 def _mask_polygons_for_transfer(masks: object) -> list:
     data = getattr(masks, "data", None)
+    if settings.YOLO_MASK_TRANSFER == "gpu" and isinstance(data, torch.Tensor) and data.is_cuda:
+        from app.services.gpu_contours import gpu_mask_polygons
+
+        return gpu_mask_polygons(
+            data, masks.orig_shape, max_points=settings.YOLO_MASK_MAX_POINTS,
+            max_components=settings.YOLO_GPU_CONTOUR_MAX_COMPONENTS,
+        )
     if (
         settings.YOLO_MASK_TRANSFER == "packed"
         and isinstance(data, torch.Tensor)
@@ -480,6 +486,11 @@ async def _write_record(
 
 def load_yolo_model() -> YOLO:
     print(f"YOLO inference device: {settings.YOLO_DEVICE}")
+    if settings.YOLO_DEVICE.startswith("cuda") and settings.YOLO_MASK_TRANSFER == "gpu":
+        from app.services.gpu_contours import validate_gpu_contours
+
+        validate_gpu_contours(settings.YOLO_DEVICE)
+        print("GPU contour startup validation passed")
     model = YOLO(settings.YOLO_MODEL)
     if model.task != "segment":
         raise ValueError(
@@ -1090,7 +1101,8 @@ async def yolo_worker(state: AppState) -> None:
         f"retina_masks={settings.YOLO_RETINA_MASKS}; "
         f"max_det={settings.YOLO_MAX_DETECTIONS}; "
         f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}; "
-        f"mask_transfer={settings.YOLO_MASK_TRANSFER}",
+        f"mask_transfer={settings.YOLO_MASK_TRANSFER}; "
+        f"gpu_max_components={settings.YOLO_GPU_CONTOUR_MAX_COMPONENTS}",
         flush=True,
     )
     print(
