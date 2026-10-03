@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { userRoleSchema } from "../../common/auth/jwt.schema";
+import { userRoleSchema } from "../../common/auth/jwt.schema.ts";
 
 export const loginBodySchema = z.object({
     loginId: z

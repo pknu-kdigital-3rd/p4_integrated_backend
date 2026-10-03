@@ -4,7 +4,7 @@ import type {
     Response
 } from "express";
 import { AppError } from "../errors/app-error.ts";
-import { verifyAccessToken } from "./jwt";
+import { verifyAccessToken } from "./jwt.ts";
 
 
 export async function authenticate(
