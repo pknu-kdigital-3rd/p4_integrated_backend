@@ -302,6 +302,68 @@ and check masks, boxes, labels and distances, then rerun the same dense image
 and video benchmarks with new result filenames. Compare GC counts/maximum
 pause, p99, postprocessing, publication and memory before proceeding to Phase 3.
 
+## Bounded memory and allocation diagnosis
+
+Depth staging reuses one pinned host tensor and one device tensor for the current
+input shape. CPU staging is not pinned. A shape change replaces the pair; it
+does not accumulate a cache of shapes. The single depth worker synchronizes its
+stream even on exceptions before those buffers can be reused. YOLO and depth
+share the read-only BGR ndarray, removing the separate full-frame depth copy.
+GPU intermediate tensors still use PyTorch's caching allocator.
+
+Retained polygons are capped at `YOLO_MASK_MAX_POINTS` (default 256), using
+evenly spaced contour points when necessary. This can reduce overlay detail;
+distance estimation continues to use the original segmentation masks.
+`YOLO_MAX_DETECTIONS` already bounds model detections/masks (default 100).
+
+Playback storage is now independently bounded by `PLAYBACK_MAX_FRAMES` (default
+1800) and `BACKLOG_MAX_BYTES` encoded bytes (default 256 MiB), even without
+browser acknowledgements. Oldest results are evicted; a viewer requesting
+evicted sequences follows the existing resync paths. Byte accounting includes
+encoded video only, not Python metadata or polygons. The point/detection/frame
+caps separately bound stored polygon payloads. `[mem]` logs expose
+`playback_cache`, `playback_encoded_mib`, and `playback_evictions`.
+
+For a smaller playback budget, configure all four values together:
+
+```dotenv
+YOLO_MAX_DETECTIONS=32
+YOLO_MASK_MAX_POINTS=256
+PLAYBACK_MAX_FRAMES=300
+BACKLOG_MAX_BYTES=67108864
+```
+
+This bounds raw retained polygon coordinates to at most 18.75 MiB and encoded
+video to 64 MiB; metadata, tensors, model weights, allocator caches and transport
+buffers are additional. It shortens replay history and limits detections.
+These bounds do not prove zero RSS growth or eliminate cyclic GC.
+
+Run the new offline diagnostic in the dev container, which mounts benchmark
+scripts from the host. It temporarily disables automatic collection over a
+bounded capture and uses `DEBUG_SAVEALL` to inspect otherwise reclaimed gen0
+objects. It restores GC state and releases captured garbage afterwards. The
+diagnostic changes memory and timings and must not be enabled in a live service:
+
+```bash
+set -o pipefail
+docker compose -f docker-compose.dev.yml run --rm --no-deps -T \
+  -v /home/kdt/benchmark_input:/benchmark-input:ro \
+  p4-vision python benchmark_yolo.py \
+  --device cuda:0 --imgsz 320 --width 1280 --height 720 \
+  --warmup 30 --iterations 100 --image /benchmark-input/mpv-shot0001.jpg \
+  --gc frozen --gc-diagnose 100 \
+  2>&1 | tee /home/kdt/benchmark_results/allocation-diagnostic.log
+```
+
+The report separates `run_yolo` without depth and with the depth executor. It
+reports young tracked survivors, gen0 garbage types, shallow sizes, available
+allocation sites, function locations, and references among garbage objects.
+These are not total allocation counts, complete retained sizes, or proven cycle
+roots. The isolated benchmark excludes telemetry, WebSocket and live decode.
+Use the GPU report to attribute the observed runtime garbage before changing
+third-party model internals. Repeat the long pipeline benchmark and verify the
+`UniDepth depth-only validation passed` log for the new staging path.
+
 ## Recording-specific UniDepth intrinsics
 
 The current UniDepth inference path uses `UNIDEPTH_CAMERA_INTRINSIC` with

@@ -153,6 +153,8 @@ class AppState:
     result_store: OrderedDict[tuple[int, int], PlaybackItem] = field(
         default_factory=OrderedDict
     )
+    result_store_encoded_bytes: int = 0
+    result_store_evictions: int = 0
     result_condition: asyncio.Condition = field(default_factory=asyncio.Condition)
     feed_commands: asyncio.Queue[dict[str, Any]] = field(default_factory=asyncio.Queue)
     fault: str | None = None
@@ -198,7 +200,27 @@ class AppState:
         self.completed_sequence_order.clear()
 
     def put_result(self, item: PlaybackItem) -> None:
-        self.result_store[(item.epoch, item.seq)] = item
+        from app.core.settings import settings
+
+        key = (item.epoch, item.seq)
+        previous = self.result_store.get(key)
+        if previous is not None:
+            self.result_store_encoded_bytes -= len(previous.encoded)
+        self.result_store[key] = item
+        self.result_store_encoded_bytes += len(item.encoded)
+        # Browser acknowledgements are not a memory bound. Evict oldest data
+        # even with no viewer; a viewer missing evicted sequences resyncs via
+        # the existing sequence-gap/resume-data-unavailable paths.
+        while (len(self.result_store) > settings.PLAYBACK_MAX_FRAMES
+               or self.result_store_encoded_bytes > settings.BACKLOG_MAX_BYTES):
+            _, expired = self.result_store.popitem(last=False)
+            self.result_store_encoded_bytes -= len(expired.encoded)
+            self.result_store_evictions += 1
+
+    def _remove_result(self, key: tuple[int, int]) -> None:
+        removed = self.result_store.pop(key, None)
+        if removed is not None:
+            self.result_store_encoded_bytes -= len(removed.encoded)
 
     def acknowledge(self, epoch: int, seq: int) -> None:
         """Cumulatively remove results already painted by the browser."""
@@ -208,7 +230,7 @@ class AppState:
         for key in list(self.result_store):
             item_epoch, item_seq = key
             if item_epoch == epoch and item_seq <= seq:
-                self.result_store.pop(key, None)
+                self._remove_result(key)
         if self.last_presented is None or self.last_presented[0] != epoch:
             self.last_presented = (epoch, seq)
         else:
@@ -218,10 +240,11 @@ class AppState:
         target = self.current_epoch if epoch is None else epoch
         for key in list(self.result_store):
             if key[0] == target:
-                self.result_store.pop(key, None)
+                self._remove_result(key)
 
     def clear_all_results(self) -> None:
         self.result_store.clear()
+        self.result_store_encoded_bytes = 0
         self.held_items_cache = None
 
 

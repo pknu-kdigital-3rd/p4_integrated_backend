@@ -227,6 +227,15 @@ def _simplify_mask_polygon(
     return simplified if len(simplified) >= 3 else polygon
 
 
+def _bounded_mask_polygon(polygon, max_points: int):
+    """Bound retained/wire coordinates; preserve contour traversal order."""
+    if len(polygon) <= max_points:
+        return polygon
+    points = np.asarray(polygon, dtype=np.float32)
+    indices = np.arange(max_points, dtype=np.int64) * len(points) // max_points
+    return np.ascontiguousarray(points[indices])
+
+
 def _normalized_mask_polygons(result: object, box_indices: list[int]) -> list:
     """Convert only retained result masks to normalized polygons.
 
@@ -657,7 +666,10 @@ def run_yolo(
             settings.UNIDEPTH_CALIBRATION_WIDTH,
             settings.UNIDEPTH_CALIBRATION_HEIGHT,
         )
-        depth_input = img.copy()
+        # Depth only copies from this array. The pinned fork's LetterBox makes
+        # new output, and preprocess converts uint8 before in-place division.
+        # TensorRT consumes the resulting tensor, not this shared ndarray.
+        depth_input = img
         if depth_executor is not None:
             depth_future = depth_executor.submit(
                 predict_timed, depth_model, depth_input, camera_intrinsic
@@ -724,6 +736,7 @@ def run_yolo(
     confidence_floor = settings.CONF_THRESHOLD_LOW
     simplify_masks = settings.YOLO_MASK_POLYGON_SIMPLIFY
     polygon_epsilon_ratio = settings.YOLO_MASK_POLYGON_EPSILON_RATIO
+    max_polygon_points = settings.YOLO_MASK_MAX_POINTS
     names = yolo_model.names
     for result in results:
         boxes = result.boxes
@@ -770,6 +783,7 @@ def run_yolo(
                 polygon = _simplify_mask_polygon(
                     normalized_polygons[polygon_index], simplify_masks, polygon_epsilon_ratio,
                 )
+                polygon = _bounded_mask_polygon(polygon, max_polygon_points)
                 if len(polygon) >= 3:
                     detection["mask"] = (
                         np.ascontiguousarray(polygon, dtype=np.float32)

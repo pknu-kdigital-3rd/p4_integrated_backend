@@ -77,6 +77,10 @@ class DepthEstimator:
 
         self._torch = torch
         self._device = torch.device(device)
+        self._input_shape = None
+        self._host_input = None
+        self._host_input_array = None
+        self._device_input = None
         self._model = UniDepthV2.from_pretrained(
             str(model_path), local_files_only=True
         ).to(self._device).eval()
@@ -178,20 +182,42 @@ class DepthEstimator:
             flush=True,
         )
 
+    def _stage_input(self, frame: np.ndarray) -> Any:
+        """Reuse one host/device pair; one depth worker owns these buffers."""
+        if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype != np.uint8:
+            raise ValueError("depth input must be an HxWx3 uint8 BGR image")
+        shape = tuple(frame.shape)
+        if shape != self._input_shape:
+            host = self._torch.empty(shape, dtype=self._torch.uint8,
+                                     pin_memory=self._device.type == "cuda")
+            device = self._torch.empty(shape, dtype=self._torch.uint8, device=self._device)
+            # Only one shape is cached; changing shape replaces the old pair.
+            self._host_input = host
+            self._host_input_array = host.numpy()
+            self._device_input = device
+            self._input_shape = shape
+        np.copyto(self._host_input_array, frame)
+        self._device_input.copy_(self._host_input, non_blocking=self._device.type == "cuda")
+        return self._device_input.permute(2, 0, 1).flip(0)
+
     def _infer(self, frame: np.ndarray, camera: np.ndarray, reference: bool = False) -> Any:
         torch = self._torch
         with torch.inference_mode():
             context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
-            with context, torch.autocast("cuda", dtype=torch.float16, enabled=self._device.type == "cuda"):
-                rgb = torch.from_numpy(frame[:, :, ::-1].copy()).permute(2, 0, 1).to(self._device)
-                if reference or not self._optimized:
-                    intrinsic = torch.as_tensor(camera.copy(), device=self._device)
-                    output = self._model.infer(rgb, intrinsic)["depth"]
-                else:
-                    output = self._depth_path(rgb, camera)
-                output = output.detach().float()
-            if self._stream is not None:
-                self._stream.synchronize()
+            try:
+                with context, torch.autocast("cuda", dtype=torch.float16, enabled=self._device.type == "cuda"):
+                    rgb = self._stage_input(frame)
+                    if reference or not self._optimized:
+                        intrinsic = torch.as_tensor(camera.copy(), device=self._device)
+                        output = self._model.infer(rgb, intrinsic)["depth"]
+                    else:
+                        output = self._depth_path(rgb, camera)
+                    output = output.detach().float()
+            finally:
+                if self._stream is not None:
+                    # max_workers=1 and synchronization even on failure keep
+                    # retries from overwriting an in-flight pinned H2D copy.
+                    self._stream.synchronize()
         return output
 
 

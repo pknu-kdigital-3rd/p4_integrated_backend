@@ -14,6 +14,7 @@ from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.yolo import (
     _box_field_values,
     _box_rows,
+    _bounded_mask_polygon,
     _skipped_frame_result,
     _model_confidence_floor,
     overlay_class_names,
@@ -95,6 +96,53 @@ class _SourceFrame:
 
 
 class RunYoloTests(unittest.TestCase):
+    def test_mask_point_cap_preserves_order_and_small_polygons(self):
+        polygon = np.arange(2000, dtype=np.float32).reshape(1000, 2)
+        bounded = _bounded_mask_polygon(polygon, 256)
+        self.assertEqual(bounded.shape, (256, 2))
+        self.assertTrue(bounded.flags.c_contiguous)
+        self.assertTrue(np.all(np.diff(bounded[:, 0]) > 0))
+        small = polygon[:3]
+        self.assertIs(_bounded_mask_polygon(small, 256), small)
+
+    def test_run_yolo_shares_read_only_input_with_depth(self):
+        from app.services.depth import DepthFrame
+        image = np.arange(32 * 32 * 3, dtype=np.uint8).reshape(32, 32, 3)
+        original = image.copy()
+        frame = SimpleNamespace(width=32, height=32, to_ndarray=lambda **kwargs: image)
+        inference_frame = InferenceFrame(0, frame, 0, 1 / 30, 0)
+        observed = []
+        class Model:
+            names = {}
+            def __call__(self, received, **kwargs):
+                observed.append(received)
+                return [SimpleNamespace(boxes=[], masks=None)]
+        class Depth:
+            def predict(self, received, camera):
+                observed.append(received)
+                return DepthFrame(32, 32, torch.ones((32, 32)))
+        with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
+            "app.services.yolo.settings.YOLO_INFERENCE_SIZE", "source"
+        ):
+            run_yolo(inference_frame, Model(), Depth())
+        self.assertEqual(len(observed), 2)
+        self.assertIs(observed[0], image)
+        self.assertIs(observed[1], image)
+        np.testing.assert_array_equal(image, original)
+
+    def test_fork_preprocessing_does_not_mutate_shared_image(self):
+        from ultralytics.engine.predictor import BasePredictor
+        predictor = BasePredictor.__new__(BasePredictor)
+        predictor.device = torch.device("cpu")
+        predictor.model = SimpleNamespace(fp16=False, format="engine", dynamic=False, stride=32)
+        predictor.args = SimpleNamespace(rect=True)
+        predictor.imgsz = (32, 32)
+        image = np.arange(32 * 32 * 3, dtype=np.uint8).reshape(32, 32, 3)
+        original = image.copy()
+        tensor = predictor.preprocess([image])
+        np.testing.assert_array_equal(image, original)
+        self.assertEqual(tuple(tensor.shape), (1, 3, 32, 32))
+
     def test_class_filter_resolves_names_and_rejects_unknown_classes(self):
         names = {0: "person", 2: "car", 7: "bus"}
         self.assertIsNone(_resolve_yolo_classes("", names))
@@ -487,6 +535,29 @@ class PutResultTests(unittest.TestCase):
             )
         )
         self.assertEqual(state.current_epoch, 2)
+
+    def test_playback_retention_is_bounded_without_acknowledgements(self):
+        state = AppState()
+        with patch("app.core.settings.settings.PLAYBACK_MAX_FRAMES", 2), patch(
+            "app.core.settings.settings.BACKLOG_MAX_BYTES", 5
+        ):
+            for seq in range(100):
+                state.put_result(PlaybackItem(1, seq, b"abc", seq, False, {}))
+                self.assertLessEqual(len(state.result_store), 2)
+                self.assertLessEqual(state.result_store_encoded_bytes, 5)
+            self.assertEqual(list(state.result_store), [(1, 99)])
+            self.assertEqual(state.result_store_evictions, 99)
+            state.put_result(PlaybackItem(1, 99, b"x", 99, False, {}))
+            self.assertEqual(state.result_store_encoded_bytes, 1)
+            state.current_epoch = 1
+            state.acknowledge(1, 99)
+            self.assertEqual(state.result_store_encoded_bytes, 0)
+            state.put_result(PlaybackItem(1, 100, b"abc", 100, False, {}))
+            state.clear_epoch(1)
+            self.assertEqual(state.result_store_encoded_bytes, 0)
+            state.put_result(PlaybackItem(1, 101, b"abc", 101, False, {}))
+            state.clear_all_results()
+            self.assertEqual(state.result_store_encoded_bytes, 0)
 
 
 class YoloWorkerEpochRaceTests(unittest.IsolatedAsyncioTestCase):

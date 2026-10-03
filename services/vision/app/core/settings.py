@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     # Bound the device-side grid used for contour extraction. 640 preserves
     # detail by default; reduce this to trade polygon fidelity for latency.
     YOLO_MASK_CONTOUR_SIZE: int = Field(default=640, ge=32, le=640)
+    YOLO_MASK_MAX_POINTS: int = Field(default=256, ge=3, le=4096)
     # Optional contour simplification reduces JSON and browser work for masks
     # with noisy boundaries. Keep it off by default so polygon fidelity stays
     # identical until a deployment opts in.
@@ -147,6 +148,7 @@ class Settings(BaseSettings):
     INFERENCE_RETRY_DELAYS: tuple[float, ...] = (0.1, 0.5)
     BACKLOG_MAX_SECONDS: float = Field(default=30.0, ge=1.0, le=3600.0)
     BACKLOG_MAX_BYTES: int = Field(default=256 * 1024 * 1024, ge=1)
+    PLAYBACK_MAX_FRAMES: int = Field(default=1800, ge=1, le=3600)
     METRICS_LOG_INTERVAL_SECONDS: float = Field(default=5.0, ge=1.0, le=60.0)
     VISION_GC_GEN0_THRESHOLD: int | None = Field(default=None, ge=100, le=1_000_000)
     ENABLE_PYTHON_ALLOC_PROFILE: bool = False

@@ -31,6 +31,7 @@ from app.core.settings import settings
 from app.core.state import InferenceFrame
 from app.services.depth import load_depth_estimator, make_depth_executor
 from app.services.gc_stats import install
+from app.services.allocation_diagnostics import diagnose_allocations
 from app.services.yolo import load_yolo_model, run_yolo
 
 
@@ -167,6 +168,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--gc", choices=("disabled", "enabled", "frozen"), default="disabled")
     parser.add_argument("--gc-gen0-threshold", type=int)
     parser.add_argument("--alloc-trace", type=int, default=0, metavar="N")
+    parser.add_argument("--gc-diagnose", type=int, default=0, metavar="N",
+                        help="Offline object/cycle attribution over N calls per stage; changes timings and memory")
     return parser.parse_args()
 
 
@@ -178,6 +181,8 @@ def main() -> None:
         raise SystemExit("--imgsz must be a positive multiple of 32")
     if args.width < 1 or args.height < 1 or args.alloc_trace < 0:
         raise SystemExit("dimensions must be positive and --alloc-trace cannot be negative")
+    if not 0 <= args.gc_diagnose <= 500:
+        raise SystemExit("--gc-diagnose must be between 0 and 500 (bounded offline capture)")
     if args.gc_gen0_threshold is not None and not 100 <= args.gc_gen0_threshold <= 1_000_000:
         raise SystemExit("--gc-gen0-threshold must be between 100 and 1000000")
     if args.device.startswith("cuda") and not torch.cuda.is_available():
@@ -313,6 +318,18 @@ def _run_benchmarks(args, model, depth_model, depth_executor, image: np.ndarray)
             lambda: run_yolo(inference_frame, model, depth_model, depth_executor),
             args.alloc_trace, args.device,
         )
+
+    if args.gc_diagnose:
+        synchronize = lambda: _sync(args.device)
+        diagnose_allocations(
+            lambda: run_yolo(inference_frame, model, None, None),
+            args.gc_diagnose, synchronize, label="run_yolo without UniDepth",
+        )
+        if depth_model is not None:
+            diagnose_allocations(
+                lambda: run_yolo(inference_frame, model, depth_model, depth_executor),
+                args.gc_diagnose, synchronize, label="run_yolo with UniDepth executor",
+            )
 
     print("\nInterpretation")
     if forward_fps is not None and forward_fps < 30:
