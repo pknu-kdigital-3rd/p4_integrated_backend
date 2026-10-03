@@ -51,15 +51,19 @@ def unpack_binary_masks(packed: np.ndarray, shape: tuple[int, int, int]) -> np.n
     return np.unpackbits(packed, bitorder="little", count=count).reshape(shape)
 
 
-def _copy_tensor_to_host(packed: torch.Tensor) -> np.ndarray:
+def _copy_tensor_to_host(packed: torch.Tensor, *, slot: str = "default") -> np.ndarray:
+    if slot not in {"default", "metadata", "vertices", "boxes", "depth", "mask_validity"}:
+        raise ValueError("unknown host transfer buffer slot")
     if not packed.is_cuda:
         return packed.detach().cpu().numpy()
-    # Each inference thread owns one bounded staging buffer. Replace it on a
-    # size change; never cache every observed detection count or image shape.
-    host = getattr(_transfer_state, "host", None)
+    # Keep a fixed set of buffers for different transfer purposes so alternating
+    # shapes do not replace pinned allocations several times per frame. Each
+    # slot retains only its current shape, not every observed input size.
+    attribute = "host" if slot == "default" else f"host_{slot}"
+    host = getattr(_transfer_state, attribute, None)
     if host is None or host.shape != packed.shape or host.dtype != packed.dtype:
         host = torch.empty(packed.shape, dtype=packed.dtype, pin_memory=True)
-        _transfer_state.host = host
+        setattr(_transfer_state, attribute, host)
     stream = torch.cuda.current_stream(packed.device)
     ready = getattr(_transfer_state, "ready", None)
     if ready is None or ready.device != packed.device:

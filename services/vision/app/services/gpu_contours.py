@@ -89,7 +89,7 @@ def gpu_mask_polygons(masks: torch.Tensor, orig_shape: tuple[int, int], *,
                 max_points, stream.cuda_stream,
             )
             diagnostics = torch.cat((counts[:, None], errors[:, None], metadata.reshape(count, -1)), dim=1)
-            host = _copy_tensor_to_host(diagnostics).copy()
+            host = _copy_tensor_to_host(diagnostics, slot="metadata").copy()
             host_counts = host[:, 0]
             host_metadata = host[:, 2:].reshape(count, max_components, 3)
             if np.any(host[:, 1] == 2):
@@ -101,7 +101,7 @@ def gpu_mask_polygons(masks: torch.Tensor, orig_shape: tuple[int, int], *,
                 )
             chunks = [points[n, slot, :int(host_metadata[n, slot, 1])]
                       for n in range(count) for slot in range(int(host_counts[n]))]
-            payload = (_copy_tensor_to_host(torch.cat(chunks)).copy() if chunks else
+            payload = (_copy_tensor_to_host(torch.cat(chunks), slot="vertices").copy() if chunks else
                        np.empty((0, 2), dtype=np.int32))
         except BaseException:
             stream.synchronize()

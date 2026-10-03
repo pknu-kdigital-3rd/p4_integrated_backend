@@ -152,7 +152,13 @@ class GpuContourIntegrationTests(unittest.TestCase):
                     "cv2.findContours", side_effect=AssertionError("CPU contour extraction in GPU mode")
                 ), patch("numpy.unpackbits", side_effect=AssertionError("CPU mask unpacking in GPU mode")):
                     actual = _normalized_mask_polygons(result, [2, 0, 1, 3])
+                    from app.services.mask_transfer import _transfer_state
+
+                    metadata_buffer = _transfer_state.host_metadata
+                    vertex_buffer = _transfer_state.host_vertices
                     repeated = _normalized_mask_polygons(result, [2, 0, 1, 3])
+                    self.assertIs(_transfer_state.host_metadata, metadata_buffer)
+                    self.assertIs(_transfer_state.host_vertices, vertex_buffer)
             for left, right, again in zip(actual, expected, repeated):
                 np.testing.assert_array_equal(left, right)
                 np.testing.assert_array_equal(left, again)
