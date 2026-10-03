@@ -17,10 +17,12 @@ from __future__ import annotations
 import argparse
 import gc
 import os
+import tracemalloc
 from pathlib import Path
 from time import perf_counter
 
 import av
+import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
@@ -28,6 +30,7 @@ from ultralytics import YOLO
 from app.core.settings import settings
 from app.core.state import InferenceFrame
 from app.services.depth import load_depth_estimator, make_depth_executor
+from app.services.gc_stats import install
 from app.services.yolo import load_yolo_model, run_yolo
 
 
@@ -48,6 +51,77 @@ def _measure_wall(fn, iterations: int, device: str) -> tuple[float, float]:
     _sync(device)
     elapsed = perf_counter() - started
     return elapsed, _fps(elapsed, iterations)
+
+
+def _measure_exact(
+    fn, iterations: int, device: str, gc_mode: str, gen0_threshold: int | None,
+) -> tuple[np.ndarray, dict]:
+    """Time synchronized calls, including GC tails, and restore caller settings."""
+    was_enabled = gc.isenabled()
+    old_threshold = gc.get_threshold()
+    old_frozen = gc.get_freeze_count()
+    timings = np.empty(iterations, dtype=np.float64)
+    stats = install()
+    try:
+        if gen0_threshold is not None:
+            gc.set_threshold(gen0_threshold, *old_threshold[1:])
+        if gc_mode == "disabled":
+            gc.disable()
+        else:
+            gc.enable()
+            if gc_mode == "frozen":
+                gc.collect()
+                gc.freeze()
+        tracked = len(gc.get_objects())
+        frozen = gc.get_freeze_count()
+        threshold = gc.get_threshold()
+        _sync(device)
+        before = stats.snapshot()
+        stats.take_max_pause_ms()
+        for index in range(iterations):
+            started = perf_counter()
+            fn()
+            _sync(device)
+            timings[index] = (perf_counter() - started) * 1000
+        after = stats.snapshot()
+        max_pause_ms = stats.take_max_pause_ms()
+        report = {key: after[key] - before[key] for key in before}
+        report.update(
+            gc_max_ms=max_pause_ms, gc_tracked=tracked, gc_frozen=frozen,
+            gc_threshold=threshold, gc0_per_frame=report["gc0"] / iterations,
+        )
+        return timings, report
+    finally:
+        gc.set_threshold(*old_threshold)
+        if was_enabled:
+            gc.enable()
+        else:
+            gc.disable()
+        # This CLI normally owns the freeze. Do not unfreeze objects frozen
+        # by a caller when this helper is used from another process/tool.
+        if gc_mode == "frozen" and old_frozen == 0:
+            gc.unfreeze()
+
+
+def _allocation_trace(fn, iterations: int, device: str) -> None:
+    owns_trace = not tracemalloc.is_tracing()
+    if owns_trace:
+        tracemalloc.start(25)
+    try:
+        before = tracemalloc.take_snapshot()
+        tracemalloc.reset_peak()
+        for _ in range(iterations):
+            fn()
+            _sync(device)
+        _, peak = tracemalloc.get_traced_memory()
+        after = tracemalloc.take_snapshot()
+        print("\nAllocation trace (net retention; steady-state frames should retain near zero)")
+        for stat in after.compare_to(before, "lineno")[:25]:
+            print(f"  {stat}")
+        print(f"  traced peak={peak / 1024**2:.3f} MiB")
+    finally:
+        if owns_trace:
+            tracemalloc.stop()
 
 
 def _measure_forward(net: torch.nn.Module, tensor: torch.Tensor, iterations: int, device: str) -> tuple[float, float, float]:
@@ -89,6 +163,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--precision", choices=("fp16", "fp32"), default="fp16")
+    parser.add_argument("--image", type=Path)
+    parser.add_argument("--gc", choices=("disabled", "enabled", "frozen"), default="disabled")
+    parser.add_argument("--gc-gen0-threshold", type=int)
+    parser.add_argument("--alloc-trace", type=int, default=0, metavar="N")
     return parser.parse_args()
 
 
@@ -98,6 +176,10 @@ def main() -> None:
         raise SystemExit("--iterations must be positive and --warmup cannot be negative")
     if args.imgsz <= 0 or args.imgsz % 32:
         raise SystemExit("--imgsz must be a positive multiple of 32")
+    if args.width < 1 or args.height < 1 or args.alloc_trace < 0:
+        raise SystemExit("dimensions must be positive and --alloc-trace cannot be negative")
+    if args.gc_gen0_threshold is not None and not 100 <= args.gc_gen0_threshold <= 1_000_000:
+        raise SystemExit("--gc-gen0-threshold must be between 100 and 1000000")
     if args.device.startswith("cuda") and not torch.cuda.is_available():
         raise SystemExit("CUDA was requested but torch.cuda.is_available() is false")
 
@@ -117,13 +199,27 @@ def main() -> None:
         f"contour_size={settings.YOLO_MASK_CONTOUR_SIZE}"
     )
 
+    if args.image is None:
+        image = np.zeros((args.height, args.width, 3), dtype=np.uint8)
+        print("input note: black frame normally produces no detections; use --image to exercise masks/postprocessing")
+    else:
+        image = cv2.imread(str(args.image))
+        if image is None:
+            raise SystemExit(f"cannot read image: {args.image}")
+        image = cv2.resize(image, (args.width, args.height))
+
     model: YOLO = load_yolo_model()
     if model.task != "segment":
         raise SystemExit(f"expected a segmentation model, got task={model.task!r}")
     depth_model = load_depth_estimator()
     depth_executor = make_depth_executor()
+    try:
+        _run_benchmarks(args, model, depth_model, depth_executor, image)
+    finally:
+        depth_executor.shutdown(wait=True, cancel_futures=True)
 
-    image = np.zeros((args.height, args.width, 3), dtype=np.uint8)
+
+def _run_benchmarks(args, model, depth_model, depth_executor, image: np.ndarray) -> None:
     frame = av.VideoFrame.from_ndarray(image, format="bgr24")
     inference_frame = InferenceFrame(
         epoch=1,
@@ -188,13 +284,15 @@ def main() -> None:
     )
 
     # Exact production path, including PyAV conversion and bbox/mask extraction.
-    gc.disable()
-    exact_seconds, exact_fps = _measure_wall(
+    exact_timings, gc_report = _measure_exact(
         lambda: run_yolo(inference_frame, model, depth_model, depth_executor),
         args.iterations,
         args.device,
+        args.gc,
+        args.gc_gen0_threshold,
     )
-    gc.enable()
+    exact_seconds = float(exact_timings.sum()) / 1000
+    exact_fps = _fps(exact_seconds, args.iterations)
 
     print("\nResults")
     if forward_fps is None:
@@ -204,6 +302,17 @@ def main() -> None:
     print(f"  Ultralytics predict  : {predict_fps:6.2f} FPS ({predict_seconds * 1000 / args.iterations:6.2f} ms wall)")
     print(f"  PyAV conversion      : {conversion_fps:6.2f} FPS ({conversion_seconds * 1000 / args.iterations:6.2f} ms wall)")
     print(f"  exact run_yolo path  : {exact_fps:6.2f} FPS ({exact_seconds * 1000 / args.iterations:6.2f} ms wall)")
+    print(
+        f"  exact latency ms     : p50={np.percentile(exact_timings, 50):.3f} "
+        f"p99={np.percentile(exact_timings, 99):.3f} max={exact_timings.max():.3f}"
+    )
+    print(f"  GC mode={args.gc} " + " ".join(f"{key}={value}" for key, value in gc_report.items()))
+
+    if args.alloc_trace:
+        _allocation_trace(
+            lambda: run_yolo(inference_frame, model, depth_model, depth_executor),
+            args.alloc_trace, args.device,
+        )
 
     print("\nInterpretation")
     if forward_fps is not None and forward_fps < 30:
@@ -215,7 +324,6 @@ def main() -> None:
     else:
         print("  This isolated path clears 30 FPS; inspect relay input rate, WebSocket delivery, and browser pacing.")
     print("  30 FPS budget: 33.33 ms per completed frame, including decode and result handling.")
-    depth_executor.shutdown(wait=True, cancel_futures=True)
 
 
 if __name__ == "__main__":

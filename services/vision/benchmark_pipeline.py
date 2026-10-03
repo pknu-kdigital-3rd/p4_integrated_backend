@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import gc
 from pathlib import Path
 from time import monotonic
 
@@ -22,6 +23,8 @@ import torch
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame
 from app.services.depth import load_depth_estimator, make_depth_executor
+from app.services.gc_stats import install
+from app.services.metrics import _gc_report
 from app.services.yolo import (
     _enqueue_inference_frame,
     load_yolo_model,
@@ -162,17 +165,31 @@ async def _run(args: argparse.Namespace) -> None:
         "model_ms",
         "depth_ms",
         "postprocess_ms",
+        "worker_cycle_ms",
+        "publish_ms",
+        "gc_ms",
+        "gc_pct",
+        "gc_max_ms",
+        "gc0",
+        "gc1",
+        "gc2",
+        "gc0_per_frame",
+        "gc_collected",
+        "gc_uncollectable",
     ]
     input_frames = 0
     max_queue_observed = 0
     feed_started = monotonic()
     previous_at = feed_started
     previous = state.metrics.snapshot()
+    gc_stats = install()
+    previous_gc = gc_stats.snapshot()
+    gc_stats.take_max_pause_ms()
     peak_rss = 0
     stop_reporter = asyncio.Event()
 
     def write_sample() -> None:
-        nonlocal previous, previous_at, peak_rss
+        nonlocal previous, previous_at, peak_rss, previous_gc
         now = monotonic()
         elapsed = max(now - previous_at, 1e-6)
         current = state.metrics.snapshot()
@@ -225,7 +242,32 @@ async def _run(args: argparse.Namespace) -> None:
             "postprocess_ms": _mean_stage_ms(
                 current, previous, "postprocess_ms_total", inferred_delta
             ),
+            "worker_cycle_ms": _mean_stage_ms(
+                current, previous, "worker_cycle_ms_total", inferred_delta
+            ),
+            "publish_ms": _mean_stage_ms(
+                current, previous, "publish_ms_total", inferred_delta
+            ),
         }
+        current_gc = gc_stats.snapshot()
+        max_pause_ms = gc_stats.take_max_pause_ms()
+        gc_ms = float(current_gc["gc_ms_total"]) - float(previous_gc["gc_ms_total"])
+        for key in ("gc0", "gc1", "gc2", "gc_collected", "gc_uncollectable"):
+            row[key] = int(current_gc[key]) - int(previous_gc[key])
+        row.update(
+            gc_ms=gc_ms, gc_pct=gc_ms / (elapsed * 1000) * 100,
+            gc_max_ms=max_pause_ms,
+            gc0_per_frame=row["gc0"] / inferred_delta if inferred_delta > 0 else "n/a",
+        )
+        print(
+            _gc_report(
+                current_gc, previous_gc, max_pause_ms, inferred_delta, elapsed,
+                len(gc.get_objects()) if settings.ENABLE_PYTHON_ALLOC_PROFILE else None,
+                threshold=gc.get_threshold(), frozen=gc.get_freeze_count(),
+            ),
+            flush=True,
+        )
+        previous_gc = current_gc
         writer.writerow(row)
         output.flush()
         print(

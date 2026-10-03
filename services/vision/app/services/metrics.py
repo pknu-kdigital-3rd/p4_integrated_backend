@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import os
 import sys
 import tracemalloc
@@ -22,6 +23,7 @@ except ImportError:  # pragma: no cover - resource is not available on Windows
 
 from app.core.settings import settings
 from app.core.state import AppState
+from app.services.gc_stats import install
 
 
 _PROCESS = psutil.Process(os.getpid()) if psutil is not None else None
@@ -79,6 +81,38 @@ def _average_ms(
     )
 
 
+def _gc_report(
+    current: dict[str, float | int],
+    previous: dict[str, float | int],
+    max_pause_ms: float,
+    inferred_delta: int,
+    elapsed: float,
+    count_tracked: int | None,
+    *,
+    threshold: tuple[int, int, int],
+    frozen: int,
+) -> str:
+    """Format an interval without walking the heap or changing GC state."""
+    gc_ms = float(current["gc_ms_total"]) - float(previous["gc_ms_total"])
+    gc0 = int(current["gc0"]) - int(previous["gc0"])
+    per_frame = f"{gc0 / inferred_delta:.3f}" if inferred_delta > 0 else "n/a"
+    report = (
+        f"[gc] gc_ms={gc_ms:.3f} "
+        f"gc_pct={gc_ms / max(elapsed * 1000, 1e-6) * 100:.3f} "
+        f"gc_max_ms={max_pause_ms:.3f} "
+        f"gc0={gc0} "
+        f"gc1={int(current['gc1']) - int(previous['gc1'])} "
+        f"gc2={int(current['gc2']) - int(previous['gc2'])} "
+        f"gc0_per_frame={per_frame} "
+        f"gc_collected={int(current['gc_collected']) - int(previous['gc_collected'])} "
+        f"gc_uncollectable={int(current['gc_uncollectable']) - int(previous['gc_uncollectable'])} "
+        f"gc_threshold={threshold} gc_frozen={frozen}"
+    )
+    if count_tracked is not None:
+        report += f" gc_tracked={count_tracked}"
+    return report
+
+
 async def metrics_worker(state: AppState) -> None:
     """Emit a compact five-second health/allocation report."""
 
@@ -92,6 +126,9 @@ async def metrics_worker(state: AppState) -> None:
     next_profile_at = monotonic() + profile_interval
     previous = state.metrics.snapshot()
     previous_at = monotonic()
+    gc_stats = install()
+    previous_gc = gc_stats.snapshot()
+    gc_stats.take_max_pause_ms()
     try:
         while True:
             await asyncio.sleep(interval)
@@ -201,6 +238,18 @@ async def metrics_worker(state: AppState) -> None:
                 f"source_playback_rate={state.source_timeline.playback_rate:.2f}",
                 flush=True,
             )
+
+            current_gc = gc_stats.snapshot()
+            print(
+                _gc_report(
+                    current_gc, previous_gc, gc_stats.take_max_pause_ms(),
+                    inferred_delta, elapsed,
+                    len(gc.get_objects()) if profile_enabled else None,
+                    threshold=gc.get_threshold(), frozen=gc.get_freeze_count(),
+                ),
+                flush=True,
+            )
+            previous_gc = current_gc
 
             if profile_enabled and now >= next_profile_at:
                 snapshot = tracemalloc.take_snapshot()

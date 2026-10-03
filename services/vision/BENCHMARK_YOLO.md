@@ -77,6 +77,42 @@ with PyAV before BGR materialization. Normalized boxes/masks are unchanged and
 pixel-format boxes are mapped back to the original source dimensions. Compare
 the exact path with the same source dimensions when evaluating this change.
 
+## GC baseline and allocation profiling
+
+Use a real street frame to exercise detections and mask extraction. The default
+black input normally produces no detections. The exact `run_yolo` timing keeps
+GC disabled by default for comparison with older benchmark results; explicitly
+enable it for the production baseline:
+
+```bash
+.venv/bin/python benchmark_yolo.py --model "$YOLO_MODEL" --device cuda:0 --imgsz 640 \
+  --width 1920 --height 1080 --warmup 30 --iterations 500 \
+  --image /path/to/real_street_frame.jpg --gc enabled --alloc-trace 100
+```
+
+Repeat with `--gc frozen`, then with `--gc enabled --gc-gen0-threshold 10000`
+and `50000`. Each call synchronizes CUDA and the report includes p50/p99/max
+latency, collection counts, total GC time, maximum pause, tracked objects and
+frozen objects. The threshold and enabled state are restored after timing.
+Allocation tracing runs separately after timing and reports **net retention**
+and the traced peak, rather than total allocation churn.
+
+The service emits interval `[gc]` lines next to `[mem]` and `[telemetry]`.
+`gc0_per_frame` is `n/a` when no frames were inferred. The expensive tracked
+object count is included only with `ENABLE_PYTHON_ALLOC_PROFILE=true`.
+
+`benchmark_pipeline.py` uses its own reporter and now emits the same `[gc]`
+line and records GC interval fields, mean `worker_cycle_ms`, and mean
+`publish_ms` in its CSV. Run the ten-minute soak with a real recording:
+
+```bash
+.venv/bin/python benchmark_pipeline.py --video /path/to/recording.mp4 --duration-seconds 600
+```
+
+CSV stage timings are interval averages, not per-frame p99 measurements. Save
+the baseline before applying the later optimization phases in
+`docs/vision-gc-allocation-guide.md`.
+
 ## Mask detail settings
 
 The live service defaults to detail-first masks:
