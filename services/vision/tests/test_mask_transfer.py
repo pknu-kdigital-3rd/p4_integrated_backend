@@ -1,4 +1,5 @@
 import unittest
+from functools import cache
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -6,10 +7,21 @@ import numpy as np
 import torch
 from ultralytics.engine.results import Masks
 
-from app.core.settings import _default_yolo_device
 from app.services.mask_transfer import compact_mask_polygons, pack_binary_masks, unpack_binary_masks
 from app.services.mask_transfer import _transfer_state
 from app.services.yolo import _normalized_mask_polygons
+
+
+@cache
+def cuda_tensor_operations_available():
+    if not torch.cuda.is_available():
+        return False
+    try:
+        # An exact architecture-list check wrongly skips compatible newer GPUs
+        # (for example sm_89 running Torch's sm_86 kernels). Execute an operation.
+        return torch.ones(1, device="cuda:0").add_(1).item() == 2
+    except (RuntimeError, AssertionError):
+        return False
 
 
 def example_masks():
@@ -82,7 +94,7 @@ class MaskTransferTests(unittest.TestCase):
             _normalized_mask_polygons(result, [0, 1])
         compact.assert_not_called()
 
-    @unittest.skipUnless(_default_yolo_device().startswith("cuda"), "requires a supported CUDA GPU")
+    @unittest.skipUnless(cuda_tensor_operations_available(), "requires a supported CUDA GPU")
     def test_cuda_production_route_and_staging_reuse_match_legacy(self):
         for size in (61, 61, 45, 61):
             masks = example_masks()[:, :, :size].cuda()

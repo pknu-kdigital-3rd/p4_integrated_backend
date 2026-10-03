@@ -51,14 +51,14 @@ def unpack_binary_masks(packed: np.ndarray, shape: tuple[int, int, int]) -> np.n
     return np.unpackbits(packed, bitorder="little", count=count).reshape(shape)
 
 
-def _copy_packed_to_host(packed: torch.Tensor) -> np.ndarray:
+def _copy_tensor_to_host(packed: torch.Tensor) -> np.ndarray:
     if not packed.is_cuda:
         return packed.detach().cpu().numpy()
     # Each inference thread owns one bounded staging buffer. Replace it on a
     # size change; never cache every observed detection count or image shape.
     host = getattr(_transfer_state, "host", None)
-    if host is None or host.shape != packed.shape:
-        host = torch.empty(packed.shape, dtype=torch.uint8, pin_memory=True)
+    if host is None or host.shape != packed.shape or host.dtype != packed.dtype:
+        host = torch.empty(packed.shape, dtype=packed.dtype, pin_memory=True)
         _transfer_state.host = host
     stream = torch.cuda.current_stream(packed.device)
     ready = getattr(_transfer_state, "ready", None)
@@ -81,7 +81,7 @@ def compact_mask_polygons(masks: torch.Tensor, orig_shape: tuple[int, int]) -> l
     """Transfer packed masks and extract the same polygons as Masks.xyn."""
     shape = tuple(map(int, masks.shape))
     packed = pack_binary_masks(masks)
-    restored = unpack_binary_masks(_copy_packed_to_host(packed), shape)
+    restored = unpack_binary_masks(_copy_tensor_to_host(packed), shape)
     # Reuse the fork's contour merging and letterbox-aware normalization rather
     # than duplicating their geometry rules. NumPy data causes no second copy
     # across the GPU boundary, and depth continues to use the original tensor.
