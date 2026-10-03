@@ -302,6 +302,47 @@ and check masks, boxes, labels and distances, then rerun the same dense image
 and video benchmarks with new result filenames. Compare GC counts/maximum
 pause, p99, postprocessing, publication and memory before proceeding to Phase 3.
 
+## Recording-specific UniDepth intrinsics
+
+The current UniDepth inference path uses `UNIDEPTH_CAMERA_INTRINSIC` with
+`UNIDEPTH_CALIBRATION_WIDTH` and `UNIDEPTH_CALIBRATION_HEIGHT`; it does not
+automatically read the recording's `intrinsics.json`. Both Compose files expose
+these settings. The fixed defaults now match
+`20260827_longtrip_merged/intrinsics.json`. Configure the matrix and dimensions
+together when switching to another recording. The current values are:
+
+```dotenv
+UNIDEPTH_CAMERA_INTRINSIC=[[920.0,0.0,640.0],[0.0,690.0,360.0],[0.0,0.0,1.0]]
+UNIDEPTH_CALIBRATION_WIDTH=1280
+UNIDEPTH_CALIBRATION_HEIGHT=720
+```
+
+Existing environment overrides take precedence; remove old values or replace
+them with the values above in the GPU server's Compose environment file. The service
+scales this matrix to the decoded image passed to depth inference; for an
+explicit 320x320 input, this becomes `fx=230`, `fy=306.6667`, `cx=160`, `cy=160`.
+The matrix is for the recording's original image geometry. Cropped, rotated or
+stabilized footage may require further calibration adjustments.
+
+For development, this is a Compose environment change: recreate Vision with
+`docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-vision`
+(using the same `--env-file` options as before). No image rebuild is needed for
+this calibration-only change once the Phase 2 images are available. Development
+still mounts the source directory and entrypoint file and runs Uvicorn reload;
+recreation applies the new environment and refreshes the file mount.
+
+Verify the effective values in the running container:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T p4-vision python -c \
+  'from app.core.settings import settings as s; print(s.UNIDEPTH_CAMERA_INTRINSIC); print(s.UNIDEPTH_CALIBRATION_WIDTH, s.UNIDEPTH_CALIBRATION_HEIGHT)'
+```
+
+Then repeat the same input/engine/compile-mode comparison and check several
+objects with measured physical distances. Matching the recording's intrinsics
+fixes the input mismatch; it does not by itself demonstrate accurate metric
+depth or explain all overestimation.
+
 ## Mask detail settings
 
 The live service defaults to detail-first masks:

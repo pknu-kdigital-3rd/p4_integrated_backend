@@ -101,13 +101,14 @@ class Settings(BaseSettings):
     # Level 2 trades some fine depth detail for lower per-frame latency.
     UNIDEPTH_RESOLUTION_LEVEL: int = Field(default=2, ge=0, le=9)
     UNIDEPTH_COMPILE: bool = True
+    # Fixed calibration from 20260827_longtrip_merged/intrinsics.json.
     UNIDEPTH_CAMERA_INTRINSIC: tuple[tuple[float, float, float], ...] = (
-        (1266.417203046554, 0.0, 816.2670197447984),
-        (0.0, 1266.417203046554, 491.50706579294757),
+        (920.0, 0.0, 640.0),
+        (0.0, 690.0, 360.0),
         (0.0, 0.0, 1.0),
     )
-    UNIDEPTH_CALIBRATION_WIDTH: int = Field(default=1920, ge=1, le=16384)
-    UNIDEPTH_CALIBRATION_HEIGHT: int = Field(default=1080, ge=1, le=16384)
+    UNIDEPTH_CALIBRATION_WIDTH: int = Field(default=1280, ge=1, le=16384)
+    UNIDEPTH_CALIBRATION_HEIGHT: int = Field(default=720, ge=1, le=16384)
     LOG_TELEMETRY_ACCESS: bool = False
 
     # --- Server ---
