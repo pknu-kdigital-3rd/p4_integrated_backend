@@ -24,6 +24,7 @@ from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame
 from app.services.depth import load_depth_estimator, make_depth_executor
 from app.services.gc_stats import install
+from app.services.gc_runtime import _freeze_loaded_objects, configure_gc
 from app.services.metrics import _gc_report
 from app.services.yolo import (
     _enqueue_inference_frame,
@@ -104,6 +105,9 @@ async def _run(args: argparse.Namespace) -> None:
     model = load_yolo_model()
     depth_model = load_depth_estimator()
     depth_executor = make_depth_executor()
+    # Match lifespan startup policy; the worker also freezes lazy state once.
+    configure_gc(settings.VISION_GC_GEN0_THRESHOLD)
+    _freeze_loaded_objects("Vision model startup")
     print(
         f"engine={settings.YOLO_MODEL} gpu={torch.cuda.get_device_name(0)} "
         f"source={first_frame.width}x{first_frame.height}@{source_fps or args.input_fps:.3f} "

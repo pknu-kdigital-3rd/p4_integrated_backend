@@ -10,6 +10,7 @@ from app.core.state import AppState
 from app.core.settings import settings
 from app.services.access_logs import configure_telemetry_access_logging
 from app.services.depth import load_depth_estimator, make_depth_executor
+from app.services.gc_runtime import _freeze_loaded_objects, configure_gc
 from app.services.metrics import metrics_worker
 from app.services.recording_detections import RecordingDetectionWriter
 from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
@@ -44,6 +45,8 @@ async def lifespan(app: FastAPI):
     state.yolo_model = load_yolo_model()
     state.depth_model = load_depth_estimator()
     state.depth_executor = make_depth_executor()
+    configure_gc(settings.VISION_GC_GEN0_THRESHOLD)
+    _freeze_loaded_objects("Vision model startup")
 
     # Reference the tasks for the lifetime of the app (held by this suspended
     # generator frame across the yield below) - asyncio only keeps a weak

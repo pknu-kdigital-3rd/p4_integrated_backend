@@ -205,6 +205,30 @@ the reported compiled/eager mode. `UNIDEPTH_COMPILE=false` is an eager-mode
 comparison, not a compiled-mode baseline. These commands do not replace or
 verify the running Vision service's deployment.
 
+## Phase 1 GC policy and dense-scene comparison
+
+The application and pipeline benchmark collect and freeze objects after model
+startup, then once after 30 completed worker inferences to include lazy tracker
+and predictor state. Those are one-time full collections; inspect the `GC: froze`
+logs and exclude startup/warmup from steady-state comparisons. Freezing reduces
+future full-heap scans. It does not disable gen0/gen1 collections or guarantee
+that their pauses disappear.
+
+`VISION_GC_GEN0_THRESHOLD` is optional (100 through 1000000). Unset or blank
+retains Python's default; no larger threshold has been selected automatically.
+For an isolated image comparison, reuse the Docker YOLO command with a dense
+street frame and compare `--gc enabled`, `--gc frozen`, and
+`--gc frozen --gc-gen0-threshold 10000` / `50000`. The CLI's `--gc` choice
+controls its timing block; the pipeline benchmark exercises application policy.
+
+For the dense-video soak, reuse the Docker pipeline command and add
+`-e VISION_GC_GEN0_THRESHOLD=10000` before `p4-vision`; repeat with 50000 and
+with the override unset. Save separate logs/CSVs, retain the original Phase 0
+baseline, and keep input, engine, GPU assignment and all model settings fixed.
+The existing light-scene baseline cannot bound latency under larger mask counts.
+Compare maximum GC pause and frame latency as well as aggregate GC percentage.
+Monitor memory because raising the threshold delays cyclic garbage collection.
+
 ## Mask detail settings
 
 The live service defaults to detail-first masks:

@@ -19,6 +19,7 @@ from ultralytics import YOLO
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.depth import masked_median_distances, predict_timed, scale_camera_intrinsic
+from app.services.gc_runtime import _freeze_loaded_objects
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
 # one-byte record kind and the kind-specific body.
@@ -34,6 +35,7 @@ K_RESYNC = 13
 K_STOP = 14
 RTP_VIDEO_TIME_BASE = Fraction(1, 90000)
 MAX_RECORD_BYTES = 256 * 1024 * 1024
+GC_FREEZE_AFTER_INFERENCES = 30
 
 
 def _discard_inference_queue(state: AppState) -> None:
@@ -1027,6 +1029,7 @@ async def yolo_worker(state: AppState) -> None:
     previous_result_epoch: int | None = None
     window_started = perf_counter()
     window_completed = 0
+    completed_for_gc_freeze = 0
     while True:
         retrying = retry_frame is not None
         queue_wait_started = perf_counter()
@@ -1129,6 +1132,12 @@ async def yolo_worker(state: AppState) -> None:
             state.metrics.playback_frames_published += 1
             state.result_condition.notify_all()
         state.metrics.record_inference(result)
+        completed_for_gc_freeze += 1
+        if completed_for_gc_freeze == GC_FREEZE_AFTER_INFERENCES:
+            # Predictor/tracker state is initialized lazily. Freeze once after
+            # warmup, when the inference/depth threads have completed. Results
+            # retained at this point also enter the permanent generation.
+            _freeze_loaded_objects(f"{GC_FREEZE_AFTER_INFERENCES} Vision inferences")
         state.metrics.queue_wait_ms_total += queue_wait_ms
         state.metrics.inference_wait_ms_total += inference_wait_ms
         state.metrics.publish_ms_total += (perf_counter() - publish_started) * 1000

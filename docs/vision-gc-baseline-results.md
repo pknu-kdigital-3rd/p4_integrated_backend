@@ -67,12 +67,19 @@ so publication throughput does not verify Live View delivery or rendering.
 
 ## Decision
 
-Stop after Phase 0 under the guide's instruction to stop when measurements
-show GC is no longer significant. This measured workload already spends much
-less than 1% of runtime in GC and sustains the offered 30 FPS publication rate.
-It does not support applying Phase 1 freeze/threshold changes, or Phases 2–3,
-as necessary GC fixes. No application GC policy or dependencies were changed
-as a result of this review.
+Proceed to Phase 1 to evaluate frame latency under denser mask workloads, as
+requested after reviewing this baseline. The low average GC share does not
+establish an acceptable maximum pause: the observed 3.275 ms pause consumes
+9.8% of a 33.33 ms frame budget. The user reports more severe scenes with more
+masks than this benchmark, so the earlier decision to stop was too broad.
+
+Phase 1 freezes startup and lazily initialized model state and exposes an
+optional gen0 threshold override. Freeze targets full-heap collection scans;
+the observed pauses were gen0/gen1, with no gen2 collection. Do not assume
+freezing alone removes these observed pauses. Keep the default threshold and
+compare explicit overrides on dense input before selecting a production value.
+Phase 1 after-change GPU measurements are pending; no improvement has yet
+been demonstrated. Phases 2–3 remain gated on those measurements.
 
 These results apply to the measured 720p input, 320x320 inference and RTX 6000
 Ada configuration. They do not establish performance for 1080p/640 inference,

@@ -147,6 +147,7 @@ class Settings(BaseSettings):
     BACKLOG_MAX_SECONDS: float = Field(default=30.0, ge=1.0, le=3600.0)
     BACKLOG_MAX_BYTES: int = Field(default=256 * 1024 * 1024, ge=1)
     METRICS_LOG_INTERVAL_SECONDS: float = Field(default=5.0, ge=1.0, le=60.0)
+    VISION_GC_GEN0_THRESHOLD: int | None = Field(default=None, ge=100, le=1_000_000)
     ENABLE_PYTHON_ALLOC_PROFILE: bool = False
     PYTHON_ALLOC_PROFILE_INTERVAL_SECONDS: float = Field(
         default=30.0, ge=5.0, le=3600.0
@@ -180,6 +181,11 @@ class Settings(BaseSettings):
     @classmethod
     def _blank_confidence_is_unset(cls, v: object) -> object:
         # Compose passes `${VAR:-}` as an empty string when it is not set.
+        return None if isinstance(v, str) and not v.strip() else v
+
+    @field_validator("VISION_GC_GEN0_THRESHOLD", mode="before")
+    @classmethod
+    def _blank_gc_threshold_is_unset(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
 
     @field_validator("YOLO_MODEL")
