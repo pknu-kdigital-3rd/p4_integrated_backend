@@ -63,7 +63,9 @@ def _copy_tensor_to_host(packed: torch.Tensor) -> np.ndarray:
     stream = torch.cuda.current_stream(packed.device)
     ready = getattr(_transfer_state, "ready", None)
     if ready is None or ready.device != packed.device:
-        ready = torch.cuda.Event()
+        # Default CUDA event synchronization busy-waits on the host. Sleep
+        # while the GPU finishes instead of spending a CPU core on the wait.
+        ready = torch.cuda.Event(blocking=True)
         _transfer_state.ready = ready
     # Copy follows packing on the same stream. Wait before NumPy reads pinned
     # memory or the next frame reuses it. This does not overlap inference frames.

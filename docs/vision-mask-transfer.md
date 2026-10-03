@@ -87,6 +87,11 @@ No running deployment has been verified locally.
 
 ## Compare CPU cost and latency
 
+Pinned transfers wait on a blocking CUDA event so the host thread can sleep
+while GPU work completes. Default CUDA events can busy-wait and consume a CPU
+core even though contour tracing itself runs on the GPU. Compare both
+`process_cpu_mean` and wall latency: reduced CPU waiting need not reduce latency.
+
 Run in the existing dev container to match its GPU visibility and dependencies:
 
 ```bash
