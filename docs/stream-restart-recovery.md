@@ -25,6 +25,18 @@ Android also ignores late local-SDP success and HTTP answer callbacks belonging
 to an already replaced peer. A delayed answer must never be applied to the new
 peer connection.
 
+The relay now registers pending offers as well as connected publishers. Before
+gathering ICE candidates for a replacement, it closes the previous server peer
+and its native transports. Android sends an explicit close request on stop or
+retry using the existing `/offer/android` URL and an opaque `connectionId`
+returned in the answer. A late close request cannot close a newer connection.
+Canceled offer requests also stop waiting for ICE gathering. No additional
+route or port is required; TURN relay ports remain **39006–39007**.
+
+Android's delayed codec stats callback runs on the RTC executor and checks that
+its peer is still current before calling native WebRTC methods. SDP acceptance
+is labeled separately from an established WebRTC connection in the UI.
+
 Validation covers browser waiting/failed transport/decoder recovery, same-feed
 END followed by another START, relay source lifecycle and first restarted IDR,
 existing relay signaling/broadcaster tests, and Android Kotlin compilation.
@@ -59,3 +71,15 @@ and `Android publisher video codec=...`. Watchdog messages should cease while
 the publisher is stopped, and accepted keyframes should stop active retries.
 The Android callback guards require rebuilding and installing the updated app;
 backend/browser recovery changes also work with the existing app.
+
+For the peer-release changes alone, rebuild and recreate `p4-relay` and install
+the updated Android APK. Vision and coturn need no changes. Verify the deployed
+relay binary includes `Android previous peer retired before new ICE gathering`,
+then check logs for `Android peer explicitly released` on stop and Android's
+`Relay peer release HTTP 200`. After resume, expect ICE connected, telemetry
+channel OPEN, publisher arrival and accepted keyframes without repeated retries.
+
+The native local TURN regression test occupies both relay ports, closes the
+previous server peer, and verifies the replacement immediately gathers a relay
+candidate using the freed port. This tests Pion allocation cleanup with a local
+Pion TURN server; it does not verify the deployed coturn server or phone network.

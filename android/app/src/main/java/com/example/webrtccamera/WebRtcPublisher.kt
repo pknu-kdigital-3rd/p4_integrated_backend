@@ -72,6 +72,8 @@ class WebRtcPublisher(
     private val videoSource: VideoSource
     private val videoTrack: VideoTrack
     private var peer: PeerConnection? = null
+    private var remotePeerId: String? = null
+    private var offerCall: Call? = null
     private var localDescriptionReady = false
     private var offerPosted = false
     private var capturerStarted = false
@@ -131,7 +133,11 @@ class WebRtcPublisher(
             }
 
             override fun onConnectionChange(state: PeerConnection.PeerConnectionState) {
-                onStatus("WebRTC ${state.name.lowercase()}")
+                postRtc {
+                    if (peer !== connectionRef) return@postRtc
+                    Log.i(TAG, "Peer state=$state")
+                    onStatus("WebRTC ${state.name.lowercase()}")
+                }
                 // DISCONNECTED is often transient (ICE consent checks recovering on
                 // their own) and reacting to it would tear down connections that
                 // would have healed by themselves. FAILED is the terminal state -
@@ -144,7 +150,11 @@ class WebRtcPublisher(
             }
 
             override fun onSignalingChange(state: PeerConnection.SignalingState) = Unit
-            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) = Unit
+            override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
+                postRtc {
+                    if (peer === connectionRef) Log.i(TAG, "ICE state=$state")
+                }
+            }
             override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
             override fun onAddStream(stream: MediaStream) = Unit
             override fun onRemoveStream(stream: MediaStream) = Unit
@@ -466,7 +476,9 @@ class WebRtcPublisher(
             .url(offerEndpoint)
             .post(json.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        httpClient.newCall(request).enqueue(object : Callback {
+        val call = httpClient.newCall(request)
+        offerCall = call
+        call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: java.io.IOException) {
                 // Covers the relay not being up yet (connection refused) as well as a
                 // mid-stream restart - either way, the fix is the same full redo below.
@@ -485,8 +497,20 @@ class WebRtcPublisher(
                         postRtc { restartPeerConnection(connection, "Server returned invalid JSON") }
                         return
                     }
+                    val remoteId = answer.optString("connectionId").takeIf { it.isNotBlank() }
+                    // A Stop can race an HTTP answer. Release that answered
+                    // server peer even when the RTC executor is already gone.
+                    if (disposed.get() || stopped.get()) {
+                        remoteId?.let(::closeRemotePeer)
+                        return
+                    }
                     postRtc {
-                        if (peer !== connection || stopped.get()) return@postRtc
+                        if (peer !== connection || stopped.get()) {
+                            remoteId?.let(::closeRemotePeer)
+                            return@postRtc
+                        }
+                        offerCall = null
+                        remotePeerId = remoteId
                         val current = connection
                         val type = answer.optString("type", "answer")
                         val sdp = answer.optString("sdp")
@@ -497,20 +521,23 @@ class WebRtcPublisher(
                         val streamIdentity = answer.optJSONObject("streamIdentity")
                         current.setRemoteDescription(SimpleSdpObserver(
                             setSuccess = {
-                                val connectedSession = sessionContext
-                                if (connectedSession != null) {
-                                    onStatus("Connected to relay; sent ${identityLabel(connectedSession)}")
-                                } else {
-                                    onStatus("Connected to relay; no recording IDs sent")
-                                }
-                                reportStreamIdentity(streamIdentity)
-                                // outbound-rtp stats have no codecId until the encoder has
-                                // produced at least one packet, so check once immediately
-                                // (may be empty) and once more after the encoder warms up.
-                                videoSender?.let { logNegotiatedCodec(current, it) }
-                                Handler(Looper.getMainLooper()).postDelayed({
+                                postRtc {
+                                    if (peer !== current || stopped.get()) return@postRtc
+                                    val connectedSession = sessionContext
+                                    if (connectedSession != null) {
+                                        onStatus("Relay SDP accepted; sent ${identityLabel(connectedSession)}")
+                                    } else {
+                                        onStatus("Relay SDP accepted; no recording IDs sent")
+                                    }
+                                    reportStreamIdentity(streamIdentity)
                                     videoSender?.let { logNegotiatedCodec(current, it) }
-                                }, 3000)
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        postRtc {
+                                            if (peer !== current || stopped.get()) return@postRtc
+                                            videoSender?.let { logNegotiatedCodec(current, it) }
+                                        }
+                                    }, 3000)
+                                }
                             },
                             setFailure = { error ->
                                 postRtc { restartPeerConnection(current, "Setting server SDP failed: $error") }
@@ -536,6 +563,7 @@ class WebRtcPublisher(
         if (deadConnection != null && peer !== deadConnection) return
         if (stopped.get() || disposed.get()) return
         onStatus("$reason - reconnecting…")
+        releaseRemotePeer()
         // The data channel belongs to the failed PeerConnection. Dispose it
         // before creating the replacement so QR events cannot be delivered to
         // a stale SCTP association or remain queued across a new RTP epoch.
@@ -569,6 +597,7 @@ class WebRtcPublisher(
         val finished = CountDownLatch(1)
         rtcExecutor.execute {
             try {
+                releaseRemotePeer()
                 peer?.close()
                 peer?.dispose()
                 peer = null
@@ -605,6 +634,33 @@ class WebRtcPublisher(
             // down already. The process can safely reclaim the remaining pool.
         }
         httpExecutor.shutdown()
+    }
+
+    // Run on the RTC executor, before local close/new gathering. Closing only
+    // Android's peer leaves the relay waiting for an ICE timeout while its
+    // allocation occupies one of the deployment's two TURN relay ports.
+    private fun releaseRemotePeer() {
+        offerCall?.cancel()
+        offerCall = null
+        val id = remotePeerId
+        remotePeerId = null
+        if (id != null) closeRemotePeer(id)
+    }
+
+    private fun closeRemotePeer(id: String) {
+        val body = JSONObject().put("type", "close").put("connectionId", id)
+        val request = Request.Builder().url(offerEndpoint)
+            .post(body.toString().toRequestBody(JSON_MEDIA_TYPE)).build()
+        try {
+            // Bounded and off the UI thread. The existing offer URL avoids
+            // requiring a new reverse-proxy route or additional network port.
+            httpClient.newBuilder().callTimeout(1, TimeUnit.SECONDS).build()
+                .newCall(request).execute().use { response ->
+                    Log.i(TAG, "Relay peer release HTTP ${response.code}")
+                }
+        } catch (error: Exception) {
+            Log.w(TAG, "Relay peer release failed: ${error.message}")
+        }
     }
 
     private fun postRtc(action: () -> Unit) {

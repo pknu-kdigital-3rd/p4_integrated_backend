@@ -2,12 +2,15 @@ package signaling
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -18,6 +21,7 @@ import (
 )
 
 type OfferModel struct {
+	ConnectionID       string `json:"connectionId,omitempty"`
 	SDP                string `json:"sdp"`
 	Type               string `json:"type"`
 	TripID             string `json:"tripId,omitempty"`
@@ -40,6 +44,7 @@ type StreamIdentityStatus struct {
 
 // AnswerModel is the SDP answer plus the identity verdict.
 type AnswerModel struct {
+	ConnectionID   string                `json:"connectionId,omitempty"`
 	Type           string                `json:"type"`
 	SDP            string                `json:"sdp"`
 	StreamIdentity *StreamIdentityStatus `json:"streamIdentity,omitempty"`
@@ -64,6 +69,10 @@ func (v identityVerdict) status() *StreamIdentityStatus {
 }
 
 type Handler struct {
+	lifecycleMu   sync.Mutex
+	peerMu        sync.Mutex
+	peer          *webrtc.PeerConnection
+	peerID        string
 	api           *webrtc.API
 	configuration webrtc.Configuration
 	broadcaster   *broadcaster.Broadcaster
@@ -157,6 +166,25 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if offer.Type == "close" {
+		if offer.ConnectionID == "" {
+			writeError(w, http.StatusBadRequest, "connectionId required")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"closed": h.closePeer(offer.ConnectionID)})
+		return
+	}
+	if offer.Type != "offer" || offer.SDP == "" {
+		writeError(w, http.StatusBadRequest, "valid SDP offer required")
+		return
+	}
+	// Validate SDP before retiring the working publisher for a malformed offer.
+	var parsed webrtc.SessionDescription
+	parsed.Type, parsed.SDP = webrtc.SDPTypeOffer, offer.SDP
+	if _, err := parsed.Unmarshal(); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid SDP offer")
+		return
+	}
 	verdict := h.validateRecordingContext(r.Context(), offer)
 	recordingContext := verdict.context
 	pc, err := h.newPeerConnection()
@@ -164,33 +192,94 @@ func (h *Handler) offerAndroid(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	connectionID, err := h.replacePeer(pc)
+	if err != nil {
+		_ = pc.Close()
+		writeError(w, http.StatusInternalServerError, "could not register connection")
+		return
+	}
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
-			h.broadcaster.SetPublisher(pc, track, recordingContext)
+			h.peerMu.Lock()
+			if h.peer == pc {
+				h.broadcaster.SetPublisher(pc, track, recordingContext)
+			}
+			h.peerMu.Unlock()
 		}
 	})
 	pc.OnDataChannel(func(channel *webrtc.DataChannel) {
-		h.broadcaster.HandleDataChannel(pc, recordingContext, channel)
+		h.peerMu.Lock()
+		if h.peer == pc {
+			h.broadcaster.HandleDataChannel(pc, recordingContext, channel)
+		}
+		h.peerMu.Unlock()
 	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		log.Printf("Android PeerConnection state=%s", state)
 		if isGone(state) {
-			h.broadcaster.RemovePublisher(pc)
-			_ = pc.Close()
+			h.closePeer(connectionID)
 		}
 	})
 
-	answer, err := h.negotiate(pc, offer)
+	answer, err := h.negotiate(r.Context(), pc, offer)
 	if err != nil {
-		_ = pc.Close()
+		h.closePeer(connectionID)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, AnswerModel{
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(AnswerModel{
+		ConnectionID:   connectionID,
 		Type:           answer.Type.String(),
 		SDP:            answer.SDP,
 		StreamIdentity: verdict.status(),
-	})
+	}); err != nil {
+		h.closePeer(connectionID)
+	}
+}
+
+// Only one Android publisher is supported. Retire its previous negotiated or
+// pending peer before gathering for a new offer, rather than waiting for ICE
+// failure or first RTP. This frees its TURN allocation within the fixed pool.
+func (h *Handler) replacePeer(pc *webrtc.PeerConnection) (string, error) {
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+	var token [32]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", err
+	}
+	id := hex.EncodeToString(token[:])
+	h.peerMu.Lock()
+	old := h.peer
+	h.peer, h.peerID = pc, id
+	if old != nil && h.broadcaster != nil {
+		h.broadcaster.RemovePublisher(old)
+	}
+	h.peerMu.Unlock()
+	if old != nil {
+		log.Printf("Android previous peer retired before new ICE gathering")
+		_ = old.Close()
+	}
+	return id, nil
+}
+
+func (h *Handler) closePeer(id string) bool {
+	h.lifecycleMu.Lock()
+	defer h.lifecycleMu.Unlock()
+	h.peerMu.Lock()
+	if id == "" || h.peerID != id || h.peer == nil {
+		h.peerMu.Unlock()
+		return false
+	}
+	pc := h.peer
+	h.peer, h.peerID = nil, ""
+	if h.broadcaster != nil {
+		h.broadcaster.RemovePublisher(pc)
+	}
+	h.peerMu.Unlock()
+	_ = pc.Close()
+	log.Printf("Android peer explicitly released")
+	return true
 }
 
 // validateRecordingContext resolves the offer's stream identity. A rejection is
@@ -294,7 +383,10 @@ func (h *Handler) newPeerConnection() (*webrtc.PeerConnection, error) {
 	return h.api.NewPeerConnection(h.configuration)
 }
 
-func (h *Handler) negotiate(pc *webrtc.PeerConnection, offer OfferModel) (webrtc.SessionDescription, error) {
+func (h *Handler) negotiate(ctx context.Context, pc *webrtc.PeerConnection, offer OfferModel) (webrtc.SessionDescription, error) {
+	if err := ctx.Err(); err != nil {
+		return webrtc.SessionDescription{}, err
+	}
 	if offer.Type != "offer" || offer.SDP == "" {
 		return webrtc.SessionDescription{}, errors.New("valid SDP offer required")
 	}
@@ -309,7 +401,17 @@ func (h *Handler) negotiate(pc *webrtc.PeerConnection, offer OfferModel) (webrtc
 	if err := pc.SetLocalDescription(answer); err != nil {
 		return webrtc.SessionDescription{}, err
 	}
-	<-gatherComplete
+	select {
+	case <-gatherComplete:
+	case <-ctx.Done():
+		return webrtc.SessionDescription{}, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return webrtc.SessionDescription{}, err
+	}
+	if pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+		return webrtc.SessionDescription{}, errors.New("peer was replaced during negotiation")
+	}
 	local := pc.LocalDescription()
 	if local == nil {
 		return webrtc.SessionDescription{}, errors.New("local SDP was not created")
