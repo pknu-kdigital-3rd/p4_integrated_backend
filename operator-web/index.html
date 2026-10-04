@@ -9,7 +9,7 @@
   </title>
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
   <link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet"/>
-  <link href="styles.css?v=37" rel="stylesheet"/>
+  <link href="styles.css?v=38" rel="stylesheet"/>
  </head>
  <body>
   <header class="app-header">
@@ -531,10 +531,6 @@
       </p>
      </div>
      <div hidden="" id="recording-saved-content">
-      <details class="recording-management" id="recording-trip-management" open="">
-       <summary>운행별 녹화 관리</summary>
-       <div id="recording-library"></div>
-      </details>
       <form id="recordings-form">
        <label for="recording-trip-id">
         운행 ID
@@ -556,9 +552,12 @@
         녹화 관리
        </summary>
        <div hidden="" id="recording-delete-tools">
+        <div class="recording-delete-actions">
         <button id="recording-delete-toggle" type="button">
          구간 삭제
         </button>
+        <button id="recording-delete-trip" type="button">운행 녹화 전체 삭제</button>
+        </div>
         <div hidden="" id="recording-delete-mode">
          <button id="recording-delete-select-all" type="button">전체 구간 선택</button>
          <p>
@@ -708,7 +707,7 @@
   </script>
   <script src="https://cdn.jsdelivr.net/npm/leaflet-arrowheads@1.4.0/src/leaflet-arrowheads.js">
   </script>
-  <script src="app.js?v=58" type="module">
+  <script src="app.js?v=59" type="module">
   </script>
   <script src="virtual-dispatch.js?v=44" type="module">
   </script>

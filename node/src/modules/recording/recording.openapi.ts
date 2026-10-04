@@ -12,19 +12,10 @@ import {
     recordingSummarySchema,
     registeredSegmentResponseSchema,
     tripVideoReplayParamsSchema,
-    recordingTripsQuerySchema,
-    recordingTripsResponseSchema,
     tripRecordingDeleteSchema,
     tripRecordingDeleteResponseSchema,
     tripIdParamSchema,
 } from "./recording.schema.ts";
-
-registry.registerPath({
-    method: "get", path: "/api/v1/recording-trips", tags: ["Recording"],
-    summary: "List trips with stored recordings, status counts, duration and storage totals (50 per page)",
-    security: [{ bearerAuth: [] }], request: { query: recordingTripsQuerySchema },
-    responses: { 200: { description: "Recording trip summaries and older-page cursor", content: { "application/json": { schema: recordingTripsResponseSchema } } } },
-});
 
 registry.registerPath({
     method: "delete", path: "/api/v1/trips/{tripId}/videos", tags: ["Recording"],
@@ -36,13 +27,6 @@ registry.registerPath({
         403: { description: "Admin or operator required", content: { "application/json": { schema: apiErrorSchema } } },
         409: { description: "Selection changed or includes segments outside this trip", content: { "application/json": { schema: apiErrorSchema } } },
     },
-});
-
-registry.registerPath({
-    method: "post", path: "/api/v1/trip-videos/{tripVideoId}/download-url", tags: ["Recording"],
-    summary: "Create a short-lived MP4 download URL with an attachment filename",
-    security: [{ bearerAuth: [] }], request: { params: recordingSummarySchema.pick({ tripVideoId: true }) },
-    responses: { 200: { description: "Presigned segment download URL", content: { "application/json": { schema: playbackUrlResponseSchema } } } },
 });
 
 registry.registerComponent("securitySchemes", "internalServiceToken", {

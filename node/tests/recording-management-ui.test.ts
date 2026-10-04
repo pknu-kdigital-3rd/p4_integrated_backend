@@ -1,12 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { deleteRecordingSnapshot, recordingDuration, recordingSize, recordingStatus } from "../../operator-web/recording-management.js";
+import { deleteRecordingSnapshot } from "../../operator-web/recording-delete.js";
 
-describe("recording library", () => {
-    it("formats trip storage, long duration and mixed stored statuses", () => {
-        expect(recordingDuration(3661)).toBe("1:01:01");
-        expect(recordingSize("1073741824")).toBe("1.0 GB");
-        expect(recordingStatus({ recordingStatuses: { FINALIZED: 10, FAILED: 2 } })).toBe("저장 완료 10 · 실패 2");
-    });
+describe("recording deletion", () => {
     it("batches an immutable segment snapshot without selecting later uploads", async () => {
         const videos = Array.from({ length: 51 }, (_, i) => ({ tripVideoId: String(i + 1) }));
         const api = vi.fn(async (_path, options) => {

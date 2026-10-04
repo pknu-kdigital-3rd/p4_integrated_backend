@@ -2,25 +2,12 @@ import type { Request, Response } from "express";
 
 import type { RecordingContextBody, RecordingSegmentBody, ReplayDetectionSampleBody } from "./recording.schema.ts";
 import { recordingService } from "./recording.service.ts";
-import { recordingTripsQuerySchema } from "./recording.schema.ts";
 
 export const recordingController = {
-    async listRecordingTrips(req: Request, res: Response) {
-        const query = recordingTripsQuerySchema.safeParse(req.query);
-        if (!query.success) {
-            res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid recording list query" } });
-            return;
-        }
-        res.json({ data: await recordingService.listRecordingTrips(query.data.beforeTripId) });
-    },
-
     async deleteTripRecordings(req: Request, res: Response) {
         res.json({ data: await recordingService.deleteTripRecordings(req.params.tripId as string, req.body.tripVideoIds) });
     },
 
-    async createDownloadUrl(req: Request, res: Response) {
-        res.json({ data: await recordingService.createPlaybackUrl(req.params.tripVideoId as string, true) });
-    },
     async validateContext(req: Request<{}, {}, RecordingContextBody>, res: Response) {
         const context = await recordingService.validateContext(req.body);
         res.status(200).json(context);

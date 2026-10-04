@@ -33,9 +33,7 @@ internalRecordingRouter.post("/segments", requireRecordingEnabled, validateBody(
 internalRecordingRouter.post("/detections", requireRecordingEnabled, validateBody(replayDetectionBatchSchema), recordingController.registerDetectionSamples);
 
 export const recordingRouter = Router();
-recordingRouter.get("/recording-trips", authenticate, requireRole("ADMIN", "OPERATOR", "VIEWER"), recordingController.listRecordingTrips);
 recordingRouter.delete("/trips/:tripId/videos", authenticate, requireRole("ADMIN", "OPERATOR"), validateParams(tripIdParamSchema), validateBody(tripRecordingDeleteSchema), recordingController.deleteTripRecordings);
-recordingRouter.post("/trip-videos/:tripVideoId/download-url", authenticate, requireRole("ADMIN", "OPERATOR", "VIEWER"), validateParams(recordingIdParamSchema), recordingController.createDownloadUrl);
 recordingRouter.get("/trips/:tripId/videos", authenticate, requireRole("ADMIN", "OPERATOR", "VIEWER"), validateParams(tripIdParamSchema), recordingController.listTripVideos);
 recordingRouter.get("/trip-videos/:tripVideoId", authenticate, requireRole("ADMIN", "OPERATOR", "VIEWER"), validateParams(recordingIdParamSchema), recordingController.getTripVideo);
 recordingRouter.get("/trips/:tripId/videos/:tripVideoId/detections", authenticate, requireRole("ADMIN", "OPERATOR", "VIEWER"), validateParams(tripVideoReplayParamsSchema), recordingController.listTripVideoDetections);
