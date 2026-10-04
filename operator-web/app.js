@@ -412,6 +412,10 @@ function matchesLiveTarget(item){
     &&String(metadata.vehicleId??'')===String(item.vehicleId)
     &&typeof metadata.recordingSessionId==='string'&&metadata.recordingSessionId.length>0;
 }
+function isLiveRecordingTabActive(){
+  return document.querySelector('#recording-live-tab').getAttribute('aria-pressed')==='true'
+    &&!document.querySelector('#recording-live-content').hidden;
+}
 // Live View opens by itself on selection (or from the "실시간 영상" tab); this
 // only tells the operator whether the selected vehicle can be watched.
 function syncLiveViewButton(item=selected){
@@ -827,7 +831,7 @@ function selectVehicle(item){
   retargetLiveView(item);
   // Open the live view as soon as a streaming vehicle is selected, where it is
   // visible: the "실시간 영상" tab. Only on selection, so closing it sticks.
-  if(!liveView&&matchesLiveTarget(item)&&!document.querySelector('#recording-live-content').hidden)openLiveView();
+  if(!liveView&&matchesLiveTarget(item)&&isLiveRecordingTabActive())openLiveView();
 }
 window.__operatorCancelMapPick=()=>{tripMapPick=undefined;document.querySelector('#map-pick-banner').hidden=true;document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.setAttribute('aria-pressed','false'));};
 function render(snapshot){
@@ -1247,12 +1251,14 @@ function setLiveViewLoading(loading,text='실시간 영상 연결 중…'){
   liveFrame.setAttribute('aria-busy',String(loading));
 }
 function stopLiveView(){
+  const restoreFocus=livePanel.contains(document.activeElement);
+  // Hide before navigating the iframe, including when switching vehicles.
+  livePanel.hidden=true;
   if(document.fullscreenElement===livePanel)void document.exitFullscreen().catch(()=>{});
   releaseLiveMarker();
   // Navigating the iframe away from the Vision page closes its WebRTC peer
   // connection and releases the browser media resources.
   liveFrame.src='about:blank';
-  livePanel.hidden=true;
   operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
   liveView=null;lastLiveMessage=null;liveVideoSize=null;liveDetections=null;fitLivePanelToVideo();
@@ -1260,7 +1266,9 @@ function stopLiveView(){
   document.querySelector('#live-view-title').textContent='실시간 전방 영상';
   clearInterval(liveStatusTimer);liveStatusTimer=undefined;
   refreshMapLayout();
-  if(!document.querySelector('#details').hidden)document.querySelector('#recording-live-tab').focus({preventScroll:true});
+  if(restoreFocus&&!document.querySelector('#details').hidden){
+    document.querySelector(isLiveRecordingTabActive()?'#recording-live-tab':'#recording-saved-tab').focus({preventScroll:true});
+  }
   syncLiveViewButton();
   renderLiveTelemetryStatus();
 }
@@ -1328,7 +1336,7 @@ setInterval(()=>{
 // With no open button, the "실시간 영상" tab reopens a closed preview for a streaming vehicle.
 document.querySelector('#recording-live-tab').addEventListener('click',()=>{if(!liveView)openLiveView()});
 function openLiveView(){
-  if(!bootstrap||!matchesLiveTarget(selected))return;
+  if(window.__virtualMode||!isLiveRecordingTabActive()||!bootstrap||!matchesLiveTarget(selected))return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
   liveViewUrlObject.searchParams.set('autostart','1');
   liveViewUrlObject.searchParams.set('embedded','1');
@@ -1343,9 +1351,12 @@ function openLiveView(){
   clearInterval(liveStatusTimer);liveStatusTimer=setInterval(renderLiveTelemetryStatus,1000);
   renderLiveTelemetryStatus();
   setLiveViewLoading(true);
-  livePanel.hidden=false;
-  // Restore the operator's saved docked or floating placement.
+  // Restore placement while hidden so moving the iframe cannot flash it over
+  // another tab or the map before its final host is ready.
   placeLivePanel(liveDocked);
+  livePanel.hidden=false;
+  operatorLayout.classList.toggle('live-view-open',!liveDocked);
+  fitLivePanelToVideo();
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
   liveFrame.src=liveViewUrl;
