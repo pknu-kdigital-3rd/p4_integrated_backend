@@ -827,7 +827,11 @@ function selectVehicle(item){
   }
   void loadSelectedTrip();
   selectRecordingTrip(item.tripId);
-  if(item.tripId)void loadTripRecordings(String(item.tripId));
+  // Keep the loaded trip's video and timeline when reselecting its vehicle.
+  // Explicitly clear them for a vehicle without a trip, so it cannot show the
+  // previous vehicle's recorded frames under an empty trip picker.
+  const recordingTripId=String(item.tripId??'');
+  if(recordingTripId!==replayTripId||replayIndex<0||!replayTimeline.length)void loadTripRecordings(recordingTripId);
   retargetLiveView(item);
   // Open the live view as soon as a streaming vehicle is selected, where it is
   // visible: the "실시간 영상" tab. Only on selection, so closing it sticks.
@@ -1150,7 +1154,56 @@ function waitForVideoMetadata(player){return new Promise((resolve,reject)=>{cons
 function loadReplayDetections(entry){if(entry.samplesLoaded)return Promise.resolve();if(entry.sampleLoadPromise)return entry.sampleLoadPromise;entry.sampleLoadPromise=api(`/api/v1/trips/${encodeURIComponent(replayTripId)}/videos/${encodeURIComponent(entry.video.tripVideoId)}/detections`,{},true).then(result=>{entry.samples=result.samples||[];entry.coverageIncomplete=Boolean(result.coverageIncomplete)}).catch(()=>{entry.samples=[];entry.coverageIncomplete=true}).finally(()=>{entry.samplesLoaded=true;entry.sampleLoadPromise=null;renderReplayBreakMarkers();if(replayTimeline[replayIndex]===entry)drawReplayOverlay()});return entry.sampleLoadPromise}
 async function activateReplaySegment(index,localTime,autoplay,generation){const entry=replayTimeline[index],player=replayPlayer();if(!entry||entry.unavailable)throw new Error('This recording segment is unavailable');const switchSegment=replayIndex!==index||!player.currentSrc,urlPromise=switchSegment?api(`/api/v1/trip-videos/${encodeURIComponent(entry.video.tripVideoId)}/playback-url`,{method:'POST'},true):Promise.resolve({url:entry.playbackUrl});const [url]=await Promise.all([urlPromise,loadReplayDetections(entry)]);if(generation!==replayGeneration)return false;if(switchSegment){entry.playbackUrl=url.url;player.src=url.url;player.load();await waitForVideoMetadata(player);if(generation!==replayGeneration)return false}replayIndex=index;const safeDuration=Number.isFinite(player.duration)?player.duration:entry.duration;player.currentTime=Math.min(Math.max(0,localTime),Math.max(0,safeDuration-.02));setReplayPosition(entry.start+player.currentTime);if(autoplay)await player.play();drawReplayOverlay();return true}
 async function seekReplay(position,autoplay=true,direction=1,preferredIndex=-1){if(!replayTimeline.length)return;const generation=++replayGeneration,player=replayPlayer();player.pause();let target=Math.max(0,Math.min(replayDuration,Number(position)||0));let index=preferredIndex>=0?preferredIndex:entryForTime(replayTimeline,replayDuration,target,direction);if(index<0)index=direction<0?replayTimeline.length-1:0;for(let attempt=0;attempt<replayTimeline.length;attempt++){const entry=replayTimeline[index];if(entry.unavailable){index+=direction;if(index<0||index>=replayTimeline.length)break;target=replayTimeline[index].start;continue}try{const ok=await activateReplaySegment(index,Math.max(0,target-entry.start),autoplay,generation);if(!ok)return;document.querySelector('#recordings-status').textContent=`Playing trip timeline · segment ${entry.video.segmentIndex} of ${replayTimeline.length}.`;return}catch(ex){if(generation!==replayGeneration)return;entry.unavailable=true;renderReplayBreakMarkers();document.querySelector('#recordings-status').textContent=`Segment ${entry.video.segmentIndex} is unavailable (${ex.message}); skipping to the next segment.`;index+=direction;if(index<0||index>=replayTimeline.length)break;target=replayTimeline[index].start}}player.pause();document.querySelector('#recordings-status').textContent='No playable recording segments remain in this direction.'}
-async function loadTripRecordings(value,keepDeleteMode=false){const deleteMode=document.querySelector('#recording-delete-mode'),resumeDeleteMode=keepDeleteMode&&!deleteMode.hidden;if(resumeDeleteMode){clearRecordingDeleteSelection();document.querySelector('#recording-delete-segments').replaceChildren()}else{closeRecordingDeleteMode();document.querySelector('#recording-delete-tools').hidden=true}const requestId=++recordingsRequest,tripId=String(value||'').trim(),status=document.querySelector('#recordings-status');tripRecordingVideos=[];replayTimeline=[];replayDuration=0;replayTripId=tripId;updateRecordingDeleteTools();renderReplayBreakMarkers();stopRecordingPlayback();document.querySelector('#recording-player-panel').hidden=true;if(!/^[1-9][0-9]{0,18}$/.test(tripId)){status.textContent='운행이 배정된 차량을 선택하거나 운행 번호를 입력하세요.';return}status.textContent=`운행 ${tripId} 녹화 불러오는 중…`;try{await requireRecordingLogin();const videos=await api(`/api/v1/trips/${encodeURIComponent(tripId)}/videos`,{},true);if(requestId!==recordingsRequest)return;if(!videos.length){closeRecordingDeleteMode();document.querySelector('#recording-delete-tools').hidden=true;renderReplayBreakMarkers();status.textContent=`운행 ${tripId}에 저장 완료된 녹화 구간이 없습니다.`;return}tripRecordingVideos=videos;const timeline=buildReplayTimeline(videos);replayTimeline=timeline.entries;replayDuration=timeline.duration;renderReplayBreakMarkers();updateRecordingDeleteTools();if(!replayTimeline.length){closeRecordingDeleteMode();updateRecordingDeleteTools();status.textContent=`운행 ${tripId}에 재생 가능한 녹화 구간이 없습니다.`;return}document.querySelector('#recording-player-panel').hidden=false;const seek=document.querySelector('#recording-seek');seek.max=String(replayDuration);seek.value='0';document.querySelector('#recording-time').textContent=`0:00 / ${formatReplayTime(replayDuration)}`;if(resumeDeleteMode)openRecordingDeleteMode();status.textContent=resumeDeleteMode?`운행 ${tripId} · 남은 녹화 ${replayTimeline.length}개 · 삭제할 구간을 선택하세요.`:`운행 ${tripId} · 녹화 ${replayTimeline.length}개 · 총 ${formatReplayTime(replayDuration)} · 재생 중 탐지 결과를 불러옵니다.`;await seekReplay(0,false)}catch(ex){if(requestId!==recordingsRequest)return;if(resumeDeleteMode&&!replayTimeline.length){closeRecordingDeleteMode();updateRecordingDeleteTools();renderReplayBreakMarkers()}status.textContent=ex.message}}
+async function loadTripRecordings(value,keepDeleteMode=false){
+  const deleteMode=document.querySelector('#recording-delete-mode'),resumeDeleteMode=keepDeleteMode&&!deleteMode.hidden;
+  if(resumeDeleteMode){clearRecordingDeleteSelection();document.querySelector('#recording-delete-segments').replaceChildren()}
+  else{closeRecordingDeleteMode();document.querySelector('#recording-delete-tools').hidden=true}
+  const requestId=++recordingsRequest,tripId=String(value||'').trim(),status=document.querySelector('#recordings-status');
+  const panel=document.querySelector('#recording-player-panel');
+  // Mask the old frame before resetting the player, keeping its layout stable
+  // while the new trip loads. Only the current request may reveal its video.
+  panel.setAttribute('aria-busy','true');panel.inert=true;
+  tripRecordingVideos=[];replayTimeline=[];replayDuration=0;replayTripId=tripId;
+  updateRecordingDeleteTools();renderReplayBreakMarkers();stopRecordingPlayback();
+  try{
+    if(!/^[1-9][0-9]{0,18}$/.test(tripId)){
+      panel.hidden=true;status.textContent='운행이 배정된 차량을 선택하거나 운행 번호를 입력하세요.';return;
+    }
+    status.textContent=`운행 ${tripId} 녹화 불러오는 중…`;
+    await requireRecordingLogin();
+    const videos=await api(`/api/v1/trips/${encodeURIComponent(tripId)}/videos`,{},true);
+    if(requestId!==recordingsRequest)return;
+    if(!videos.length){
+      panel.hidden=true;closeRecordingDeleteMode();document.querySelector('#recording-delete-tools').hidden=true;renderReplayBreakMarkers();
+      status.textContent=`운행 ${tripId}에 저장 완료된 녹화 구간이 없습니다.`;return;
+    }
+    tripRecordingVideos=videos;
+    const timeline=buildReplayTimeline(videos);replayTimeline=timeline.entries;replayDuration=timeline.duration;
+    renderReplayBreakMarkers();updateRecordingDeleteTools();
+    if(!replayTimeline.length){
+      panel.hidden=true;closeRecordingDeleteMode();updateRecordingDeleteTools();
+      status.textContent=`운행 ${tripId}에 재생 가능한 녹화 구간이 없습니다.`;return;
+    }
+    const seek=document.querySelector('#recording-seek');seek.max=String(replayDuration);seek.value='0';
+    document.querySelector('#recording-time').textContent=`0:00 / ${formatReplayTime(replayDuration)}`;
+    status.textContent=resumeDeleteMode?`운행 ${tripId} · 남은 녹화 ${replayTimeline.length}개 · 삭제할 구간을 선택하세요.`
+      :`운행 ${tripId} · 녹화 ${replayTimeline.length}개 · 총 ${formatReplayTime(replayDuration)} · 재생 중 탐지 결과를 불러옵니다.`;
+    await seekReplay(0,false);
+    if(requestId!==recordingsRequest)return;
+    panel.hidden=replayIndex<0;
+    if(!panel.hidden)drawReplayOverlay();
+  }catch(ex){
+    if(requestId!==recordingsRequest)return;
+    panel.hidden=true;
+    if(resumeDeleteMode&&!replayTimeline.length){closeRecordingDeleteMode();updateRecordingDeleteTools();renderReplayBreakMarkers()}
+    status.textContent=ex.message;
+  }finally{
+    if(requestId===recordingsRequest){
+      panel.setAttribute('aria-busy','false');panel.inert=false;
+      if(resumeDeleteMode&&!panel.hidden&&replayIndex>=0)openRecordingDeleteMode();
+    }
+  }
+}
 function drawReplayOverlay(mediaTime){
   const canvas=document.querySelector('#recording-overlay'),player=replayPlayer(),entry=replayTimeline[replayIndex];
   if(!entry||player.videoWidth<=0||player.videoHeight<=0){clearReplayOverlay();return}

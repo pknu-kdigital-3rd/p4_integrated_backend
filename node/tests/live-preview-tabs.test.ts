@@ -42,6 +42,7 @@ function setup(tab='saved',previousPreview=false) {
     bootstrap:{liveViewUrl:'https://vision.example/live'},selected:{vehicleId:'1',telemetry:{external_id:'device:1'}},
     liveView:previousPreview?{vehicleId:'1',markerKey:'device:1'}:null,
     liveDocked:false,lastLiveMessage:null,liveVideoSize:null,liveDetections:null,liveStatusTimer:undefined,
+    replayTripId:'',replayTimeline:[],replayIndex:0,
     markers:new Map(),details:element('#details'),fields:element('#fields'),
     operatorLayout:{classList:{remove:vi.fn(),toggle:vi.fn()}},
     liveMapFollower:{begin:vi.fn()},
@@ -63,6 +64,32 @@ function setup(tab='saved',previousPreview=false) {
 }
 
 describe('live preview and saved recordings',()=>{
+  it('keeps the loaded recording when its vehicle is selected again',()=>{
+    const {context,streaming,navigations}=setup();
+    context.replayTripId='21';context.replayTimeline=[{start:0,duration:10}];
+    context.selectVehicle({...streaming,tripId:'21'});
+    expect(context.loadTripRecordings).not.toHaveBeenCalled();
+    expect(context.selectRecordingTrip).toHaveBeenCalledWith('21');
+    expect(navigations).toEqual([]);
+  });
+  it('clears the old recording when selecting a vehicle with no trip',()=>{
+    const {context,streaming}=setup();
+    context.replayTripId='21';context.replayTimeline=[{start:0,duration:10}];
+    context.selectVehicle(streaming);
+    expect(context.loadTripRecordings).toHaveBeenCalledWith('');
+  });
+  it('loads a different vehicle trip and retries a trip with no playable recordings',()=>{
+    const {context,streaming}=setup();
+    context.replayTripId='21';context.replayTimeline=[{start:0,duration:10}];
+    context.selectVehicle({...streaming,tripId:'22'});
+    expect(context.loadTripRecordings).toHaveBeenCalledWith('22');
+    context.loadTripRecordings.mockClear();context.replayTimeline=[];
+    context.selectVehicle({...streaming,tripId:'21'});
+    expect(context.loadTripRecordings).toHaveBeenCalledWith('21');
+    context.loadTripRecordings.mockClear();context.replayTimeline=[{start:0,duration:10}];context.replayIndex=-1;
+    context.selectVehicle({...streaming,tripId:'21'});
+    expect(context.loadTripRecordings).toHaveBeenCalledWith('21');
+  });
   it('keeps saved recordings selected when switching to a streaming vehicle',()=>{
     const {context,element,livePanel,navigations,streaming}=setup();
     context.selectVehicle(streaming);
