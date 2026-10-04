@@ -9,6 +9,7 @@ import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
 import {initializeAssistantPanel} from './assistant-panel.js?v=4';
+import {mountRecordingManagement} from './recording-management.js?v=1';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
@@ -235,7 +236,7 @@ document.querySelector('#live-float').addEventListener('click',async()=>{
   placeLivePanel(!liveDocked);
 });
 // A docked preview is hidden by the saved-recordings tab; close it rather than keep a TURN port busy.
-document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView()});
+document.querySelector('#recording-saved-tab').addEventListener('click',()=>{if(liveView&&liveDocked)stopLiveView();if(token&&!demoMode)void recordingManagement.refresh()});
 placeLivePanel(liveDocked);
 const ROUTE_TICK_MS=500,FLEET_POLL_MS=3000;
 // How the replay line uses the road match: 'gaps' (default) follows the
@@ -1025,6 +1026,7 @@ async function start(role){
     document.querySelector('#trip-status-message').textContent=['ADMIN','OPERATOR'].includes(role)?uiText('Choose a vehicle and destination.'):'You can review recent trips; an operator or admin can create one.';
   }
   await refresh();
+  if(!demoMode)void recordingManagement.refresh();
   if(!demoMode){
     // BIMS vehicle identities are populated by the fleet snapshot before the assignment list loads.
     void loadTripAssignments().catch(ex=>{document.querySelector('#trip-status-message').textContent=`운행 목록을 불러올 수 없습니다: ${ex.message}`;console.error('[operator trips]',ex)});
@@ -1113,6 +1115,11 @@ document.querySelector('#recording-forward').addEventListener('click',()=>void s
 document.querySelector('#recording-seek').addEventListener('input',event=>{beginReplayScrub();setReplayPosition(event.currentTarget.value)});
 document.querySelector('#recording-seek').addEventListener('change',event=>void commitReplayScrub(event.currentTarget.value));
 document.querySelector('#recordings-form').addEventListener('submit',event=>{event.preventDefault();const tripId=document.querySelector('#recording-trip-id').value;if(tripId)void loadTripRecordings(tripId)});
+const recordingManagement=mountRecordingManagement(document.querySelector('#recording-library'),{
+  api,canManage:()=>['ADMIN','OPERATOR'].includes(currentRole),
+  onOpenTrip:tripId=>{selectRecordingTrip(tripId);void loadTripRecordings(tripId)},
+  onChanged:async tripId=>{if(replayTripId===tripId)await loadTripRecordings(tripId)},
+});
 // Choosing a trip loads its recordings right away.
 document.querySelector('#recording-trip-id').addEventListener('change',event=>{if(event.currentTarget.value)void loadTripRecordings(event.currentTarget.value)});
 // The recordings trip picker lists the recent trips (newest first); with none it says so.

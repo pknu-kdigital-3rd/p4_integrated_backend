@@ -63,6 +63,34 @@ export const tripIdParamSchema = z.object({
     tripId: positiveIntegerString,
 });
 
+export const recordingTripsQuerySchema = z.object({
+    beforeTripId: positiveIntegerString.optional(),
+});
+
+// Explicit IDs form the confirmed snapshot; later uploads are never included.
+export const tripRecordingDeleteSchema = z.object({
+    tripVideoIds: z.array(positiveIntegerString).min(1).max(50)
+        .refine(ids => new Set(ids).size === ids.length, "Duplicate segment IDs"),
+});
+
+export const recordingTripsResponseSchema = z.object({ data: z.object({
+    trips: z.array(z.object({
+        tripId: z.string(), vehicleId: z.string(), vehicleCode: z.string(),
+        destinationName: z.string(), tripStatus: z.string(),
+        segmentCount: z.number().int(), finalizedCount: z.number().int(),
+        durationSec: z.number(), sizeBytes: z.string(),
+        recordingStatuses: z.record(z.string(), z.number().int()),
+        startedAt: z.iso.datetime({ offset: true }).nullable(),
+        endedAt: z.iso.datetime({ offset: true }).nullable(),
+    })),
+    nextBeforeTripId: z.string().nullable(),
+}) });
+
+export const tripRecordingDeleteResponseSchema = z.object({ data: z.object({
+    tripId: z.string(), deletedTripVideoIds: z.array(z.string()),
+    failures: z.array(z.object({ tripVideoId: z.string(), message: z.string() })),
+}) });
+
 export const tripVideoReplayParamsSchema = tripIdParamSchema.extend({
     tripVideoId: positiveIntegerString,
 });

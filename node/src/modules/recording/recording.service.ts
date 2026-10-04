@@ -107,6 +107,64 @@ function ensureSameSegment(existing: {
 }
 
 export const recordingService = {
+    async listRecordingTrips(beforeTripId?: string) {
+        const page = await prisma.trip.findMany({
+            where: { tripVideos: { some: {} }, ...(beforeTripId ? { tripId: { lt: parsePositiveId(beforeTripId, "beforeTripId") } } : {}) },
+            orderBy: { tripId: "desc" }, take: 51,
+            select: { tripId: true, vehicleId: true, destinationName: true, tripStatus: true, vehicle: { select: { vehicleCode: true } } },
+        });
+        const trips = page.slice(0, 50);
+        const groups = trips.length ? await prisma.tripVideo.groupBy({
+            by: ["tripId", "uploadStatus"], where: { tripId: { in: trips.map(trip => trip.tripId) } },
+            _count: { _all: true }, _sum: { sizeBytes: true, durationSec: true },
+            _min: { startedAt: true }, _max: { endedAt: true },
+        }) : [];
+        return {
+            trips: trips.map(trip => {
+                const rows = groups.filter(group => group.tripId === trip.tripId);
+                const starts = rows.flatMap(row => row._min.startedAt ? [row._min.startedAt] : []);
+                const ends = rows.flatMap(row => row._max.endedAt ? [row._max.endedAt] : []);
+                return {
+                    tripId: trip.tripId, vehicleId: trip.vehicleId, vehicleCode: trip.vehicle.vehicleCode,
+                    destinationName: trip.destinationName, tripStatus: trip.tripStatus,
+                    segmentCount: rows.reduce((sum, row) => sum + row._count._all, 0),
+                    finalizedCount: rows.find(row => row.uploadStatus === "FINALIZED")?._count._all ?? 0,
+                    durationSec: rows.reduce((sum, row) => sum + (row._sum.durationSec ?? 0), 0),
+                    sizeBytes: rows.reduce((sum, row) => sum + (row._sum.sizeBytes ?? 0n), 0n),
+                    recordingStatuses: Object.fromEntries(rows.map(row => [row.uploadStatus, row._count._all])),
+                    startedAt: starts.length ? new Date(Math.min(...starts.map(date => date.getTime()))) : null,
+                    endedAt: ends.length ? new Date(Math.max(...ends.map(date => date.getTime()))) : null,
+                };
+            }),
+            nextBeforeTripId: page.length > 50 ? trips.at(-1)!.tripId.toString() : null,
+        };
+    },
+
+    async deleteTripRecordings(tripIdValue: string, ids: string[]) {
+        if (!env.RECORDING_ENABLED || !storageMinioClient) {
+            throw new AppError(503, "Recording deletion is disabled", "RECORDING_DISABLED");
+        }
+        const tripId = parsePositiveId(tripIdValue, "tripId");
+        const tripVideoIds = ids.map(id => parsePositiveId(id, "tripVideoId"));
+        const videos = await prisma.tripVideo.findMany({ where: { tripId, tripVideoId: { in: tripVideoIds } }, select: { tripVideoId: true, uploadStatus: true } });
+        if (videos.length !== ids.length || videos.some(video => video.uploadStatus !== "FINALIZED")) {
+            throw new AppError(409, "Selected recordings changed or do not belong to this trip. Refresh before deleting.", "RECORDING_SELECTION_CHANGED");
+        }
+        const deletedTripVideoIds: string[] = [];
+        const failures: { tripVideoId: string; message: string }[] = [];
+        // Storage and database deletion cannot be atomic. Keep successful
+        // removals and report each failure so the remaining segments can retry.
+        for (const id of ids) {
+            try {
+                await this.deleteTripVideo(id);
+                deletedTripVideoIds.push(id);
+            } catch (error) {
+                if (!(error instanceof AppError)) logger.error({ err: error, tripVideoId: id }, "Could not delete selected trip recording");
+                failures.push({ tripVideoId: id, message: error instanceof AppError ? error.message : "Recording deletion failed. Refresh and retry." });
+            }
+        }
+        return { tripId: tripIdValue, deletedTripVideoIds, failures };
+    },
     async validateContext(context: RecordingContextBody) {
         const tripId = parsePositiveId(context.tripId, "tripId");
         const vehicleId = parsePositiveId(context.vehicleId, "vehicleId");
@@ -264,7 +322,7 @@ export const recordingService = {
         return { coverageIncomplete, samples };
     },
 
-    async createPlaybackUrl(tripVideoIdValue: string) {
+    async createPlaybackUrl(tripVideoIdValue: string, download = false) {
         if (!env.RECORDING_ENABLED || !playbackMinioClient) {
             throw new AppError(503, "Recording playback is disabled", "RECORDING_DISABLED");
         }
@@ -278,6 +336,7 @@ export const recordingService = {
                 video.storageBucket,
                 video.objectKey,
                 env.RECORDING_PLAYBACK_URL_TTL_SECONDS,
+                download ? { "response-content-disposition": `attachment; filename="trip-${video.tripId}-segment-${video.tripVideoId}.mp4"` } : {},
             );
         } catch (error) {
             logger.error({ err: error, tripVideoId: video.tripVideoId.toString() }, "Could not create a MinIO playback URL");
