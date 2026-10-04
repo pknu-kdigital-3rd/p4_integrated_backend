@@ -214,6 +214,8 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 .trip-progress-card[hidden] { display: none; }
 .trip-progress-card strong { font-size: 14px; }
 .trip-progress-card p { margin: 0; color: var(--ui-text-secondary); }
+.trip-progress-summary { display: flex; align-items: baseline; gap: 12px; min-width: 0; overflow-x: auto; white-space: nowrap; }
+.trip-progress-summary p { flex: 0 0 auto; }
 /* Origin ─── bus at the current percentage ─── destination, as in the design mockup. */
 .trip-track { --trip-progress: 0%; display: grid; gap: 8px; margin: 6px 0 2px; }
 .trip-track-rail { position: relative; height: 26px; margin: 0 10px; }

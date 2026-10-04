@@ -454,13 +454,12 @@ function retargetLiveView(item){
 }
 // The progress card's red end flag frames the vehicle and the trip's destination
 // together, clear of the controls over the map (with its own destination
-// marker, as a trip that has not started draws no route), and keeps both in
-// view as the vehicle moves. The vehicle
-// stays live throughout. The vehicle icon on the bar, dragging the map or
-// recentring Live View returns to following the vehicle.
-let destinationPeekMarker=null,destinationFrame=null;
+// marker, as a trip that has not started draws no route). This is a one-time
+// camera move; users can then pan and zoom freely while the vehicle stays live.
+// The vehicle icon restores the zoom from before the destination peek.
+let destinationPeekMarker=null,destinationReturnZoom=null;
 function clearDestinationPeek(){
-  destinationFrame=null;
+  destinationReturnZoom=null;
   if(destinationPeekMarker){map.removeLayer(destinationPeekMarker);destinationPeekMarker=null}
 }
 function tripDestination(display){
@@ -498,44 +497,34 @@ function mapOverlayPadding(){
   }
   return padding;
 }
-// Keeps the vehicle and the destination in the part of the map no control
-// covers. It refits only when either point leaves that clear area, so the zoom
-// does not change on every position update.
-function frameVehicleAndDestination(force=false){
-  if(!destinationFrame)return;
+// Frames both points once, in the part of the map no control covers.
+function frameVehicleAndDestination(target){
   const vehicle=framedVehiclePosition();
-  if(!vehicle)return;
-  const padding=mapOverlayPadding(),size=map.getSize();
+  const padding=mapOverlayPadding();
   padding.top+=36; // the destination's label sits above its marker
-  const clear=point=>{const p=map.latLngToContainerPoint(point);
-    return p.x>=padding.left-4&&p.x<=size.x-padding.right+4&&p.y>=padding.top-4&&p.y<=size.y-padding.bottom+4};
-  if(!force&&clear(vehicle)&&clear(destinationFrame.target))return;
-  map.fitBounds(L.latLngBounds([vehicle,destinationFrame.target]),
+  map.fitBounds(L.latLngBounds([vehicle??target,target]),
     {paddingTopLeft:[padding.left,padding.top],paddingBottomRight:[padding.right,padding.bottom],maxZoom:17});
 }
 function showTripDestination(){
   const target=tripDestination(currentTripDisplay);
   if(!target)return;
+  const returnZoom=destinationReturnZoom??map.getZoom();
   liveMapFollower.pause();
+  map.stop();
   clearDestinationPeek();
+  destinationReturnZoom=returnZoom;
   destinationPeekMarker=L.circleMarker(target,{radius:9,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map)
     .bindTooltip(`목적지 · ${currentTripDisplay.destinationName||'—'}`,{direction:'top',permanent:true});
-  destinationFrame={target:L.latLng(target)};
-  frameVehicleAndDestination(true);
+  frameVehicleAndDestination(target);
 }
 function returnToVehicle(){
+  const returnZoom=destinationReturnZoom;
   clearDestinationPeek();
-  if(liveView&&String(liveView.vehicleId)===String(currentTripDisplay?.vehicleId)){liveMapFollower.recenter();return}
+  map.stop();
   const vehicle=framedVehiclePosition();
-  if(vehicle)map.setView(vehicle,Math.max(map.getZoom(),16));
+  if(vehicle)map.setView(vehicle,returnZoom??Math.max(map.getZoom(),16),{animate:false});
+  if(liveView&&String(liveView.vehicleId)===String(currentTripDisplay?.vehicleId)){liveMapFollower.recenter();return}
 }
-setInterval(()=>{
-  if(!destinationFrame||document.hidden||mapZooming)return;
-  // Live View's own recenter button resumed following: it owns the camera again.
-  if(liveMapFollower.isFollowing()){clearDestinationPeek();return}
-  frameVehicleAndDestination();
-},500);
-map.on('dragstart',()=>{if(destinationFrame)destinationFrame=null});
 for(const [id,action] of [['#selected-destination',showTripDestination],['#trip-track-vehicle',returnToVehicle]]){
   const element=document.querySelector(id);
   element.addEventListener('click',action);
@@ -1380,7 +1369,7 @@ liveFrame.addEventListener('load',event=>{
 });
 // There is no close button: the preview closes when another vehicle is
 // selected, or when "저장된 녹화" is shown while it is docked.
-liveRecenterButton.addEventListener('click',()=>liveMapFollower.recenter());
+liveRecenterButton.addEventListener('click',()=>{clearDestinationPeek();liveMapFollower.recenter()});
 const liveFullscreenButton=document.querySelector('#live-fullscreen');
 function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.textContent=fullscreen?'전체 화면 종료':'전체 화면';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
 if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
