@@ -5,10 +5,38 @@ import numpy as np
 
 import torch
 
-from app.services.depth import DepthEstimator, masked_median_distances, scale_camera_intrinsic
+from app.services.depth import DepthEstimator, DepthFrame, masked_median_distances, scale_camera_intrinsic
+from app.core.settings import Settings
 
 
 class DepthUtilityTests(unittest.TestCase):
+    def test_depth_size_validation_and_selection(self):
+        for value, normalized in (("", "yolo"), (" YOLO ", "yolo"), ("original", "source"),
+                                   ("360 X 640", "360x640"), ("360,640", "360x640")):
+            self.assertEqual(Settings(UNIDEPTH_INFERENCE_SIZE=value).UNIDEPTH_INFERENCE_SIZE, normalized)
+        for value in ("auto", "31x640", "360x4097", "bad", 360):
+            with self.assertRaises(ValueError):
+                Settings(UNIDEPTH_INFERENCE_SIZE=value)
+
+    def test_depth_warmup_uses_independent_grid_and_camera(self):
+        estimator = DepthEstimator.__new__(DepthEstimator)
+        estimator._torch = torch
+        estimator._compiled = False
+        observed = []
+        def predict(frame, camera):
+            observed.append((frame.shape, camera.copy()))
+            return DepthFrame(48, 32, torch.ones((32, 48)))
+        estimator.predict = predict
+        estimator._infer = lambda frame, camera, reference=False: torch.ones((1, 1, 32, 48))
+        with patch("app.services.depth.settings.UNIDEPTH_INFERENCE_SIZE", "32x48"), patch(
+            "app.services.depth.settings.YOLO_INFERENCE_SIZE", "720x1280"
+        ):
+            estimator.warmup()
+        self.assertEqual(observed[0][0], (32, 48, 3))
+        np.testing.assert_allclose(observed[0][1],
+            [[920 * 48 / 1280, 0, 640 * 48 / 1280],
+             [0, 690 * 32 / 720, 360 * 32 / 720], [0, 0, 1]], rtol=1e-6)
+
     def test_cpu_staging_reuses_buffers_and_preserves_bgr_input(self):
         estimator = DepthEstimator.__new__(DepthEstimator)
         estimator._torch = torch

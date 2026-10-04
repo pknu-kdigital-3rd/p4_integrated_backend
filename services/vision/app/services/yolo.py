@@ -20,7 +20,7 @@ from ultralytics import YOLO
 
 from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
-from app.services.depth import box_median_distances, masked_median_distances, predict_timed, scale_camera_intrinsic
+from app.services.depth import box_median_distances, depth_input_size, masked_median_distances, predict_timed, scale_camera_intrinsic
 from app.services.gc_runtime import _freeze_loaded_objects
 from app.services.mask_transfer import compact_mask_polygons, _copy_tensor_to_host
 
@@ -664,12 +664,26 @@ def run_yolo(
         img = model_frame.to_ndarray()
     else:
         img = inference_frame.frame.to_ndarray(format="bgr24")
-    frame_convert_ms = (perf_counter() - frame_convert_start) * 1000
     frame_height, frame_width = img.shape[:2]
     if source_width <= 0:
         source_width = frame_width
     if source_height <= 0:
         source_height = frame_height
+    depth_input = img
+    if depth_model is not None:
+        depth_width, depth_height = depth_input_size(
+            source_width, source_height, frame_width, frame_height,
+        )
+        if (depth_width, depth_height) != (frame_width, frame_height):
+            # Resize from the decoded source, so a larger depth image does not
+            # upsample information already discarded by YOLO's smaller input.
+            if (depth_width, depth_height) == (source_width, source_height):
+                depth_input = inference_frame.frame.to_ndarray(format="bgr24")
+            else:
+                depth_input = inference_frame.frame.reformat(
+                    width=depth_width, height=depth_height, format="bgr24",
+                ).to_ndarray()
+    frame_convert_ms = (perf_counter() - frame_convert_start) * 1000
     if settings.YOLO_INFERENCE_SIZE == "auto":
         longest_side = max(frame_width, frame_height)
         imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
@@ -684,15 +698,14 @@ def run_yolo(
     if depth_model is not None:
         camera_intrinsic = scale_camera_intrinsic(
             settings.UNIDEPTH_CAMERA_INTRINSIC,
-            frame_width,
-            frame_height,
+            depth_input.shape[1],
+            depth_input.shape[0],
             settings.UNIDEPTH_CALIBRATION_WIDTH,
             settings.UNIDEPTH_CALIBRATION_HEIGHT,
         )
         # Depth only copies from this array. The pinned fork's LetterBox makes
         # new output, and preprocess converts uint8 before in-place division.
         # TensorRT consumes the resulting tensor, not this shared ndarray.
-        depth_input = img
         if depth_executor is not None:
             depth_future = depth_executor.submit(
                 predict_timed, depth_model, depth_input, camera_intrinsic
@@ -841,6 +854,8 @@ def run_yolo(
             "model": "unidepth-v2-vitb14",
             "status": depth_status,
             "duration_ms": round(depth_ms, 1),
+            "input_width": depth_input.shape[1] if depth_model is not None else None,
+            "input_height": depth_input.shape[0] if depth_model is not None else None,
             "distance_region": distance_region,
             "box_scale": distance_box_scale if distance_region == "inner_box" else None,
         },
@@ -1119,6 +1134,7 @@ async def yolo_worker(state: AppState) -> None:
         f"box_scale={settings.UNIDEPTH_DISTANCE_BOX_SCALE}",
         flush=True,
     )
+    print(f"UniDepth input size: {settings.UNIDEPTH_INFERENCE_SIZE}", flush=True)
     run_inference = partial(
         run_yolo,
         yolo_model=state.yolo_model,

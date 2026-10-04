@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     # Defaults to YOLO_DEVICE. The entrypoint sets cuda:1 when a separate
     # UNIDEPTH_GPU_INDEX is selected.
     UNIDEPTH_DEVICE: str | None = None
+    # yolo shares YOLO's resized image; source uses the decoded frame; HxW
+    # selects an independent depth input grid with the same field of view.
+    UNIDEPTH_INFERENCE_SIZE: str = "yolo"
     # UniDepth's internal inference pixel budget increases from 0 to 9.
     # Level 2 trades some fine depth detail for lower per-frame latency.
     UNIDEPTH_RESOLUTION_LEVEL: int = Field(default=2, ge=0, le=9)
@@ -266,6 +269,24 @@ class Settings(BaseSettings):
                 "TURN_USERNAME and TURN_PASSWORD are required when TURN_URL is set"
             )
         return self
+
+    @field_validator("UNIDEPTH_INFERENCE_SIZE", mode="before")
+    @classmethod
+    def _normalize_depth_inference_size(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("UNIDEPTH_INFERENCE_SIZE must be yolo, source, or HxW")
+        value = value.strip().lower()
+        if value in {"", "yolo"}:
+            return "yolo"
+        if value in {"source", "original"}:
+            return "source"
+        match = re.fullmatch(r"(\d+)\s*(?:x|,|\s)\s*(\d+)", value)
+        if match is None:
+            raise ValueError("UNIDEPTH_INFERENCE_SIZE must be yolo, source, or HxW (for example 360x640)")
+        height, width = map(int, match.groups())
+        if not 32 <= height <= 4096 or not 32 <= width <= 4096:
+            raise ValueError("UNIDEPTH_INFERENCE_SIZE dimensions must be between 32 and 4096")
+        return f"{height}x{width}"
 
 
 settings = Settings()

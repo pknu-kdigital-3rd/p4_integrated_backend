@@ -96,6 +96,57 @@ class _SourceFrame:
 
 
 class RunYoloTests(unittest.TestCase):
+    def test_independent_depth_grid_scales_camera_and_masks_and_keeps_concurrency(self):
+        import threading
+        from app.services.depth import DepthFrame, make_depth_executor
+
+        cases = (("yolo", (96, 64)), ("32x48", (48, 32)), ("96x144", (144, 96)), ("source", (192, 128)))
+        for configured, expected_size, region in ((mode, size, region) for mode, size in cases
+                                                  for region in ("mask", "inner_box")):
+            with self.subTest(configured=configured, region=region):
+                barrier = threading.Barrier(2)
+                observed = {}
+                masks = torch.zeros((1, 64, 96), dtype=torch.uint8)
+                masks[:, :, :48] = 1
+                boxes = Boxes(torch.tensor([[0., 0., 48., 64., .9, 0.]]), (64, 96))
+
+                class Model:
+                    names = {0: "person"}
+                    def __call__(self, image, **kwargs):
+                        observed["yolo_shape"] = image.shape
+                        barrier.wait(timeout=3)
+                        return [SimpleNamespace(boxes=boxes, masks=Masks(masks, (64, 96)))]
+
+                class Depth:
+                    def predict(self, image, camera):
+                        observed["depth_shape"] = image.shape
+                        observed["camera"] = camera
+                        barrier.wait(timeout=3)
+                        height, width = image.shape[:2]
+                        depth = torch.arange(1, width + 1, dtype=torch.float32).expand(height, width)
+                        return DepthFrame(width, height, depth)
+
+                frame = _SourceFrame(192, 128)
+                with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
+                    "app.services.yolo.settings.YOLO_INFERENCE_SIZE", "64x96"
+                ), patch("app.services.yolo.settings.UNIDEPTH_INFERENCE_SIZE", configured), patch(
+                    "app.services.yolo.settings.UNIDEPTH_DISTANCE_REGION", region
+                ), patch("app.services.yolo.settings.UNIDEPTH_DISTANCE_BOX_SCALE", 1.0
+                ), patch("app.services.yolo.settings.BBOX_FORMAT", "xyxy_normalized"), patch(
+                    "app.services.yolo.settings.YOLO_DEVICE", "cpu"
+                ), make_depth_executor() as executor:
+                    result = run_yolo(InferenceFrame(1, frame, None, None, None), Model(), Depth(), executor)
+                width, height = expected_size
+                self.assertEqual(observed["yolo_shape"], (64, 96, 3))
+                self.assertEqual(observed["depth_shape"], (height, width, 3))
+                np.testing.assert_allclose(observed["camera"],
+                    [[920 * width / 1280, 0, 640 * width / 1280],
+                     [0, 690 * height / 720, 360 * height / 720], [0, 0, 1]], rtol=1e-6)
+                self.assertEqual(result["depth"]["input_width"], width)
+                self.assertEqual(result["depth"]["input_height"], height)
+                self.assertEqual(result["items"][0]["distance_status"], "ok")
+                self.assertEqual(result["items"][0]["distance_m"], (1 + width // 2) / 2)
+
     def test_mask_point_cap_preserves_order_and_small_polygons(self):
         polygon = np.arange(2000, dtype=np.float32).reshape(1000, 2)
         bounded = _bounded_mask_polygon(polygon, 256)

@@ -160,6 +160,10 @@ class DepthEstimator:
         else:
             height_text, width_text = configured.split("x", 1)
             height, width = int(height_text), int(width_text)
+        width, height = depth_input_size(
+            settings.UNIDEPTH_CALIBRATION_WIDTH, settings.UNIDEPTH_CALIBRATION_HEIGHT,
+            width, height,
+        )
         camera = scale_camera_intrinsic(
             settings.UNIDEPTH_CAMERA_INTRINSIC,
             width,
@@ -226,6 +230,18 @@ class DepthEstimator:
                     self._ready.record(self._stream)
                     self._ready.synchronize()
         return output
+
+
+def depth_input_size(source_width: int, source_height: int,
+                     yolo_width: int, yolo_height: int) -> tuple[int, int]:
+    """Select the depth image size independently of YOLO's image grid."""
+    configured = settings.UNIDEPTH_INFERENCE_SIZE
+    if configured == "yolo":
+        return yolo_width, yolo_height
+    if configured == "source":
+        return source_width, source_height
+    height, width = map(int, configured.split("x"))
+    return width, height
 
 
 def load_depth_estimator() -> DepthEstimator:
