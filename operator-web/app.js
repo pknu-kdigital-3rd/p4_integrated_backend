@@ -1,4 +1,4 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, vehicleDisplayName, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=6';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, vehicleDisplayName, vehicleStatus, STATUS_LABELS, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=6';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder} from './live-telemetry.js?v=2';
@@ -1022,7 +1022,7 @@ async function loadTripAssignments(){
   const vehicleSelect=document.querySelector('#trip-vehicle'),previousVehicle=vehicleSelect.value;
   vehicleSelect.replaceChildren(new Option(uiText('Select a vehicle'),''));
   for(const vehicle of vehicles.filter(item=>item.isActive)){
-    const label=[vehicleDisplayName(vehicle),`차량 ID ${vehicle.vehicleId}`,vehicle.vehicleStatus].filter(Boolean).join(' · ');
+    const label=[vehicleDisplayName(vehicle),`차량 ID ${vehicle.vehicleId}`,STATUS_LABELS[vehicleStatus(vehicle)]].filter(Boolean).join(' · ');
     vehicleSelect.add(new Option(label,String(vehicle.vehicleId)));
   }
   if(vehicles.some(item=>item.isActive&&String(item.vehicleId)===previousVehicle))vehicleSelect.value=previousVehicle;
