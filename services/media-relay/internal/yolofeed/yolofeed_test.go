@@ -301,6 +301,42 @@ func TestRecordingIdentityOmitsTripWhenTrackedWithoutTrip(t *testing.T) {
 	}
 }
 
+func TestKeyframeRecoveryOnlyRunsForActiveSource(t *testing.T) {
+	feed := NewWithLimits("", 0, 0)
+	if _, pending := feed.keyframePending(); pending {
+		t.Fatal("idle feed must not request keyframes")
+	}
+	feed.Begin()
+	firstEpoch, pending := feed.keyframePending()
+	if !pending {
+		t.Fatal("new publisher must request its first keyframe")
+	}
+	publishSingleNAL(feed, 10000, 90000, []byte{0x65, 1})
+	if _, pending := feed.keyframePending(); pending {
+		t.Fatal("accepted IDR must stop recovery")
+	}
+	feed.End()
+	feed.mu.Lock()
+	feed.resetLocked("viewer_start")
+	feed.mu.Unlock()
+	if _, pending := feed.keyframePending(); pending {
+		t.Fatal("viewer resync while source stopped must stay idle")
+	}
+	feed.Begin()
+	secondEpoch, pending := feed.keyframePending()
+	if !pending || secondEpoch <= firstEpoch {
+		t.Fatal("restarted publisher must recover in a fresh epoch")
+	}
+	// A replacement publisher can start at any RTP sequence, including one
+	// that would have been dropped as late against the previous track.
+	publishSingleNAL(feed, 1, 3000, []byte{0x65, 2})
+	feed.mu.Lock()
+	defer feed.mu.Unlock()
+	if len(feed.backlog) != 1 || !feed.backlog[0].Keyframe || feed.backlog[0].Seq != 0 {
+		t.Fatal("first restarted keyframe must survive the publisher boundary")
+	}
+}
+
 // Relabelling for a trip change keeps the live feed running instead of
 // starting a new epoch that waits for a keyframe.
 func TestRelabelRecordingIdentityDoesNotResetFeed(t *testing.T) {

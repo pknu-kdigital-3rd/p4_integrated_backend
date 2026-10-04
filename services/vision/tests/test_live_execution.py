@@ -59,18 +59,22 @@ class LiveExecutionTests(unittest.IsolatedAsyncioTestCase):
             record(K_RESET, {"new_epoch": 2}),
             record(K_FRAME, {"epoch": 2, "seq": 2, "pts_90k": 6000}),
             record(K_END, {}),
+            record(K_START, {"epoch": 3}),
+            record(K_FRAME, {"epoch": 3, "seq": 3, "pts_90k": 9000}),
+            record(K_END, {}),
         ]
         queued = AsyncMock()
         with patch("app.services.live_execution.av.CodecContext.create", side_effect=lambda *_: Context()), patch(
-            "app.services.yolo._read_record", new=AsyncMock(side_effect=records)
+            "app.services.yolo._read_record", new=AsyncMock(side_effect=records + [asyncio.IncompleteReadError(b"", 4)])
         ), patch("app.services.yolo._queue_decoded_frame", new=queued):
-            await _decode_session(None, state)
-        self.assertEqual(calls, ["reset", "reset", "reset"])
-        self.assertEqual(state.current_epoch, 2)
-        queued.assert_awaited_once()
-        self.assertEqual(queued.call_args.args[1]["seq"], 2)
-        self.assertEqual(queued.call_args.args[2].pts, 6000)
-        self.assertEqual(state.metrics.decode_calls, 3)
+            with self.assertRaises(asyncio.IncompleteReadError):
+                await _decode_session(None, state)
+        self.assertEqual(calls, ["reset", "reset", "reset", "reset"])
+        self.assertEqual(state.current_epoch, 3)
+        self.assertEqual(queued.await_count, 2)
+        self.assertEqual([call.args[1]["seq"] for call in queued.await_args_list], [2, 3])
+        self.assertEqual([call.args[2].pts for call in queued.await_args_list], [6000, 9000])
+        self.assertEqual(state.metrics.decode_calls, 5)
 
     async def test_decoder_owns_reset_packets_flush_on_one_thread(self):
         metrics = VisionMetrics()

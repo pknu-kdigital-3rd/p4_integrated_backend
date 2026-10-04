@@ -19,7 +19,7 @@ function functions(...names) {
 function lifecycle() {
   const calls = [];
   const context = vm.createContext({
-    stopped: false, foregroundResumePending: false, foregroundReconnectAttempts: 0,
+    stopped: false, decoding: false, foregroundResumePending: false, foregroundReconnectAttempts: 0,
     lastForegroundResumeAt: -Infinity, foregroundResumeTimer: null,
     socket: { readyState: 1, close: () => calls.push('close') }, reconnectTimer: null,
     WebSocket: { OPEN: 1, CONNECTING: 0 },
@@ -48,21 +48,21 @@ test('returning after a long background wait restarts a pending join', () => {
   assert.ok(calls.includes('open'));
 });
 
-test('watchdog continues recovering until a frame paints, beyond two attempts', () => {
+test('watchdog keeps an open socket while waiting for a restarted publisher', () => {
   const { context, calls } = lifecycle();
   context.foregroundResumePending = true;
   context.foregroundReconnectAttempts = 2;
   context.reconnectAfterForegroundStall();
-  assert.ok(calls.includes('open'));
-  assert.equal(context.foregroundReconnectAttempts, 3);
+  assert.deepEqual(calls, ['loading', 'watchdog']);
+  assert.equal(context.foregroundReconnectAttempts, 2);
 });
 
-test('a stream that stops delivering packets resets even with an idle decoder', () => {
+test('a stream that stops delivering packets resyncs without reopening the transport', () => {
   let reconnects = 0;
   const context = vm.createContext({
     stopped: false, playing: true, decoding: false, document: { hidden: false },
     lastPaintedAt: 1000, performance: { now: () => 4100 }, DECODE_STALL_MS: 3000,
-    reconnectAtLive: () => reconnects++,
+    jumpLive: () => reconnects++,
   });
   vm.runInContext(functions('checkPlaybackHealth'), context);
   context.checkPlaybackHealth();
@@ -147,4 +147,24 @@ test('receiving an encoded packet keeps loading active until its frame is painte
   assert.equal(context.foregroundResumePending, false);
   assert.equal(watchdogCleared, 1);
   assert.equal(loadingCleared, 1);
+});
+
+test('watchdog still replaces a failed transport', () => {
+  const { context, calls } = lifecycle();
+  context.socket = null;
+  context.foregroundResumePending = true;
+  context.reconnectAfterForegroundStall();
+  assert.ok(calls.includes('open'));
+  assert.equal(context.foregroundReconnectAttempts, 1);
+});
+
+test('watchdog repairs a decoder stall without replacing an open socket', () => {
+  const { context, calls } = lifecycle();
+  context.foregroundResumePending = true;
+  context.decoding = true;
+  context.decodeStartedAt = 0;
+  context.DECODE_STALL_MS = 3000;
+  context.jumpLive = () => calls.push('resync');
+  context.reconnectAfterForegroundStall();
+  assert.deepEqual(calls, ['resync']);
 });

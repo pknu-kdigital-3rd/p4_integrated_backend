@@ -1083,7 +1083,9 @@ async def _decode_records(reader, state, decoder) -> None:
                     await _queue_decoded_frame(state, source, frame)
             async with state.result_condition:
                 state.result_condition.notify_all()
-            return
+            # END ends the source, not the reliable transport. Keep reading so
+            # the next publisher's RESET/START is handled without a reconnect.
+            continue
 
 
 @asynccontextmanager

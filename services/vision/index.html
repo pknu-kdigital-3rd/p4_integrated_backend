@@ -1070,8 +1070,20 @@
   }
   function reconnectAfterForegroundStall() {
     if (stopped || document.hidden || !foregroundResumePending) return;
+    // An open playback transport cannot manufacture an Android keyframe.
+    // Keep it alive across source stop/start; relay keyframe recovery runs
+    // independently. Reopening here repeatedly resets otherwise healthy joins.
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      if (decoding && performance.now() - decodeStartedAt >= DECODE_STALL_MS) {
+        jumpLive(false);
+      } else {
+        setLoading(true, 'Waiting for live video from Android…');
+        armForegroundResumeWatchdog();
+      }
+      return;
+    }
     foregroundReconnectAttempts++;
-    reconnectAtLive('Live stream is still connecting; retrying…');
+    reconnectAtLive('Playback transport is still connecting; retrying…');
   }
   function reconnectAtLive(text = 'Joining live video…') {
     if (stopped) return;
@@ -1118,7 +1130,7 @@
   function checkPlaybackHealth() {
     if (stopped || !playing || document.hidden) return;
     if (lastPaintedAt !== null && performance.now() - lastPaintedAt >= DECODE_STALL_MS) {
-      reconnectAtLive('No fresh frames; reconnecting to live video…');
+      jumpLive(false);
       return;
     }
     if (!decoding || performance.now() - decodeStartedAt < DECODE_STALL_MS) return;

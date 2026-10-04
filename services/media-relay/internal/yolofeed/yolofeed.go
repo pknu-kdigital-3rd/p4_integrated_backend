@@ -126,6 +126,7 @@ type Feed struct {
 	lastQREventAt         time.Time
 	recording             *RecordingIdentity
 	sourceEnded           bool
+	sourceActive          bool
 	endSent               bool
 
 	// OnClientConnect requests a fresh IDR when Python reconnects. OnResync is
@@ -324,6 +325,7 @@ func (f *Feed) Publish(packet *rtp.Packet) *AccessUnit {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.sourceActive = true
 	if f.sourceEnded {
 		f.resetLocked("source_restart")
 		f.sourceEnded = false
@@ -368,8 +370,18 @@ func (f *Feed) Publish(packet *rtp.Packet) *AccessUnit {
 
 // End marks the source complete without deleting already accepted media. The
 // connected Python reader receives END after the retained sequence drains.
+// Begin discards the previous publisher's packet sequence and codec state
+// before the new track's first RTP packet (which may already contain its IDR).
+func (f *Feed) Begin() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sourceActive = true
+	f.resetLocked("publisher_start")
+}
+
 func (f *Feed) End() {
 	f.mu.Lock()
+	f.sourceActive = false
 	f.sourceEnded = true
 	f.endSent = false
 	f.cond.Broadcast()
@@ -543,6 +555,12 @@ func (f *Feed) overflowLocked() bool {
 // until a viewer forced another explicit resync.
 const keyframeRetryInterval = 1 * time.Second
 
+func (f *Feed) keyframePending() (uint64, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.epoch, f.sourceActive && !f.seenIDR
+}
+
 // watchKeyframe re-requests a keyframe on an interval for as long as none has
 // been seen since the last reset. It runs for the lifetime of the process;
 // RequestKeyFrame is a no-op with no publisher connected, so idling here
@@ -552,18 +570,18 @@ func (f *Feed) watchKeyframe() {
 	defer ticker.Stop()
 	var waitingSince time.Time
 	var retries int
+	var waitingEpoch uint64
 	for range ticker.C {
-		f.mu.Lock()
-		needsKeyframe := !f.seenIDR
-		epoch := f.epoch
-		f.mu.Unlock()
+		epoch, needsKeyframe := f.keyframePending()
 		if !needsKeyframe {
 			waitingSince = time.Time{}
 			retries = 0
 			continue
 		}
-		if waitingSince.IsZero() {
+		if waitingSince.IsZero() || waitingEpoch != epoch {
 			waitingSince = time.Now()
+			waitingEpoch = epoch
+			retries = 0
 		}
 		retries++
 		if f.OnResync != nil {

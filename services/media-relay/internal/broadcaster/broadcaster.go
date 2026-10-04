@@ -113,6 +113,10 @@ func (b *Broadcaster) SetPublisher(pc *webrtc.PeerConnection, track *webrtc.Trac
 	} else {
 		log.Printf("Android publisher connected (SSRC %d)", track.SSRC())
 	}
+	log.Printf("Android publisher video codec=%s fmtp=%s", track.Codec().MimeType, track.Codec().SDPFmtpLine)
+	if b.yolo != nil {
+		b.yolo.Begin()
+	}
 	if b.recorder != nil {
 		if recordingContext == nil {
 			b.recorder.Stop("publisher connected without a validated recording context")
