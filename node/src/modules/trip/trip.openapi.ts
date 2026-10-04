@@ -1,6 +1,6 @@
 import { registry } from "../../docs/registry.ts";
 import { apiErrorSchema } from "../../common/schema/api.schema.ts";
-import { createTripSchema } from "./trip.schema.ts";
+import { createTripSchema, tripIdParamSchema } from "./trip.schema.ts";
 import { tripDataResponseSchema, tripListResponseSchema } from "./trip.response.ts";
 import { replayPreviewSchema } from "./trip.preview.ts";
 import { z } from "zod";
@@ -18,6 +18,17 @@ registry.registerPath({
 });
 
 const tripIdParameter = z.object({ tripId: z.string().regex(/^[1-9]\d*$/) });
+registry.registerPath({
+    method: "delete", path: "/api/v1/trips/{tripId}", tags: ["Trip"],
+    summary: "Permanently remove a completed or cancelled trip after its recordings are deleted",
+    security: [{ bearerAuth: [] }], request: { params: tripIdParamSchema },
+    responses: {
+        200: { description: "Trip, routes, deviations, related alerts and replay samples removed; GPS and object detection history retained without trip links", content: { "application/json": { schema: z.object({ data: z.object({ tripId: z.string(), deleted: z.literal(true) }) }) } } },
+        403: { description: "Admin or operator required", content: { "application/json": { schema: apiErrorSchema } } },
+        404: { description: "Trip not found", content: { "application/json": { schema: apiErrorSchema } } },
+        409: { description: "Trip is active or has remaining recording metadata", content: { "application/json": { schema: apiErrorSchema } } },
+    },
+});
 const vehicleIdParameter = z.object({ vehicleId: z.string().regex(/^[1-9]\d*$/) });
 const deviceTripParameter = vehicleIdParameter.extend({ tripId: z.string().regex(/^[1-9]\d*$/) });
 registry.registerPath({

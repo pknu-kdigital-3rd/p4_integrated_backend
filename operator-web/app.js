@@ -10,6 +10,7 @@ import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
 import {initializeAssistantPanel} from './assistant-panel.js?v=4';
 import {deleteRecordingSnapshot} from './recording-delete.js?v=1';
+import {deleteTripWithRecordings,tripAction} from './trip-actions.js?v=1';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
 const mapContainer=map.getContainer();
 let rightButtonPan=null;
@@ -970,6 +971,63 @@ document.querySelector('#trip-vehicle').addEventListener('change',()=>void loadA
 // Trips change on the phone too (Start/Stop Trip), so the list is polled; it is
 // only rebuilt when the data changed, so buttons do not flicker or lose focus.
 let tripListSignature='';
+const pendingTripActions=new Set();
+
+function clearDeletedTrip(tripId){
+  if(String(currentTripDisplay?.tripId)===tripId){displayRequest++;clearTripLayers();document.querySelector('#trip-progress-card').hidden=true}
+  if(String(selected?.tripId)===tripId)selected={...selected,tripId:null,tripStatus:null};
+  if(replayTripId===tripId){
+    recordingsRequest++;stopRecordingPlayback();closeRecordingDeleteMode();
+    replayTripId='';tripRecordingVideos=[];replayTimeline=[];replayDuration=0;
+    setReplayPosition(0);
+    renderReplayBreakMarkers();updateRecordingDeleteTools();selectRecordingTrip('');
+    document.querySelector('#recording-player-panel').hidden=true;
+    document.querySelector('#recordings-status').textContent=`운행 ${tripId}이(가) 삭제되었습니다.`;
+  }
+  const picker=document.querySelector('#recording-trip-id');
+  for(const option of [...picker.options])if(option.value===tripId)option.remove();
+}
+
+function createTripActions(trip){
+  const action=tripAction(trip.tripStatus,currentRole);
+  if(!action)return null;
+  const tripId=String(trip.tripId),menu=document.createElement('details'),toggle=document.createElement('summary'),button=document.createElement('button');
+  menu.className='trip-actions';toggle.textContent='⋮';toggle.setAttribute('aria-label',`운행 ${tripId} 작업`);
+  button.type='button';button.textContent=action==='cancel'?'운행 취소':'운행 삭제';button.disabled=pendingTripActions.has(tripId);
+  button.addEventListener('click',async()=>{
+    if(pendingTripActions.has(tripId)||!['ADMIN','OPERATOR'].includes(currentRole))return;
+    if(action==='delete'&&recordingDeleteBusy){document.querySelector('#trip-status-message').textContent='녹화 삭제가 끝난 후 운행 삭제를 시도하세요.';return}
+    if(action==='cancel'&&!window.confirm(`Trip ID ${tripId} 배정을 취소할까요?`))return;
+    pendingTripActions.add(tripId);button.disabled=true;menu.open=false;
+    const notice=document.querySelector('#trip-status-message');let ownsRecordingDelete=false;
+    try{
+      if(action==='cancel'){
+        await api(`/api/v1/trips/${encodeURIComponent(tripId)}/cancel`,{method:'POST',body:'{}'},true);
+        notice.textContent=`운행 ${tripId} 취소 완료.`;
+      }else{
+        notice.textContent=`운행 ${tripId} 녹화 확인 중…`;
+        const deleted=await deleteTripWithRecordings(api,tripId,text=>{
+          if(recordingDeleteBusy)throw new Error('녹화 삭제가 끝난 후 운행 삭제를 시도하세요.');
+          return window.confirm(text);
+        },()=>{
+          recordingDeleteBusy=true;ownsRecordingDelete=true;updateRecordingDeleteTools();notice.textContent=`운행 ${tripId} 삭제 중…`;
+          if(replayTripId===tripId){closeRecordingDeleteMode();stopRecordingPlayback()}
+        });
+        if(!deleted){notice.textContent='운행 삭제를 취소했습니다.';return}
+        clearDeletedTrip(tripId);notice.textContent=`운행 ${tripId} 삭제 완료.`;
+      }
+    }catch(ex){
+      notice.textContent=/not active/i.test(ex.message)?`Trip ID ${tripId}은(는) 이미 종료된 운행입니다.`:ex.message;
+      if(action==='delete'&&replayTripId===tripId)await loadTripRecordings(tripId);
+    }finally{
+      if(ownsRecordingDelete){recordingDeleteBusy=false;updateRecordingDeleteTools()}
+      pendingTripActions.delete(tripId);button.disabled=false;
+      tripListSignature='';
+      await loadTripAssignments().catch(()=>{});await refresh().catch(()=>{});
+    }
+  });
+  menu.append(toggle,button);return menu;
+}
 async function loadTripAssignments(){
   const [vehicles,trips]=await Promise.all([api('/api/v1/vehicles',{},true),api('/api/v1/trips',{},true)]);
   const signature=JSON.stringify([vehicles,trips,currentRole]);
@@ -995,18 +1053,9 @@ async function loadTripAssignments(){
     vehicle.textContent=`Vehicle ID ${trip.vehicleId} · ${trip.vehicle.vehicleCode}${trip.vehicle.vehicleName?` · ${trip.vehicle.vehicleName}`:''}`;
     destination.textContent=`${trip.originName?`${trip.originName} → `:''}${trip.destinationName}`;
     status.textContent=`${TRIP_STATUS_LABELS[trip.tripStatus]||trip.tripStatus} · ${trip.routeMode==='REPLAY_ONLY'?'Android GPS 재생 경로만':'최적 경로 + Android GPS 재생'}${trip.plannedStartAt?` · planned ${new Date(trip.plannedStartAt).toLocaleString()}`:''}`;
-    row.append(title,vehicle,destination,status);
-    if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&['ADMIN','OPERATOR'].includes(currentRole)){
-      const cancel=document.createElement('button');cancel.type='button';cancel.textContent='운행 취소';
-      cancel.onclick=async()=>{if(!window.confirm(`Trip ID ${trip.tripId} 배정을 취소할까요?`))return;
-        cancel.disabled=true;try{await api(`/api/v1/trips/${trip.tripId}/cancel`,{method:'POST',body:'{}'},true);await loadTripAssignments();await refresh()}
-        catch(ex){
-          // Usually the phone already ended it (Stop Trip completes a trip); show that and refresh.
-          document.querySelector('#trip-status-message').textContent=/not active/i.test(ex.message)?`Trip ID ${trip.tripId}은(는) 이미 종료된 운행입니다.`:ex.message;
-          cancel.disabled=false;await loadTripAssignments().catch(()=>{});
-        }};
-      row.append(cancel);
-    }
+    const header=document.createElement('div');header.className='trip-row-header';header.append(title);
+    const actions=createTripActions(trip);if(actions)header.append(actions);
+    row.append(header,vehicle,destination,status);
     list.append(row);
   }
   if(!vehicles.some(item=>item.isActive))vehicleSelect.replaceChildren(new Option(uiText('No active vehicles available'),''));

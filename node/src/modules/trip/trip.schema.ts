@@ -4,6 +4,11 @@ import { routeModeSchema } from "./trip.preview.ts";
 const optionalText = z.string().trim().max(150).optional();
 const optionalAddress = z.string().trim().max(2000).optional();
 
+export const tripIdParamSchema = z.object({
+    tripId: z.string().regex(/^[1-9][0-9]{0,18}$/)
+        .refine(value => BigInt(value) <= 9_223_372_036_854_775_807n, "Trip ID exceeds database range"),
+});
+
 export const tripStatusSchema = z.enum([
     "READY",
     "IN_PROGRESS",

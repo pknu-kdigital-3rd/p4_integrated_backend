@@ -7,6 +7,7 @@ import { matchReplayPreview } from "./trip-road-match.ts";
 import { cleanReplayPreviewPoints } from "./trip-preview-clean.ts";
 import { tripRepository, tripSelect, type ResolvedTripInput } from "./trip.repository.ts";
 import type { CreateTripBody } from "./trip.schema.ts";
+import { deleteTrip } from "./trip.delete.ts";
 
 const activeStatuses = ["READY", "IN_PROGRESS", "PAUSED"];
 
@@ -50,6 +51,7 @@ function positiveId(value: string, label: string): bigint {
 }
 
 export const tripService = {
+    deleteTrip,
     getTrips() { return tripRepository.findRecent(); },
     async createTrip(input: CreateTripBody) {
         const vehicleId = positiveId(input.vehicleId, "vehicleId");

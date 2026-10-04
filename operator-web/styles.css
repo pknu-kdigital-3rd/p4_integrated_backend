@@ -261,6 +261,12 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #trip-status-message,#recordings-status,#telemetry-mode-status { font-size: 12px; color: var(--ui-text-secondary); margin: 12px 0; }
 #trips-list { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; max-height: 200px; overflow: auto; }
 #trips-list li { display: grid; gap: 4px; background: var(--ui-surface-soft); border-radius: 8px; padding: 10px; font-size: 12px; }
+.trip-row-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.trip-actions { flex-shrink: 0; text-align: right; }
+.trip-actions summary { list-style: none; cursor: pointer; font-size: 20px; line-height: 24px; padding: 0 8px; border-radius: 4px; }
+.trip-actions summary::-webkit-details-marker { display: none; }
+.trip-actions summary::marker { content: ''; }
+#trips-list .trip-actions button { display: block; margin-top: 4px; }
 
 /* Recording controls retain the source-aligned overlay and deletion timeline. */
 #recording-saved-content,#recording-live-content { margin-top: 14px; }

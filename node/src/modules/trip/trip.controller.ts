@@ -6,6 +6,9 @@ import { cleanReplayPreviewPoints } from "./trip-preview-clean.ts";
 import { matchReplayPreview } from "./trip-road-match.ts";
 
 export const tripController = {
+    async delete(req: Request, res: Response) {
+        res.json({ data: await tripService.deleteTrip(String(req.params.tripId)) });
+    },
     async getAll(_req: Request, res: Response) {
         res.status(200).json({ data: await tripService.getTrips() });
     },
