@@ -65,11 +65,21 @@ docker compose -f docker-compose.dev.yml logs -f --tail 100 p4-vision
 ```
 
 Replay the problematic scene. Each model skips its first 60 calls, then captures
-60 calls using `cProfile` with `time.thread_time()` as its clock. Models still
-run concurrently. CPython 3.12 allows only one active cProfile tool per interpreter,
-so a capture is deferred when the other call is being profiled; inference is
-never deferred. Both files may therefore take more than 120 frames to complete.
-Capture stops automatically after the configured sample count.
+60 calls using a pstats collector with `time.thread_time()` as its clock and
+thread-local `sys.setprofile` hooks. Models and their captures run concurrently.
+Capture stops automatically after the configured sample count. The completion
+message includes `profiler=thread_local` to identify the corrected implementation.
+Each model also logs its configured frame/warmup counts on first use and progress
+after the first sample and every 20 samples. If no configuration message appears
+while models are running, check the effective settings and mounted code inside
+the container. Files live inside the named Docker volume, not the host repo.
+
+Discard files captured by the earlier cProfile implementation: on Python 3.12
+its monitoring events crossed thread boundaries, mixing different thread CPU
+clocks. Negative times, unrelated decoder calls and inflated totals from those
+files are invalid. The replacement has more Python profiling overhead. Its hook
+bookkeeping CPU is excluded from attribution, but profiling still affects model
+execution; compare the attribution with unprofiled `[cpu]` data.
 
 Wait for fresh `[cpu-profile]` completion messages for **both** models before
 reading files; old files can remain from a previous capture. Files are stored
