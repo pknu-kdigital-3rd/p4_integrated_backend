@@ -15,13 +15,24 @@ class DepthUtilityTests(unittest.TestCase):
         output = DepthFrame(48, 32, torch.ones((32, 48)))
         estimator = Mock()
         estimator.predict.return_value = output
+        timing = {}
         with patch("app.services.depth.perf_counter", side_effect=[10, 10.020]), patch(
             "app.services.depth.thread_time", side_effect=[1, 1.002]
         ):
-            result, wall_ms, cpu_ms = predict_timed(estimator, frame, np.eye(3))
+            result, wall_ms, cpu_ms = predict_timed(estimator, frame, np.eye(3), timing)
         self.assertIs(result, output)
         self.assertAlmostEqual(wall_ms, 20)
         self.assertAlmostEqual(cpu_ms, 2)
+        self.assertEqual(timing, {"start": 10, "end": 10.020})
+
+    def test_failed_depth_call_still_records_finish(self):
+        estimator = Mock()
+        estimator.predict.side_effect = RuntimeError("depth failed")
+        timing = {}
+        with patch("app.services.depth.perf_counter", side_effect=[10, 10.020]):
+            with self.assertRaisesRegex(RuntimeError, "depth failed"):
+                predict_timed(estimator, np.zeros((32, 48, 3), np.uint8), np.eye(3), timing)
+        self.assertEqual(timing, {"start": 10, "end": 10.020})
 
     def test_depth_size_validation_and_selection(self):
         for value, normalized in (("", "yolo"), (" YOLO ", "yolo"), ("original", "source"),

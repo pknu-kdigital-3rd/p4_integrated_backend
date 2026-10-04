@@ -409,12 +409,20 @@ def predict_timed(
     estimator: DepthEstimator,
     frame_bgr: np.ndarray,
     camera_intrinsic: np.ndarray,
+    timing: dict | None = None,
 ) -> tuple[DepthFrame, float, float]:
     started = perf_counter()
     cpu_started = thread_time()
-    result = run_model_cpu_profile("depth", estimator.predict, frame_bgr, camera_intrinsic)
+    if timing is not None:
+        timing["start"] = started
+    try:
+        result = run_model_cpu_profile("depth", estimator.predict, frame_bgr, camera_intrinsic)
+    finally:
+        finished = perf_counter()
+        if timing is not None:
+            timing["end"] = finished
     cpu_ms = (thread_time() - cpu_started) * 1000.0
-    return result, (perf_counter() - started) * 1000.0, cpu_ms
+    return result, (finished - started) * 1000.0, cpu_ms
 
 
 def make_depth_executor() -> ThreadPoolExecutor:

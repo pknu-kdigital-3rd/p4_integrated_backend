@@ -150,6 +150,11 @@ class RunYoloTests(unittest.TestCase):
                     "app.services.yolo.settings.YOLO_DEVICE", "cpu"
                 ), make_depth_executor() as executor:
                     result = run_yolo(InferenceFrame(1, frame, None, None, None), Model(), Depth(), executor)
+                    timeline = result["model_timeline"]
+                    self.assertEqual(timeline["mode"], "parallel")
+                    self.assertGreater(timeline["overlap_ms"], 0)
+                    self.assertLessEqual(timeline["yolo_start_ms"], timeline["yolo_end_ms"])
+                    self.assertLessEqual(timeline["depth_start_ms"], timeline["depth_end_ms"])
                 width, height = expected_size
                 self.assertEqual(observed["yolo_shape"], (64, 96, 3))
                 self.assertEqual(observed["depth_shape"], (height, width, 3))

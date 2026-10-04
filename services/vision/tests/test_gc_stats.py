@@ -76,6 +76,35 @@ class MetricsHeapTraversalTests(unittest.IsolatedAsyncioTestCase):
                       "inference_thread_cpu_ms=10.000", "inference_thread_cpu_pct=0.5",
                       "depth_thread_cpu_pct=0.1", "process_cpu_pct=5.0"):
             self.assertIn(field, report)
+
+    async def test_periodic_timeline_report_includes_same_slow_frame(self):
+        from app.core.state import AppState
+        from app.services.metrics import metrics_worker
+        from app.services.model_timing import model_timeline
+
+        state = AppState()
+        async def tick(_interval):
+            if state.metrics.frames_inferred:
+                raise asyncio.CancelledError()
+            state.metrics.record_inference({
+                "inference_ms": 35., "frame_seq": 42, "frame_epoch": 2,
+                "model_timeline": model_timeline(0, .002, .030,
+                    {"start": .004, "end": .025}, .001, True, True),
+            })
+        with patch("app.services.metrics.settings.ENABLE_PYTHON_ALLOC_PROFILE", False), patch(
+            "app.services.metrics.asyncio.sleep", side_effect=tick
+        ), patch("app.services.metrics._cuda_memory", return_value=(0, 0, 0, 0)), patch("builtins.print") as output:
+            with self.assertRaises(asyncio.CancelledError):
+                await metrics_worker(state)
+        reports = [call.args[0] for call in output.call_args_list]
+        report = next(line for line in reports if line.startswith("[model-timeline]"))
+        slow = next(line for line in reports if line.startswith("[model-timeline-slow]"))
+        self.assertIn("yolo_last_frames=1", report)
+        self.assertIn("mean_yolo_tail_ms=5.00", report)
+        self.assertIn("seq=42", slow)
+        self.assertIn("last_model=yolo", slow)
+        self.assertEqual(state.metrics.model_timelines.take_reports(), [])
+
     async def test_periodic_report_does_not_walk_frozen_or_tracked_objects(self):
         from app.core.state import AppState
         from app.services.metrics import metrics_worker

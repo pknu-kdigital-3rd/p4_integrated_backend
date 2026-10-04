@@ -23,6 +23,7 @@ from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.depth import box_median_distances, depth_input_size, masked_median_distances, predict_timed, scale_camera_intrinsic
 from app.services.gc_runtime import _freeze_loaded_objects
 from app.services.cpu_profile import run_model_cpu_profile
+from app.services.model_timing import model_timeline
 from app.services.mask_transfer import compact_mask_polygons, _copy_tensor_to_host
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
@@ -699,6 +700,8 @@ def run_yolo(
     if class_ids is None and settings.YOLO_CLASSES.strip():
         class_ids = _resolve_yolo_classes(settings.YOLO_CLASSES, yolo_model.names)
     depth_future = None
+    depth_times = {}
+    depth_submitted = None
     if depth_model is not None:
         camera_intrinsic = scale_camera_intrinsic(
             settings.UNIDEPTH_CAMERA_INTRINSIC,
@@ -711,8 +714,9 @@ def run_yolo(
         # new output, and preprocess converts uint8 before in-place division.
         # TensorRT consumes the resulting tensor, not this shared ndarray.
         if depth_executor is not None:
+            depth_submitted = perf_counter()
             depth_future = depth_executor.submit(
-                predict_timed, depth_model, depth_input, camera_intrinsic
+                predict_timed, depth_model, depth_input, camera_intrinsic, depth_times
             )
     model_start = perf_counter()
     model_cpu_start = thread_time()
@@ -756,7 +760,8 @@ def run_yolo(
             with suppress(Exception):
                 depth_future.result()
         raise
-    model_ms = (perf_counter() - model_start) * 1000
+    model_end = perf_counter()
+    model_ms = (model_end - model_start) * 1000
     model_cpu_ms = (thread_time() - model_cpu_start) * 1000
     depth_frame = None
     depth_ms = 0.0
@@ -766,8 +771,9 @@ def run_yolo(
     else:
         try:
             if depth_future is None:
+                depth_submitted = perf_counter()
                 depth_frame, depth_ms, depth_cpu_ms = predict_timed(
-                    depth_model, depth_input, camera_intrinsic
+                    depth_model, depth_input, camera_intrinsic, depth_times
                 )
             else:
                 depth_frame, depth_ms, depth_cpu_ms = depth_future.result()
@@ -852,6 +858,10 @@ def run_yolo(
     postprocess_cpu_ms = (thread_time() - postprocess_cpu_start) * 1000
     inference_cpu_ms = (thread_time() - cpu_start) * 1000
     return {
+        "frame_seq": inference_frame.seq,
+        "frame_epoch": inference_frame.epoch,
+        "model_timeline": model_timeline(start, model_start, model_end, depth_times,
+                                         depth_submitted, depth_executor is not None, depth_status == "ok"),
         "source": _source_metadata(inference_frame),
         "width": source_width,
         "height": source_height,

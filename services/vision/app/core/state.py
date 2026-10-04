@@ -12,6 +12,7 @@ from ultralytics import YOLO
 
 from app.services.source_timeline import SourceTimelineResolver
 from app.services.telemetry import TelemetryStore
+from app.services.model_timing import ModelTimelineMetrics
 
 
 @dataclass
@@ -58,6 +59,7 @@ class VisionMetrics:
     """Cheap process-local counters used by the periodic diagnostics task."""
 
     started_at: float = field(default_factory=monotonic)
+    model_timelines: ModelTimelineMetrics = field(default_factory=ModelTimelineMetrics)
     decoded_frames_received: int = 0
     inference_frames_dropped: int = 0
     inference_enqueue_dropped: int = 0
@@ -87,6 +89,7 @@ class VisionMetrics:
     recording_samples_uploaded: int = 0
 
     def record_inference(self, result: dict[str, Any]) -> None:
+        self.model_timelines.record(result)
         self.frames_inferred += 1
         self.frame_convert_ms_total += float(result.get("frame_convert_ms", 0.0))
         self.model_ms_total += float(result.get("model_ms", 0.0))

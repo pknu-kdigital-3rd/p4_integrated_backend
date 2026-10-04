@@ -272,6 +272,8 @@ async def metrics_worker(state: AppState) -> None:
                 flush=True,
             )
             previous_gc = current_gc
+            for report in state.metrics.model_timelines.take_reports():
+                print(report, flush=True)
 
             if profile_enabled and now >= next_profile_at:
                 snapshot = tracemalloc.take_snapshot()

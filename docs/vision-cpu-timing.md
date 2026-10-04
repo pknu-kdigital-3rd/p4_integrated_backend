@@ -40,6 +40,33 @@ selection and reporting arithmetic, not CPU usage of the deployed models.
 
 ## Locate CPU cost inside the calls
 
+### Determine which model finishes last
+
+Each completed result includes `model_timeline`: YOLO and depth start/end offsets
+in milliseconds from the beginning of that frame's `run_yolo` call. Depth's
+timestamps are measured inside its worker, not when its Future is retrieved.
+Both use `perf_counter`, the same monotonic clock across threads. These are host
+call intervals including preprocessing, GPU waits and model callbacks, not a GPU
+kernel trace. No additional CUDA synchronization is introduced.
+
+Every metrics interval prints `[model-timeline]` with parallel-frame counts for
+`yolo_last_frames`, `depth_last_frames` and ties, plus mean overlap, each model's
+tail beyond the other model's finish, and depth submission-to-start delay.
+Means and finish-order counts cover successful parallel pairs only; serial,
+YOLO-only and depth-error frames have separate counts. Finish order measures
+the last model call; it does not prove the model is the only pipeline bottleneck
+or predict the benefit of speeding it up under CPU/GPU contention.
+
+`[model-timeline-slow]` reports the slowest inference frame in that interval,
+identified by epoch and sequence, with its actual start/end offsets and mode.
+This keeps one frame rather than an accumulating history and avoids per-frame
+console output. Look for its `last_model`, tails and launch delay during drops.
+Input conversion and result postprocessing are outside these model intervals;
+compare their existing metrics too. Disable CPU profiling for baseline timings
+(`VISION_CPU_PROFILE_FRAMES=0`); profiling changes scheduling and CPU cost.
+
+### Capture model CPU profiles
+
 The installed TensorRT backend uses synchronous `execute_v2()`, and YOLO's
 preprocessing uses a blocking `Tensor.to(device)` transfer. These are code
 findings, not yet measured CPU attribution. UniDepth's optimized path stages a
