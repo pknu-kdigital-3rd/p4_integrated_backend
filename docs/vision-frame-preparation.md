@@ -124,6 +124,23 @@ and mask counts. The summary p99 is the average of phase p99s, not a pooled p99.
 `--output /path/report.json` optionally saves each phase's report. This compares
 isolated inference and does not measure WebSocket work or live drop rate.
 
+Use `--frames 0` to measure every video frame from `--start-frame` through EOF.
+Decoded frames and result dictionaries are streamed rather than accumulated;
+only one 8-byte wall timing per frame is retained for exact latency percentiles.
+Warmup caches at most 600 images and rereads the video for measurement, so the
+start of the scene is included. Progress prints every 300 measured frames.
+All phases must report the same measured frame count or the comparison fails.
+`--rounds 1` performs two full-video passes (sync then async); `--rounds 2`
+performs four passes in the balanced order described above.
+
+With physical GPUs 0 and 3 busy, explicitly map available GPUs 1 and 2 for the
+benchmark. `docker compose exec` does not run the entrypoint's GPU-selection
+exports, so do not rely on those process-specific exports being inherited:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T -e CUDA_DEVICE_ORDER=PCI_BUS_ID -e CUDA_VISIBLE_DEVICES=1,2 -e YOLO_DEVICE=cuda:0 -e UNIDEPTH_DEVICE=cuda:1 p4-vision python benchmark_trt_execution.py --video /path/inside/container/scene.mp4 --frames 0 --warmup 30 --rounds 1
+```
+
 For a live follow-up, use the same recording start point and playback duration,
 keep the browser connected and verify `input_fps` and `ws_fps` stay near 30 in
 both captures. Change only `YOLO_TRT_EXECUTION=sync` versus `async`, recreating

@@ -10,7 +10,7 @@ import sys
 import av
 import numpy as np
 
-from benchmark_trt_execution import compare, measure_frames, phase_order, read_frames, run_worker, run_command
+from benchmark_trt_execution import compare, measure_frames, phase_order, read_frames, read_warmup_frames, run_worker, run_command, main
 
 
 class TensorRTComparisonTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class TensorRTComparisonTests(unittest.TestCase):
             "benchmark_trt_execution.settings.VISION_FRAME_PREP", "independent"
         ), patch("benchmark_trt_execution.settings.YOLO_PINNED_INPUT", False), patch(
             "benchmark_trt_execution.settings.VISION_CPU_PROFILE_FRAMES", 0
-        ), patch("benchmark_trt_execution.read_frames", return_value=[object()]), patch(
+        ), patch("benchmark_trt_execution.read_warmup_frames", return_value=[object()]), patch(
             "benchmark_trt_execution.load_yolo_model", return_value=model
         ), patch("benchmark_trt_execution.load_depth_on_worker", new=AsyncMock(return_value=depth)), patch(
             "benchmark_trt_execution.run_yolo"
@@ -54,7 +54,7 @@ class TensorRTComparisonTests(unittest.TestCase):
         with patch("benchmark_trt_execution.perf_counter", side_effect=[1, 1.010, 2, 2.020]), patch(
             "benchmark_trt_execution.process_time", side_effect=[1, 1.005, 2, 2.015]
         ):
-            report = measure_frames(frames, infer)
+            report = measure_frames(iter(frames), infer)
         self.assertEqual([call.args[0] for call in infer.call_args_list], frames)
         self.assertAlmostEqual(report["wall_mean_ms"], 15)
         self.assertAlmostEqual(report["process_cpu_ms"], 10)
@@ -64,11 +64,39 @@ class TensorRTComparisonTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "depth inference failed"):
             measure_frames(frames, infer)
 
+    def test_decode_time_is_excluded_and_empty_stream_rejected(self):
+        clock = [0.]
+        result = dict.fromkeys(("yolo_thread_cpu_ms", "depth_thread_cpu_ms", "frame_convert_thread_cpu_ms",
+                               "postprocess_thread_cpu_ms", "model_ms", "depth_ms", "frame_convert_ms", "inference_ms"), 3.)
+        result.update(depth={"status": "ok"}, model_timeline={"last_model": "depth"})
+        def frames():
+            for _ in range(3):
+                clock[0] += 100  # simulated expensive decode before yielding
+                yield object()
+        def infer(frame):
+            clock[0] += .01
+            return result
+        with patch("benchmark_trt_execution.perf_counter", side_effect=lambda: clock[0]):
+            report = measure_frames(frames(), infer)
+        self.assertEqual(report["frames"], 3)
+        self.assertAlmostEqual(report["wall_mean_ms"], 10)
+        with self.assertRaisesRegex(ValueError, "no video frames"):
+            measure_frames(iter(()), infer)
+
+    def test_cli_accepts_whole_video_and_large_explicit_counts(self):
+        for count in (0, 1000):
+            with patch("sys.argv", ["benchmark_trt_execution.py", "--video", "scene.mp4", "--frames", str(count)]), patch(
+                "pathlib.Path.is_file", return_value=True
+            ), patch("benchmark_trt_execution.compare") as compare_mock:
+                main()
+            self.assertEqual(compare_mock.call_args.args[0].frames, count)
+
     def test_comparison_uses_fresh_processes_and_rejects_failures(self):
         args = SimpleNamespace(video=Path("scene.mp4"), frames=2, warmup=1, start_frame=7,
                                rounds=2, output=None)
         report = dict.fromkeys(("wall_mean_ms", "wall_p99_ms", "yolo_thread_cpu_ms", "depth_thread_cpu_ms",
                                "frame_convert_thread_cpu_ms", "process_cpu_ms", "model_ms", "depth_ms", "mask_mean"), 1.)
+        report["frames"] = 2
         modes = []
         def worker(command, **kwargs):
             mode = command[command.index("--worker") + 1]
@@ -106,6 +134,9 @@ class TensorRTComparisonTests(unittest.TestCase):
         self.assertEqual([(frame.frame.width, frame.frame.height) for frame in frames], [(32, 32)] * 2)
         self.assertLess(frames[0].frame.to_ndarray(format="bgr24").mean(),
                         frames[1].frame.to_ndarray(format="bgr24").mean())
+        self.assertEqual([frame.seq for frame in read_frames(path, 0, 0)], [0, 1, 2])
+        self.assertEqual([frame.seq for frame in read_frames(path, 0, 1)], [1, 2])
+        self.assertEqual(len(read_warmup_frames(path, 30, 0)), 3)
         with self.assertRaisesRegex(ValueError, "found 2"):
             read_frames(path, 3, 1)
 
