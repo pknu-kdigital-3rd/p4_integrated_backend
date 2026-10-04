@@ -37,3 +37,57 @@ CPU timing fields for deeper inspection.
 The running container must contain this code before these fields appear.
 These measurements require deployment validation; local tests verify clock
 selection and reporting arithmetic, not CPU usage of the deployed models.
+
+## Locate CPU cost inside the calls
+
+The installed TensorRT backend uses synchronous `execute_v2()`, and YOLO's
+preprocessing uses a blocking `Tensor.to(device)` transfer. These are code
+findings, not yet measured CPU attribution. UniDepth's optimized path stages a
+pinned input, normalizes/resizes it, calls the compiled model and resizes the
+depth output. Its final completion event is blocking; internal Torch calls can
+still consume CPU for dispatch, allocation or implicit synchronization.
+
+Enable bounded CPU profiles in `.env` on the deployment host:
+
+```env
+VISION_CPU_PROFILE_FRAMES=60
+VISION_CPU_PROFILE_WARMUP_FRAMES=60
+```
+
+The default is zero (disabled). Dev directory-mounts app code and runs Uvicorn
+with reload; recreate to apply the new environment. The unchanged entrypoint is
+individually mounted. No dependency/image build inputs changed:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-vision
+docker compose -f docker-compose.dev.yml exec -T p4-vision python -c "from app.core.settings import settings; print(settings.VISION_CPU_PROFILE_FRAMES, settings.VISION_CPU_PROFILE_WARMUP_FRAMES)"
+docker compose -f docker-compose.dev.yml logs -f --tail 100 p4-vision
+```
+
+Replay the problematic scene. Each model skips its first 60 calls, then captures
+60 calls using `cProfile` with `time.thread_time()` as its clock. Models still
+run concurrently. CPython 3.12 allows only one active cProfile tool per interpreter,
+so a capture is deferred when the other call is being profiled; inference is
+never deferred. Both files may therefore take more than 120 frames to complete.
+Capture stops automatically after the configured sample count.
+
+Wait for fresh `[cpu-profile]` completion messages for **both** models before
+reading files; old files can remain from a previous capture. Files are stored
+in the already-mounted compile-cache volume:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T p4-vision python -c "import pstats; pstats.Stats('/var/cache/p4-vision-compile/cpu-profile/yolo.pstats').strip_dirs().sort_stats('tottime').print_stats(20)"
+docker compose -f docker-compose.dev.yml exec -T p4-vision python -c "import pstats; pstats.Stats('/var/cache/p4-vision-compile/cpu-profile/depth.pstats').strip_dirs().sort_stats('tottime').print_stats(20)"
+```
+
+`tottime` locates CPU charged directly to a function; `cumtime` includes its
+children. Times are aggregate CPU seconds across sampled calls, not GPU duration.
+An expensive C-extension entry identifies a native boundary, not necessarily
+the precise driver/kernel operation inside it. Native child-worker CPU is still
+excluded. Profiling adds overhead: use it for attribution, not baseline FPS or
+CPU utilization. Set `VISION_CPU_PROFILE_FRAMES=0` and recreate after the capture.
+Production app code is baked into its image and requires an app-image rebuild.
+
+No local Vision container is running, and the local GPU cannot execute the
+locked Torch build. Actual model profiles must be captured on the deployment
+GPU; local tests validate bounded capture, concurrent inference, and output files.

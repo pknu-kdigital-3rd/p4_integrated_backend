@@ -22,6 +22,7 @@ from app.core.settings import settings
 from app.core.state import AppState, InferenceFrame, PlaybackItem
 from app.services.depth import box_median_distances, depth_input_size, masked_median_distances, predict_timed, scale_camera_intrinsic
 from app.services.gc_runtime import _freeze_loaded_objects
+from app.services.cpu_profile import model_cpu_profile
 from app.services.mask_transfer import compact_mask_polygons, _copy_tensor_to_host
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
@@ -716,7 +717,7 @@ def run_yolo(
     model_start = perf_counter()
     model_cpu_start = thread_time()
     try:
-        with torch.inference_mode():
+        with torch.inference_mode(), model_cpu_profile("yolo"):
             from app.services.realtime_predictor import RealtimeSegmentationPredictor
 
             if tracking:

@@ -161,6 +161,10 @@ class Settings(BaseSettings):
     METRICS_LOG_INTERVAL_SECONDS: float = Field(default=5.0, ge=1.0, le=60.0)
     VISION_GC_GEN0_THRESHOLD: int | None = Field(default=None, ge=100, le=1_000_000)
     ENABLE_PYTHON_ALLOC_PROFILE: bool = False
+    # Opt-in, bounded profiles of actual YOLO/depth calls using thread CPU time.
+    VISION_CPU_PROFILE_FRAMES: int = Field(default=0, ge=0, le=1000)
+    VISION_CPU_PROFILE_WARMUP_FRAMES: int = Field(default=60, ge=0, le=10000)
+    VISION_CPU_PROFILE_DIR: str = "/var/cache/p4-vision-compile/cpu-profile"
     PYTHON_ALLOC_PROFILE_INTERVAL_SECONDS: float = Field(
         default=30.0, ge=5.0, le=3600.0
     )

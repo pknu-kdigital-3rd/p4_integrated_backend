@@ -17,6 +17,7 @@ import numpy as np
 
 from app.core.settings import settings
 from app.services.depth_path import DepthOnlyPath
+from app.services.cpu_profile import model_cpu_profile
 from app.services.mask_transfer import _copy_tensor_to_host
 
 
@@ -411,7 +412,8 @@ def predict_timed(
 ) -> tuple[DepthFrame, float, float]:
     started = perf_counter()
     cpu_started = thread_time()
-    result = estimator.predict(frame_bgr, camera_intrinsic)
+    with model_cpu_profile("depth"):
+        result = estimator.predict(frame_bgr, camera_intrinsic)
     cpu_ms = (thread_time() - cpu_started) * 1000.0
     return result, (perf_counter() - started) * 1000.0, cpu_ms
 
