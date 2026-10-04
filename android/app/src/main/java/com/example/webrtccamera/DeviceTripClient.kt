@@ -5,6 +5,11 @@ import com.example.webrtccamera.telemetry.model.TelemetryDataset
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -52,6 +57,34 @@ class DeviceTripClient(serverUrl: String) {
 
     fun current(vehicleId: Long): DeviceTrip? = call("/vehicles/$vehicleId/trip")?.let(::parseTrip)
 
+    /** A dedicated dispatcher keeps the long-lived event stream off video/trip request workers. */
+    fun watch(vehicleId: Long, onTrip: (DeviceTrip?) -> Unit, onConnected: (Boolean) -> Unit): Call {
+        val request = Request.Builder().url("$base/api/v1/device/vehicles/$vehicleId/trip/events").build()
+        val call = eventHttp.newCall(request)
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) { onConnected(false) }
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    try {
+                        if (!response.isSuccessful) return
+                        val source = response.body?.source() ?: return
+                        onConnected(true)
+                        while (!call.isCanceled()) {
+                            val line = source.readUtf8Line() ?: break
+                            if (line.startsWith("data: ")) {
+                                val data = JSONObject(line.removePrefix("data: ")).optJSONObject("data")
+                                onTrip(data?.let(::parseTrip))
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // The foreground retry loop reconnects and reconciles the latest state.
+                    } finally { onConnected(false) }
+                }
+            }
+        })
+        return call
+    }
+
     fun change(vehicleId: Long, tripId: Long, action: String, fingerprint: String?): DeviceTrip {
         val body = JSONObject().apply { if (fingerprint != null) put("fingerprint", fingerprint) }
         val data = call("/vehicles/$vehicleId/trips/$tripId/$action", "POST", body)
@@ -96,6 +129,7 @@ class DeviceTripClient(serverUrl: String) {
         // One client for all trip calls: a new OkHttpClient per request would pay a fresh
         // HTTPS connection and TLS handshake every time, which the driver feels on Start Trip.
         private val sharedHttp = OkHttpClient()
+        private val eventHttp = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
 
         // In a tunnel or under a road the phone keeps reporting its last position or a
         // network fix (hundreds of metres of accuracy) instead of nothing. Left in the

@@ -4,7 +4,7 @@ import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-ti
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder} from './live-telemetry.js?v=2';
 import {cancelGlide,createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,glideMarker,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js?v=2';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
-import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOnlyPosition,plannedProgress,recordedProgress,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=13';
+import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOnlyPosition,plannedProgress,recordedProgress,routeProgressAtPosition,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=14';
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
@@ -672,12 +672,19 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
 function drawReplayRouteAt(layer,marker,position){
   const route=routeDisplayFromPosition(currentRouteCoordinates,position,currentRouteBreaks);
   if(!route)return;
-  shownRoutePosition=position;
   // Path and vehicle move together, so both wait out a zoom animation.
   drawWhenNotZooming(layer,()=>{
+    shownRoutePosition=position;
     layer.setLatLngs(route.latLngs);
     cancelGlide(marker);
     marker.setLatLng(route.head);
+    const progress=routeProgressAtPosition(currentRouteTiming?.distances,position);
+    if(progress){
+      document.querySelector('#selected-progress').textContent=`남은 경로: ${(progress.remainingM/1000).toFixed(1)} km`;
+      document.querySelector('#selected-current').textContent=`현 위치 · ${route.head[0].toFixed(5)}, ${route.head[1].toFixed(5)}`;
+      const track=document.querySelector('#trip-track');
+      track.style.setProperty('--trip-progress',`${progress.percent}%`);track.classList.remove('no-progress');
+    }
   });
 }
 // Moves the shown position to target over one route tick (for the coarse fleet
@@ -734,9 +741,12 @@ function showTripDisplay(display){
   document.querySelector('#route-label').textContent='수송 진행 현황';
   let progress=null,label='진행 상태 대기 중';
   if(replayOnly){
-    progress=recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
+    const drawn=running&&shownRoutePosition!=null?routeDisplayFromPosition(currentRouteCoordinates,shownRoutePosition,currentRouteBreaks):null;
+    progress=drawn?routeProgressAtPosition(currentRouteTiming?.distances,shownRoutePosition)
+      :recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
     const replayFix=latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='RECORDED_GPS')?.telemetry;
-    document.querySelector('#selected-current').textContent=replayFix?`현 위치 · ${replayFix.latitude.toFixed(5)}, ${replayFix.longitude.toFixed(5)}`:'현 위치 대기 중';
+    const current=drawn?.head??(replayFix?[replayFix.latitude,replayFix.longitude]:null);
+    document.querySelector('#selected-current').textContent=current?`현 위치 · ${current[0].toFixed(5)}, ${current[1].toFixed(5)}`:'현 위치 대기 중';
     label=progress?`남은 경로: ${(progress.remainingM/1000).toFixed(1)} km`:'GPS 재생 대기 중 · 실제 운행 진행률 아님';
   }else{
     const live=latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='BIMS_LIVE'&&item.telemetry?.source_metadata?.state==='live')

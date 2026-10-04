@@ -24,6 +24,7 @@ class CsvReplayTelemetrySource(
     sessionContext: StreamSessionContext,
     sender: TelemetryBatchSender,
     onStatus: (String) -> Unit = {},
+    onGpsReplayComplete: (StreamSessionContext) -> Unit = {},
 ) : TelemetrySource {
     private val sourceClock = QrSourceClock()
     private val scheduler = TelemetryReplayScheduler(
@@ -32,6 +33,7 @@ class CsvReplayTelemetrySource(
         sessionContext = sessionContext,
         onBatchReady = sender::sendTelemetryBatch,
         onStatus = onStatus,
+        onGpsReplayComplete = onGpsReplayComplete,
     )
 
     override fun start() = scheduler.start()

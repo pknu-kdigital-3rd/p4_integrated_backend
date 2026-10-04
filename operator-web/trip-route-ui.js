@@ -141,6 +141,19 @@ export function recordedProgress(preview,sourceTimestampNs){
   return {percent:total?Math.round(100*travelled/total):100,remainingM:Math.round(total-travelled)};
 }
 
+/** Progress on the exact road geometry and fractional position drawn on the map. */
+export function routeProgressAtPosition(distances,position){
+  if(!Array.isArray(distances)||distances.length<2||!Number.isFinite(position))return null;
+  const total=distances.at(-1);
+  if(!Number.isFinite(total)||total<0)return null;
+  const clamped=Math.max(0,Math.min(distances.length-1,position));
+  const first=Math.min(distances.length-2,Math.floor(clamped)),fraction=clamped-first;
+  const travelled=distances[first]+fraction*(distances[first+1]-distances[first]);
+  if(!Number.isFinite(travelled))return null;
+  return {percent:total?Math.max(0,Math.min(100,100*travelled/total)):clamped===distances.length-1?100:0,
+    remainingM:Math.max(0,Math.round(total-travelled))};
+}
+
 /** "14:10" in the operator's local time (or `timeZone` when given). */
 export function formatClock(value,timeZone){
   const date=value instanceof Date?value:new Date(value??'');

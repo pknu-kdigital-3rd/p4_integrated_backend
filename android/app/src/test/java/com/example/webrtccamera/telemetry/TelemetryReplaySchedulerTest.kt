@@ -32,6 +32,43 @@ class TelemetryReplaySchedulerTest {
         )
 
     @Test
+    fun `gps endpoint completes once before imu end and before wrap`() {
+        val dataset = TelemetryDataset("d", gps = listOf(gps(100), gps(200)), imu = listOf(imu(300)))
+        val batches = mutableListOf<TelemetryBatch>()
+        val completed = mutableListOf<StreamSessionContext>()
+        val scheduler = TelemetryReplayScheduler(dataset, QrSourceClock(), SESSION,
+            onBatchReady = { batches.add(it) },
+            onGpsReplayComplete = {
+                assertEquals(200L, batches.flatMap { batch -> batch.gps }.last().timestampNs)
+                completed.add(it)
+            }, elapsedMillis = { 0L })
+        scheduler.testResync(0)
+        scheduler.advanceCursors(199, 0)
+        assertTrue(completed.isEmpty())
+        scheduler.advanceCursors(200, 1)
+        assertEquals(listOf(SESSION), completed)
+        assertEquals(0, scheduler.nextImuIndex)
+        scheduler.advanceCursors(300, 2)
+        scheduler.testResync(0) // Wrapping must not complete the same trip again.
+        scheduler.advanceCursors(200, 3)
+        assertEquals(1, completed.size)
+        scheduler.stop()
+    }
+
+    @Test
+    fun `tripless replay does not request completion`() {
+        val completed = mutableListOf<StreamSessionContext>()
+        val scheduler = TelemetryReplayScheduler(
+            TelemetryDataset("d", gps = listOf(gps(100)), imu = emptyList()), QrSourceClock(),
+            SESSION.copy(tripId = null), onBatchReady = {},
+            onGpsReplayComplete = { completed.add(it) }, elapsedMillis = { 0L })
+        scheduler.testResync(0)
+        scheduler.advanceCursors(100, 0)
+        assertTrue(completed.isEmpty())
+        scheduler.stop()
+    }
+
+    @Test
     fun `each sample emitted once during normal progression`() {
         val dataset = TelemetryDataset(
             "d",

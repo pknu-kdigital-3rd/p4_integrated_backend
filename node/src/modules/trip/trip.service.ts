@@ -8,6 +8,7 @@ import { cleanReplayPreviewPoints } from "./trip-preview-clean.ts";
 import { tripRepository, tripSelect, type ResolvedTripInput } from "./trip.repository.ts";
 import type { CreateTripBody } from "./trip.schema.ts";
 import { deleteTrip } from "./trip.delete.ts";
+import { notifyTripChange } from "./trip-events.ts";
 
 const activeStatuses = ["READY", "IN_PROGRESS", "PAUSED"];
 
@@ -82,11 +83,12 @@ export const tripService = {
         }
         const trip = await tripRepository.create(resolved, route);
         if (!trip) throw new AppError(500, "Created trip could not be loaded", "TRIP_CREATE_FAILED");
+        notifyTripChange(vehicleId);
         return trip;
     },
-    async current(vehicleIdValue: string) {
+    async current(vehicleIdValue: string, includeTerminal = false) {
         const vehicleId = positiveId(vehicleIdValue, "vehicleId");
-        return prisma.trip.findFirst({ where: { vehicleId, tripStatus: { in: activeStatuses } },
+        return prisma.trip.findFirst({ where: { vehicleId, tripStatus: { in: includeTerminal ? [...activeStatuses, "COMPLETED", "CANCELLED"] : activeStatuses } },
             orderBy: [{ createdAt: "desc" }, { tripId: "desc" }],
             select: { tripId: true, vehicleId: true, destinationName: true, tripStatus: true,
                 routeMode: true, replayPreview: { select: { fingerprint: true, datasetName: true } } } });
@@ -107,6 +109,7 @@ export const tripService = {
         const changed = await prisma.trip.updateMany({ where: { tripId, vehicleId, tripStatus: source },
             data: { tripStatus: target, ...(action === "start" ? { startedAt: new Date() } : { endedAt: new Date() }) } });
         if (!changed.count) throw new AppError(409, "Trip state changed; refresh", "TRIP_STATE_CONFLICT");
+        notifyTripChange(vehicleId);
         return prisma.trip.findUnique({ where: { tripId }, select: tripSelect });
     },
     async cancel(tripIdValue: string) {
@@ -114,7 +117,9 @@ export const tripService = {
         const changed = await prisma.trip.updateMany({ where: { tripId, tripStatus: { in: activeStatuses } },
             data: { tripStatus: "CANCELLED", endedAt: new Date() } });
         if (!changed.count) throw new AppError(409, "Trip is not active", "TRIP_STATE_CONFLICT");
-        return prisma.trip.findUnique({ where: { tripId }, select: tripSelect });
+        const trip = await prisma.trip.findUnique({ where: { tripId }, select: tripSelect });
+        if (trip) notifyTripChange(trip.vehicleId);
+        return trip;
     },
     async display(tripIdValue: string) {
         const tripId = positiveId(tripIdValue, "tripId");

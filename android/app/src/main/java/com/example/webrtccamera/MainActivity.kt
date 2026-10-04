@@ -164,10 +164,25 @@ class MainActivity : AppCompatActivity() {
     private var selectedTelemetryDataset: TelemetryDataset? = null
     private var telemetryReplaySource: CsvReplayTelemetrySource? = null
     private var activeSessionContext: StreamSessionContext? = null
-    private var assignedTrip: DeviceTrip? = null
+    private val tripAssignmentState = TripAssignmentState()
+    private var assignedTrip: DeviceTrip?
+        get() = tripAssignmentState.active
+        set(value) { tripAssignmentState.active = value }
     private var selectedDatasetFingerprint: String? = null
     private var suppressedManualTripId: Long? = null
     private var tripRequestBusy = false
+    private var tripRefreshBusy = false
+    private var terminalTrip: DeviceTrip?
+        get() = tripAssignmentState.terminal
+        set(value) { tripAssignmentState.terminal = value }
+    private var tripEvents: okhttp3.Call? = null
+    private var tripEventsKey: String? = null
+    private var tripEventsConnected = false
+    private var tripEventsForeground = false
+    private var tripStateRevision = 0L
+    private var tripEventsGeneration = 0L
+    private var pendingGpsCompletionTripId: Long? = null
+    private val gpsCompletionRetry = Runnable { maybeCompleteGpsTrip() }
     // Non-null while a trip-related transfer runs; shown with the progress bar.
     private var tripBusyMessage: String? = null
     private var previewUploadBusy = false
@@ -185,7 +200,8 @@ class MainActivity : AppCompatActivity() {
     private val tripPollHandler = Handler(Looper.getMainLooper())
     private val tripPoll = object : Runnable {
         override fun run() {
-            refreshTripAssignment()
+            ensureTripEvents()
+            if (!tripEventsConnected) refreshTripAssignment()
             tripPollHandler.postDelayed(this, 5_000)
         }
     }
@@ -394,6 +410,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        tripEventsForeground = true
         tripPollHandler.removeCallbacks(tripPoll)
         tripPollHandler.post(tripPoll)
         if (resumeStreamOnForeground) {
@@ -452,9 +469,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderTripStatus() {
         if (!::tripButton.isInitialized) return
-        val trip = assignedTrip
-        tripButton.isEnabled = !tripRequestBusy && trip != null && trip.status in listOf("READY", "IN_PROGRESS", "MANUAL")
-        tripButton.text = if (trip?.status == "IN_PROGRESS") "Stop Trip" else "Start Trip"
+        val trip = assignedTrip ?: terminalTrip
+        tripButton.isEnabled = !tripRequestBusy && trip != null && trip.status in listOf("READY", "IN_PROGRESS", "MANUAL", "COMPLETED", "CANCELLED")
+        tripButton.text = when (trip?.status) {
+            "COMPLETED", "CANCELLED" -> "Dismiss"
+            "IN_PROGRESS" -> "Stop Trip"
+            else -> "Start Trip"
+        }
         val busy = tripRequestBusy || previewUploadBusy || tripStreamSwitchPending
         tripProgress.visibility = if (busy) View.VISIBLE else View.GONE
         tripStatusText.text = when {
@@ -496,32 +517,74 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshTripAssignment() {
-        if (!::telemetryIoExecutor.isInitialized || tripRequestBusy) return
-        val vehicleId = vehicleIdInput() ?: run { assignedTrip = null; renderTripStatus(); return }
+    private fun ensureTripEvents() {
+        if (!tripEventsForeground) return
+        val vehicleId = vehicleIdInput() ?: return
         val endpoint = normalizeServerUrl(serverUrl.text.toString()) ?: return
+        val key = "$endpoint/$vehicleId"
+        if (tripEventsKey == key && tripEvents != null) return
+        tripEvents?.cancel()
+        if (tripEventsKey != key) {
+            assignedTrip = null
+            terminalTrip = null
+            tripStateRevision++
+            renderTripStatus()
+        }
+        val generation = ++tripEventsGeneration
+        tripEventsKey = key
+        tripEventsConnected = false
+        tripEvents = DeviceTripClient(endpoint).watch(vehicleId,
+            onTrip = { current -> runOnUiThread {
+                if (tripEventsForeground && tripEventsKey == key && tripEventsGeneration == generation) {
+                    tripStateRevision++
+                    applyServerTrip(current)
+                }
+            } },
+            onConnected = { connected -> runOnUiThread {
+                if (tripEventsForeground && tripEventsKey == key && tripEventsGeneration == generation) {
+                    tripEventsConnected = connected
+                    if (!connected) tripEvents = null
+                }
+            } },
+        )
+    }
+
+    private fun applyServerTrip(current: DeviceTrip?) {
+        val previous = assignedTrip
+        if (current?.status in listOf("COMPLETED", "CANCELLED")) suppressedManualTripId = current?.tripId
+        val dismissed = current?.let { getPreferences(MODE_PRIVATE).getLong("dismissedTrip:${it.vehicleId}", -1) } ?: -1
+        tripAssignmentState.update(current, dismissed)
+        if (previous != null && previous.status != "MANUAL" && assignedTrip?.tripId != previous.tripId) {
+            suppressedManualTripId = previous.tripId
+        }
+        val currentRecording = assignedTrip?.takeIf {
+            it.status == "IN_PROGRESS" && (it.routeMode != "REPLAY_ONLY" || it.fingerprint == selectedDatasetFingerprint)
+        }?.tripId
+        if (streaming.get() && activeSessionContext?.tripId != currentRecording) switchStreamToCurrentTrip()
+        if (pendingGpsCompletionTripId != assignedTrip?.tripId) pendingGpsCompletionTripId = null
+        renderTripStatus()
+        maybeAutoStartTrip()
+        maybeCompleteGpsTrip()
+    }
+
+    private fun refreshTripAssignment() {
+        ensureTripEvents()
+        if (!::telemetryIoExecutor.isInitialized || tripRequestBusy || tripRefreshBusy) return
+        val vehicleId = vehicleIdInput() ?: run { assignedTrip = null; terminalTrip = null; renderTripStatus(); return }
+        val endpoint = normalizeServerUrl(serverUrl.text.toString()) ?: return
+        val revision = tripStateRevision
+        tripRefreshBusy = true
         telemetryIoExecutor.execute {
             val result = runCatching { DeviceTripClient(endpoint).current(vehicleId) }
             runOnUiThread {
-                if (vehicleIdInput() != vehicleId) return@runOnUiThread
-                val previous = assignedTrip
-                if (result.isFailure && previous != null) return@runOnUiThread
-                val current = result.getOrNull()
-                // A server trip that disappeared was completed or cancelled; never
-                // resurrect it through the saved manual Trip ID fallback.
-                if (result.isSuccess && previous != null && previous.status != "MANUAL" && current?.tripId != previous.tripId) {
-                    suppressedManualTripId = previous.tripId
+                tripRefreshBusy = false
+                if (vehicleIdInput() != vehicleId || normalizeServerUrl(serverUrl.text.toString()) != endpoint || revision != tripStateRevision) return@runOnUiThread
+                result.onSuccess { applyServerTrip(it) }.onFailure {
+                    if (assignedTrip == null && terminalTrip == null) {
+                        assignedTrip = fallbackManualTrip(vehicleId)
+                        renderTripStatus()
+                    }
                 }
-                // The saved manual Trip ID only stands in when the server cannot be asked;
-                // when it answers "no active trip", the relay would reject that ID anyway.
-                assignedTrip = if (result.isSuccess) current else fallbackManualTrip(vehicleId)
-                if (result.isSuccess && previous?.status == "IN_PROGRESS" && assignedTrip?.tripId != previous.tripId) {
-                    if (streaming.get()) switchStreamToCurrentTrip()
-                } else if (result.isSuccess && previous?.status == "READY" && assignedTrip?.status == "IN_PROGRESS" && streaming.get()) {
-                    switchStreamToCurrentTrip()
-                }
-                renderTripStatus()
-                maybeAutoStartTrip()
             }
         }
     }
@@ -543,11 +606,24 @@ class MainActivity : AppCompatActivity() {
         toggleTrip()
     }
 
+    private fun maybeCompleteGpsTrip() {
+        val trip = assignedTrip ?: return
+        if (tripEventsForeground && !tripRequestBusy && trip.status == "IN_PROGRESS" &&
+            trip.routeMode == "REPLAY_ONLY" && trip.tripId == pendingGpsCompletionTripId) toggleTrip()
+    }
+
     private fun toggleTrip() {
         if (tripRequestBusy) return
+        terminalTrip?.let {
+            getPreferences(MODE_PRIVATE).edit().putLong("dismissedTrip:${it.vehicleId}", it.tripId).apply()
+            tripAssignmentState.dismiss()
+            renderTripStatus()
+            return
+        }
         val vehicleId = vehicleIdInput() ?: run { setStatus("Enter Vehicle ID"); return }
         val trip = assignedTrip ?: fallbackManualTrip(vehicleId) ?: run { setStatus("No assigned or saved Trip ID"); return }
         val endpoint = normalizeServerUrl(serverUrl.text.toString()) ?: run { setStatus("Enter a valid server URL"); return }
+        val requestRevision = tripStateRevision
         val action = if (trip.status == "IN_PROGRESS") "complete" else "start"
         val dataset = selectedTelemetryDataset
         // The preview was normally published when the dataset was chosen; only send it
@@ -574,16 +650,23 @@ class MainActivity : AppCompatActivity() {
                 tripRequestBusy = false
                 result.onSuccess { (changed, fingerprint) ->
                     // The start response omits the preview; the server just matched this fingerprint.
-                    assignedTrip = changed.copy(fingerprint = fingerprint ?: changed.fingerprint)
                     selectedDatasetFingerprint = fingerprint
-                    if (action == "complete") suppressedManualTripId = changed.tripId
-                    if (streaming.get()) {
-                        tripStreamSwitchPending = true
-                        tripBusyMessage = "Trip ${changed.tripId} ${changed.status}: updating stream…"
-                        switchStreamToCurrentTrip()
+                    // A push may already have applied this response; applying twice must not rotate the stream.
+                    if (tripStateRevision == requestRevision) {
+                        tripStateRevision++
+                        applyServerTrip(changed.copy(fingerprint = fingerprint ?: changed.fingerprint))
+                    } else if (assignedTrip?.tripId == changed.tripId && assignedTrip?.status == changed.status) {
+                        // Reconcile recording identity after a start push that preceded preview upload acknowledgement.
+                        applyServerTrip(assignedTrip)
                     }
                     setStatus("Trip ${changed.tripId}: ${changed.status}")
-                }.onFailure { setStatus("Trip change failed: ${it.message}") }
+                }.onFailure {
+                    setStatus("Trip change failed: ${it.message}")
+                    if (action == "complete" && pendingGpsCompletionTripId == trip.tripId && tripEventsForeground) {
+                        tripPollHandler.removeCallbacks(gpsCompletionRetry)
+                        tripPollHandler.postDelayed(gpsCompletionRetry, 1_000)
+                    }
+                }
                 renderTripStatus()
             }
         }
@@ -754,6 +837,14 @@ class MainActivity : AppCompatActivity() {
                 sessionContext = sessionContext,
                 sender = TelemetryDataChannelSender(publisher!!),
                 onStatus = { message -> runOnUiThread { if (streaming.get()) setTelemetryStatus(message) } },
+                onGpsReplayComplete = { context -> runOnUiThread {
+                    val trip = assignedTrip
+                    if (streaming.get() && trip != null && trip.tripId == context.tripId &&
+                        trip.status == "IN_PROGRESS" && trip.routeMode == "REPLAY_ONLY") {
+                        pendingGpsCompletionTripId = trip.tripId
+                        maybeCompleteGpsTrip()
+                    }
+                } },
             ).also {
                 it.start()
                 setTelemetryStatus("Telemetry: waiting for QR…")
@@ -1371,7 +1462,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        tripEventsForeground = false
+        tripEventsKey = null
+        tripEventsConnected = false
+        tripEvents?.cancel()
+        tripEvents = null
         tripPollHandler.removeCallbacks(tripPoll)
+        tripPollHandler.removeCallbacks(gpsCompletionRetry)
         // CameraX and the publisher are stopped while Android has the screen
         // locked or the app is backgrounded. Remember the operator's intent so
         // the stream (and its map GPS marker) comes back automatically on wake.

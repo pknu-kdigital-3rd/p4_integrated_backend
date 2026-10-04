@@ -27,6 +27,7 @@ class TelemetryReplayScheduler(
     sessionContext: StreamSessionContext,
     private val onBatchReady: (TelemetryBatch) -> Unit,
     private val onStatus: (String) -> Unit = {},
+    private val onGpsReplayComplete: (StreamSessionContext) -> Unit = {},
     private val elapsedMillis: () -> Long = SystemClock::elapsedRealtime,
 ) {
     private val executor = Executors.newSingleThreadScheduledExecutor { task ->
@@ -46,6 +47,7 @@ class TelemetryReplayScheduler(
     @Volatile private var running = false
     private var lastReportedQrClockState: SourceClockState? = null
     private var endOfDatasetLogged = false
+    private var completedGpsTripId: Long? = null
     // False until the cursors have been positioned at a known source time. Replay usually
     // starts before the first QR decode, and that first anchor can land anywhere in the
     // footage; without this, every sample from the start of the dataset would be released
@@ -185,6 +187,14 @@ class TelemetryReplayScheduler(
             pendingImu.add(dataset.imu[nextImuIndex])
             nextImuIndex++
             if (pendingImu.size >= MAX_IMU_PER_BATCH) flush(sourceNow, nowMs)
+        }
+        val tripId = sessionContext.tripId
+        if (dataset.gps.isNotEmpty() && nextGpsIndex >= dataset.gps.size &&
+            tripId != null && completedGpsTripId != tripId) {
+            // Queue the final GPS before requesting completion; never wait for IMU or a wrap.
+            flush(sourceNow, nowMs)
+            completedGpsTripId = tripId
+            onGpsReplayComplete(sessionContext)
         }
         if (!endOfDatasetLogged && nextGpsIndex >= dataset.gps.size && nextImuIndex >= dataset.imu.size) {
             endOfDatasetLogged = true
