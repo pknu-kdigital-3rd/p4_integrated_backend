@@ -40,6 +40,7 @@ class InferenceFrame:
     resolved_source_timestamp_ns: int | None = None
     source_timeline_status: str = "unavailable"
     source_timeline_generation: int = 0
+    enqueued_at: float | None = None
 
 
 @dataclass
@@ -67,6 +68,14 @@ class VisionMetrics:
     frames_inferred: int = 0
     playback_frames_published: int = 0
     websocket_frames_sent: int = 0
+    decode_calls: int = 0
+    decode_thread_cpu_ms_total: float = 0.0
+    decode_wait_ms_total: float = 0.0
+    inference_attempts: int = 0
+    inference_dispatch_ms_total: float = 0.0
+    inference_resume_ms_total: float = 0.0
+    frame_age_samples: int = 0
+    frame_age_ms_total: float = 0.0
     decode_ms_total: float = 0.0
     frame_convert_ms_total: float = 0.0
     model_ms_total: float = 0.0
@@ -109,6 +118,14 @@ class VisionMetrics:
             "frames_inferred": self.frames_inferred,
             "playback_frames_published": self.playback_frames_published,
             "websocket_frames_sent": self.websocket_frames_sent,
+            "decode_calls": self.decode_calls,
+            "decode_thread_cpu_ms_total": self.decode_thread_cpu_ms_total,
+            "decode_wait_ms_total": self.decode_wait_ms_total,
+            "inference_attempts": self.inference_attempts,
+            "inference_dispatch_ms_total": self.inference_dispatch_ms_total,
+            "inference_resume_ms_total": self.inference_resume_ms_total,
+            "frame_age_samples": self.frame_age_samples,
+            "frame_age_ms_total": self.frame_age_ms_total,
             "decode_ms_total": self.decode_ms_total,
             "frame_convert_ms_total": self.frame_convert_ms_total,
             "model_ms_total": self.model_ms_total,

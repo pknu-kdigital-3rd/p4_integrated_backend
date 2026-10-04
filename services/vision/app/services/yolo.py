@@ -24,6 +24,7 @@ from app.services.depth import box_median_distances, depth_input_size, masked_me
 from app.services.gc_runtime import _freeze_loaded_objects
 from app.services.cpu_profile import run_model_cpu_profile
 from app.services.model_timing import model_timeline
+from app.services.live_execution import OrderedDecoder, timed_inference
 from app.services.frame_preparation import shared_source_inputs
 from app.services.mask_transfer import compact_mask_polygons, _copy_tensor_to_host
 
@@ -441,6 +442,7 @@ async def _enqueue_inference_frame(
             return
 
     try:
+        inference_frame.enqueued_at = perf_counter()
         queue.put_nowait(inference_frame)
     except asyncio.QueueFull:
         # A finite queue cannot be full here in the normal event-loop path,
@@ -978,7 +980,15 @@ async def _queue_decoded_frame(
 
 
 async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None:
-    decoder = av.CodecContext.create("h264", "r")
+    decoder = OrderedDecoder(state.metrics)
+    try:
+        await decoder.reset()
+        await _decode_records(reader, state, decoder)
+    finally:
+        await decoder.close()
+
+
+async def _decode_records(reader, state, decoder) -> None:
     pending: deque[dict] = deque()
     pending_by_pts: dict[int, deque[dict]] = {}
     while True:
@@ -999,7 +1009,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
                     state.last_inference_result_epoch = None
                     state.fault = None
                     state.result_condition.notify_all()
-            decoder = av.CodecContext.create("h264", "r")
+            await decoder.reset()
             pending.clear()
             pending_by_pts.clear()
             state.source_timeline.reset()
@@ -1018,7 +1028,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
                 state.last_inference_result_epoch = None
                 state.fault = None
                 state.result_condition.notify_all()
-            decoder = av.CodecContext.create("h264", "r")
+            await decoder.reset()
             pending.clear()
             pending_by_pts.clear()
             state.source_timeline.reset()
@@ -1039,13 +1049,9 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
                 pending_by_pts.setdefault(int(metadata["pts_90k"]), deque()).append(
                     metadata
                 )
-            decode_started = perf_counter()
             try:
-                decoded = decoder.decode(packet)
+                decoded = await decoder.decode(packet)
             except av.error.InvalidDataError as exc:
-                state.metrics.decode_ms_total += (
-                    perf_counter() - decode_started
-                ) * 1000
                 pending.clear()
                 pending_by_pts.clear()
                 await state.feed_commands.put(
@@ -1054,7 +1060,6 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
                 raise RuntimeError(
                     "H.264 decode failed; requested a new epoch"
                 ) from exc
-            state.metrics.decode_ms_total += (perf_counter() - decode_started) * 1000
             for frame in decoded:
                 source = None
                 if frame.pts is not None and pending_by_pts.get(int(frame.pts)):
@@ -1068,7 +1073,7 @@ async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None
                 await _queue_decoded_frame(state, source, frame)
         elif kind == K_END:
             state.android_live = False
-            for frame in decoder.decode():
+            for frame in await decoder.decode():
                 if pending:
                     source = pending.popleft()
                     if source.get("pts_90k") is not None and pending_by_pts.get(
@@ -1225,6 +1230,9 @@ async def yolo_worker(state: AppState) -> None:
             # tracker's identities and motion models must not survive it.
             await asyncio.to_thread(reset_tracker, state.yolo_model)
             state.tracker_epoch = inference_frame.epoch
+        if inference_frame.enqueued_at is not None and not retrying:
+            state.metrics.frame_age_samples += 1
+            state.metrics.frame_age_ms_total += max(0.0, perf_counter() - inference_frame.enqueued_at) * 1000
         result = None
         last_error: Exception | None = None
         inference_wait_ms = 0.0
@@ -1234,7 +1242,7 @@ async def yolo_worker(state: AppState) -> None:
                 inference_wait_started = perf_counter()
                 retry_delay = None
                 try:
-                    result = await asyncio.to_thread(run_inference, inference_frame)
+                    result = await timed_inference(run_inference, inference_frame, state.metrics)
                     break
                 except Exception as exc:  # retry the same frame, never skip it
                     last_error = exc

@@ -229,6 +229,18 @@ async def metrics_worker(state: AppState) -> None:
                 f"{peak_reserved / 1024**2:.0f}MiB",
                 flush=True,
             )
+            scheduling_fields = {
+                "decode_call_ms": ("decode_ms_total", "decode_calls"),
+                "decode_wait_ms": ("decode_wait_ms_total", "decode_calls"),
+                "decode_thread_cpu_ms": ("decode_thread_cpu_ms_total", "decode_calls"),
+                "inference_dispatch_ms": ("inference_dispatch_ms_total", "inference_attempts"),
+                "inference_resume_ms": ("inference_resume_ms_total", "inference_attempts"),
+                "frame_age_ms": ("frame_age_ms_total", "frame_age_samples"),
+            }
+            print("[live-scheduling] " + " ".join(
+                f"{label}={_average_ms(current, previous, total, int(current[count]) - int(previous[count])):.3f}"
+                for label, (total, count) in scheduling_fields.items()
+            ), flush=True)
             telemetry = state.telemetry_store.counters
             gps_buffer, imu_buffer = state.telemetry_store.buffer_sizes()
             print(
