@@ -96,3 +96,41 @@ buffer reuse, stream/error handling, TensorRT binding APIs, validation/fallback,
 dynamic shapes and output order with CPU tests/mocks. The local GPU cannot run
 the locked Torch build; pinned CUDA copies and actual TensorRT enqueue/outputs
 must be verified on the deployment GPU. No deployed GPU speedup is claimed.
+
+## Controlled TensorRT comparison
+
+`benchmark_trt_execution.py` isolates async versus sync while keeping shared
+preparation, pinned input, model resolutions, tracking and concurrent UniDepth.
+Use a local video of the scene, visible at the same path inside the container.
+Pause live playback/feed inference and wait for its queue to drain before the
+benchmark; concurrent live inference on the same GPU would invalidate isolation.
+The benchmark loads its own model copies, so it also needs GPU memory for them.
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T p4-vision python benchmark_trt_execution.py --video /path/inside/container/scene.mp4 --frames 120 --start-frame 0 --warmup 30 --rounds 2
+```
+
+Each phase starts a fresh process, warms up, resets the tracker, then measures
+the same decoded frames in the same order. GC is configured and frozen after
+warmup as in the live service. Two rounds use sync/async then
+async/sync to reduce order effects. CPU profiling is disabled and the active
+TensorRT mode is checked after warmup. Depth errors or eager fallback reject
+the comparison. Startup, decoding and engine validation are excluded from the
+timed calls; no extra per-frame device-wide sync is added to `run_yolo`.
+
+Copy both `[trt-ab-summary]` lines and the `[trt-ab-result]` lines. They include
+caller YOLO/depth/conversion CPU, all-process CPU per frame, wall latency/tails
+and mask counts. The summary p99 is the average of phase p99s, not a pooled p99.
+`--output /path/report.json` optionally saves each phase's report. This compares
+isolated inference and does not measure WebSocket work or live drop rate.
+
+For a live follow-up, use the same recording start point and playback duration,
+keep the browser connected and verify `input_fps` and `ws_fps` stay near 30 in
+both captures. Change only `YOLO_TRT_EXECUTION=sync` versus `async`, recreating
+the dev container for each environment change. Keep shared preparation and
+pinned input enabled. Exclude startup validation, initial bursts and reconnect
+intervals before comparing `[cpu]` and pipeline metrics.
+
+The CLI is locally verified for native video decoding, identical frame order,
+CPU accounting, alternating fresh processes and error handling. Actual TensorRT
+comparison requires the deployment GPU; it cannot execute on the local GPU.
