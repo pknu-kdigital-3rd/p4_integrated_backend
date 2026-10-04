@@ -109,6 +109,13 @@ Tracking CPU transfers and variable-sized depth filtering remain synchronization
 boundaries. The contour benchmark does not include those inference operations;
 only staging-buffer changes affect that benchmark.
 
+Periodic GC reports use `gc_frozen_at_freeze`, the count captured at the last
+explicit startup/warmup freeze. They do not call `gc.get_freeze_count()` every
+interval: in CPython 3.12 that function traverses the permanent object list on
+the reporting thread. Such a diagnostic scan can stall the event loop without
+appearing in the GC collection-pause counters. The snapshot is not a live count;
+objects freed after the freeze may reduce the actual frozen population.
+
 Run in the existing dev container to match its GPU visibility and dependencies:
 
 ```bash

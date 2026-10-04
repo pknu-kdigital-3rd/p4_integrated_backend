@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from app.core.settings import Settings
 from app.core.state import AppState, InferenceFrame
-from app.services.gc_runtime import _freeze_loaded_objects, configure_gc
+from app.services.gc_runtime import _freeze_loaded_objects, configure_gc, frozen_count_at_freeze
 from app.services.yolo import yolo_worker
 
 
@@ -23,6 +23,8 @@ class GCRuntimeTests(unittest.TestCase):
             _freeze_loaded_objects("test startup")
         self.assertEqual(calls, ["collect", "freeze"])
         log.assert_called_once_with("GC: froze 123 objects after test startup in 0.2 s", flush=True)
+        with patch("gc.get_freeze_count", side_effect=AssertionError("periodic frozen heap scan")):
+            self.assertEqual(frozen_count_at_freeze(), 123)
 
     def test_threshold_override_preserves_older_generation_thresholds(self):
         with patch("app.services.gc_runtime.gc.get_threshold", return_value=(700, 11, 12)), patch(

@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - resource is not available on Windows
 from app.core.settings import settings
 from app.core.state import AppState
 from app.services.gc_stats import install
+from app.services.gc_runtime import frozen_count_at_freeze
 
 
 _PROCESS = psutil.Process(os.getpid()) if psutil is not None else None
@@ -106,7 +107,7 @@ def _gc_report(
         f"gc0_per_frame={per_frame} "
         f"gc_collected={int(current['gc_collected']) - int(previous['gc_collected'])} "
         f"gc_uncollectable={int(current['gc_uncollectable']) - int(previous['gc_uncollectable'])} "
-        f"gc_threshold={threshold} gc_frozen={frozen}"
+        f"gc_threshold={threshold} gc_frozen_at_freeze={frozen}"
     )
     if count_tracked is not None:
         report += f" gc_tracked={count_tracked}"
@@ -248,7 +249,7 @@ async def metrics_worker(state: AppState) -> None:
                     current_gc, previous_gc, gc_stats.take_max_pause_ms(),
                     inferred_delta, elapsed,
                     len(gc.get_objects()) if profile_enabled else None,
-                    threshold=gc.get_threshold(), frozen=gc.get_freeze_count(),
+                    threshold=gc.get_threshold(), frozen=frozen_count_at_freeze(),
                 ),
                 flush=True,
             )

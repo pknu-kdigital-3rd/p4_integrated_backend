@@ -1,6 +1,7 @@
+import asyncio
 import gc
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.services.gc_stats import GCStats, install
 from app.services.metrics import _gc_report
@@ -44,12 +45,30 @@ class GCStatsTests(unittest.TestCase):
             "gc_ms=20.000", "gc_pct=1.000", "gc_max_ms=9.000",
             "gc0=6", "gc1=2", "gc2=1", "gc0_per_frame=2.000",
             "gc_collected=7", "gc_uncollectable=1",
-            "gc_threshold=(700, 10, 10)", "gc_frozen=100", "gc_tracked=42",
+            "gc_threshold=(700, 10, 10)", "gc_frozen_at_freeze=100", "gc_tracked=42",
         ):
             self.assertIn(expected, report)
         idle = _gc_report(after, after, 0, 0, 0, None, threshold=(700, 10, 10), frozen=0)
         self.assertIn("gc0_per_frame=n/a", idle)
         self.assertNotIn("gc_tracked", idle)
+
+
+class MetricsHeapTraversalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_periodic_report_does_not_walk_frozen_or_tracked_objects(self):
+        from app.core.state import AppState
+        from app.services.metrics import metrics_worker
+
+        with patch("app.services.metrics.settings.ENABLE_PYTHON_ALLOC_PROFILE", False), patch(
+            "app.services.metrics.asyncio.sleep", new=AsyncMock(side_effect=[None, asyncio.CancelledError()])
+        ), patch("app.services.metrics._cuda_memory", return_value=(0, 0, 0, 0)), patch(
+            "app.services.metrics.frozen_count_at_freeze", return_value=1047533
+        ), patch("gc.get_freeze_count", side_effect=AssertionError("frozen heap scan")), patch(
+            "gc.get_objects", side_effect=AssertionError("tracked heap scan")
+        ), patch("builtins.print") as output:
+            with self.assertRaises(asyncio.CancelledError):
+                await metrics_worker(AppState())
+        reports = [call.args[0] for call in output.call_args_list]
+        self.assertTrue(any("gc_frozen_at_freeze=1047533" in report for report in reports))
 
 
 if __name__ == "__main__":
