@@ -9,7 +9,7 @@ from collections import deque
 from contextlib import asynccontextmanager, suppress
 from fractions import Fraction
 from functools import partial
-from time import perf_counter
+from time import perf_counter, thread_time
 from pathlib import Path
 
 import av
@@ -645,6 +645,8 @@ def run_yolo(
     depth_executor=None,
 ) -> dict:
     start = perf_counter()
+    cpu_start = thread_time()
+    convert_cpu_start = cpu_start
     frame_convert_start = start
     source_width = int(getattr(inference_frame.frame, "width", 0) or 0)
     source_height = int(getattr(inference_frame.frame, "height", 0) or 0)
@@ -684,6 +686,7 @@ def run_yolo(
                     width=depth_width, height=depth_height, format="bgr24",
                 ).to_ndarray()
     frame_convert_ms = (perf_counter() - frame_convert_start) * 1000
+    frame_convert_cpu_ms = (thread_time() - convert_cpu_start) * 1000
     if settings.YOLO_INFERENCE_SIZE == "auto":
         longest_side = max(frame_width, frame_height)
         imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
@@ -711,6 +714,7 @@ def run_yolo(
                 predict_timed, depth_model, depth_input, camera_intrinsic
             )
     model_start = perf_counter()
+    model_cpu_start = thread_time()
     try:
         with torch.inference_mode():
             from app.services.realtime_predictor import RealtimeSegmentationPredictor
@@ -750,23 +754,26 @@ def run_yolo(
                 depth_future.result()
         raise
     model_ms = (perf_counter() - model_start) * 1000
+    model_cpu_ms = (thread_time() - model_cpu_start) * 1000
     depth_frame = None
     depth_ms = 0.0
+    depth_cpu_ms = 0.0
     if depth_model is None:
         depth_status = "depth_unavailable"
     else:
         try:
             if depth_future is None:
-                depth_frame, depth_ms = predict_timed(
+                depth_frame, depth_ms, depth_cpu_ms = predict_timed(
                     depth_model, depth_input, camera_intrinsic
                 )
             else:
-                depth_frame, depth_ms = depth_future.result()
+                depth_frame, depth_ms, depth_cpu_ms = depth_future.result()
             depth_status = "ok"
         except Exception as exc:
             depth_status = "inference_error"
             print(f"UniDepth inference failed: {type(exc).__name__}: {exc}", flush=True)
     postprocess_start = perf_counter()
+    postprocess_cpu_start = thread_time()
     detections = []
     bbox_format = settings.BBOX_FORMAT
     coordinate_field = BOX_COORDINATE_FIELDS[bbox_format]
@@ -839,6 +846,8 @@ def run_yolo(
                     )
                     detection["mask_format"] = "polygon_normalized"
             detections.append(detection)
+    postprocess_cpu_ms = (thread_time() - postprocess_cpu_start) * 1000
+    inference_cpu_ms = (thread_time() - cpu_start) * 1000
     return {
         "source": _source_metadata(inference_frame),
         "width": source_width,
@@ -850,6 +859,11 @@ def run_yolo(
         "model_ms": round(model_ms, 1),
         "depth_ms": round(depth_ms, 1),
         "postprocess_ms": round((perf_counter() - postprocess_start) * 1000, 1),
+        "frame_convert_thread_cpu_ms": frame_convert_cpu_ms,
+        "yolo_thread_cpu_ms": model_cpu_ms,
+        "depth_thread_cpu_ms": depth_cpu_ms,
+        "postprocess_thread_cpu_ms": postprocess_cpu_ms,
+        "inference_thread_cpu_ms": inference_cpu_ms,
         "depth": {
             "model": "unidepth-v2-vitb14",
             "status": depth_status,

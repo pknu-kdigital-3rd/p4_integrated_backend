@@ -54,6 +54,28 @@ class GCStatsTests(unittest.TestCase):
 
 
 class MetricsHeapTraversalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cpu_report_aggregates_stage_clocks_and_one_core_percentages(self):
+        from app.core.state import AppState
+        from app.services.metrics import metrics_worker
+
+        state = AppState()
+        async def tick(_interval):
+            if state.metrics.frames_inferred:
+                raise asyncio.CancelledError()
+            state.metrics.record_inference({"yolo_thread_cpu_ms": 4, "depth_thread_cpu_ms": 2,
+                                            "inference_thread_cpu_ms": 10})
+        with patch("app.services.metrics.settings.ENABLE_PYTHON_ALLOC_PROFILE", False), patch(
+            "app.services.metrics.asyncio.sleep", side_effect=tick
+        ), patch("app.services.metrics._cuda_memory", return_value=(0, 0, 0, 0)), patch(
+            "app.services.metrics.monotonic", side_effect=[0, 0, 2]
+        ), patch("app.services.metrics.process_time", side_effect=[1, 1.1]), patch("builtins.print") as output:
+            with self.assertRaises(asyncio.CancelledError):
+                await metrics_worker(state)
+        report = next(call.args[0] for call in output.call_args_list if call.args[0].startswith("[cpu]"))
+        for field in ("yolo_thread_cpu_ms=4.000", "depth_thread_cpu_ms=2.000",
+                      "inference_thread_cpu_ms=10.000", "inference_thread_cpu_pct=0.5",
+                      "depth_thread_cpu_pct=0.1", "process_cpu_pct=5.0"):
+            self.assertIn(field, report)
     async def test_periodic_report_does_not_walk_frozen_or_tracked_objects(self):
         from app.core.state import AppState
         from app.services.metrics import metrics_worker

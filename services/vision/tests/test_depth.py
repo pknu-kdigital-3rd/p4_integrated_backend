@@ -1,15 +1,28 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 import torch
 
-from app.services.depth import DepthEstimator, DepthFrame, masked_median_distances, scale_camera_intrinsic
+from app.services.depth import DepthEstimator, DepthFrame, masked_median_distances, predict_timed, scale_camera_intrinsic
 from app.core.settings import Settings
 
 
 class DepthUtilityTests(unittest.TestCase):
+    def test_depth_timing_separates_thread_cpu_from_wall_time(self):
+        frame = np.zeros((32, 48, 3), np.uint8)
+        output = DepthFrame(48, 32, torch.ones((32, 48)))
+        estimator = Mock()
+        estimator.predict.return_value = output
+        with patch("app.services.depth.perf_counter", side_effect=[10, 10.020]), patch(
+            "app.services.depth.thread_time", side_effect=[1, 1.002]
+        ):
+            result, wall_ms, cpu_ms = predict_timed(estimator, frame, np.eye(3))
+        self.assertIs(result, output)
+        self.assertAlmostEqual(wall_ms, 20)
+        self.assertAlmostEqual(cpu_ms, 2)
+
     def test_depth_size_validation_and_selection(self):
         for value, normalized in (("", "yolo"), (" YOLO ", "yolo"), ("original", "source"),
                                    ("360 X 640", "360x640"), ("360,640", "360x640")):

@@ -96,6 +96,20 @@ class _SourceFrame:
 
 
 class RunYoloTests(unittest.TestCase):
+    def test_cpu_phase_timings_use_current_thread_clock(self):
+        model = _SegmentationModel(SimpleNamespace(boxes=[], masks=None))
+        frame = _SourceFrame(32, 32)
+        with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
+            "app.services.yolo.settings.YOLO_INFERENCE_SIZE", "source"
+        ), patch("app.services.yolo.thread_time", side_effect=[10, 10.001, 10.002, 10.006,
+                                                               10.007, 10.009, 10.010]):
+            result = run_yolo(InferenceFrame(1, frame, None, None, None), model)
+        self.assertAlmostEqual(result["frame_convert_thread_cpu_ms"], 1)
+        self.assertAlmostEqual(result["yolo_thread_cpu_ms"], 4)
+        self.assertAlmostEqual(result["postprocess_thread_cpu_ms"], 2)
+        self.assertAlmostEqual(result["inference_thread_cpu_ms"], 10)
+        self.assertEqual(result["depth_thread_cpu_ms"], 0)
+
     def test_independent_depth_grid_scales_camera_and_masks_and_keeps_concurrency(self):
         import threading
         from app.services.depth import DepthFrame, make_depth_executor

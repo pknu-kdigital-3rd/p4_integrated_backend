@@ -10,7 +10,7 @@ import math
 import os
 from pathlib import Path
 import shutil
-from time import perf_counter
+from time import perf_counter, thread_time
 from typing import Any
 
 import numpy as np
@@ -408,10 +408,12 @@ def predict_timed(
     estimator: DepthEstimator,
     frame_bgr: np.ndarray,
     camera_intrinsic: np.ndarray,
-) -> tuple[DepthFrame, float]:
+) -> tuple[DepthFrame, float, float]:
     started = perf_counter()
+    cpu_started = thread_time()
     result = estimator.predict(frame_bgr, camera_intrinsic)
-    return result, (perf_counter() - started) * 1000.0
+    cpu_ms = (thread_time() - cpu_started) * 1000.0
+    return result, (perf_counter() - started) * 1000.0, cpu_ms
 
 
 def make_depth_executor() -> ThreadPoolExecutor:

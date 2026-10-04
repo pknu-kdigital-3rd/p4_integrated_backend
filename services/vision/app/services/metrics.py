@@ -7,7 +7,7 @@ import gc
 import os
 import sys
 import tracemalloc
-from time import monotonic
+from time import monotonic, process_time
 
 import torch
 
@@ -127,6 +127,7 @@ async def metrics_worker(state: AppState) -> None:
     next_profile_at = monotonic() + profile_interval
     previous = state.metrics.snapshot()
     previous_at = monotonic()
+    previous_process_cpu = process_time()
     gc_stats = install()
     previous_gc = gc_stats.snapshot()
     gc_stats.take_max_pause_ms()
@@ -134,6 +135,7 @@ async def metrics_worker(state: AppState) -> None:
         while True:
             await asyncio.sleep(interval)
             now = monotonic()
+            process_cpu = process_time()
             elapsed = max(now - previous_at, 1e-6)
             current = state.metrics.snapshot()
             decoded_delta = int(current["decoded_frames_received"]) - int(
@@ -253,6 +255,22 @@ async def metrics_worker(state: AppState) -> None:
                 ),
                 flush=True,
             )
+            cpu_fields = ("yolo", "depth", "frame_convert", "postprocess", "inference")
+            cpu_means = " ".join(
+                f"{field}_thread_cpu_ms="
+                f"{_average_ms(current, previous, f'{field}_thread_cpu_ms_total', inferred_delta):.3f}"
+                for field in cpu_fields
+            )
+            cpu_percentages = " ".join(
+                f"{field}_thread_cpu_pct="
+                f"{max(0.0, current[f'{field}_thread_cpu_ms_total'] - previous[f'{field}_thread_cpu_ms_total']) / (elapsed * 10):.1f}"
+                for field in ("inference", "depth")
+            )
+            print(
+                f"[cpu] {cpu_means} {cpu_percentages} "
+                f"process_cpu_pct={max(0.0, process_cpu - previous_process_cpu) / elapsed * 100:.1f}",
+                flush=True,
+            )
             previous_gc = current_gc
 
             if profile_enabled and now >= next_profile_at:
@@ -269,6 +287,7 @@ async def metrics_worker(state: AppState) -> None:
 
             previous = current
             previous_at = now
+            previous_process_cpu = process_cpu
     finally:
         if profile_enabled:
             tracemalloc.stop()

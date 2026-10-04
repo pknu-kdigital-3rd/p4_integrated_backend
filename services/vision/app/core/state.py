@@ -71,6 +71,11 @@ class VisionMetrics:
     depth_ms_total: float = 0.0
     inference_ms_total: float = 0.0
     postprocess_ms_total: float = 0.0
+    frame_convert_thread_cpu_ms_total: float = 0.0
+    yolo_thread_cpu_ms_total: float = 0.0
+    depth_thread_cpu_ms_total: float = 0.0
+    postprocess_thread_cpu_ms_total: float = 0.0
+    inference_thread_cpu_ms_total: float = 0.0
     worker_cycle_ms_total: float = 0.0
     queue_wait_ms_total: float = 0.0
     inference_wait_ms_total: float = 0.0
@@ -88,6 +93,9 @@ class VisionMetrics:
         self.depth_ms_total += float(result.get("depth_ms", 0.0))
         self.inference_ms_total += float(result.get("inference_ms", 0.0))
         self.postprocess_ms_total += float(result.get("postprocess_ms", 0.0))
+        for field in ("frame_convert", "yolo", "depth", "postprocess", "inference"):
+            name = f"{field}_thread_cpu_ms"
+            setattr(self, f"{name}_total", getattr(self, f"{name}_total") + float(result.get(name, 0.0)))
 
     def snapshot(self) -> dict[str, float | int]:
         return {
@@ -104,6 +112,11 @@ class VisionMetrics:
             "depth_ms_total": self.depth_ms_total,
             "inference_ms_total": self.inference_ms_total,
             "postprocess_ms_total": self.postprocess_ms_total,
+            "frame_convert_thread_cpu_ms_total": self.frame_convert_thread_cpu_ms_total,
+            "yolo_thread_cpu_ms_total": self.yolo_thread_cpu_ms_total,
+            "depth_thread_cpu_ms_total": self.depth_thread_cpu_ms_total,
+            "postprocess_thread_cpu_ms_total": self.postprocess_thread_cpu_ms_total,
+            "inference_thread_cpu_ms_total": self.inference_thread_cpu_ms_total,
             "worker_cycle_ms_total": self.worker_cycle_ms_total,
             "queue_wait_ms_total": self.queue_wait_ms_total,
             "inference_wait_ms_total": self.inference_wait_ms_total,
