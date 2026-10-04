@@ -1,4 +1,4 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=5';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, vehicleDisplayName, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=6';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
 import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder} from './live-telemetry.js?v=2';
@@ -286,7 +286,7 @@ function routeControlsMarker(item){
 const vehiclePickers=[...document.querySelectorAll('.vehicle-picker')];
 let vehiclePickerSignature='';
 function vehiclePickerLabel(item){
-  const t=item.telemetry||{},name=item.vehicleCode||item.vehicleName||t.external_id;
+  const t=item.telemetry||{},name=vehicleDisplayName(item);
   return t.telemetry_source!=='RECORDED_GPS'&&isAndroidGpsItem(item)?`${name} · Android GPS`:name;
 }
 function renderVehiclePickers(vehicles){
@@ -326,7 +326,7 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
 }
 function syncVehicleMapLabel(entry){
   const item=entry.item,telemetry=item?.telemetry||{},onTrip=item?.tripStatus==='IN_PROGRESS';
-  const name=telemetry.telemetry_source==='RECORDED_GPS'?(item?.vehicleCode||'차량'):isAndroidGpsItem(item)?`Android GPS · ${item?.vehicleCode||telemetry.external_id||'차량'}`:item?.vehicleCode||telemetry.external_id||'차량';
+  const name=telemetry.telemetry_source==='RECORDED_GPS'?vehicleDisplayName(item):isAndroidGpsItem(item)?`Android GPS · ${vehicleDisplayName(item)}`:vehicleDisplayName(item);
   const label=document.createElement('span');label.textContent=entry.estimated?`${name} · 추정 위치`:name;
   if(entry.labelOnTrip!==onTrip){
     entry.marker.unbindTooltip();
@@ -430,7 +430,7 @@ function releaseLiveMarker(){
     if(Number.isFinite(telemetry?.latitude)&&Number.isFinite(telemetry?.longitude))entry.marker.setLatLng([telemetry.latitude,telemetry.longitude]);
   }
 }
-function liveTargetLabel(item){return item?.vehicleCode||item?.vehicleName||`Vehicle ID ${item?.vehicleId??item?.telemetry?.external_id??'unknown'}`}
+function liveTargetLabel(item){return vehicleDisplayName(item)}
 // The Vision page's "fullscreen" mode shows only the video, scaled to fit the
 // frame. It is used whenever details are hidden; with fullscreen details on,
 // the page shows its full information and options.
@@ -817,7 +817,7 @@ function selectVehicle(item){
   }
   const t=item.telemetry;
   fields.replaceChildren();
-  for(const [label,value] of [[uiText('Vehicle'),item.vehicleName||item.vehicleCode||t.external_id],[uiText('Source'),`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],[uiText('Status'),item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],[uiText('Speed'),formatSpeed(t.speed_kmh)],[uiText('Observed'),t.observed_at_utc||'—'],[uiText('Trip ID'),item.tripId??'—']]){
+  for(const [label,value] of [[uiText('Vehicle'),vehicleDisplayName(item)],[uiText('Source'),`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],[uiText('Status'),item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],[uiText('Speed'),formatSpeed(t.speed_kmh)],[uiText('Observed'),t.observed_at_utc||'—'],[uiText('Trip ID'),item.tripId??'—']]){
     const term=document.createElement('dt'),description=document.createElement('dd');
     term.textContent=label;description.textContent=String(value);fields.append(term,description);
   }
@@ -1022,7 +1022,7 @@ async function loadTripAssignments(){
   const vehicleSelect=document.querySelector('#trip-vehicle'),previousVehicle=vehicleSelect.value;
   vehicleSelect.replaceChildren(new Option(uiText('Select a vehicle'),''));
   for(const vehicle of vehicles.filter(item=>item.isActive)){
-    const label=[`Vehicle ${vehicle.vehicleId}`,vehicle.vehicleCode,vehicle.vehicleName,vehicle.vehicleStatus].filter(Boolean).join(' · ');
+    const label=[vehicleDisplayName(vehicle),`차량 ID ${vehicle.vehicleId}`,vehicle.vehicleStatus].filter(Boolean).join(' · ');
     vehicleSelect.add(new Option(label,String(vehicle.vehicleId)));
   }
   if(vehicles.some(item=>item.isActive&&String(item.vehicleId)===previousVehicle))vehicleSelect.value=previousVehicle;
@@ -1036,7 +1036,7 @@ async function loadTripAssignments(){
   for(const trip of trips){
     const row=document.createElement('li'),title=document.createElement('strong'),vehicle=document.createElement('span'),destination=document.createElement('span'),status=document.createElement('span');
     title.textContent=`Trip ID ${trip.tripId}`;
-    vehicle.textContent=`Vehicle ID ${trip.vehicleId} · ${trip.vehicle.vehicleCode}${trip.vehicle.vehicleName?` · ${trip.vehicle.vehicleName}`:''}`;
+    vehicle.textContent=`${vehicleDisplayName({...trip.vehicle,vehicleId:trip.vehicleId})} · 차량 ID ${trip.vehicleId}`;
     destination.textContent=`${trip.originName?`${trip.originName} → `:''}${trip.destinationName}`;
     status.textContent=`${TRIP_STATUS_LABELS[trip.tripStatus]||trip.tripStatus} · ${trip.routeMode==='REPLAY_ONLY'?'Android GPS 재생 경로만':'최적 경로 + Android GPS 재생'}${trip.plannedStartAt?` · planned ${new Date(trip.plannedStartAt).toLocaleString()}`:''}`;
     const header=document.createElement('div');header.className='trip-row-header';header.append(title);
@@ -1192,7 +1192,7 @@ function renderRecordingTripOptions(trips){
   if(!trips.length){select.add(new Option('없음','',true,true));select.options[0].disabled=true;return}
   select.add(new Option('운행 선택','',!previous,!previous));select.options[0].disabled=true;
   for(const trip of trips){
-    const vehicle=trip.vehicle?.vehicleCode||`Vehicle ${trip.vehicleId}`;
+    const vehicle=vehicleDisplayName({...trip.vehicle,vehicleId:trip.vehicleId});
     select.add(new Option(`운행 ${trip.tripId} · ${vehicle} · ${TRIP_STATUS_LABELS[trip.tripStatus]||trip.tripStatus}`,String(trip.tripId)));
   }
   if(previous)selectRecordingTrip(previous);

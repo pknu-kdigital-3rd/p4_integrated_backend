@@ -23,6 +23,14 @@ export const UI_LABELS = {
 };
 export const uiText = text => UI_LABELS[text] || text;
 
+/** Korean display names; codes and IDs still identify vehicles in API calls. */
+export function vehicleDisplayName(item) {
+  const identity=String(item?.vehicleCode??item?.externalId??item?.telemetry?.external_id??'');
+  const suffix=identity.match(/(?:^|[-_:])(\d+)$/)?.[1];
+  const number=String(item?.vehicleId??suffix??'').trim().replace(/^0+(?=\d)/,'');
+  return number?`화물차 ${number}호`:'화물차';
+}
+
 export function applyRoadHatch(layer, kind, color) {
   layer.eachLayer(child => {
     const element = child.getElement?.(), svg = element?.ownerSVGElement;
@@ -55,7 +63,7 @@ export function vehicleStatus(item) {
   return 'unknown';
 }
 export function matchesVehicle(item, query) {
-  const values = [item.vehicleCode, item.vehicleName, item.vehicleId, item.telemetry?.external_id];
+  const values = [vehicleDisplayName(item), item.vehicleCode, item.vehicleName, item.vehicleId, item.telemetry?.external_id];
   return values.some(value => String(value ?? '').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 }
 const paths = {
@@ -85,7 +93,7 @@ export function renderVehicleDetails(item) {
   const t = item.telemetry || {}, state = vehicleStatus(item);
   const write = (id, text) => { document.getElementById(id).textContent = text; };
   document.querySelector('#selection-empty').hidden = true;
-  write('selected-source', [item.vehicleName, item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?null:t.telemetry_source].filter(Boolean).join(' · '));
+  write('selected-source', [vehicleDisplayName(item), item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?null:t.telemetry_source].filter(Boolean).join(' · '));
   write('selected-speed', formatSpeed(t.speed_kmh));
   write('selected-state', TRIP_STATUS_LABELS[item.tripStatus]||STATUS_LABELS[state]); write('selected-trip', item.tripId ?? '—');
   const observed = new Date(t.observed_at_utc);
@@ -126,7 +134,7 @@ export function initializeDashboard({ map, markers, selectVehicle, showFleet }) 
     const matches = fleet.filter(item => (filter === 'all' || vehicleStatus(item) === filter) && matchesVehicle(item, query));
     for (const item of matches.slice(0,100)) {
       const li = document.createElement('li'), button = document.createElement('button'); button.type = 'button';
-      button.textContent = `${item.vehicleCode || item.vehicleName || item.telemetry.external_id} · ${STATUS_LABELS[vehicleStatus(item)]}`;
+      button.textContent = `${vehicleDisplayName(item)} · ${STATUS_LABELS[vehicleStatus(item)]}`;
       button.onclick = () => { selectVehicle(item); const t=item.telemetry; if(Number.isFinite(t.latitude)&&Number.isFinite(t.longitude))map.setView([t.latitude,t.longitude],Math.max(15,map.getZoom())); drawerOpen=false;query='';search.value='';render(); };
       li.append(button); results.append(li);
     }

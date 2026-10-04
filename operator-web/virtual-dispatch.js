@@ -1,4 +1,4 @@
-import {uiText, applyRoadHatch, vehicleIcon} from './dashboard-ui.js?v=5';
+import {uiText, applyRoadHatch, vehicleIcon, vehicleDisplayName} from './dashboard-ui.js?v=6';
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
@@ -89,7 +89,7 @@ tripCompletionMessage.querySelector('button').addEventListener('click', () => {
   if (completionDismissTimer) clearTimeout(completionDismissTimer);
 });
 function showTripCompletion(vehicle, tripId) {
-  tripCompletionText.textContent = `${vehicle.vehicleCode || `차량 ${vehicle.vehicleId}`} · 운행 ${tripId}을(를) 완료했습니다.`;
+  tripCompletionText.textContent = `${vehicleDisplayName(vehicle)} · 운행 ${tripId}을(를) 완료했습니다.`;
   tripCompletionMessage.hidden = false;
   if (completionDismissTimer) clearTimeout(completionDismissTimer);
   completionDismissTimer = setTimeout(() => { tripCompletionMessage.hidden = true; }, 9000);
@@ -123,7 +123,7 @@ const seenNoRouteKeys = new Set();
 noRouteAlarmDismiss.addEventListener('click', () => { noRouteAlarm.hidden = true; });
 function showNoRouteAlarm(vehicleId, tripId, message) {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === String(vehicleId));
-  const label = vehicle?.vehicleCode || `차량 ${vehicleId}`;
+  const label = vehicleDisplayName({...vehicle,vehicleId});
   noRouteAlarm.dataset.key = `${scenarioId}:${vehicleId}:${tripId || ''}`;
   noRouteAlarmMessage.textContent = `${label}${tripId ? ` · 운행 ${tripId}` : ''} — ${message || '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.'}`;
   noRouteAlarm.hidden = false;
@@ -343,7 +343,7 @@ window.__virtualAssistantScope = () => {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === String(selectedVehicleId));
   return {
     scope: { view: 'virtual', scenarioId: String(scenarioId), vehicleId: String(selectedVehicleId) },
-    label: `가상 차량 ${vehicle?.vehicleCode || `#${selectedVehicleId}`} · 시나리오 ${scenarioName}`,
+    label: `${vehicleDisplayName({...vehicle,vehicleId:selectedVehicleId})} · 시나리오 ${scenarioName}`,
   };
 };
 // Scenarios known to the scenario list (loaded once virtual mode was
@@ -362,8 +362,8 @@ window.__virtualAssistantTargets = () => {
       label: `가상 차량 · ${current.text}`,
       options: vehicles.map((vehicle) => ({
         value: `virtual:${scenarioId}:${vehicle.vehicleId}`,
-        text: vehicle.vehicleCode,
-        label: `가상 차량 ${vehicle.vehicleCode} · 시나리오 ${current.text}`,
+        text: vehicleDisplayName(vehicle),
+        label: `${vehicleDisplayName(vehicle)} · 시나리오 ${current.text}`,
         scope: { view: 'virtual', scenarioId: String(scenarioId), vehicleId: String(vehicle.vehicleId) },
       })),
     });
@@ -1207,14 +1207,14 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.checked = selectedVehicleIds.has(String(vehicle.vehicleId));
-    checkbox.setAttribute('aria-label', `${vehicle.vehicleCode} 선택`);
+    checkbox.setAttribute('aria-label', `${vehicleDisplayName(vehicle)} 선택`);
     checkbox.addEventListener('change', () => {
       const id = String(vehicle.vehicleId);
       if (checkbox.checked) selectedVehicleIds.add(id); else selectedVehicleIds.delete(id);
       vehicleBulkRemove.disabled = selectedVehicleIds.size === 0;
       vehicleSelectAll.textContent = vehicles.length && vehicles.every((item) => selectedVehicleIds.has(String(item.vehicleId))) ? '선택 해제' : '전체 선택';
     });
-    label.append(checkbox, document.createTextNode(` ${vehicle.vehicleCode}${vehicle.vehicleName ? ` · ${vehicle.vehicleName}` : ''}`));
+    label.append(checkbox, document.createTextNode(` ${vehicleDisplayName(vehicle)}`));
     row.append(label);
     vehicleBulkList.append(row);
   }
@@ -1223,7 +1223,7 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     vehicleSelect.replaceChildren(new Option('가상 차량 선택', ''));
     for (const vehicle of vehicles) {
       const state = vehicle.state?.simStatus || vehicle.vehicleStatus || 'READY';
-      vehicleSelect.add(new Option(`${vehicle.vehicleCode}${vehicle.vehicleName ? ` · ${vehicle.vehicleName}` : ''} · ${state}`, String(vehicle.vehicleId)));
+      vehicleSelect.add(new Option(`${vehicleDisplayName(vehicle)} · ${state}`, String(vehicle.vehicleId)));
     }
     if (vehicles.some((vehicle) => String(vehicle.vehicleId) === selected)) vehicleSelect.value = selected;
     else selectedVehicleId = '';
@@ -1256,14 +1256,14 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     let marker = virtualVehicleMarkers.get(vehicleId);
     if (!marker) {
       marker = L.marker([Number(position.lat), Number(position.lon)], { icon: vehicleIcon(vehicle, vehicleId === selected, true) });
-      marker.bindTooltip(`Virtual · ${vehicle.vehicleCode}`);
+      marker.bindTooltip(vehicleDisplayName(vehicle));
       marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; speedControlEditing = false; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); syncTurboModeUI(); });
       virtualVehicleMarkers.set(vehicleId, marker);
       markerLayerGroup.addLayer(marker);
     } else {
       animateVehicleMarker(vehicleId, marker, { lat: Number(position.lat), lon: Number(position.lon) });
       marker.setIcon(vehicleIcon(vehicle, vehicleId === selected, true));
-      marker.setTooltipContent(`Virtual · ${vehicle.vehicleCode}`);
+      marker.setTooltipContent(vehicleDisplayName(vehicle));
     }
   }
   for (const [vehicleId, marker] of virtualVehicleMarkers) {
@@ -1290,7 +1290,7 @@ function noViablePathMessage() {
   const noRouteVehicles = vehicles.filter((vehicle) => vehicle.state?.simStatus === 'NO_ROUTE'
     && vehicle.state?.blockedReason === 'No viable path after road restriction');
   if (!noRouteVehicles.length) return '';
-  const labels = noRouteVehicles.map((vehicle) => vehicle.vehicleCode).join(', ');
+  const labels = noRouteVehicles.map(vehicleDisplayName).join(', ');
   return `No viable path after applying this blockage${labels ? ` for ${labels}` : ''}.`;
 }
 function renderRequests(requests) {
@@ -1480,7 +1480,7 @@ async function createVehicle() {
 async function removeVehicle() {
   const vehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
   if (!vehicle) { setStatus('Select a virtual vehicle first.', true); return; }
-  const label = vehicle.vehicleName ? `${vehicle.vehicleCode} · ${vehicle.vehicleName}` : vehicle.vehicleCode;
+  const label = vehicleDisplayName(vehicle);
   if (!window.confirm(`Remove ${label} from virtual dispatch? Its completed trip history will be preserved.`)) return;
   removeVehicleButton.disabled = true;
   try {
@@ -1548,7 +1548,7 @@ vehicleBulkRemove.addEventListener('click', async () => {
       await api(`/api/v1/virtual/vehicles/${encodeURIComponent(vehicle.vehicleId)}`, { method: 'PATCH', body: JSON.stringify({ isActive: false }) });
       removed++;
       if (selectedVehicleId === String(vehicle.vehicleId)) selectedVehicleId = '';
-    } catch (error) { failures.push(`${vehicle.vehicleCode}: ${error.message}`); }
+    } catch (error) { failures.push(`${vehicleDisplayName(vehicle)}: ${error.message}`); }
   }
   selectedVehicleIds.clear();
   if (!failures.length) vehicleBulkMode = false;

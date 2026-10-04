@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The operator frontend remains plain browser JavaScript.
-import { matchesVehicle, vehicleStatus } from '../../operator-web/dashboard-ui.js';
+import { matchesVehicle, vehicleStatus, vehicleDisplayName } from '../../operator-web/dashboard-ui.js';
 
 describe('dashboard fleet presentation', () => {
   it('maps backend vehicle states without guessing an unknown state', () => {
@@ -24,6 +24,28 @@ describe('dashboard fleet presentation', () => {
     for(const query of ['1234','해운대',' device:42 ','42',''])expect(matchesVehicle(item,query)).toBe(true);
     expect(matchesVehicle(item,'서울')).toBe(false);
     expect(matchesVehicle({},'missing')).toBe(false);
+  });
+});
+
+describe('Korean truck display names', () => {
+  it('uses the vehicle ID consistently for every vehicle source', () => {
+    for(const vehicleSource of ['BIMS','CUSTOM','VIRTUAL']) {
+      expect(vehicleDisplayName({vehicleId:'42',vehicleSource,vehicleCode:'BIMS-99',vehicleName:'English vehicle'})).toBe('화물차 42호');
+    }
+    expect(vehicleDisplayName({vehicleId:'9007199254740993',vehicleName:'해운대 버스'})).toBe('화물차 9007199254740993호');
+  });
+  it('falls back to the code or external number when no registered ID is available', () => {
+    expect(vehicleDisplayName({vehicleCode:'CUSTOM-TRUCK-01'})).toBe('화물차 1호');
+    expect(vehicleDisplayName({telemetry:{external_id:'DEVICE:09'}})).toBe('화물차 9호');
+    expect(vehicleDisplayName({})).toBe('화물차');
+  });
+  it('finds the Korean display name as well as the original identity without changing it', () => {
+    const item={vehicleId:'42',vehicleCode:'CUSTOM-TRUCK-01',vehicleName:'Custom Truck 1'};
+    expect(matchesVehicle(item,'화물차 42호')).toBe(true);
+    expect(matchesVehicle(item,'CUSTOM-TRUCK-01')).toBe(true);
+    expect(matchesVehicle(item,'Custom Truck')).toBe(true);
+    expect(item.vehicleCode).toBe('CUSTOM-TRUCK-01');
+    expect(item.vehicleName).toBe('Custom Truck 1');
   });
 });
 
