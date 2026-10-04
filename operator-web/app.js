@@ -1037,16 +1037,19 @@ async function loadTripAssignments(){
   const signature=JSON.stringify([vehicles,trips,currentRole]);
   if(signature===tripListSignature)return;
   tripListSignature=signature;
+  // The stored vehicle status can stay READY while its Android trip is running.
+  // Use the same active-trip state as the tracking fleet, newest assignment first.
+  const currentTrips=new Map();
+  for(const trip of trips)if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&!currentTrips.has(String(trip.vehicleId)))currentTrips.set(String(trip.vehicleId),trip);
   const vehicleSelect=document.querySelector('#trip-vehicle'),previousVehicle=vehicleSelect.value;
   vehicleSelect.replaceChildren(new Option(uiText('Select a vehicle'),''));
   for(const vehicle of vehicles.filter(item=>item.isActive)){
-    const label=[vehicleDisplayName(vehicle),`차량 ID ${vehicle.vehicleId}`,STATUS_LABELS[vehicleStatus(vehicle)]].filter(Boolean).join(' · ');
+    const label=[vehicleDisplayName(vehicle),`차량 ID ${vehicle.vehicleId}`,STATUS_LABELS[vehicleStatus({...vehicle,tripStatus:currentTrips.get(String(vehicle.vehicleId))?.tripStatus})]].filter(Boolean).join(' · ');
     vehicleSelect.add(new Option(label,String(vehicle.vehicleId)));
   }
   if(vehicles.some(item=>item.isActive&&String(item.vehicleId)===previousVehicle))vehicleSelect.value=previousVehicle;
   // Trips arrive newest first; name the newest active one, as Android's current-trip lookup does.
-  activeTripByVehicle=new Map();
-  for(const trip of trips)if(['READY','IN_PROGRESS','PAUSED'].includes(trip.tripStatus)&&!activeTripByVehicle.has(String(trip.vehicleId)))activeTripByVehicle.set(String(trip.vehicleId),String(trip.tripId));
+  activeTripByVehicle=new Map([...currentTrips].map(([vehicleId,trip])=>[vehicleId,String(trip.tripId)]));
   syncTripRouteMode();
   void loadAssignmentPreview();
   renderRecordingTripOptions(trips);
