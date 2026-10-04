@@ -243,6 +243,7 @@ class WebRtcPublisher(
                     connection.setLocalDescription(SimpleSdpObserver(
                         setSuccess = {
                             postRtc {
+                                if (peer !== connection || stopped.get()) return@postRtc
                                 localDescriptionReady = true
                                 sendOfferWhenReady()
                             }
@@ -485,7 +486,8 @@ class WebRtcPublisher(
                         return
                     }
                     postRtc {
-                        val current = peer ?: return@postRtc
+                        if (peer !== connection || stopped.get()) return@postRtc
+                        val current = connection
                         val type = answer.optString("type", "answer")
                         val sdp = answer.optString("sdp")
                         if (sdp.isBlank()) {
