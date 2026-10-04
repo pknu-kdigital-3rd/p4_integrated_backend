@@ -1,6 +1,7 @@
 """Service predictor for in-memory frames, with stream-scoped CUDA timing."""
 
 from time import perf_counter
+from contextlib import contextmanager
 
 import numpy as np
 import torch
@@ -10,6 +11,8 @@ from ultralytics.utils import ops
 from ultralytics.utils.torch_utils import smart_inference_mode
 
 from app.services.mask_transfer import _copy_tensor_to_host
+from app.core.settings import settings
+from app.services.tensorrt_execution import enable_async_tensorrt, validate_async_tensorrt
 
 
 class StageTimer:
@@ -49,6 +52,58 @@ class StageTimer:
 
 
 class RealtimeSegmentationPredictor(SegmentationPredictor):
+    @contextmanager
+    def _frame_execution(self):
+        if self.device.type != "cuda":
+            yield
+            return
+        async_engine = False
+        if self.model.format == "engine" and settings.YOLO_TRT_EXECUTION == "async":
+            backend = getattr(self.model, "backend", None)
+            if backend is not None:
+                async_engine = enable_async_tensorrt(backend)
+        stream = torch.cuda.current_stream(self.device)
+        if async_engine:
+            if not hasattr(self, "_service_stream"):
+                self._service_stream = torch.cuda.Stream(device=self.device)
+            self._service_stream.wait_stream(stream)
+            stream = self._service_stream
+        with torch.cuda.stream(stream):
+            self._fast_frame_active = True
+            try:
+                yield
+            except BaseException:
+                # Even a failing frame must finish queued copies/kernels before
+                # its pinned host slot or TensorRT context can be reused.
+                ready = torch.cuda.Event(blocking=True)
+                ready.record(stream)
+                ready.synchronize()
+                raise
+            finally:
+                self._fast_frame_active = False
+
+    def preprocess(self, images):
+        if (not settings.YOLO_PINNED_INPUT or self.device.type != "cuda"
+                or not getattr(self, "_fast_frame_active", False)
+                or not isinstance(images, list) or len(images) != 1):
+            return super().preprocess(images)
+        image = self.pre_transform(images)[0]
+        if image.dtype != np.uint8:
+            return super().preprocess(images)
+        key = (image.shape, self.device)
+        if getattr(self, "_input_buffer_key", None) != key:
+            self._host_image = torch.empty(image.shape, dtype=torch.uint8, pin_memory=True)
+            self._host_image_array = self._host_image.numpy()
+            self._device_image = torch.empty(image.shape, dtype=torch.uint8, device=self.device)
+            self._input_buffer_key = key
+        np.copyto(self._host_image_array, image)
+        self._device_image.copy_(self._host_image, non_blocking=True)
+        tensor = self._device_image.unsqueeze(0).permute(0, 3, 1, 2)
+        if tensor.shape[1] == 3:
+            tensor = tensor.flip(1)
+        tensor = tensor.contiguous()
+        return (tensor.half() if self.model.fp16 else tensor.float()).div_(255)
+
     @smart_inference_mode()
     def stream_inference(self, source=None, model=None, *args, **kwargs):
         # Other Ultralytics consumers retain upstream saving/streaming behavior.
@@ -73,16 +128,20 @@ class RealtimeSegmentationPredictor(SegmentationPredictor):
                 self.batch = batch
                 self.run_callbacks("on_predict_batch_start")
                 _, originals, _ = batch
-                with stages[0]:
-                    image = self.preprocess(originals)
-                if not self.done_warmup:
-                    self.model.warmup(im=image)
-                    self.done_warmup = True
-                with stages[1]:
-                    predictions = self.inference(image, *args, **kwargs)
-                with stages[2]:
-                    self.results = self.postprocess(predictions, image, originals)
-                StageTimer.finish(stages)
+                with self._frame_execution():
+                    with stages[0]:
+                        image = self.preprocess(originals)
+                    backend = getattr(self.model, "backend", None)
+                    if backend is not None and getattr(backend, "_p4_async_execution", False):
+                        validate_async_tensorrt(backend, image)
+                    if not self.done_warmup:
+                        self.model.warmup(im=image)
+                        self.done_warmup = True
+                    with stages[1]:
+                        predictions = self.inference(image, *args, **kwargs)
+                    with stages[2]:
+                        self.results = self.postprocess(predictions, image, originals)
+                    StageTimer.finish(stages)
                 # Tracking consumes ready results through the upstream callback.
                 self.run_callbacks("on_predict_postprocess_end")
                 count = len(originals)

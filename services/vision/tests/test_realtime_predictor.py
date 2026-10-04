@@ -12,6 +12,63 @@ from tests.test_mask_transfer import cuda_tensor_operations_available
 
 
 class RealtimePredictorTests(unittest.TestCase):
+    def test_async_engine_reuses_nondefault_stream_and_waits_for_caller(self):
+        predictor = RealtimeSegmentationPredictor.__new__(RealtimeSegmentationPredictor)
+        predictor.device = torch.device("cuda:0")
+        predictor.model = SimpleNamespace(format="engine", backend=object())
+        caller, service = Mock(), Mock()
+        with patch("app.services.realtime_predictor.settings.YOLO_TRT_EXECUTION", "async"), patch(
+            "app.services.realtime_predictor.enable_async_tensorrt", return_value=True
+        ), patch("torch.cuda.current_stream", return_value=caller), patch(
+            "torch.cuda.Stream", return_value=service
+        ) as create, patch("torch.cuda.stream") as context:
+            for _ in range(2):
+                with predictor._frame_execution():
+                    self.assertTrue(predictor._fast_frame_active)
+        create.assert_called_once_with(device=predictor.device)
+        self.assertEqual(service.wait_stream.call_count, 2)
+        service.wait_stream.assert_called_with(caller)
+        context.assert_called_with(service)
+        self.assertFalse(predictor._fast_frame_active)
+
+    def test_pinned_staging_matches_fork_values_reuses_buffers_and_keeps_source(self):
+        predictor = RealtimeSegmentationPredictor.__new__(RealtimeSegmentationPredictor)
+        predictor.device = torch.device("cuda:0")
+        predictor.model = SimpleNamespace(fp16=False)
+        predictor._fast_frame_active = True
+        image = np.arange(8 * 12 * 3, dtype=np.uint8).reshape(8, 12, 3)
+        original = image.copy()
+        predictor.pre_transform = Mock(side_effect=lambda images: images)
+        real_empty = torch.empty
+        def allocate(shape, **kwargs):
+            return real_empty(shape, dtype=kwargs["dtype"], device="cpu")
+        with patch("app.services.realtime_predictor.settings.YOLO_PINNED_INPUT", True), patch(
+            "torch.empty", side_effect=allocate
+        ) as allocation:
+            actual = predictor.preprocess([image])
+            predictor.preprocess([image])
+            self.assertEqual(allocation.call_count, 2)
+            predictor.preprocess([np.zeros((4, 6, 3), np.uint8)])
+            self.assertEqual(allocation.call_count, 4)
+        expected = torch.from_numpy(image).permute(2, 0, 1).flip(0).float().unsqueeze(0) / 255
+        torch.testing.assert_close(actual, expected)
+        np.testing.assert_array_equal(image, original)
+
+    def test_cuda_exception_drains_frame_before_buffer_reuse(self):
+        predictor = RealtimeSegmentationPredictor.__new__(RealtimeSegmentationPredictor)
+        predictor.device = torch.device("cuda:0")
+        predictor.model = SimpleNamespace(format="pt")
+        stream = Mock()
+        event = Mock()
+        with patch("torch.cuda.current_stream", return_value=stream), patch("torch.cuda.stream"), patch(
+            "torch.cuda.Event", return_value=event
+        ), self.assertRaisesRegex(ValueError, "failed frame"):
+            with predictor._frame_execution():
+                raise ValueError("failed frame")
+        event.record.assert_called_once_with(stream)
+        event.synchronize.assert_called_once()
+        self.assertFalse(predictor._fast_frame_active)
+
     def test_file_sources_keep_upstream_stream_behavior(self):
         predictor = RealtimeSegmentationPredictor.__new__(RealtimeSegmentationPredictor)
         predictor.args = SimpleNamespace()
@@ -95,6 +152,25 @@ class RealtimePredictorTests(unittest.TestCase):
                     torch.testing.assert_close(actual.boxes.data, expected.boxes.data)
                     torch.testing.assert_close(actual.masks.data, expected.masks.data)
                     self.assertEqual(len(actual.boxes), 2 if empty and reid is None else 3)
+
+    @unittest.skipUnless(cuda_tensor_operations_available(), "requires supported CUDA PyTorch GPU")
+    def test_cuda_pinned_preprocessing_matches_upstream_and_updates_each_frame(self):
+        predictor = RealtimeSegmentationPredictor.__new__(RealtimeSegmentationPredictor)
+        predictor.device = torch.device("cuda:0")
+        predictor.model = SimpleNamespace(fp16=True, format="pt")
+        predictor.pre_transform = lambda images: images
+        with patch("app.services.realtime_predictor.settings.YOLO_PINNED_INPUT", True):
+            for value in (3, 17, 91):
+                image = np.full((32, 48, 3), value, np.uint8)
+                image[:, :, 2] += 1
+                with predictor._frame_execution():
+                    actual = predictor.preprocess([image])
+                    ready = torch.cuda.Event(blocking=True)
+                    ready.record(torch.cuda.current_stream(predictor.device))
+                    ready.synchronize()
+                reference = torch.from_numpy(image).to(predictor.device).unsqueeze(0).permute(0, 3, 1, 2)
+                reference = reference.flip(1).contiguous().half().div_(255)
+                torch.testing.assert_close(actual, reference, rtol=0, atol=0)
 
     @unittest.skipUnless(cuda_tensor_operations_available(), "requires supported CUDA PyTorch GPU")
     def test_cuda_events_measure_work_without_device_wide_wait(self):

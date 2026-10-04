@@ -1,0 +1,98 @@
+# Shared input preparation and asynchronous YOLO execution
+
+For source-sized UniDepth input and a different YOLO grid, `VISION_FRAME_PREP=shared`
+converts the decoded source to BGR once. Depth consumes that original BGR array;
+YOLO is resized from it using OpenCV area interpolation for downsampling and
+linear interpolation for upsampling. Both configured model grids and camera
+calibration stay the same. Other depth configurations retain the previous
+independent PyAV conversions; identical grids still share one array.
+
+Depth pixels are identical to the previous source-sized conversion. YOLO pixels
+are not bit-identical: resize interpolation and resize/color-conversion order
+change. Compare detections on the same scene. `VISION_FRAME_PREP=independent`
+restores the old preparation path when comparing accuracy or performance.
+
+The native preparation benchmark uses actual PyAV/OpenCV operations on a
+synthetic 1280x720 YUV420 frame, with 320x320 YOLO and source-sized depth:
+
+```bash
+docker compose -f docker-compose.dev.yml exec -T p4-vision python benchmark_frame_preparation.py --frames 120
+```
+
+One local Windows run (60 samples, after the service OpenCV thread policy was
+initialized) measured caller CPU 9.375 -> 4.427 ms and process CPU 43.750 ->
+11.719 ms per preparation. These are synthetic preparation measurements, not
+deployment results or model FPS. The script prints source-depth pixel equality
+and YOLO pixel differences as well as wall, caller and all-process CPU time.
+
+`YOLO_PINNED_INPUT=true` stages one letterboxed uint8 image into reusable pinned
+host/device buffers and enqueues the transfer on the inference stream. RGB
+channel ordering, dtype conversion and normalization match the pinned fork.
+Buffers retain only the latest shape. CPU, tensor and upstream/file consumers
+keep upstream preprocessing. `false` restores the old blocking upload.
+
+`YOLO_TRT_EXECUTION=async` replaces the backend instance's forward method with
+a service-owned adapter. It uses named tensor addresses and `execute_async_v3`
+for TensorRT 10+, or ordered bindings and `execute_async_v2` for older engines.
+Addresses are rebound when pointers change, including dynamic output resize.
+Output order matches the pinned fork. The external editable fork is unchanged.
+
+For the in-memory service loop, preprocessing, TensorRT and postprocessing run
+on one persistent nondefault stream with dependencies on the caller's stream.
+The existing final blocking event precedes tracking callbacks and result reads.
+A failing frame also drains queued work before retry can reuse the pinned input
+or context. Input bindings retain the tensor until the next completed frame.
+Synchronous execution keeps the caller stream; mixing that API with the private
+preprocessing stream would permit inference to read an unfinished input.
+
+On first use, async raw outputs are compared with the original synchronous
+backend on the same prepared input at rtol/atol 0.001. Success prints:
+
+```text
+YOLO TensorRT async startup validation passed (rtol=0.001, atol=0.001)
+```
+
+A validation mismatch restores synchronous execution. Missing async APIs also
+retain synchronous execution. Failed enqueue/address/shape operations raise;
+partly enqueued work is not silently retried through another execution API.
+`YOLO_TRT_EXECUTION=sync` restores the original backend for comparisons.
+See [NVIDIA's TensorRT Python API](https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/python-api-docs.html)
+for stream, binding and buffer-lifetime requirements.
+
+## Deployment comparison
+
+Defaults enable these changes; leave model resolutions and depth compile mode
+unchanged. Disable CPU profiling for baseline readings:
+
+```env
+VISION_FRAME_PREP=shared
+YOLO_TRT_EXECUTION=async
+YOLO_PINNED_INPUT=true
+VISION_CPU_PROFILE_FRAMES=0
+```
+
+Dev directory-mounts app code, individually mounts the unchanged entrypoint and
+runs Uvicorn with reload. Recreate for the new Compose environment; the dev app
+code comes from the directory mount, and dependencies/Dockerfiles are unchanged:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-vision
+docker compose -f docker-compose.dev.yml exec -T p4-vision python -c "from app.core.settings import settings; from app.services.tensorrt_execution import AsyncTensorRT; print(settings.VISION_FRAME_PREP, settings.YOLO_TRT_EXECUTION, settings.YOLO_PINNED_INPUT, settings.VISION_CPU_PROFILE_FRAMES, AsyncTensorRT.__name__)"
+docker compose -f docker-compose.dev.yml logs -f --tail 100 p4-vision
+```
+
+Expect `shared async True 0 AsyncTensorRT`, the frame-preparation configuration
+log and the async startup validation log once inference starts. Settings alone
+do not prove an engine passed validation or avoided fallback. Production app
+code is baked into its image and requires an app-image rebuild and recreation.
+
+Replay the same scene; compare conversion/Yolo CPU, model wall time, process CPU,
+inference FPS, skipped FPS, depth tail and the resulting detections. The earlier
+deployment baseline averaged conversion CPU 5.94 ms, YOLO CPU 9.32 ms, process
+CPU 113.8%, inferred FPS 28.92 and skipped FPS 1.05.
+
+Local checks execute native PyAV/OpenCV preparation and verify staging values,
+buffer reuse, stream/error handling, TensorRT binding APIs, validation/fallback,
+dynamic shapes and output order with CPU tests/mocks. The local GPU cannot run
+the locked Torch build; pinned CUDA copies and actual TensorRT enqueue/outputs
+must be verified on the deployment GPU. No deployed GPU speedup is claimed.

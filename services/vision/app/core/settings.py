@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # FP16 is substantially faster on RTX-class CUDA GPUs. It is enabled by
     # default but is automatically ignored when YOLO_DEVICE is CPU.
     YOLO_HALF: bool = True
+    VISION_FRAME_PREP: Literal["shared", "independent"] = "shared"
+    YOLO_TRT_EXECUTION: Literal["async", "sync"] = "async"
+    YOLO_PINNED_INPUT: bool = True
     # Preserve detail in the source-aligned segmentation masks. Operators can
     # disable this when inference latency matters more than polygon detail.
     YOLO_RETINA_MASKS: bool = True

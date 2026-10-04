@@ -96,6 +96,36 @@ class _SourceFrame:
 
 
 class RunYoloTests(unittest.TestCase):
+    def test_source_depth_is_converted_once_and_yolo_resized_from_shared_bgr(self):
+        import av
+        import cv2
+        from app.services.depth import DepthFrame
+        pixels = np.random.default_rng(4).integers(0, 256, (96, 128, 3), dtype=np.uint8)
+        decoded = av.VideoFrame.from_ndarray(pixels, format="bgr24").reformat(format="yuv420p")
+        source = SimpleNamespace(width=128, height=96,
+                                 to_ndarray=Mock(wraps=decoded.to_ndarray), reformat=Mock(wraps=decoded.reformat))
+        observed = {}
+        class Model:
+            names = {}
+            def __call__(self, image, **kwargs):
+                observed["yolo"] = image.copy()
+                return [SimpleNamespace(boxes=[], masks=None)]
+        class Depth:
+            def predict(self, image, camera):
+                observed["depth"] = image.copy()
+                return DepthFrame(128, 96, torch.ones((96, 128)))
+        with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
+            "app.services.yolo.settings.YOLO_INFERENCE_SIZE", "32x32"
+        ), patch("app.services.yolo.settings.UNIDEPTH_INFERENCE_SIZE", "source"), patch(
+            "app.services.yolo.settings.VISION_FRAME_PREP", "shared"
+        ):
+            run_yolo(InferenceFrame(1, source, None, None, None), Model(), Depth())
+        source.to_ndarray.assert_called_once_with(format="bgr24")
+        source.reformat.assert_not_called()
+        expected = decoded.to_ndarray(format="bgr24")
+        np.testing.assert_array_equal(observed["depth"], expected)
+        np.testing.assert_array_equal(observed["yolo"], cv2.resize(expected, (32, 32), interpolation=cv2.INTER_AREA))
+
     def test_cpu_phase_timings_use_current_thread_clock(self):
         model = _SegmentationModel(SimpleNamespace(boxes=[], masks=None))
         frame = _SourceFrame(32, 32)

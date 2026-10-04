@@ -24,6 +24,7 @@ from app.services.depth import box_median_distances, depth_input_size, masked_me
 from app.services.gc_runtime import _freeze_loaded_objects
 from app.services.cpu_profile import run_model_cpu_profile
 from app.services.model_timing import model_timeline
+from app.services.frame_preparation import shared_source_inputs
 from app.services.mask_transfer import compact_mask_polygons, _copy_tensor_to_host
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
@@ -659,7 +660,16 @@ def run_yolo(
     else:
         target_width, target_height = source_width, source_height
         imgsz = settings.YOLO_MAX_IMGSZ
-    if (target_width, target_height) != (source_width, source_height):
+    shared_source = None
+    if (settings.VISION_FRAME_PREP == "shared" and depth_model is not None
+            and source_width > 0 and source_height > 0
+            and (target_width, target_height) != (source_width, source_height)
+            and depth_input_size(source_width, source_height, target_width, target_height)
+                == (source_width, source_height)):
+        # Depth consumes the full source. Convert it once and derive YOLO's
+        # smaller grid without a second YUV -> BGR conversion.
+        img, shared_source = shared_source_inputs(inference_frame.frame, (target_width, target_height))
+    elif (target_width, target_height) != (source_width, source_height):
         model_frame = inference_frame.frame.reformat(
             width=target_width,
             height=target_height,
@@ -673,12 +683,12 @@ def run_yolo(
         source_width = frame_width
     if source_height <= 0:
         source_height = frame_height
-    depth_input = img
+    depth_input = shared_source if shared_source is not None else img
     if depth_model is not None:
         depth_width, depth_height = depth_input_size(
             source_width, source_height, frame_width, frame_height,
         )
-        if (depth_width, depth_height) != (frame_width, frame_height):
+        if shared_source is None and (depth_width, depth_height) != (frame_width, frame_height):
             # Resize from the decoded source, so a larger depth image does not
             # upsample information already discarded by YOLO's smaller input.
             if (depth_width, depth_height) == (source_width, source_height):
@@ -1162,6 +1172,8 @@ async def yolo_worker(state: AppState) -> None:
         flush=True,
     )
     print(f"UniDepth input size: {settings.UNIDEPTH_INFERENCE_SIZE}", flush=True)
+    print(f"Vision frame preparation: {settings.VISION_FRAME_PREP}; "
+          f"YOLO TensorRT execution: {settings.YOLO_TRT_EXECUTION}; pinned_input={settings.YOLO_PINNED_INPUT}", flush=True)
     run_inference = partial(
         run_yolo,
         yolo_model=state.yolo_model,
