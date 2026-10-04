@@ -128,3 +128,61 @@ Production app code is baked into its image and requires an app-image rebuild.
 No local Vision container is running, and the local GPU cannot execute the
 locked Torch build. Actual model profiles must be captured on the deployment
 GPU; local tests validate bounded capture, concurrent inference, and output files.
+
+## Reduce UniDepth kernel-launch overhead
+
+`UNIDEPTH_COMPILE_MODE=reduce-overhead` is now the default when compilation is
+enabled on CUDA. It requests TorchInductor CUDA graphs to reduce repeated CPU
+kernel dispatch. `default` restores the previous compile mode; CPU execution
+always uses `default`. `UNIDEPTH_COMPILE=false` retains eager execution.
+No dependencies, resolution, weights or depth-median semantics change.
+
+Loading and warmup run on the existing single depth worker, so graph state is
+initialized on the thread that performs live inference. Every optimized graph
+frame marks a new iteration. Returned depth is cloned outside compilation to
+protect it from graph pool reuse. CUDA completion retains the existing blocking
+event; this change adds no per-stage GPU synchronization.
+
+Graph-mode startup tests three different images against upstream eager output
+at the existing 1%/0.01 m tolerance, and checks that the first returned depth
+stays unchanged through later calls. Setup/runtime compiler failures retry eager;
+output-validation failures use the upstream eager path. Logs show the requested
+compile mode and the final warmup mode. Successful validation is a correctness
+check, not proof that every region captured a CUDA graph. Unsupported operations
+or graph breaks can prevent capture; compare actual timings and launch profiles.
+Graph workspace caching may increase CUDA reserved memory.
+
+For a deployment comparison, leave the current input size and resolution level
+unchanged and disable CPU profiling:
+
+```env
+UNIDEPTH_COMPILE=true
+UNIDEPTH_COMPILE_MODE=reduce-overhead
+VISION_CPU_PROFILE_FRAMES=0
+```
+
+Dev directory-mounts app code, individually mounts the unchanged entrypoint and
+runs Uvicorn with reload. Recreate for the new Compose environment. Dev uses
+the directory mount for changed app code; dependencies and Dockerfiles are unchanged:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --no-deps --force-recreate p4-vision
+docker compose -f docker-compose.dev.yml exec -T p4-vision python -c "from app.core.settings import settings; print(settings.UNIDEPTH_COMPILE, settings.UNIDEPTH_COMPILE_MODE, settings.VISION_CPU_PROFILE_FRAMES)"
+docker compose -f docker-compose.dev.yml logs -f --tail 100 p4-vision
+```
+
+Expect effective settings `True reduce-overhead 0`, followed by a final
+`UniDepth warmup finished ... mode=compiled/reduce-overhead` log and successful
+three-frame validation with `output_lifetime_checked=True`. A settings value
+alone does not prove the active model avoided fallback. Replay the same scene
+and compare `[cpu] depth_thread_cpu_ms`, `[mem] depth_ms/infer_fps/skipped_fps`,
+depth tails in `[model-timeline]`, and CUDA memory. For rollback set
+`UNIDEPTH_COMPILE_MODE=default` and recreate. Production bakes app code into its
+image and requires an app-image rebuild plus container recreation.
+
+Local tests cover mode selection, worker ownership, output copying, repeated
+frame validation and fallback. Actual CUDA graph inference/replay cannot run on
+the local GPU with the locked Torch build; no deployment speedup is claimed.
+
+References: [torch.compile modes](https://docs.pytorch.org/docs/stable/generated/torch.compile.html),
+[CUDA graph output lifetime](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_cudagraph_trees.html).

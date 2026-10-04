@@ -1,6 +1,7 @@
 """UniDepth V2 metric depth and instance-mask distance fusion."""
 from __future__ import annotations
 
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -101,19 +102,7 @@ class DepthEstimator:
             if compiler_name
             else any(shutil.which(name) is not None for name in ("gcc", "cc", "clang"))
         )
-        self._compiled = settings.UNIDEPTH_COMPILE and compiler_available
-        if self._compiled:
-            self._depth_path.forward = torch.compile(
-                self._depth_path.eager_forward, mode="default", fullgraph=False
-            )
-            print("UniDepth torch.compile enabled; warming up before serving frames", flush=True)
-        elif not settings.UNIDEPTH_COMPILE:
-            print("UniDepth torch.compile disabled; using eager inference", flush=True)
-        else:
-            print(
-                "UniDepth C compiler unavailable; using eager inference",
-                flush=True,
-            )
+        self._configure_compile(compiler_available)
         self._stream = (
             torch.cuda.Stream(device=self._device)
             if self._device.type == "cuda"
@@ -123,6 +112,34 @@ class DepthEstimator:
         if self._stream is not None:
             with torch.cuda.device(self._device):
                 self._ready = torch.cuda.Event(blocking=True)
+
+    def _configure_compile(self, compiler_available: bool) -> None:
+        # CUDA graphs target GPU launch overhead. CPU inference keeps the
+        # previous compiler mode even when reduce-overhead is requested.
+        self._compile_mode = settings.UNIDEPTH_COMPILE_MODE if self._device.type == "cuda" else "default"
+        self._compiled = settings.UNIDEPTH_COMPILE and compiler_available
+        if self._compiled:
+            try:
+                self._depth_path.forward = self._torch.compile(
+                    self._depth_path.eager_forward, mode=self._compile_mode, fullgraph=False
+                )
+            except Exception as exc:
+                self._compiled = False
+                self._depth_path.forward = self._depth_path.eager_forward
+                print(f"UniDepth compiler setup failed ({type(exc).__name__}: {exc}); using eager inference", flush=True)
+            else:
+                print(f"UniDepth torch.compile enabled; mode={self._compile_mode}; "
+                      "warming up before serving frames", flush=True)
+        elif not settings.UNIDEPTH_COMPILE:
+            print("UniDepth torch.compile disabled; using eager inference", flush=True)
+        else:
+            print(
+                "UniDepth C compiler unavailable; using eager inference",
+                flush=True,
+            )
+
+    def _cuda_graph_mode(self) -> bool:
+        return self._compiled and self._device.type == "cuda" and self._compile_mode == "reduce-overhead"
 
     def predict(self, frame_bgr: np.ndarray, camera_intrinsic: np.ndarray) -> DepthFrame:
         torch = self._torch
@@ -174,22 +191,32 @@ class DepthEstimator:
         )
         print(f"UniDepth depth-only warmup shape: {width}x{height}", flush=True)
         started = perf_counter()
-        frame = np.random.default_rng(0).integers(
-            0, 256, (height, width, 3), dtype=np.uint8
-        )
-        candidate = self.predict(frame, camera).tensor
-        reference = self._infer(frame, camera, reference=True)[0, 0]
+        rng = np.random.default_rng(0)
+        # Exercise compiler warmup, capture and replay with changing pixels.
+        # Returned depth must remain valid when the next graph invocation runs.
+        iterations = 3 if self._cuda_graph_mode() else 1
+        retained = retained_snapshot = None
         try:
-            self._torch.testing.assert_close(candidate, reference, rtol=0.01, atol=0.01)
+            for iteration in range(iterations):
+                frame = rng.integers(0, 256, (height, width, 3), dtype=np.uint8)
+                candidate = self.predict(frame, camera).tensor
+                reference = self._infer(frame, camera, reference=True)[0, 0]
+                self._torch.testing.assert_close(candidate, reference, rtol=0.01, atol=0.01)
+                if iterations > 1:
+                    if iteration == 0:
+                        retained, retained_snapshot = candidate, candidate.clone()
+                    else:
+                        self._torch.testing.assert_close(retained, retained_snapshot, rtol=0, atol=0)
         except AssertionError as exc:
             self._optimized = False
             self._compiled = False
             print(f"UniDepth depth-only validation failed; using upstream eager path: {exc}", flush=True)
         else:
-            print("UniDepth depth-only validation passed (rtol=0.01, atol=0.01m)", flush=True)
+            print(f"UniDepth depth-only validation passed (rtol=0.01, atol=0.01m); "
+                  f"frames={iterations}; output_lifetime_checked={iterations > 1}", flush=True)
         print(
             f"UniDepth warmup finished in {perf_counter() - started:.1f}s; "
-            f"mode={'compiled' if self._compiled else 'eager fallback'}",
+            f"mode={'compiled/' + self._compile_mode if self._compiled else 'eager fallback'}",
             flush=True,
         )
 
@@ -217,6 +244,9 @@ class DepthEstimator:
             context = torch.cuda.stream(self._stream) if self._stream is not None else nullcontext()
             try:
                 with context, torch.autocast("cuda", dtype=torch.float16, enabled=self._device.type == "cuda"):
+                    graph_mode = self._cuda_graph_mode() and not reference and self._optimized
+                    if graph_mode:
+                        torch.compiler.cudagraph_mark_step_begin()
                     rgb = self._stage_input(frame)
                     if reference or not self._optimized:
                         intrinsic = torch.as_tensor(camera.copy(), device=self._device)
@@ -224,6 +254,11 @@ class DepthEstimator:
                     else:
                         output = self._depth_path(rgb, camera)
                     output = output.detach().float()
+                    if graph_mode:
+                        # Graph pools may reuse their output storage next frame.
+                        # Own the result outside the compiled callable so mask
+                        # fusion and retained DepthFrames cannot see overwrite.
+                        output = output.clone()
             finally:
                 if self._stream is not None:
                     # max_workers=1 and synchronization even on failure keep
@@ -251,6 +286,15 @@ def load_depth_estimator() -> DepthEstimator:
     estimator = DepthEstimator(settings.UNIDEPTH_MODEL_DIR, device)
     estimator.warmup()
     return estimator
+
+
+async def load_depth_on_worker(executor: ThreadPoolExecutor, loader=load_depth_estimator) -> DepthEstimator:
+    """Warm graph state on the same persistent thread that serves depth calls."""
+    try:
+        return await asyncio.get_running_loop().run_in_executor(executor, loader)
+    except BaseException:
+        await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
+        raise
 
 
 def _exact_median(values: Any, torch: Any) -> Any:

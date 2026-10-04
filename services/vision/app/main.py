@@ -9,7 +9,7 @@ from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
 from app.core.settings import settings
 from app.services.access_logs import configure_telemetry_access_logging
-from app.services.depth import load_depth_estimator, make_depth_executor
+from app.services.depth import load_depth_estimator, load_depth_on_worker, make_depth_executor
 from app.services.gc_runtime import _freeze_loaded_objects, configure_gc
 from app.services.metrics import metrics_worker
 from app.services.recording_detections import RecordingDetectionWriter
@@ -43,8 +43,8 @@ async def lifespan(app: FastAPI):
     # per-call auto-detection, so the chosen device is logged once at startup
     # and stays fixed for the life of the process.
     state.yolo_model = load_yolo_model()
-    state.depth_model = load_depth_estimator()
     state.depth_executor = make_depth_executor()
+    state.depth_model = await load_depth_on_worker(state.depth_executor, load_depth_estimator)
     configure_gc(settings.VISION_GC_GEN0_THRESHOLD)
     _freeze_loaded_objects("Vision model startup")
 

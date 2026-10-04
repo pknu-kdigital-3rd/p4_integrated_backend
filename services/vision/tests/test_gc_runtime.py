@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from types import SimpleNamespace
 import unittest
@@ -52,7 +53,9 @@ class WorkerGCFreezeTests(unittest.IsolatedAsyncioTestCase):
         from app import main
 
         events = []
-        executor = Mock()
+        real_executor = ThreadPoolExecutor(max_workers=1)
+        self.addCleanup(real_executor.shutdown, wait=True, cancel_futures=True)
+        executor = Mock(wraps=real_executor)
 
         def loaded(name, value):
             events.append(name)
@@ -74,7 +77,7 @@ class WorkerGCFreezeTests(unittest.IsolatedAsyncioTestCase):
             "app.main.sync_android_live_from_relay", new=worker
         ):
             async with main.lifespan(SimpleNamespace(state=SimpleNamespace())):
-                self.assertEqual(events[:5], ["yolo", "depth", "executor", "threshold", "freeze"])
+                self.assertEqual(events[:5], ["yolo", "executor", "depth", "threshold", "freeze"])
                 self.assertEqual(events[5:], ["task"] * 4)
         executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
 
