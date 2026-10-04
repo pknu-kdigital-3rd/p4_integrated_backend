@@ -22,10 +22,10 @@ export function countDetections(classCounts) {
   return counts;
 }
 
-/** The status line text, e.g. "YOLO 객체 탐지 중 · 자동차 3 | 사람 1 | 오토바이 0". */
+/** The status line text, e.g. "객체 탐지 중 · 자동차 3 | 사람 1 | 오토바이 0". */
 export function describeDetections(classCounts, receivedAt, now) {
   if (classCounts == null || !Number.isFinite(receivedAt)) return 'YOLO 객체 탐지 대기 중';
   if (now - receivedAt > DETECTION_STALE_MS) return 'YOLO 객체 탐지 · 영상 수신 대기 중';
   const counts = countDetections(classCounts);
-  return `YOLO 객체 탐지 중 · ${DETECTION_CATEGORIES.map(({label}) => `${label} ${counts[label]}`).join(' | ')}`;
+  return `객체 탐지 중 · ${DETECTION_CATEGORIES.map(({label}) => `${label} ${counts[label]}`).join(' | ')}`;
 }

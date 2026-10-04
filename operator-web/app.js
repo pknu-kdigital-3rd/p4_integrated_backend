@@ -738,16 +738,13 @@ function showTripDisplay(display){
   }
   currentTripDisplay=display;
   updateRemainingTripRoute();
-  document.querySelector('#route-label').textContent=replayOnly
-    ?roadSnapMode==='gaps'?(display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 경로':'남은 GPS 재생 경로 (도로 매칭 없음)')
-      :display.replayPreview?.roadMatch?'도로에 맞춘 남은 GPS 재생 경로':'남은 GPS 재생 경로 (도로 매칭 없음)'
-    :'목적지까지 남은 최적 경로';
+  document.querySelector('#route-label').textContent='수송 진행 현황';
   let progress=null,label='진행 상태 대기 중';
   if(replayOnly){
     progress=recordedProgress(display.replayPreview,display.replayPosition?.sourceTimestampNs);
     const replayFix=latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='RECORDED_GPS')?.telemetry;
-    document.querySelector('#selected-current').textContent=replayFix?`GPS 재생 위치 · ${replayFix.latitude.toFixed(5)}, ${replayFix.longitude.toFixed(5)}`:'GPS 재생 위치 대기 중';
-    label=progress?`GPS 재생 ${progress.percent}% · 남은 기록 경로 ${(progress.remainingM/1000).toFixed(1)} km`:'GPS 재생 대기 중 · 실제 운행 진행률 아님';
+    document.querySelector('#selected-current').textContent=replayFix?`현 위치 · ${replayFix.latitude.toFixed(5)}, ${replayFix.longitude.toFixed(5)}`:'현 위치 대기 중';
+    label=progress?`남은 경로: ${(progress.remainingM/1000).toFixed(1)} km`:'GPS 재생 대기 중 · 실제 운행 진행률 아님';
   }else{
     const live=latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='BIMS_LIVE'&&item.telemetry?.source_metadata?.state==='live')
       ||latestFleet.find(item=>String(item.vehicleId)===String(display.vehicleId)&&item.telemetry?.telemetry_source==='DEVICE_GPS');
