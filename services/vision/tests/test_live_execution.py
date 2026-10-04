@@ -11,10 +11,90 @@ import numpy as np
 
 from app.core.state import AppState, VisionMetrics
 from app.services.live_execution import OrderedDecoder, timed_inference
-from app.services.yolo import _decode_session, K_START, K_FRAME, K_RESET, K_END, FRAME_META_LENGTH
+from app.services.yolo import _decode_records, _decode_session, _source_metadata, K_START, K_FRAME, K_RESET, K_END, FRAME_META_LENGTH
+from app.services.telemetry import TelemetryBatchIn
 
 
 class LiveExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_relay_decode_preserves_qr_identity_and_telemetry(self):
+        encoder = av.CodecContext.create("libx264", "w")
+        encoder.width, encoder.height = 64, 48
+        encoder.pix_fmt = "yuv420p"
+        encoder.time_base = Fraction(1, 30)
+        encoder.options = {"preset": "medium", "bf": "2"}
+        packets = []
+        for index in range(8):
+            frame = av.VideoFrame.from_ndarray(np.full((48, 64, 3), index * 25, dtype=np.uint8), format="bgr24")
+            frame.pts = index
+            packets.extend(encoder.encode(frame))
+        packets.extend(encoder.encode())
+        source_origin = 1454597711189433
+        records = [(K_START, memoryview(b'{"epoch":1}'))]
+        expected_sources = {}
+        for seq, packet in enumerate(packets):
+            source_ns = source_origin + packet.pts * 33_333_333
+            pts = 90000 + packet.pts * 3000
+            metadata = {"epoch": 1, "seq": seq, "pts_90k": pts,
+                        "timestamp_us": pts * 1000000 // 90000,
+                        "keyframe": packet.is_keyframe,
+                        "qr": {"source_timestamp_ns": str(source_ns), "decode_success": True},
+                        "recording": {"trip_id": "8", "vehicle_id": "1", "recording_session_id": "native-test"}}
+            expected_sources[seq] = source_ns
+            body = json.dumps(metadata).encode()
+            records.append((K_FRAME, memoryview(FRAME_META_LENGTH.pack(len(body)) + body + bytes(packet))))
+        records.append((K_END, memoryview(b"")))
+
+        class InlineDecoder:
+            async def reset(self):
+                self.context = av.CodecContext.create("h264", "r")
+
+            async def decode(self, packet=None):
+                return self.context.decode(packet) if packet is not None else self.context.decode()
+
+        async def run(decoder):
+            state = AppState()
+            timestamps = sorted(expected_sources.values())
+            state.telemetry_store.ingest(TelemetryBatchIn(
+                mode="REPLAY", tripId="8", vehicleId="1", recordingSessionId="native-test",
+                gps=[{"timestamp_ns": ts, "latitude": 35, "longitude": 129} for ts in timestamps],
+                imu=[{"timestamp_ns": ts, "pitch_deg": 1, "roll_deg": 2, "yaw_deg": 3} for ts in timestamps],
+            ))
+            frames = []
+
+            async def retain(_state, frame):
+                frames.append(frame)
+
+            with patch("app.services.yolo._read_record", new=AsyncMock(
+                side_effect=records + [asyncio.IncompleteReadError(b"", 4)]
+            )), patch("app.services.yolo._enqueue_inference_frame", side_effect=retain):
+                with self.assertRaises(asyncio.IncompleteReadError):
+                    await _decode_records(None, state, decoder)
+            observations = []
+            self.assertEqual(len(frames), 8)
+            for frame in frames:
+                # Compare native decoded PTS to its selected metadata, not only
+                # async output against an equally incorrect inline baseline.
+                self.assertEqual(frame.frame.pts, frame.pts)
+                self.assertEqual(frame.time_base, float(Fraction(1, 90000)))
+                self.assertEqual(frame.resolved_source_timestamp_ns, expected_sources[frame.seq])
+                source = await timed_inference(_source_metadata, frame, state.metrics)
+                matched = state.telemetry_store.match(source["recording"], int(source["resolved_source_timestamp_ns"]))
+                self.assertEqual(matched["status"], "ok")
+                self.assertEqual(matched["match"]["gps"], "exact")
+                self.assertEqual(matched["match"]["imu_delta_ms"], 0)
+                observations.append((source, matched, frame.encoded, frame.frame.to_ndarray(format="bgr24")))
+            return observations
+
+        baseline = await run(InlineDecoder())
+        decoder = OrderedDecoder(VisionMetrics())
+        try:
+            actual = await run(decoder)
+        finally:
+            await decoder.close()
+        for before, after in zip(baseline, actual):
+            self.assertEqual(before[:3], after[:3])
+            np.testing.assert_array_equal(before[3], after[3])
+
     async def test_decode_error_preserves_relay_resync(self):
         state = AppState()
 
