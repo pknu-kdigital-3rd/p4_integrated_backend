@@ -63,7 +63,7 @@ map.getContainer().append(routeContextMenu);
 const touchLocateButton = document.createElement('button');
 touchLocateButton.type = 'button';
 touchLocateButton.dataset.routeLocate = 'true';
-touchLocateButton.textContent = '경로 위치 선택';
+touchLocateButton.innerHTML = '<span class="route-point-menu-icon waypoint" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7Zm0 10a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"/></svg></span><span>경로 위치 선택</span>';
 touchLocateButton.hidden = true;
 routeContextMenu.prepend(touchLocateButton);
 const routePointToolbar = installRoutePointToolbar(map.getContainer(), {
