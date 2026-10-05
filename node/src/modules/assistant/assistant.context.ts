@@ -450,8 +450,10 @@ function minutesText(seconds: number): string {
 
 export function remainingText(remaining: TripRemaining): string {
     const distance = `남은 거리 ${(remaining.distanceM / 1000).toFixed(1)} km`;
-    const basis = remaining.basis === "REPLAY" ? "녹화 재생 기준" : "계획 경로 기준";
-    return remaining.durationSec === null ? `${distance} (${basis}, 남은 시간 확인 불가)` : `${distance}, 남은 시간 ${minutesText(remaining.durationSec)} (${basis})`;
+    const basis = remaining.basis === "REPLAY" ? "" : "계획 경로 기준";
+    return remaining.durationSec === null
+        ? `${distance} (${basis ? `${basis}, ` : ""}남은 시간 확인 불가)`
+        : `${distance}, 남은 시간 ${minutesText(remaining.durationSec)}${basis ? ` (${basis})` : ""}`;
 }
 
 export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {

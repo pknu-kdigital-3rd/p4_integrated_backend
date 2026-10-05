@@ -24,7 +24,7 @@ describe("trip remaining", () => {
     });
 
     it("renders distance and time for the assistant", () => {
-        expect(remainingText({ distanceM: 4120, durationSec: 270, basis: "REPLAY" })).toBe("남은 거리 4.1 km, 남은 시간 약 5분 (녹화 재생 기준)");
+        expect(remainingText({ distanceM: 4120, durationSec: 270, basis: "REPLAY" })).toBe("남은 거리 4.1 km, 남은 시간 약 5분");
         expect(remainingText({ distanceM: 12_000, durationSec: 4000, basis: "ROUTE" })).toBe("남은 거리 12.0 km, 남은 시간 약 1시간 7분 (계획 경로 기준)");
         expect(remainingText({ distanceM: 500, durationSec: null, basis: "ROUTE" })).toBe("남은 거리 0.5 km (계획 경로 기준, 남은 시간 확인 불가)");
     });
