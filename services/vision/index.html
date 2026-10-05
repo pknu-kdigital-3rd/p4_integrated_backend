@@ -173,7 +173,10 @@
   let browserFps = 0, fpsWindowStarted = performance.now(), fpsWindowFrames = 0;
   let lastDepth = {};
   let modelFilename = '--';
-  let nextPaintAt = null;
+  // Paint times follow source timestamps from an anchor set PLAYOUT_DELAY_MS
+  // after the first frame arrives, so a late frame paints immediately and the
+  // frames behind it catch up instead of shifting the whole schedule later.
+  let playoutAnchor = null, latePaints = 0, awaitingPaint = 0;
   let tracks = new Map(), nextTrackId = 1;
   let overlayMode = localStorage.getItem('playback-overlay-mode') || 'custom';
   // The former "Person: boxes, others: segmentation" preset is the per-class
@@ -262,6 +265,13 @@
   const MAX_LIVE_LAG_S = 0.25;
   const MAX_QUEUED_LIVE_SECONDS = 0.75;
   const MAX_QUEUED_LIVE_FRAMES = 30;
+  // Playout cushion that absorbs uneven arrival; the anchor drifts toward it
+  // slowly and is reset only when a frame is this far from its slot.
+  const PLAYOUT_DELAY_MS = 50;
+  const PLAYOUT_REANCHOR_MS = 250;
+  const PLAYOUT_ADAPT = 0.1;
+  // Decoded frames allowed to wait for their paint slot while the next decodes.
+  const MAX_DECODED_AHEAD = 2;
   // pump() decodes one chunk at a time and waits for its frame. A chunk the
   // decoder never returns a frame for would leave it locked forever, so
   // rejoin live when a decode has been outstanding this long.
@@ -396,7 +406,7 @@
   }
   function updateStats() {
     const depthStatus = lastDepth.status ? `  depth=${lastDepth.status}` : '';
-    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  predict=${temporalConfig.predictMs}ms hold=${temporalConfig.holdMs}ms mask=${temporalConfig.maskPredictMs}ms  tracks obs/pred/hold=${trackSummary.observed}/${trackSummary.predicting}/${trackSummary.holding} max_age=${Math.round(trackSummary.maxPredictionAgeMs)}ms expired=${trackCounters.expired} reacquired=${trackCounters.reacquired}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${depthStatus}`;
+    statsEl.textContent = `epoch=${epoch}  queued=${queue.length}  pending=${pending.size}  buffered=${bufferedSeconds().toFixed(2)}s  playing=${playing}  decoding=${decoding}  late_paints=${latePaints}  browser_fps=${browserFps.toFixed(1)}  last_seq=${lastPresentedSeq}  presented=${presentedCount}  last_inference=${lastInferenceMs.toFixed(1)}ms  overlay=${overlayMode}  compensation=${compensationMode}  predict=${temporalConfig.predictMs}ms hold=${temporalConfig.holdMs}ms mask=${temporalConfig.maskPredictMs}ms  tracks obs/pred/hold=${trackSummary.observed}/${trackSummary.predicting}/${trackSummary.holding} max_age=${Math.round(trackSummary.maxPredictionAgeMs)}ms expired=${trackCounters.expired} reacquired=${trackCounters.reacquired}  global_motion=${(globalMotion.dx * 100).toFixed(1)}%,${(globalMotion.dy * 100).toFixed(1)}% (${globalMotion.confidence.toFixed(2)})${depthStatus}`;
     modelLabelEl.textContent = `Segmentation model: ${modelFilename}`;
   }
   function updateBrowserFps() {
@@ -606,26 +616,27 @@
           known.delete(`${pair.epoch}:${pair.seq}`);
           frame.close();
           decoding = false;
-          nextPaintAt = null;
+          playoutAnchor = null;
           pump();
           return;
         }
-        // Inference has already completed before this pair is sent.  Waiting
-        // for inference_ms here would charge that cost a second time and make
-        // a 30 fps source play at roughly half speed when inference takes one
-        // frame interval.  Source spacing controls a queued burst; if
-        // inference is slower, arrival/decode naturally becomes the pacing.
-        const sourceDelta = lastPresentedTs == null ? 0 : Math.max(0, (pair.timestamp_us - lastPresentedTs) / 1000);
+        // Inference has already completed before this pair is sent, so only
+        // source spacing paces playback. Skipping stale rendering clears the
+        // anchor, so the next fresh frame starts a new schedule.
         const now = performance.now();
-        // Skipping stale rendering clears nextPaintAt, so the next fresh frame
-        // paints immediately instead of waiting out the skipped source time.
-        if (lastPresentedTs == null || nextPaintAt == null) nextPaintAt = now;
-        else nextPaintAt = Math.max(nextPaintAt + sourceDelta, now);
-        const delay = Math.max(0, nextPaintAt - now);
+        const paintAt = playoutPaintAt(pair, now);
+        decoding = false;
+        awaitingPaint++;
+        pump();
         setTimeout(() => requestAnimationFrame(() => {
-          if (generation !== decoderGeneration || decoder !== configuredDecoder || awaitingLiveEpoch || stopped) { frame.close(); return; }
+          if (generation !== decoderGeneration || decoder !== configuredDecoder || awaitingLiveEpoch || stopped) {
+            frame.close();
+            // A replaced decoder's reset already cleared the count.
+            if (generation === decoderGeneration) awaitingPaint = Math.max(0, awaitingPaint - 1);
+            return;
+          }
           paint(frame, pair);
-        }), delay);
+        }), Math.max(0, paintAt - now));
       },
       error(error) {
         if (generation !== decoderGeneration || decoder !== configuredDecoder) return;
@@ -647,6 +658,27 @@
     const previous = decoder;
     decoder = null;
     if (previous && previous.state !== 'closed') { try { previous.close(); } catch (_) {} }
+  }
+  function playoutPaintAt(pair, now) {
+    const arrivedAt = pair.receivedAt ?? now;
+    if (playoutAnchor) {
+      const paintAt = playoutAnchor.wall + (pair.timestamp_us - playoutAnchor.ts) / 1000;
+      // A source jump, long stall, or backward timestamp starts a new schedule.
+      if (now - paintAt <= PLAYOUT_REANCHOR_MS && paintAt - now <= PLAYOUT_DELAY_MS + PLAYOUT_REANCHOR_MS) {
+        // Steer the cushion toward PLAYOUT_DELAY_MS: later after late
+        // arrivals, earlier when frames keep arriving with surplus slack.
+        const slack = paintAt - arrivedAt;
+        if (slack < 0) {
+          latePaints++;
+          playoutAnchor.wall -= slack * PLAYOUT_ADAPT;
+        } else if (slack > 2 * PLAYOUT_DELAY_MS) {
+          playoutAnchor.wall -= (slack - PLAYOUT_DELAY_MS) * PLAYOUT_ADAPT;
+        }
+        return paintAt;
+      }
+    }
+    playoutAnchor = { wall: arrivedAt + PLAYOUT_DELAY_MS, ts: pair.timestamp_us };
+    return playoutAnchor.wall;
   }
   function paint(frame, pair) {
     // Use the dimensions produced by the server's inference frame as the
@@ -684,7 +716,7 @@
     // The map follows the frame actually painted, not the newest received.
     renderTelemetry(pair.telemetry, pair.source);
     postPresentedTelemetry(pair);
-    decoding = false;
+    awaitingPaint = Math.max(0, awaitingPaint - 1);
     // Keep the session in the playing state even when the queue momentarily
     // empties. The pump is naturally idle until enqueue() supplies the next
     // completed pair; toggling playing here creates a first-frame/rebuffer
@@ -927,7 +959,7 @@
     }
   }
   function pump() {
-    if (stopped || !decoder || decoding || !playing || !queue.length) return;
+    if (stopped || !decoder || decoding || awaitingPaint >= MAX_DECODED_AHEAD || !playing || !queue.length) return;
     const pair = queue.shift();
     pending.set(pair.timestamp_us, pair);
     decoding = true;
@@ -961,10 +993,10 @@
       serverThresholdsEl.textContent = `(server: appear ≥ ${Number(thresholds.appear).toFixed(2)}, keep ≥ ${Number(thresholds.keep).toFixed(2)})`;
     }
     const key = `${meta.epoch}:${meta.seq}`;
-    if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; awaitingLiveEpoch = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
+    if (meta.epoch > epoch) { epoch = meta.epoch; sessionStorage.setItem('playback-epoch', String(epoch)); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; awaitingPaint = 0; playoutAnchor = null; lastPresentedTs = null; presentedCount = 0; playing = false; awaitingLiveEpoch = false; configureDecoder({ codec: meta.encoded.codec, width: meta.frame.width, height: meta.frame.height }); }
     if (known.has(key) || meta.epoch !== epoch) return;
     known.add(key);
-    const pair = { epoch: meta.epoch, seq: meta.seq, timestamp_us: Number(meta.source.timestamp_us), keyframe: !!meta.encoded.keyframe, data, inference: meta.inference, frame: meta.frame, source: meta.source, telemetry: meta.telemetry };
+    const pair = { epoch: meta.epoch, seq: meta.seq, timestamp_us: Number(meta.source.timestamp_us), receivedAt: performance.now(), keyframe: !!meta.encoded.keyframe, data, inference: meta.inference, frame: meta.frame, source: meta.source, telemetry: meta.telemetry };
     queue.push(pair);
     queue.sort((a, b) => a.seq - b.seq);
     // Never try to paint an unbounded history at display refresh speed.
@@ -1012,10 +1044,10 @@
           renderClassStyleList();
         }
         if (message.type === 'session') { sessionId = message.session_id; epoch = message.epoch; targetSeconds = message.buffer.target_seconds; lowWatermarkSeconds = message.buffer.low_watermark_seconds; maxBufferBytes = message.buffer.client_max_bytes; sessionStorage.setItem('playback-session-id', sessionId); }
-        else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); awaitingLiveEpoch = false; setStatus('Live IDR received; starting playback', '#4fdb8a'); updateStats(); }
+        else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; awaitingPaint = 0; playoutAnchor = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); awaitingLiveEpoch = false; setStatus('Live IDR received; starting playback', '#4fdb8a'); updateStats(); }
         else if (message.type === 'fault') setStatus(message.detail, '#f66');
         else if (message.type === 'resyncing') { resetPlayback(); setLoading(true, 'Playback fell behind; joining live video…'); foregroundResumePending = true; armForegroundResumeWatchdog(); }
-        else if (message.type === 'resume_unavailable') { setStatus(`Resume unavailable: ${message.reason}; resyncing`, '#fc6'); awaitingLiveEpoch = true; queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); }
+        else if (message.type === 'resume_unavailable') { setStatus(`Resume unavailable: ${message.reason}; resyncing`, '#fc6'); awaitingLiveEpoch = true; queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; awaitingPaint = 0; playoutAnchor = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); }
         return;
       }
       if (awaitingLiveEpoch) return;
@@ -1107,11 +1139,11 @@
       reconnectAfterForegroundStall();
     }, Math.min(15000, 2500 * 2 ** foregroundReconnectAttempts));
   }
-  function stop() { stopped = true; jumpPending = false; awaitingLiveEpoch = false; backgroundedWhilePlaying = false; foregroundResumePending = false; clearForegroundResumeTimer(); playing = false; nextPaintAt = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; invalidateDecoder(); queue = []; known.clear(); pending.clear(); resetCompensation(); browserFps = 0; fpsWindowStarted = performance.now(); fpsWindowFrames = 0; fpsOverlayEl.textContent = 'Browser FPS: --'; updateStats(); setStatus('Stopped'); }
+  function stop() { stopped = true; jumpPending = false; awaitingLiveEpoch = false; backgroundedWhilePlaying = false; foregroundResumePending = false; clearForegroundResumeTimer(); playing = false; awaitingPaint = 0; playoutAnchor = null; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } send({ type: 'stop' }); if (socket) socket.close(); socket = null; invalidateDecoder(); queue = []; known.clear(); pending.clear(); resetCompensation(); browserFps = 0; fpsWindowStarted = performance.now(); fpsWindowFrames = 0; fpsOverlayEl.textContent = 'Browser FPS: --'; updateStats(); setStatus('Stopped'); }
   function resetPlayback() {
     awaitingLiveEpoch = true;
     lastPaintedAt = null;
-    queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; nextPaintAt = null; lastPresentedTs = null; presentedCount = 0; playing = false; sourceEnded = false; lastPresentedSeq = -1;
+    queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; awaitingPaint = 0; playoutAnchor = null; lastPresentedTs = null; presentedCount = 0; playing = false; sourceEnded = false; lastPresentedSeq = -1;
     sessionStorage.setItem('playback-last-seq', '-1');
     invalidateDecoder();
   }

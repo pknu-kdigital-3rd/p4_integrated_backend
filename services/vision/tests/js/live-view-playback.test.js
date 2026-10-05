@@ -79,7 +79,7 @@ test('decoder skips stale rendering while preserving H.264 decode dependencies',
     invalidateDecoder() {}, decoderGeneration: 1, decoder: null, playing: true,
     pending: new Map([[123, pair]]), known: new Set(['1:1']), decoding: true,
     bufferedSeconds: () => 0.5, MAX_LIVE_LAG_S: 0.25,
-    pump: () => pumped++, nextPaintAt: 123,
+    pump: () => pumped++, playoutAnchor: { wall: 0, ts: 0 },
     VideoDecoder: class { constructor(options) { output = options.output; } configure() {} },
   });
   vm.runInContext(functions('configureDecoder'), context);
@@ -89,7 +89,7 @@ test('decoder skips stale rendering while preserving H.264 decode dependencies',
   assert.equal(pumped, 1);
   assert.equal(context.pending.size, 0);
   assert.equal(context.known.size, 0);
-  assert.equal(context.nextPaintAt, null);
+  assert.equal(context.playoutAnchor, null);
 });
 
 test('queued live footage beyond the cap resets rather than draining stale frames', () => {
@@ -97,7 +97,7 @@ test('queued live footage beyond the cap resets rather than draining stale frame
   const context = vm.createContext({
     epoch: 1, known: new Set(), queue: [],
     bufferedSeconds: () => 0.8, MAX_QUEUED_LIVE_SECONDS: 0.75,
-    MAX_QUEUED_LIVE_FRAMES: 30, maxBufferBytes: 1024,
+    MAX_QUEUED_LIVE_FRAMES: 30, maxBufferBytes: 1024, performance: { now: () => 0 },
     reconnectAtLive: () => reset++,
   });
   vm.runInContext(functions('enqueue'), context);
@@ -129,7 +129,7 @@ test('receiving an encoded packet keeps loading active until its frame is painte
     resize() {}, estimateGlobalMotion() {}, drawOverlay() {}, updateBrowserFps() {},
     updateStats() {}, known: new Set(), sessionStorage: { setItem() {} },
     send() {}, renderTelemetry() {}, postPresentedTelemetry() {}, pump() {},
-    presentedCount: 0, performance: { now: () => 100 },
+    presentedCount: 0, awaitingPaint: 1, performance: { now: () => 100 },
   });
   vm.runInContext(functions('openSocket', 'paint'), context);
   context.openSocket();
@@ -167,4 +167,79 @@ test('watchdog repairs a decoder stall without replacing an open socket', () => 
   context.jumpLive = () => calls.push('resync');
   context.reconnectAfterForegroundStall();
   assert.deepEqual(calls, ['resync']);
+});
+
+function playout() {
+  const context = vm.createContext({
+    playoutAnchor: null, latePaints: 0,
+    PLAYOUT_DELAY_MS: 50, PLAYOUT_REANCHOR_MS: 250, PLAYOUT_ADAPT: 0.1,
+  });
+  vm.runInContext(functions('playoutPaintAt'), context);
+  return context;
+}
+
+test('playout schedule paints on source time after a fixed cushion', () => {
+  const context = playout();
+  assert.equal(context.playoutPaintAt({ timestamp_us: 0, receivedAt: 1000 }, 1005), 1050);
+  assert.equal(context.playoutPaintAt({ timestamp_us: 33333, receivedAt: 1033 }, 1036), 1050 + 33.333);
+  assert.equal(context.latePaints, 0);
+});
+
+test('a late frame paints at its slot without shifting the frames behind it', () => {
+  const context = playout();
+  context.playoutPaintAt({ timestamp_us: 0, receivedAt: 1000 }, 1000);
+  // Frame 1 is due at 1083.3 but arrives at 1120: it is late, paints now.
+  const late = context.playoutPaintAt({ timestamp_us: 33333, receivedAt: 1120 }, 1121);
+  assert.ok(late < 1121);
+  assert.equal(context.latePaints, 1);
+  // Frame 2 arrived in the same burst; it stays near its original slot
+  // (only the small adaptive nudge), so the backlog drains.
+  const next = context.playoutPaintAt({ timestamp_us: 66667, receivedAt: 1121 }, 1122);
+  assert.ok(Math.abs(next - (1050 + 66.667)) < 5, String(next));
+});
+
+test('a long stall or timestamp jump starts a new playout schedule', () => {
+  for (const [timestamp_us, now] of [[33333, 2000], [-10_000_000, 1100], [10_000_000, 1100]]) {
+    const context = playout();
+    context.playoutPaintAt({ timestamp_us: 0, receivedAt: 1000 }, 1000);
+    assert.equal(context.playoutPaintAt({ timestamp_us, receivedAt: now }, now), now + 50);
+    assert.equal(context.playoutAnchor.ts, timestamp_us);
+  }
+});
+
+test('decoder output frees the decoder for the next chunk while frames wait to paint', () => {
+  let output, pumped = 0;
+  const timers = [];
+  const pair = { epoch: 1, seq: 1, timestamp_us: 0 };
+  const context = vm.createContext({
+    invalidateDecoder() {}, decoderGeneration: 1, decoder: null, playing: true,
+    pending: new Map([[0, pair]]), known: new Set(), decoding: true, awaitingPaint: 0,
+    bufferedSeconds: () => 0, MAX_LIVE_LAG_S: 0.25, performance: { now: () => 10 },
+    playoutPaintAt: () => 60, pump: () => pumped++,
+    setTimeout: (callback, delay) => timers.push(delay),
+    VideoDecoder: class { constructor(options) { output = options.output; } configure() {} },
+  });
+  vm.runInContext(functions('configureDecoder'), context);
+  context.configureDecoder({});
+  output({ timestamp: 0, close() {} });
+  assert.equal(context.decoding, false);
+  assert.equal(context.awaitingPaint, 1);
+  assert.equal(pumped, 1);
+  assert.deepEqual(timers, [50]);
+});
+
+test('pump stops decoding ahead once enough frames wait for their slot', () => {
+  const decoded = [];
+  const context = vm.createContext({
+    stopped: false, decoding: false, playing: true, awaitingPaint: 2, MAX_DECODED_AHEAD: 2,
+    queue: [{ timestamp_us: 1, keyframe: false, data: new Uint8Array(1) }], pending: new Map(),
+    decoder: { decode: chunk => decoded.push(chunk) }, performance: { now: () => 0 },
+    EncodedVideoChunk: class { constructor(init) { Object.assign(this, init); } },
+  });
+  vm.runInContext(functions('pump'), context);
+  context.pump();
+  assert.equal(decoded.length, 0);
+  context.awaitingPaint = 1;
+  context.pump();
+  assert.equal(decoded.length, 1);
 });
