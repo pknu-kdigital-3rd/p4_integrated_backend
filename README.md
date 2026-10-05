@@ -11,6 +11,10 @@ This repository integrates the existing control backend, BIMS routing/tracking, 
 - `services/media-relay/` — existing Go/Pion relay
 - `android/` — existing Android publisher
 
+Optional [private TURN administration](services/turn-admin/README.md) shows real
+allocations and ICE state and manually releases selected UDP allocations. It is
+disabled by default and independent of demo mode.
+
 ## BIMS history compensation
 
 In the operator dashboard, open **설정 → 데이터 소스** to enable

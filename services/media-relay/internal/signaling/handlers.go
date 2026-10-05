@@ -448,9 +448,31 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "GET required")
 		return
 	}
+	h.peerMu.Lock()
+	pc := h.peer
+	h.peerMu.Unlock()
+	var peerStatus map[string]any
+	if pc != nil {
+		peerStatus = map[string]any{
+			"connectionState":    pc.ConnectionState().String(),
+			"iceConnectionState": pc.ICEConnectionState().String(),
+			"iceGatheringState":  pc.ICEGatheringState().String(),
+			"signalingState":     pc.SignalingState().String(),
+		}
+		if sctp := pc.SCTP(); sctp != nil && sctp.Transport() != nil {
+			ice := sctp.Transport().ICETransport()
+			if ice != nil {
+				if pair, err := ice.GetSelectedCandidatePair(); err == nil && pair != nil {
+					peerStatus["localCandidate"] = pair.Local
+					peerStatus["remoteCandidate"] = pair.Remote
+				}
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"live":      h.broadcaster.IsLive(),
 		"recording": h.broadcaster.RecordingStatus(),
+		"peer":      peerStatus,
 	})
 }
 
@@ -460,9 +482,13 @@ func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		// Private status is also loopback-accessible when administration is enabled.
+		// Only signaling is browser-facing; never grant websites CORS access to status.
+		if r.URL.Path == "/offer/android" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

@@ -1,0 +1,8 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TURN 관리</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body><main>
+<header><div><span class="eyebrow">PRIVATE ADMINISTRATION</span><h1>TURN 관리</h1><p>실제 서버 연결과 UDP 할당을 확인하고 선택한 연결을 해제합니다.</p></div><div class="actions"><label><input id="auto" type="checkbox"> 자동 새로고침</label><button id="refresh">새로고침</button></div></header>
+<p id="message" role="status" aria-live="polite">서버 상태를 불러오는 중…</p>
+<section><h2>WebRTC 연결</h2><div id="peer" class="metrics"></div><p class="hint">ICE 상태는 미디어 릴레이의 현재 Android 연결 상태입니다. 개별 TURN 할당의 활성 여부를 판정하지 않습니다.</p><details><summary>선택된 ICE 후보</summary><pre id="candidates"></pre></details></section>
+<section><div class="section-title"><h2>TURN 할당</h2><span id="count"></span></div><p class="hint">연결 해제는 선택한 할당에만 적용됩니다. 사용 중인 할당을 해제하면 영상 연결이 끊어질 수 있습니다.</p><div class="table-wrap"><table><thead><tr><th>세션 / 사용자</th><th>UDP 릴레이 주소</th><th>클라이언트</th><th>프로토콜</th><th>유지 / 만료</th><th>트래픽</th><th>제어</th></tr></thead><tbody id="sessions"></tbody></table></div></section>
+<footer>관리 화면은 데모 모드와 별개이며, 배포 설정에서 켜거나 끌 수 있습니다. <span id="updated"></span></footer>
+</main><dialog id="confirmation"><form method="dialog"><h2>선택한 연결을 해제할까요?</h2><p id="release-label"></p><p>현재 사용 중인 연결이라면 영상이 끊어집니다.</p><div class="actions"><button value="cancel">취소</button><button id="confirm-release" value="release" class="danger">연결 해제</button></div></form></dialog></body></html>

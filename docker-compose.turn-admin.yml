@@ -1,0 +1,39 @@
+# Optional real administration; add this override only when enabling the feature.
+services:
+  p4-relay:
+    ports:
+      - "127.0.0.1:39012:39012"
+
+  p4-coturn:
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --cli-ip=127.0.0.1
+      - --cli-port=5766
+      - --cli-password=${TURN_ADMIN_PASSWORD:?set a private TURN_ADMIN_PASSWORD of at least 24 characters}
+      - --realm=${TURN_REALM:-p4.local}
+      - --user=${TURN_USERNAME:-user}:${TURN_PASSWORD:-replace-with-strong-turn-password}
+      - --listening-port=39004
+      - --tls-listening-port=39005
+      - --min-port=39006
+      - --max-port=39007
+      - --max-allocate-lifetime=120
+      - --listening-ip=${TURN_LISTENING_IP:-0.0.0.0}
+      - --relay-ip=${TLS_PUBLIC_ADDRESS:-10.174.96.119}
+      - --external-ip=${TLS_PUBLIC_ADDRESS:-10.174.96.119}
+
+  p4-turn-admin:
+    profiles: [turn-admin]
+    build:
+      context: ./services/turn-admin
+    container_name: p4-turn-admin
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_ADMIN_ENABLED: ${TURN_ADMIN_ENABLED:-false}
+      TURN_ADMIN_PASSWORD: ${TURN_ADMIN_PASSWORD:?set a private TURN_ADMIN_PASSWORD of at least 24 characters}
+    depends_on:
+      p4-coturn:
+        condition: service_started

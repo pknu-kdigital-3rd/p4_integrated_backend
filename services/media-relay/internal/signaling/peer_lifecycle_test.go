@@ -13,6 +13,7 @@ import (
 
 	"github.com/pion/turn/v4"
 	"github.com/pion/webrtc/v4"
+	"poc-server-webrtc/relay-go/internal/broadcaster"
 )
 
 func testPeer(t *testing.T) *webrtc.PeerConnection {
@@ -204,5 +205,37 @@ func TestCanceledNegotiationDoesNotWaitForGathering(t *testing.T) {
 	_, err = (&Handler{}).negotiate(ctx, receiver, OfferModel{Type: "offer", SDP: offer.SDP})
 	if err != context.Canceled {
 		t.Fatalf("canceled negotiation returned %v", err)
+	}
+}
+
+func TestPrivateStatusReportsActualPeerICEState(t *testing.T) {
+	h := &Handler{broadcaster: broadcaster.New(nil, nil, nil)}
+	pc := testPeer(t)
+	id, err := h.replacePeer(pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	h.Routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/internal/status", nil))
+	if response.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("private status must not grant CORS access")
+	}
+	var status struct {
+		Peer map[string]any `json:"peer"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Peer["iceConnectionState"] != pc.ICEConnectionState().String() || status.Peer["connectionState"] != pc.ConnectionState().String() {
+		t.Fatalf("incorrect native peer state: %v", status.Peer)
+	}
+	h.closePeer(id)
+	response = httptest.NewRecorder()
+	h.Routes().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/internal/status", nil))
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Peer != nil {
+		t.Fatalf("retired peer still appears: %v", status.Peer)
 	}
 }
