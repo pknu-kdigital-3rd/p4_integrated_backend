@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # default but is automatically ignored when YOLO_DEVICE is CPU.
     YOLO_HALF: bool = True
     VISION_FRAME_PREP: Literal["shared", "independent"] = "shared"
+    # ``decode`` converts each frame to model inputs on the decode thread, so
+    # the inference worker starts the models without a YUV -> BGR step.
+    # ``inference`` keeps the conversion inside run_yolo (for comparison).
+    VISION_FRAME_PREP_THREAD: Literal["decode", "inference"] = "decode"
     YOLO_TRT_EXECUTION: Literal["async", "sync"] = "async"
     YOLO_PINNED_INPUT: bool = True
     # Preserve detail in the source-aligned segmentation masks. Operators can

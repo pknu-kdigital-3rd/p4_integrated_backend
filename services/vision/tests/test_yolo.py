@@ -131,7 +131,7 @@ class RunYoloTests(unittest.TestCase):
         frame = _SourceFrame(32, 32)
         with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
             "app.services.yolo.settings.YOLO_INFERENCE_SIZE", "source"
-        ), patch("app.services.yolo.thread_time", side_effect=[10, 10.001, 10.002, 10.006,
+        ), patch("app.services.yolo.thread_time", side_effect=[10, 10, 10.001, 10.002, 10.006,
                                                                10.007, 10.009, 10.010]):
             result = run_yolo(InferenceFrame(1, frame, None, None, None), model)
         self.assertAlmostEqual(result["frame_convert_thread_cpu_ms"], 1)
@@ -139,6 +139,56 @@ class RunYoloTests(unittest.TestCase):
         self.assertAlmostEqual(result["postprocess_thread_cpu_ms"], 2)
         self.assertAlmostEqual(result["inference_thread_cpu_ms"], 10)
         self.assertEqual(result["depth_thread_cpu_ms"], 0)
+
+    def test_prepared_inputs_skip_conversion_on_inference_thread(self):
+        from app.services.depth import DepthFrame
+        from app.services.frame_preparation import PreparedInputs
+        image = np.full((32, 48, 3), 7, dtype=np.uint8)
+        depth_input = np.full((64, 96, 3), 9, dtype=np.uint8)
+        frame = SimpleNamespace(width=96, height=64, to_ndarray=Mock(), reformat=Mock())
+        observed = {}
+
+        class Model:
+            names = {}
+            def __call__(self, received, **kwargs):
+                observed["yolo"] = received
+                observed["imgsz"] = kwargs["imgsz"]
+                return [SimpleNamespace(boxes=[], masks=None)]
+
+        class Depth:
+            def predict(self, received, camera):
+                observed["depth"] = received
+                return DepthFrame(96, 64, torch.ones((64, 96)))
+
+        prepared = PreparedInputs(image, depth_input, 96, 64, (32, 48), True, 6.5, 6.0)
+        with patch("app.services.yolo.settings.YOLO_TRACKING", False):
+            result = run_yolo(InferenceFrame(1, frame, None, None, None, prepared=prepared), Model(), Depth())
+        frame.to_ndarray.assert_not_called()
+        frame.reformat.assert_not_called()
+        self.assertIs(observed["yolo"], image)
+        self.assertIs(observed["depth"], depth_input)
+        self.assertEqual(observed["imgsz"], (32, 48))
+        self.assertEqual(result["frame_convert_ms"], 6.5)
+        self.assertEqual(result["frame_convert_thread_cpu_ms"], 6.0)
+        self.assertEqual((result["width"], result["height"]), (96, 64))
+
+    def test_prepared_inputs_for_other_depth_setting_are_converted_again(self):
+        from app.services.frame_preparation import PreparedInputs
+        frame = _SourceFrame(32, 32)
+        stale = PreparedInputs(np.ones((8, 8, 3), dtype=np.uint8), None, 32, 32, 32, True, 1.0, 1.0)
+        observed = {}
+
+        class Model:
+            names = {}
+            def __call__(self, image, **kwargs):
+                observed["shape"] = image.shape
+                return [SimpleNamespace(boxes=[], masks=None)]
+
+        with patch("app.services.yolo.settings.YOLO_TRACKING", False), patch(
+            "app.services.yolo.settings.YOLO_INFERENCE_SIZE", "source"
+        ):
+            run_yolo(InferenceFrame(1, frame, None, None, None, prepared=stale), Model())
+        self.assertEqual(observed["shape"], (32, 32, 3))
 
     def test_independent_depth_grid_scales_camera_and_masks_and_keeps_concurrency(self):
         import threading

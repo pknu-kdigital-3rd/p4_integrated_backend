@@ -64,6 +64,10 @@ class OrderedDecoder:
                 self.metrics.decode_thread_cpu_ms_total += timing["cpu"]
                 self.metrics.decode_wait_ms_total += (perf_counter() - submitted) * 1000
 
+    async def run(self, function, *args):
+        """Run per-frame work on the decode thread, behind earlier decodes."""
+        return await asyncio.get_running_loop().run_in_executor(self.executor, function, *args)
+
     async def close(self):
         # Drain in-flight native decode before releasing its context, also on
         # cancellation. Joining the worker must not block the event loop.

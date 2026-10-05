@@ -10,6 +10,7 @@ from av import VideoFrame
 from starlette.requests import HTTPConnection
 from ultralytics import YOLO
 
+from app.services.frame_preparation import PreparedInputs
 from app.services.source_timeline import SourceTimelineResolver
 from app.services.telemetry import TelemetryStore
 from app.services.model_timing import ModelTimelineMetrics
@@ -41,6 +42,9 @@ class InferenceFrame:
     source_timeline_status: str = "unavailable"
     source_timeline_generation: int = 0
     enqueued_at: float | None = None
+    # Model inputs converted on the decode thread; run_yolo converts itself
+    # when this is absent or was prepared for a different depth setting.
+    prepared: PreparedInputs | None = None
 
 
 @dataclass

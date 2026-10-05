@@ -25,7 +25,7 @@ from app.services.gc_runtime import _freeze_loaded_objects
 from app.services.cpu_profile import run_model_cpu_profile
 from app.services.model_timing import model_timeline
 from app.services.live_execution import OrderedDecoder, timed_inference
-from app.services.frame_preparation import shared_source_inputs
+from app.services.frame_preparation import PreparedInputs, shared_source_inputs
 from app.services.mask_transfer import compact_mask_polygons, _copy_tensor_to_host
 
 # The Go feed uses a length-prefixed record stream.  The length includes the
@@ -643,18 +643,13 @@ def reset_tracker(yolo_model: YOLO) -> None:
         del predictor.trackers
 
 
-def run_yolo(
-    inference_frame: InferenceFrame,
-    yolo_model: YOLO,
-    depth_model=None,
-    depth_executor=None,
-) -> dict:
+def prepare_inference_inputs(frame, depth_enabled: bool) -> PreparedInputs:
+    """Convert one decoded frame to the YOLO image and the depth input."""
+
     start = perf_counter()
     cpu_start = thread_time()
-    convert_cpu_start = cpu_start
-    frame_convert_start = start
-    source_width = int(getattr(inference_frame.frame, "width", 0) or 0)
-    source_height = int(getattr(inference_frame.frame, "height", 0) or 0)
+    source_width = int(getattr(frame, "width", 0) or 0)
+    source_height = int(getattr(frame, "height", 0) or 0)
     if source_width > 0 and source_height > 0:
         (target_width, target_height), imgsz = _configured_inference_size(
             source_width, source_height
@@ -663,30 +658,31 @@ def run_yolo(
         target_width, target_height = source_width, source_height
         imgsz = settings.YOLO_MAX_IMGSZ
     shared_source = None
-    if (settings.VISION_FRAME_PREP == "shared" and depth_model is not None
+    if (settings.VISION_FRAME_PREP == "shared" and depth_enabled
             and source_width > 0 and source_height > 0
             and (target_width, target_height) != (source_width, source_height)
             and depth_input_size(source_width, source_height, target_width, target_height)
                 == (source_width, source_height)):
         # Depth consumes the full source. Convert it once and derive YOLO's
         # smaller grid without a second YUV -> BGR conversion.
-        img, shared_source = shared_source_inputs(inference_frame.frame, (target_width, target_height))
+        img, shared_source = shared_source_inputs(frame, (target_width, target_height))
     elif (target_width, target_height) != (source_width, source_height):
-        model_frame = inference_frame.frame.reformat(
+        model_frame = frame.reformat(
             width=target_width,
             height=target_height,
             format="bgr24",
         )
         img = model_frame.to_ndarray()
     else:
-        img = inference_frame.frame.to_ndarray(format="bgr24")
+        img = frame.to_ndarray(format="bgr24")
     frame_height, frame_width = img.shape[:2]
     if source_width <= 0:
         source_width = frame_width
     if source_height <= 0:
         source_height = frame_height
-    depth_input = shared_source if shared_source is not None else img
-    if depth_model is not None:
+    depth_input = None
+    if depth_enabled:
+        depth_input = shared_source if shared_source is not None else img
         depth_width, depth_height = depth_input_size(
             source_width, source_height, frame_width, frame_height,
         )
@@ -694,16 +690,48 @@ def run_yolo(
             # Resize from the decoded source, so a larger depth image does not
             # upsample information already discarded by YOLO's smaller input.
             if (depth_width, depth_height) == (source_width, source_height):
-                depth_input = inference_frame.frame.to_ndarray(format="bgr24")
+                depth_input = frame.to_ndarray(format="bgr24")
             else:
-                depth_input = inference_frame.frame.reformat(
+                depth_input = frame.reformat(
                     width=depth_width, height=depth_height, format="bgr24",
                 ).to_ndarray()
-    frame_convert_ms = (perf_counter() - frame_convert_start) * 1000
-    frame_convert_cpu_ms = (thread_time() - convert_cpu_start) * 1000
     if settings.YOLO_INFERENCE_SIZE == "auto":
         longest_side = max(frame_width, frame_height)
         imgsz = min(((longest_side + 31) // 32) * 32, settings.YOLO_MAX_IMGSZ)
+    return PreparedInputs(
+        image=img,
+        depth_input=depth_input,
+        source_width=source_width,
+        source_height=source_height,
+        imgsz=imgsz,
+        depth_enabled=depth_enabled,
+        convert_ms=(perf_counter() - start) * 1000,
+        convert_cpu_ms=(thread_time() - cpu_start) * 1000,
+    )
+
+
+def run_yolo(
+    inference_frame: InferenceFrame,
+    yolo_model: YOLO,
+    depth_model=None,
+    depth_executor=None,
+) -> dict:
+    start = perf_counter()
+    cpu_start = thread_time()
+    depth_enabled = depth_model is not None
+    prepared = inference_frame.prepared
+    if prepared is None or prepared.depth_enabled != depth_enabled:
+        prepared = prepare_inference_inputs(inference_frame.frame, depth_enabled)
+    img = prepared.image
+    imgsz = prepared.imgsz
+    source_width = prepared.source_width
+    source_height = prepared.source_height
+    frame_height, frame_width = img.shape[:2]
+    depth_input = prepared.depth_input if depth_enabled else img
+    # Reported for comparability; with decode-thread preparation this time was
+    # spent before the frame was queued, not on the inference critical path.
+    frame_convert_ms = prepared.convert_ms
+    frame_convert_cpu_ms = prepared.convert_cpu_ms
     quantize = (
         16 if settings.YOLO_HALF and settings.YOLO_DEVICE.startswith("cuda") else 32
     )
@@ -925,6 +953,7 @@ async def _queue_decoded_frame(
     state: AppState,
     metadata: dict,
     frame: av.VideoFrame,
+    decoder: OrderedDecoder | None = None,
 ) -> None:
     pts = metadata.get("pts_90k")
     timestamp_us = int(metadata.get("timestamp_us", 0))
@@ -940,6 +969,18 @@ async def _queue_decoded_frame(
     # Resolved here, in decode order, for every frame - including frames the
     # inference worker later skips - so telemetry never depends on YOLO.
     source_time = state.source_timeline.resolve(pts, qr_source_timestamp_ns, qr_decode_success)
+    prepared = None
+    if decoder is not None and settings.VISION_FRAME_PREP_THREAD == "decode":
+        try:
+            # Convert behind this session's decodes so the inference worker
+            # starts the models without a YUV -> BGR step.
+            prepared = await decoder.run(
+                prepare_inference_inputs, frame, state.depth_model is not None
+            )
+        except Exception as exc:
+            # run_yolo converts again and reports the failure through its
+            # retry/fault path, as it did before decode-thread preparation.
+            print(f"frame preparation failed on decode thread: {type(exc).__name__}: {exc}", flush=True)
     await _enqueue_inference_frame(
         state,
         InferenceFrame(
@@ -958,6 +999,7 @@ async def _queue_decoded_frame(
             resolved_source_timestamp_ns=source_time.source_timestamp_ns,
             source_timeline_status=source_time.status,
             source_timeline_generation=source_time.generation,
+            prepared=prepared,
             # tripId is None for a stream tracked without a trip: Live View still
             # gets its telemetry, while detection persistence requires a trip.
             recording_identity=(
@@ -1070,7 +1112,7 @@ async def _decode_records(reader, state, decoder) -> None:
                         pending.remove(source)
                 if source is None:
                     source = pending.popleft() if pending else metadata
-                await _queue_decoded_frame(state, source, frame)
+                await _queue_decoded_frame(state, source, frame, decoder)
         elif kind == K_END:
             state.android_live = False
             for frame in await decoder.decode():
@@ -1080,7 +1122,7 @@ async def _decode_records(reader, state, decoder) -> None:
                         int(source["pts_90k"])
                     ):
                         pending_by_pts[int(source["pts_90k"])].popleft()
-                    await _queue_decoded_frame(state, source, frame)
+                    await _queue_decoded_frame(state, source, frame, decoder)
             async with state.result_condition:
                 state.result_condition.notify_all()
             # END ends the source, not the reliable transport. Keep reading so
@@ -1179,7 +1221,7 @@ async def yolo_worker(state: AppState) -> None:
         flush=True,
     )
     print(f"UniDepth input size: {settings.UNIDEPTH_INFERENCE_SIZE}", flush=True)
-    print(f"Vision frame preparation: {settings.VISION_FRAME_PREP}; "
+    print(f"Vision frame preparation: {settings.VISION_FRAME_PREP} on {settings.VISION_FRAME_PREP_THREAD} thread; "
           f"YOLO TensorRT execution: {settings.YOLO_TRT_EXECUTION}; pinned_input={settings.YOLO_PINNED_INPUT}", flush=True)
     run_inference = partial(
         run_yolo,

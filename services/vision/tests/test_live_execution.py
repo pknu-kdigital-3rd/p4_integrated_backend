@@ -51,6 +51,9 @@ class LiveExecutionTests(unittest.IsolatedAsyncioTestCase):
             async def decode(self, packet=None):
                 return self.context.decode(packet) if packet is not None else self.context.decode()
 
+            async def run(self, function, *args):
+                return function(*args)
+
         async def run(decoder):
             state = AppState()
             timestamps = sorted(expected_sources.values())
@@ -82,6 +85,8 @@ class LiveExecutionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(matched["status"], "ok")
                 self.assertEqual(matched["match"]["gps"], "exact")
                 self.assertEqual(matched["match"]["imu_delta_ms"], 0)
+                self.assertEqual(frame.prepared.image.shape[:2], (48, 64))
+                np.testing.assert_array_equal(frame.prepared.image, frame.frame.to_ndarray(format="bgr24"))
                 observations.append((source, matched, frame.encoded, frame.frame.to_ndarray(format="bgr24")))
             return observations
 
@@ -94,6 +99,41 @@ class LiveExecutionTests(unittest.IsolatedAsyncioTestCase):
         for before, after in zip(baseline, actual):
             self.assertEqual(before[:3], after[:3])
             np.testing.assert_array_equal(before[3], after[3])
+
+    async def test_frame_preparation_runs_on_decode_thread_and_falls_back(self):
+        from app.services.yolo import _queue_decoded_frame
+        frame = av.VideoFrame.from_ndarray(np.zeros((48, 64, 3), dtype=np.uint8), format="bgr24")
+        threads = []
+
+        def prepare(received, depth_enabled):
+            threads.append(threading.get_ident())
+            self.assertIs(received, frame)
+            self.assertFalse(depth_enabled)
+            return "prepared"
+
+        def fail(received, depth_enabled):
+            raise ValueError("bad frame")
+
+        decoder = OrderedDecoder(VisionMetrics())
+        queued = []
+
+        async def retain(_state, inference_frame):
+            queued.append(inference_frame)
+
+        try:
+            await decoder.reset()
+            decode_thread = await decoder.run(threading.get_ident)
+            for seq, function, mode in ((1, prepare, "decode"), (2, fail, "decode"), (3, prepare, "inference")):
+                state = AppState()
+                with patch("app.services.yolo.prepare_inference_inputs", side_effect=function), patch(
+                    "app.services.yolo.settings.VISION_FRAME_PREP_THREAD", mode
+                ), patch("app.services.yolo._enqueue_inference_frame", side_effect=retain):
+                    await _queue_decoded_frame(state, {"epoch": 1, "seq": seq, "_encoded": b""}, frame, decoder)
+        finally:
+            await decoder.close()
+        self.assertEqual([item.prepared for item in queued], ["prepared", None, None])
+        self.assertEqual(threads, [decode_thread])
+        self.assertNotEqual(decode_thread, threading.get_ident())
 
     async def test_decode_error_preserves_relay_resync(self):
         state = AppState()

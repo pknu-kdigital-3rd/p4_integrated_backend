@@ -1,6 +1,23 @@
 """Prepare source-sized depth and resized YOLO inputs with one color conversion."""
 
+from dataclasses import dataclass
+
 import cv2
+import numpy as np
+
+
+@dataclass(frozen=True)
+class PreparedInputs:
+    """Model inputs converted from one decoded frame, possibly off the inference thread."""
+
+    image: np.ndarray
+    depth_input: np.ndarray | None
+    source_width: int
+    source_height: int
+    imgsz: int | tuple[int, int]
+    depth_enabled: bool
+    convert_ms: float
+    convert_cpu_ms: float
 
 
 def shared_source_inputs(frame, yolo_size):
