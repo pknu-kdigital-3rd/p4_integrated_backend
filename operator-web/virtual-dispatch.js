@@ -6,6 +6,7 @@ import { installRoadBrush } from './road-brush.js?v=6';
 import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=3';
 import { createBrushHistory } from './road-brush-history.js?v=1';
 import { installRoutePointToolbar } from './route-point-toolbar.js?v=3';
+import { createVirtualRouteMotion } from './virtual-route-motion.js?v=1';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -235,8 +236,8 @@ function syncTurboModeUI() {
   }
   turboProgressIndicator.hidden = !locked;
   turboProgressMessage.textContent = turboCommandPending
-    ? (turboCommandTarget ? '터보 모드를 시작하는 중 · 200 km/h' : '터보 모드를 종료하는 중…')
-    : `터보 진행 20× · 기준 200 km/h · ${turboVehicles.length}대`;
+    ? (turboCommandTarget ? '터보 모드를 시작하는 중 · 경로 길이 기준' : '터보 모드를 종료하는 중…')
+    : `터보 진행 · 경로 길이 기준 · ${turboVehicles.length}대`;
   const selectedVehicle = vehicles.find((item) => String(item.vehicleId) === selectedVehicleId);
   const selectedTripIsDriving = selectedVehicle?.state?.simStatus === 'DRIVING'
     && selectedVehicle?.state?.trip?.state === 'DRIVING';
@@ -563,20 +564,42 @@ function stopVehicleMarkerAnimation(vehicleId) {
   if (frame !== undefined) cancelAnimationFrame(frame);
   virtualVehicleAnimationFrames.delete(vehicleId);
 }
+const virtualVehicleRouteMotion = new Map();
 
 function clearVirtualVehicleMarkers() {
   for (const vehicleId of virtualVehicleMarkers.keys()) stopVehicleMarkerAnimation(vehicleId);
   virtualVehicleMarkers.clear();
+  virtualVehicleRouteMotion.clear();
   markerLayerGroup.clearLayers();
 }
 
-function animateVehicleMarker(vehicleId, marker, target) {
+function animateVehicleMarker(vehicleId, marker, target, state) {
   const current = marker.getLatLng();
   const from = { lat: Number(current.lat), lon: Number(current.lng) };
   const to = { lat: Number(target.lat), lon: Number(target.lon) };
   if (![from.lat, from.lon, to.lat, to.lon].every(Number.isFinite)) return;
   stopVehicleMarkerAnimation(vehicleId);
-  if (Math.abs(from.lat - to.lat) < 0.00000001 && Math.abs(from.lon - to.lon) < 0.00000001) {
+  const route = state?.trip?.routes?.find(candidate => String(candidate.routeId) === String(state.activeRouteId));
+  const offsetM = state?.offsetM == null ? NaN : Number(state.offsetM);
+  let motion = virtualVehicleRouteMotion.get(vehicleId);
+  if (route && Number.isFinite(offsetM)) {
+    if (!motion || motion.routeId !== String(route.routeId)) {
+      const path = createVirtualRouteMotion(route.routeGeojson);
+      if (path) {
+        motion = { routeId: String(route.routeId), path, offsetM: Math.max(0, Math.min(path.total, offsetM)) };
+        virtualVehicleRouteMotion.set(vehicleId, motion);
+        const point = path.sample(motion.offsetM);
+        marker.setLatLng([point.lat, point.lon]);
+        return;
+      }
+      motion = null;
+    }
+  } else motion = null;
+  if (!motion) virtualVehicleRouteMotion.delete(vehicleId);
+  const fromOffset = motion?.offsetM;
+  const toOffset = motion ? Math.max(fromOffset, Math.min(motion.path.total, offsetM)) : null;
+  if (motion ? fromOffset === toOffset : Math.abs(from.lat - to.lat) < 0.00000001 && Math.abs(from.lon - to.lon) < 0.00000001) {
+    if (motion) return;
     marker.setLatLng([to.lat, to.lon]);
     return;
   }
@@ -584,10 +607,16 @@ function animateVehicleMarker(vehicleId, marker, target) {
   const durationMs = 300;
   const tick = (now) => {
     const fraction = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
-    marker.setLatLng([
-      from.lat + (to.lat - from.lat) * fraction,
-      from.lon + (to.lon - from.lon) * fraction,
-    ]);
+    if (motion) {
+      motion.offsetM = fromOffset + (toOffset - fromOffset) * fraction;
+      const point = motion.path.sample(motion.offsetM);
+      marker.setLatLng([point.lat, point.lon]);
+    } else {
+      marker.setLatLng([
+        from.lat + (to.lat - from.lat) * fraction,
+        from.lon + (to.lon - from.lon) * fraction,
+      ]);
+    }
     if (fraction < 1) virtualVehicleAnimationFrames.set(vehicleId, requestAnimationFrame(tick));
     else virtualVehicleAnimationFrames.delete(vehicleId);
   };
@@ -1356,8 +1385,9 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
       marker.on('click', () => { selectedVehicleId = vehicleId; vehicleSelect.value = selectedVehicleId; speedControlEditing = false; renderSelectedVehicle(vehicles.find((item) => String(item.vehicleId) === vehicleId)); syncTurboModeUI(); });
       virtualVehicleMarkers.set(vehicleId, marker);
       markerLayerGroup.addLayer(marker);
+      animateVehicleMarker(vehicleId, marker, { lat: Number(position.lat), lon: Number(position.lon) }, vehicle.state);
     } else {
-      animateVehicleMarker(vehicleId, marker, { lat: Number(position.lat), lon: Number(position.lon) });
+      animateVehicleMarker(vehicleId, marker, { lat: Number(position.lat), lon: Number(position.lon) }, vehicle.state);
       marker.setIcon(vehicleIcon(vehicle, vehicleId === selected, true));
       marker.setTooltipContent(vehicleDisplayName(vehicle));
     }
@@ -1367,6 +1397,7 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
     stopVehicleMarkerAnimation(vehicleId);
     markerLayerGroup.removeLayer(marker);
     virtualVehicleMarkers.delete(vehicleId);
+    virtualVehicleRouteMotion.delete(vehicleId);
   }
   renderSelectedVehicle(vehicles.find((vehicle) => String(vehicle.vehicleId) === selectedVehicleId));
   removeVehicleButton.disabled = !selectedVehicleId;

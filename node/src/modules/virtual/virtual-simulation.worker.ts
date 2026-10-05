@@ -2,6 +2,7 @@ import { logger } from "../../config/logger.ts";
 import { prisma } from "../../infrastructure/database/prisma.ts";
 import { virtualService } from "./virtual.service.ts";
 import { waypointPassed } from "./virtual-waypoint-progress.ts";
+import { TURBO_FACTOR, turboSpeedKmh } from "./virtual-turbo-speed.ts";
 
 type RouteGeometry = { type?: string; coordinates?: unknown };
 type Point = { lat: number; lon: number };
@@ -126,7 +127,9 @@ async function advanceVehicles() {
         const nominalSpeedMps = routeDistanceM > 0 && route.durationSec > 0
             ? routeDistanceM / route.durationSec
             : 0;
-        const configuredSpeedKmh = Number(state.speedKmh);
+        const configuredSpeedKmh = state.speedFactor >= TURBO_FACTOR
+            ? turboSpeedKmh(routeDistanceM)
+            : Number(state.speedKmh);
         const configuredSpeedMps = configuredSpeedKmh > 0 ? configuredSpeedKmh / 3.6 : 0;
         const legacyFactor = Number.isFinite(state.speedFactor) && state.speedFactor > 0 ? state.speedFactor : 1;
         const motionFactor = nominalSpeedMps > 0 && configuredSpeedMps > 0
@@ -197,7 +200,7 @@ async function advanceVehicles() {
         }
         if (fraction >= 1) {
             await prisma.$transaction([
-                prisma.virtualVehicleState.update({ where: { vehicleId: state.vehicleId }, data: { simStatus: "COMPLETED", simElapsedMs: BigInt(Math.round(durationMs)), currentEdgeId: null, currentPhysicalSegmentId: null, offsetM: position.offsetM, lastPosition: position.position, lastCheckpointAt: new Date(now), updatedAt: new Date(now) } }),
+                prisma.virtualVehicleState.update({ where: { vehicleId: state.vehicleId }, data: { simStatus: "COMPLETED", speedKmh: configuredSpeedKmh, simElapsedMs: BigInt(Math.round(durationMs)), currentEdgeId: null, currentPhysicalSegmentId: null, offsetM: position.offsetM, lastPosition: position.position, lastCheckpointAt: new Date(now), updatedAt: new Date(now) } }),
                 prisma.virtualTrip.update({ where: { virtualTripId: state.virtualTripId }, data: { state: "COMPLETED", endedAt: new Date(now), updatedAt: new Date(now) } }),
                 prisma.virtualTripWaypoint.updateMany({ where: { virtualTripId: state.virtualTripId, status: "PENDING" }, data: { status: "REACHED", reachedAt: new Date(now) } }),
                 prisma.vehicle.update({ where: { vehicleId: state.vehicleId }, data: { vehicleStatus: "READY" } }),
@@ -206,7 +209,7 @@ async function advanceVehicles() {
         }
         const checkpoint = {
             where: { vehicleId: state.vehicleId, virtualTripId: state.virtualTripId, simStatus: "DRIVING", commandVersion: state.commandVersion },
-            data: { simElapsedMs: BigInt(Math.round(totalElapsedMs)), currentEdgeId, currentPhysicalSegmentId, offsetM: position.offsetM, lastPosition: position.position, lastCheckpointAt: new Date(now), updatedAt: new Date(now) },
+            data: { speedKmh: configuredSpeedKmh, simElapsedMs: BigInt(Math.round(totalElapsedMs)), currentEdgeId, currentPhysicalSegmentId, offsetM: position.offsetM, lastPosition: position.position, lastCheckpointAt: new Date(now), updatedAt: new Date(now) },
         };
         const reachedWaypointIds = state.trip.waypoints
             .filter((waypoint) => waypointPassed(waypoint.snappedOffsetM, position.offsetM))

@@ -6,6 +6,7 @@ import { routingInternalClient } from "./routing-internal.client.ts";
 import { diffRoadState, rerouteReason, routeAffectedByChange } from "./virtual-reroute-scope.ts";
 import { occupiedVehicleIds } from "./virtual-occupancy.ts";
 import { shiftSnappedStops, waypointPassed, waypointRouteOffsets } from "./virtual-waypoint-progress.ts";
+import { TURBO_FACTOR, turboSpeedKmh } from "./virtual-turbo-speed.ts";
 import type {
     CommandBody,
     Coordinate,
@@ -781,7 +782,7 @@ export const virtualService = {
     },
 
     async command(tripId: bigint, input: CommandBody, actorId?: bigint) {
-        const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { stateRecord: true } });
+        const trip = await prisma.virtualTrip.findUnique({ where: { virtualTripId: tripId }, include: { stateRecord: { include: { activeRoute: true } } } });
         if (!trip || !trip.stateRecord) throw new AppError(404, "Virtual trip not found", "VIRTUAL_TRIP_NOT_FOUND");
         if (trip.state === "DRIVING" && trip.stateRecord.simStatus === "DRIVING" && trip.stateRecord.speedFactor >= 20 && input.command !== "SET_TURBO_MODE") {
             throw new AppError(409, "Trip controls are locked while turbo progress is active", "TURBO_PROGRESS_LOCK");
@@ -797,11 +798,12 @@ export const virtualService = {
             if (trip.state !== "DRIVING" || !trip.stateRecord || trip.stateRecord.simStatus !== "DRIVING") {
                 throw new AppError(409, "Turbo mode requires an active driving trip", "TURBO_REQUIRES_DRIVING_TRIP");
             }
+            const speedKmh = input.enabled ? turboSpeedKmh(Number(trip.stateRecord.activeRoute?.distanceM)) : 200;
             const result = await tx.virtualVehicleState.update({
                 where: { virtualTripId: tripId },
-                data: { speedKmh: 200, speedFactor: input.enabled ? 20 : 1, commandVersion: { increment: 1 } },
+                data: { speedKmh, speedFactor: input.enabled ? TURBO_FACTOR : 1, commandVersion: { increment: 1 } },
             });
-            await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TURBO_MODE_CHANGED", payload: { enabled: input.enabled, speedKmh: 200 } });
+            await createEvent(tx, { scenarioId: trip.scenarioId, virtualTripId: tripId, actorId: actorId ?? null, eventType: "TURBO_MODE_CHANGED", payload: { enabled: input.enabled, speedKmh } });
             return result;
         });
         if (input.command === "SET_SPEED_KMH") return prisma.$transaction(async (tx) => {
