@@ -327,7 +327,7 @@ dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-si
 #recording-player-panel:fullscreen #recording-player { height: 100%; max-height: none; aspect-ratio: auto; }
 
 /* Floating Live View keeps map and sidebar in place. */
-#live-view-panel { position: absolute; z-index: 850; right: 18px; bottom: 34px; width: min(460px,max(320px,22vw),calc(100% - 36px)); height: min(410px,max(300px,38vh),60%); display: grid; grid-template-rows: 48px 24px 26px minmax(0,1fr) 30px; background: #15263b; color: white; border-radius: 14px; overflow: hidden; box-shadow: var(--ui-shadow-floating); }
+#live-view-panel { position: absolute; z-index: 850; right: 18px; bottom: 34px; width: min(506px,max(352px,24.2vw),calc(100% - 36px)); height: min(451px,max(330px,41.8vh),66%); display: grid; grid-template-rows: 48px 24px 26px minmax(0,1fr) 30px; background: #15263b; color: white; border-radius: 14px; overflow: hidden; box-shadow: var(--ui-shadow-floating); }
 .live-view-header { display: flex; align-items: center; justify-content: space-between; padding: 0 12px; gap: 8px; }
 .live-view-header h2 { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-view-actions { display: flex; gap: 4px; flex-shrink: 0; }
