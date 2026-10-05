@@ -189,7 +189,22 @@ export function resolveTarget(value, auto, groups) {
 // getScope() returns { scope, label } for the operator's current screen
 // selection. getTargets() returns [{ label, options: [{ value, text, label,
 // scope }] }]: every vehicle or scenario the operator can ask about instead.
-export function initializeAssistantPanel({ getToken, getScope = () => FLEET, getTargets = () => [] }) {
+// A chat request to move the map, handled like the progress card's buttons
+// instead of being sent to the model: 'destination' frames the trip's
+// destination with the vehicle, 'vehicle' returns to the vehicle. Questions
+// about the destination or vehicle ("목적지까지 얼마나 남았어?") are not commands,
+// nor is naming another vehicle ("3호"): the map acts on the selected one.
+const MAP_VERB = /보여|보이|표시|띄워|이동|포커스|focus|찾아|돌아가|돌아와|비춰|확대|줌|센터|가운데|맞춰|가 ?줘|가자/i;
+const NOT_A_COMMAND = /얼마|몇|언제|왜|어떻|무엇|뭐|남았|걸려|상태|속도|보고|위험/;
+export function mapCommand(text) {
+  const value = String(text ?? '').trim();
+  if (!value || value.length > 60 || !MAP_VERB.test(value) || NOT_A_COMMAND.test(value) || /\d\s*호/.test(value)) return null;
+  if (/목적지|도착지|destination/i.test(value)) return 'destination';
+  if (/차량|화물차|트럭|운반차|자동차|현재 ?위치|vehicle|truck/i.test(value)) return 'vehicle';
+  return null;
+}
+
+export function initializeAssistantPanel({ getToken, getScope = () => FLEET, getTargets = () => [], focusMap = null }) {
   const drawer = document.querySelector('#assistant-drawer');
   const messages = document.querySelector('#assistant-messages');
   const form = document.querySelector('#assistant-form');
@@ -405,6 +420,14 @@ export function initializeAssistantPanel({ getToken, getScope = () => FLEET, get
     const text = question.value.trim();
     if (!text || current) return;
     question.value = '';
+    const command = focusMap ? mapCommand(text) : null;
+    if (command) {
+      bubble('user', text);
+      let reply;
+      try { reply = focusMap(command); } catch (error) { reply = `지도를 이동하지 못했습니다: ${error.message}`; }
+      bubble('assistant', reply);
+      return;
+    }
     ask({ mode: 'qa', question: text }, text);
   });
   question.addEventListener('keydown', (event) => {

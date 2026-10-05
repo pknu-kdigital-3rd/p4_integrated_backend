@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The operator frontend remains plain browser JavaScript.
-import { AUTO_TARGET, FLEET_TARGET, inlineTokens, parseMarkdown, resolveTarget, sourceLabel } from '../../operator-web/assistant-panel.js';
+import { AUTO_TARGET, FLEET_TARGET, inlineTokens, mapCommand, parseMarkdown, resolveTarget, sourceLabel } from '../../operator-web/assistant-panel.js';
 
 describe('assistant panel markdown', () => {
   it('parses a report: headings, tables and lists', () => {
@@ -61,5 +61,19 @@ describe('assistant target choice', () => {
 
   it('falls back to the screen selection when the chosen target is gone', () => {
     expect(resolveTarget('real:404', auto, groups)).toEqual({ ...auto, value: AUTO_TARGET });
+  });
+});
+
+describe('assistant panel map commands', () => {
+  it('recognizes requests to show the destination or the vehicle', () => {
+    for (const text of ['목적지 보여줘', '도착지로 이동해 줘', '목적지 표시해줘', '목적지 포커스']) expect(mapCommand(text)).toBe('destination');
+    for (const text of ['현재 차량으로 이동', '차량 위치로 돌아가줘', '트럭 보여줘', '현재 위치 보여줘']) expect(mapCommand(text)).toBe('vehicle');
+    expect(mapCommand('차량이랑 목적지 같이 보여줘')).toBe('destination');
+  });
+
+  it('leaves questions and other vehicles to the model', () => {
+    for (const text of ['목적지까지 얼마나 남았어?', '차량 상태 보여줘', '현재 속도 보여줘', '3호 차량 보여줘', '목적지가 어디야?', '상태 보고']) {
+      expect(mapCommand(text)).toBeNull();
+    }
   });
 });

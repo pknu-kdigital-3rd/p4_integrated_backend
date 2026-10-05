@@ -8,7 +8,7 @@ import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOn
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
-import {initializeAssistantPanel} from './assistant-panel.js?v=5';
+import {initializeAssistantPanel} from './assistant-panel.js?v=6';
 import {deleteRecordingSnapshot} from './recording-delete.js?v=1';
 import {deleteTripWithRecordings,tripAction} from './trip-actions.js?v=1';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
@@ -380,7 +380,20 @@ function drawWhenNotZooming(key,draw){
 function refreshMapLayout(){requestAnimationFrame(()=>map.invalidateSize({pan:false}));}
 new ResizeObserver(refreshMapLayout).observe(document.querySelector('#map-surface'));
 const dashboard=initializeDashboard({map,markers,selectVehicle,showFleet:items=>fleetViewport.fit(items)});
-initializeAssistantPanel({getToken:()=>token,getScope:assistantScope,getTargets:assistantTargets});
+initializeAssistantPanel({getToken:()=>token,getScope:assistantScope,getTargets:assistantTargets,focusMap:assistantFocusMap});
+// Chat map requests do what the progress card's destination flag and vehicle
+// icon do, and say why when there is nothing to show.
+function assistantFocusMap(kind){
+  if(window.__virtualMode)return'가상 시나리오 화면에서는 지도 이동을 지원하지 않습니다.';
+  if(kind==='destination'){
+    if(!tripDestination(currentTripDisplay))return selected?'선택한 차량에 표시할 운행 목적지가 없습니다.':'운행 중인 차량을 먼저 선택해 주세요.';
+    showTripDestination();
+    return`목적지(${currentTripDisplay.destinationName||'이름 없음'})와 차량을 지도에 표시했습니다.`;
+  }
+  if(!framedVehiclePosition())return'지도에 표시된 선택 차량이 없습니다. 차량을 먼저 선택해 주세요.';
+  returnToVehicle();
+  return`${selected?liveTargetLabel(selected):'차량'} 위치로 지도를 이동했습니다.`;
+}
 // What the assistant answers about: the selected real vehicle in monitoring
 // mode, or the scenario/virtual vehicle selection in virtual mode.
 // Everything the operator can point the assistant at instead: every real
@@ -483,7 +496,7 @@ function framedVehiclePosition(){
 function mapOverlayPadding(){
   const box=map.getContainer().getBoundingClientRect(),width=box.width,height=box.height;
   const padding={top:16,right:16,bottom:16,left:16};
-  for(const element of document.querySelectorAll('#map-commands,#map-legend,#map-pick-banner,#live-view-panel,.leaflet-control-container .leaflet-control')){
+  for(const element of document.querySelectorAll('#map-commands,#map-legend,#map-pick-banner,#live-view-panel,#assistant-drawer,.leaflet-control-container .leaflet-control')){
     if(element.hidden||!element.offsetParent)continue;
     const rect=element.getBoundingClientRect();
     const left=Math.max(0,rect.left-box.left),right=Math.min(width,rect.right-box.left);
