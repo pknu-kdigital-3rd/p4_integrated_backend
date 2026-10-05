@@ -136,7 +136,7 @@ export function createAssistantService(deps: AssistantDeps) {
             const request = upstreamRequest(body, context);
             const upstream = await deps.ask(request);
             const answer = body.mode === "report"
-                ? `${context.reportFigures}\n\n### 평가 및 권고\n${upstream.answer}`
+                ? `${context.reportFigures}\n\n### 평가\n${upstream.answer}`
                 : upstream.answer;
             return {
                 mode: body.mode,
@@ -164,7 +164,7 @@ export function createAssistantService(deps: AssistantDeps) {
             const request = upstreamRequest(body, context);
             yield { type: "start", mode: body.mode, question: request.question, snapshotAt: context.generatedAt, subject: context.subject };
             if (body.mode === "report") {
-                yield { type: "delta", text: `${context.reportFigures}\n\n### 평가 및 권고\n` };
+                yield { type: "delta", text: `${context.reportFigures}\n\n### 평가\n` };
             }
             let model = "";
             let retrievalMs = 0;

@@ -47,7 +47,7 @@ describe("assistant service", () => {
         expect(requests[0]!.retrieval_query).toContain("도로 통제");
         expect(result.answer.startsWith("## 차량 현황 보고서")).toBe(true);
         expect(result.answer).toContain("| 활성 차량 | 2대 |");
-        expect(result.answer).toContain("### 평가 및 권고\n평가 [S1]");
+        expect(result.answer).toContain("### 평가\n평가 [S1]");
     });
 
     it("is a 503 when the assistant is not configured", async () => {

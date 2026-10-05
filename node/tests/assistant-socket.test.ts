@@ -135,7 +135,7 @@ describe("assistant websocket", () => {
         await client.until((message) => message.type === "done");
         const deltas = client.messages.filter((message) => message.type === "delta").map((message) => String(message.text));
         expect(deltas[0]).toContain("## 차량 현황 보고서");
-        expect(deltas[0]).toContain("### 평가 및 권고");
+        expect(deltas[0]).toContain("### 평가");
         expect(deltas[1]).toBe("평가");
     });
 
