@@ -8,7 +8,7 @@ import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOn
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
-import {initializeAssistantPanel} from './assistant-panel.js?v=8';
+import {initializeAssistantPanel} from './assistant-panel.js?v=9';
 import {deleteRecordingSnapshot} from './recording-delete.js?v=1';
 import {deleteTripWithRecordings,tripAction} from './trip-actions.js?v=1';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);
@@ -387,8 +387,9 @@ function assistantFocusMap(kind){
   if(window.__virtualMode)return'가상 시나리오 화면에서는 지도 이동을 지원하지 않습니다.';
   if(kind==='destination'){
     if(!tripDestination(currentTripDisplay))return selected?'선택한 차량에 표시할 운행 목적지가 없습니다.':'운행 중인 차량을 먼저 선택해 주세요.';
+    const [lat,lon]=tripDestination(currentTripDisplay);
     showTripDestination();
-    return`목적지(${currentTripDisplay.destinationName||'이름 없음'})와 차량을 지도에 표시했습니다.`;
+    return`지도에 목적지(위도 ${lat.toFixed(5)}, 경도 ${lon.toFixed(5)})와 차량을 표시했습니다.`;
   }
   if(!framedVehiclePosition())return'지도에 표시된 선택 차량이 없습니다. 차량을 먼저 선택해 주세요.';
   returnToVehicle();

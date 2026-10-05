@@ -198,7 +198,7 @@ export function resolveTarget(value, auto, groups) {
 const MAP_VERB = /보여|보이|표시|띄워|이동|포커스|focus|찾아|돌아가|돌아와|비춰|확대|줌|센터|가운데|맞춰|가 ?줘|가자|어디|where/i;
 const NOT_A_COMMAND = /얼마|몇|언제|왜|어떻|무엇|뭐|남았|걸려|상태|속도|보고|위험/;
 // A bare place noun ("목적지", "목적지는?", "현재 위치") is a request to see it.
-const BARE_DESTINATION = /^(목적지|도착지)\s*(는|은|가)?\s*[?？]?$/;
+const BARE_DESTINATION = /^(운행\s*|현재\s*)?(목적지|도착지)\s*(는|은|가)?\s*[?？]?$/;
 const BARE_VEHICLE = /^(현재|차량|내 차량|현재 차량)\s*위치\s*(는|은|가)?\s*[?？]?$/;
 export function mapCommand(text) {
   const value = String(text ?? '').trim();
@@ -208,6 +208,15 @@ export function mapCommand(text) {
   if (/목적지|도착지|destination/i.test(value)) return 'destination';
   if (/차량|화물차|트럭|운반차|자동차|현재 ?위치|vehicle|truck/i.test(value)) return 'vehicle';
   return null;
+}
+
+// Pure navigation ("현재 차량으로 이동", "확대") only moves the map. A question
+// or a request to see something ("운행 목적지는?", "목적지 보여줘") also gets
+// the assistant's answer, e.g. the destination's coordinates.
+const NAVIGATION_ONLY = /이동|포커스|focus|돌아가|돌아와|확대|줌|센터|가운데|맞춰|가 ?줘|가자/i;
+export function mapCommandAsks(text) {
+  const value = String(text ?? '').trim();
+  return BARE_DESTINATION.test(value) || BARE_VEHICLE.test(value) || !NAVIGATION_ONLY.test(value);
 }
 
 export function initializeAssistantPanel({ getToken, getScope = () => FLEET, getTargets = () => [], focusMap = null }) {
@@ -394,9 +403,11 @@ export function initializeAssistantPanel({ getToken, getScope = () => FLEET, get
     },
   });
 
-  async function ask(body, label) {
+  // mapNote: what a map request in the same message did, shown before the answer.
+  async function ask(body, label, mapNote = null) {
     if (current) return;
     bubble('user', label);
+    if (mapNote) bubble('assistant', mapNote);
     const element = bubble('assistant', '');
     element.classList.add('assistant-message--pending');
     const content = document.createElement('div');
@@ -427,14 +438,16 @@ export function initializeAssistantPanel({ getToken, getScope = () => FLEET, get
     if (!text || current) return;
     question.value = '';
     const command = focusMap ? mapCommand(text) : null;
+    let mapNote = null;
     if (command) {
-      bubble('user', text);
-      let reply;
-      try { reply = focusMap(command); } catch (error) { reply = `지도를 이동하지 못했습니다: ${error.message}`; }
-      bubble('assistant', reply);
-      return;
+      try { mapNote = focusMap(command); } catch (error) { mapNote = `지도를 이동하지 못했습니다: ${error.message}`; }
+      if (!mapCommandAsks(text)) {
+        bubble('user', text);
+        bubble('assistant', mapNote);
+        return;
+      }
     }
-    ask({ mode: 'qa', question: text }, text);
+    ask({ mode: 'qa', question: text }, text, mapNote);
   });
   question.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {

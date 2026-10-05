@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The operator frontend remains plain browser JavaScript.
-import { AUTO_TARGET, FLEET_TARGET, inlineTokens, mapCommand, parseMarkdown, resolveTarget, sourceLabel } from '../../operator-web/assistant-panel.js';
+import { AUTO_TARGET, FLEET_TARGET, inlineTokens, mapCommand, mapCommandAsks, parseMarkdown, resolveTarget, sourceLabel } from '../../operator-web/assistant-panel.js';
 
 describe('assistant panel markdown', () => {
   it('parses a report: headings, tables and lists', () => {
@@ -66,9 +66,14 @@ describe('assistant target choice', () => {
 
 describe('assistant panel map commands', () => {
   it('recognizes requests to show the destination or the vehicle', () => {
-    for (const text of ['목적지 보여줘', '도착지로 이동해 줘', '목적지 표시해줘', '목적지 포커스', '목적지가 어디야?', '목적지', '목적지는?', '도착지?']) expect(mapCommand(text)).toBe('destination');
+    for (const text of ['목적지 보여줘', '도착지로 이동해 줘', '목적지 표시해줘', '목적지 포커스', '목적지가 어디야?', '목적지', '목적지는?', '도착지?', '운행 목적지는?', '현재 목적지?']) expect(mapCommand(text)).toBe('destination');
     for (const text of ['현재 차량으로 이동', '차량 위치로 돌아가줘', '트럭 보여줘', '현재 위치 보여줘', '차량 어디 있어?', '현재 위치', '차량 위치는?']) expect(mapCommand(text)).toBe('vehicle');
     expect(mapCommand('차량이랑 목적지 같이 보여줘')).toBe('destination');
+  });
+
+  it('also asks the model for questions and show requests, not for pure navigation', () => {
+    for (const text of ['운행 목적지는?', '목적지가 어디야?', '목적지 보여줘', '차량 위치는?', '차량 어디 있어?']) expect(mapCommandAsks(text)).toBe(true);
+    for (const text of ['현재 차량으로 이동', '차량 위치로 돌아가줘', '목적지 포커스', '도착지로 이동해 줘']) expect(mapCommandAsks(text)).toBe(false);
   });
 
   it('leaves questions and other vehicles to the model', () => {

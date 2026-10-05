@@ -83,7 +83,7 @@ export type RealVehicleDetail = {
         speedKmh: number | null; headingDeg: number | null; accuracyM: number | null; telemetrySource: string;
     } | null;
     recentSpeed: { samples: number; minKmh: number; avgKmh: number; maxKmh: number } | null;
-    trip: { tripId: string; status: string; originName: string | null; destinationName: string; startedAt: string | null } | null;
+    trip: { tripId: string; status: string; originName: string | null; destinationName: string; destination: { lat: number; lon: number } | null; startedAt: string | null } | null;
     nearby: NearbyVehicle[];
     detections: {
         total: number;
@@ -229,6 +229,11 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         }),
     ]);
 
+    // Prisma cannot read the PostGIS point. A replay trip's destination is
+    // the recording's last fix, the same point the map pins.
+    const destination = trip ? (await db.$queryRaw<Array<{ lat: number; lon: number }>>`
+        SELECT ST_Y(destination_location::geometry) AS lat, ST_X(destination_location::geometry) AS lon
+        FROM trip WHERE trip_id = ${trip.tripId}`)?.[0] ?? null : null;
     const fix = fixes[0];
     let currentFix: RealVehicleDetail["fix"] = fix ? {
         recordedAt: fix.recorded_at.toISOString(), receivedAt: fix.received_at.toISOString(), ageSeconds: ageSeconds(now, fix.received_at) ?? 0,
@@ -265,6 +270,7 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         trip: trip ? {
             tripId: trip.tripId.toString(), status: trip.tripStatus, originName: trip.originName,
             destinationName: trip.destinationName, startedAt: trip.startedAt?.toISOString() ?? null,
+            destination: destination ? { lat: Number(destination.lat), lon: Number(destination.lon) } : null,
         } : null,
         nearby: nearby.map((row) => ({
             vehicleCode: vehicleDisplayName(row.vehicle_id), distanceM: Number(row.distance_m),
@@ -447,6 +453,7 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
     lines.push(trip
         ? `  운행 #${trip.tripId} ${label(trip.status, TRIP_STATUS_LABELS)}: ${trip.originName ?? "출발지 미상"} → ${trip.destinationName}${trip.startedAt ? `, 시작 ${kstTime(trip.startedAt)}` : ""}`
         : "  진행 중 운행 없음");
+    if (trip?.destination) lines.push(`  목적지 좌표: 위도 ${trip.destination.lat.toFixed(5)}, 경도 ${trip.destination.lon.toFixed(5)}`);
     lines.push(`  주변 실차량(위치 수신 중, 가까운 순): ${nearbyText(detail.nearby)}`);
     const detections = detail.detections;
     lines.push(`  [영상 감지 최근 ${VISION_WINDOW_MINUTES}분] 감지 ${detections.total}건 (위험도: ${formatCounts(detections.byRisk, RISK_LABELS)}), 주요 객체: ${detections.topClasses.length ? detections.topClasses.map((item) => `${label(item.className, OBJECT_CLASS_LABELS)} ${item.count}`).join(", ") : "없음"}`);
@@ -512,6 +519,7 @@ function realVehicleReport(detail: RealVehicleDetail): string {
         ...(fix?.telemetrySource === "RECORDED_GPS" ? [`| 원본 녹화 시각 / 최근 수신 시각 | ${fix.recordedAt} / ${fix.receivedAt ?? "미상"} |`] : []),
         `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed && fix && fix.ageSeconds <= STALE_FIX_SECONDS ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
         `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${label(detail.trip.status, TRIP_STATUS_LABELS)} → ${detail.trip.destinationName}` : "없음"} |`,
+        ...(detail.trip?.destination ? [`| 목적지 좌표 | ${detail.trip.destination.lat.toFixed(5)}, ${detail.trip.destination.lon.toFixed(5)} |`] : []),
         `| 가장 가까운 실차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,
         `| 영상 감지 (${VISION_WINDOW_MINUTES}분) | ${detail.detections.total}건 (${formatCounts(detail.detections.byRisk, RISK_LABELS)}) |`,
         `| 가장 가까운 감지 객체 | ${detail.detections.nearest ? `${label(detail.detections.nearest.className, OBJECT_CLASS_LABELS)} ${detail.detections.nearest.distanceM.toFixed(1)} m (${label(detail.detections.nearest.riskLevel, RISK_LABELS)})` : "없음"} |`,
