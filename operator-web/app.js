@@ -8,7 +8,7 @@ import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOn
 import {installPanelDrag} from './panel-drag.js';
 import {describeDetections} from './detection-status.js';
 import {installOperatorBasemap} from './operator-basemap.js?v=6';
-import {initializeAssistantPanel} from './assistant-panel.js?v=4';
+import {initializeAssistantPanel} from './assistant-panel.js?v=5';
 import {deleteRecordingSnapshot} from './recording-delete.js?v=1';
 import {deleteTripWithRecordings,tripAction} from './trip-actions.js?v=1';
 const map=L.map('map',{touchZoom:true}).setView([35.1796,129.0756],12);

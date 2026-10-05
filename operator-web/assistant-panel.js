@@ -289,13 +289,15 @@ export function initializeAssistantPanel({ getToken, getScope = () => FLEET, get
   setInterval(() => { if (!drawer.hidden) showScope(); }, 1000);
 
   function renderFooter(answer, note) {
-    if (answer.sources?.length) {
+    // Only guides the answer actually cites ([S1], [S2], ...) are listed.
+    const cited = (answer.sources || []).filter((source) => source.rank != null && answer.text.includes(`[S${source.rank}]`));
+    if (cited.length) {
       const sources = document.createElement('details');
       sources.className = 'assistant-sources';
       const summary = document.createElement('summary');
-      summary.textContent = `근거 KOSHA 지침 ${answer.sources.length}건`;
+      summary.textContent = `근거 KOSHA 지침 ${cited.length}건`;
       const list = document.createElement('ul');
-      for (const source of answer.sources) {
+      for (const source of cited) {
         const li = document.createElement('li');
         li.textContent = sourceLabel(source);
         if (source.source_relpath) li.title = source.source_relpath;
