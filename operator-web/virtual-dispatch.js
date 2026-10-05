@@ -5,7 +5,7 @@ import { createSectionVisibility } from './workspace-sections.js';
 import { installRoadBrush } from './road-brush.js?v=4';
 import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=2';
 import { createBrushHistory } from './road-brush-history.js?v=1';
-import { installRoutePointToolbar } from './route-point-toolbar.js?v=1';
+import { installRoutePointToolbar } from './route-point-toolbar.js?v=2';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');

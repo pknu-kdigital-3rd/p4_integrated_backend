@@ -8,8 +8,8 @@ export function installRoutePointToolbar(container, { onStart, onMove, onDrop, o
   panel.setAttribute('aria-label', '경로 위치 선택');
   panel.hidden = true;
   panel.innerHTML = '<div class="road-brush-toolbar-handle"><span aria-hidden="true">⠿</span><strong>경로 위치 선택</strong><button type="button" data-point-exit>종료</button></div><div class="route-point-toolbar-pins">'
-    + ['origin', 'destination', 'waypoint'].map((kind, index) => `<button type="button" data-point-kind="${kind}" aria-pressed="false"><svg viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="35" text-anchor="middle">${['O', 'D', 'W'][index]}</text></svg><span>${['출발', '도착', '경유지'][index]}</span></button>`).join('')
-    + '</div><p>핀을 지도에 드래그하거나 선택 후 도로를 탭하세요.</p><small data-point-preview role="status"></small>';
+    + ['origin', 'destination', 'waypoint'].map((kind, index) => `<button type="button" data-point-kind="${kind}" aria-label="${['출발', '도착', '경유지'][index]}" aria-pressed="false"><svg viewBox="0 0 60 80" aria-hidden="true"><path d="M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z"/><text x="30" y="35" text-anchor="middle">${['O', 'D', 'W'][index]}</text></svg></button>`).join('')
+    + '</div><small data-point-preview hidden></small>';
   container.append(panel);
   const buttons = [...panel.querySelectorAll('[data-point-kind]')];
   const preview = panel.querySelector('[data-point-preview]');

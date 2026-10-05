@@ -90,7 +90,7 @@ for (const reason of ['outside map', 'inside menu', 'pointercancel', 'lostpointe
   });
 }
 
-test('busy disables pin gestures, exit closes the menu, and preview is visible', () => {
+test('busy disables pin gestures, exit closes the menu, and preview text is retained', () => {
   const f = setup();
   f.toolbar.setPreview('스냅 위치 35, 129 · 도로까지 2 m');
   assert.match(f.preview.textContent, /도로까지 2 m/);
