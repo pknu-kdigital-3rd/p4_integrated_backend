@@ -22,6 +22,7 @@ from app.services.yolo import (
     _tracker_config_cache,
     tracker_confidence_config,
     _enqueue_inference_frame,
+    _schedule_playback_deadline,
     _take_latest_inference_frame,
     load_yolo_model,
     reset_tracker,
@@ -753,6 +754,99 @@ class YoloWorkerEpochRaceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(state.current_epoch, 2)
         self.assertEqual(state.result_store, {})
+
+
+class PlaybackDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    def _state_and_frame(self):
+        state = AppState()
+        state.current_epoch = 1
+        state.last_inference_result = {
+            "width": 1, "height": 1, "inference_ms": 1.0,
+            "items": [{"class": "car", "distance_m": 5.0, "distance_status": "ok"}],
+        }
+        state.last_inference_result_epoch = 1
+        frame = InferenceFrame(seq=0, frame=None, pts=0, time_base=1 / 90000,
+                               media_time=0.0, epoch=1, encoded=b"frame")
+        state.queued_sequences.add((1, 0))
+        return state, frame
+
+    async def _wait_until(self, condition):
+        for _ in range(200):
+            if condition():
+                return
+            await asyncio.sleep(0.005)
+        self.fail("condition not reached")
+
+    async def test_slow_inference_publishes_held_overlay_then_real_result_replaces_it(self):
+        import threading
+        from time import perf_counter
+        state, frame = self._state_and_frame()
+        release = threading.Event()
+        real = {"width": 1, "height": 1, "items": [{"class": "bus"}], "inference_ms": 99.0}
+
+        def slow_run_yolo(inference_frame, yolo_model, **_kwargs):
+            release.wait(5)
+            return real
+
+        with patch("app.services.yolo.settings.PLAYBACK_DEADLINE_MS", 20.0), patch(
+            "app.services.yolo.settings.YOLO_FRAME_DROP_POLICY", "latest"
+        ), patch("app.services.yolo.run_yolo", side_effect=slow_run_yolo):
+            await state.inference_queue.put(frame)
+            _schedule_playback_deadline(state, frame, perf_counter())
+            task = asyncio.create_task(yolo_worker(state))
+            try:
+                await self._wait_until(lambda: (1, 0) in state.result_store)
+                held = state.result_store[(1, 0)].result
+                self.assertTrue(held["inference_skipped"])
+                self.assertEqual(held["items"][0]["held_distance_m"], 5.0)
+                self.assertEqual(state.metrics.deadline_frames_published, 1)
+                release.set()
+                await self._wait_until(lambda: state.result_store[(1, 0)].result is real)
+            finally:
+                release.set()
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+        self.assertEqual(state.metrics.late_inference_results, 1)
+        self.assertEqual(state.metrics.playback_frames_published, 1)
+        self.assertIs(state.last_inference_result, real)
+
+    async def test_result_before_deadline_is_not_replaced_by_held_overlay(self):
+        from time import perf_counter
+        state, frame = self._state_and_frame()
+        real = {"width": 1, "height": 1, "items": [], "inference_ms": 1.0}
+        with patch("app.services.yolo.settings.PLAYBACK_DEADLINE_MS", 200.0), patch(
+            "app.services.yolo.settings.YOLO_FRAME_DROP_POLICY", "latest"
+        ), patch("app.services.yolo.run_yolo", return_value=real):
+            await state.inference_queue.put(frame)
+            _schedule_playback_deadline(state, frame, perf_counter())
+            task = asyncio.create_task(yolo_worker(state))
+            try:
+                await self._wait_until(lambda: (1, 0) in state.result_store)
+                self.assertIs(state.result_store[(1, 0)].result, real)
+                await asyncio.sleep(0.25)
+            finally:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+        self.assertIs(state.result_store[(1, 0)].result, real)
+        self.assertEqual(state.metrics.deadline_frames_published, 0)
+        self.assertEqual(state.metrics.late_inference_results, 0)
+
+    async def test_deadline_is_off_for_queue_policy_zero_deadline_and_faults(self):
+        from time import perf_counter
+        for policy, deadline, fault in (("queue", 20.0, None), ("latest", 0.0, None),
+                                        ("latest", 20.0, "inference failed")):
+            with self.subTest(policy=policy, deadline=deadline, fault=fault):
+                state, frame = self._state_and_frame()
+                state.fault = fault
+                with patch("app.services.yolo.settings.PLAYBACK_DEADLINE_MS", deadline), patch(
+                    "app.services.yolo.settings.YOLO_FRAME_DROP_POLICY", policy
+                ):
+                    _schedule_playback_deadline(state, frame, perf_counter())
+                    await asyncio.sleep(0.06)
+                self.assertEqual(state.result_store, {})
+                self.assertEqual(state.metrics.deadline_frames_published, 0)
 
 
 class YoloWorkerFramePolicyTests(unittest.IsolatedAsyncioTestCase):

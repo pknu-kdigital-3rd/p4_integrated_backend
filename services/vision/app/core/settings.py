@@ -161,6 +161,11 @@ class Settings(BaseSettings):
     CLIENT_PREFETCH_SECONDS: float = Field(default=2.0, ge=0.1, le=30.0)
     CLIENT_LOW_WATERMARK_SECONDS: float = Field(default=0.5, ge=0.05, le=10.0)
     CLIENT_BUFFER_MAX_BYTES: int = Field(default=64 * 1024 * 1024, ge=1)
+    # Publish a frame with the last overlay when its own inference has not
+    # finished this long after decode, so one slow inference cannot stall the
+    # in-order browser stream. A result that finishes later still replaces the
+    # stored item and becomes the overlay for following frames. 0 disables.
+    PLAYBACK_DEADLINE_MS: float = Field(default=50.0, ge=0.0, le=10000.0)
     INFERENCE_RETRY_COUNT: int = Field(default=3, ge=1, le=10)
     INFERENCE_RETRY_DELAYS: tuple[float, ...] = (0.1, 0.5)
     BACKLOG_MAX_SECONDS: float = Field(default=30.0, ge=1.0, le=3600.0)

@@ -202,6 +202,8 @@ async def metrics_worker(state: AppState) -> None:
                 f"dropped={current['inference_frames_dropped']} "
                 f"drop_enqueue={current['inference_enqueue_dropped']} "
                 f"drop_worker_latest={current['inference_worker_dropped']} "
+                f"deadline_published={current['deadline_frames_published']} "
+                f"late_results={current['late_inference_results']} "
                 f"input_fps={_rate(decoded_delta, elapsed):.1f} "
                 f"infer_fps={_rate(inferred_delta, elapsed):.1f} "
                 f"skipped_fps={_rate(skipped_delta, elapsed):.1f} "

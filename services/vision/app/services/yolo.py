@@ -378,6 +378,9 @@ async def _publish_skipped_frames(
             state.queued_sequences.discard(key)
             if inference_frame.epoch != state.current_epoch:
                 continue
+            if key in state.completed_sequences:
+                # Already published by its playback deadline.
+                continue
             result = _skipped_frame_result(
                 inference_frame,
                 (
@@ -406,6 +409,43 @@ async def _publish_skipped_frames(
         state.metrics.skipped_frames_published += published
         state.metrics.skipped_publish_ms_total += (perf_counter() - started) * 1000
     return published
+
+
+_deadline_tasks: set[asyncio.Task] = set()
+
+
+async def _publish_at_deadline(state: AppState, inference_frame: InferenceFrame) -> None:
+    published = await _publish_skipped_frames(
+        state,
+        [inference_frame],
+        state.last_inference_result,
+        state.last_inference_result_epoch,
+    )
+    state.metrics.deadline_frames_published += published
+
+
+def _schedule_playback_deadline(
+    state: AppState, inference_frame: InferenceFrame, decoded_at: float
+) -> None:
+    """Publish a held-overlay item if inference has not completed by the deadline."""
+
+    deadline_ms = settings.PLAYBACK_DEADLINE_MS
+    # The ordered queue policy exists to infer every frame, so it keeps waiting.
+    if deadline_ms <= 0 or settings.YOLO_FRAME_DROP_POLICY != "latest":
+        return
+
+    def fire() -> None:
+        key = (inference_frame.epoch, inference_frame.seq)
+        if (key in state.completed_sequences or inference_frame.epoch != state.current_epoch
+                or state.fault is not None):
+            # A fault must still stop playback at the failed frame.
+            return
+        task = asyncio.create_task(_publish_at_deadline(state, inference_frame))
+        _deadline_tasks.add(task)
+        task.add_done_callback(_deadline_tasks.discard)
+
+    delay = max(0.0, deadline_ms / 1000 - (perf_counter() - decoded_at))
+    asyncio.get_running_loop().call_later(delay, fire)
 
 
 async def _enqueue_inference_frame(
@@ -969,6 +1009,7 @@ async def _queue_decoded_frame(
     # Resolved here, in decode order, for every frame - including frames the
     # inference worker later skips - so telemetry never depends on YOLO.
     source_time = state.source_timeline.resolve(pts, qr_source_timestamp_ns, qr_decode_success)
+    decoded_at = perf_counter()
     prepared = None
     if decoder is not None and settings.VISION_FRAME_PREP_THREAD == "decode":
         try:
@@ -981,44 +1022,43 @@ async def _queue_decoded_frame(
             # run_yolo converts again and reports the failure through its
             # retry/fault path, as it did before decode-thread preparation.
             print(f"frame preparation failed on decode thread: {type(exc).__name__}: {exc}", flush=True)
-    await _enqueue_inference_frame(
-        state,
-        InferenceFrame(
-            epoch=int(metadata["epoch"]),
-            seq=int(metadata["seq"]),
-            frame=frame,
-            encoded=bytes(metadata["_encoded"]),
-            pts=pts,
-            time_base=time_base,
-            media_time=(pts * time_base if pts is not None else None),
-            timestamp_us=timestamp_us,
-            keyframe=bool(metadata.get("keyframe", False)),
-            qr_source_timestamp_ns=qr_source_timestamp_ns,
-            qr_capture_timestamp_ns=_optional_int(qr.get("capture_timestamp_ns")),
-            qr_decode_success=qr_decode_success,
-            resolved_source_timestamp_ns=source_time.source_timestamp_ns,
-            source_timeline_status=source_time.status,
-            source_timeline_generation=source_time.generation,
-            prepared=prepared,
-            # tripId is None for a stream tracked without a trip: Live View still
-            # gets its telemetry, while detection persistence requires a trip.
-            recording_identity=(
-                {
-                    "tripId": (
-                        str(metadata["recording"]["trip_id"])
-                        if metadata["recording"].get("trip_id") is not None
-                        else None
-                    ),
-                    "vehicleId": str(metadata["recording"]["vehicle_id"]),
-                    "recordingSessionId": str(metadata["recording"]["recording_session_id"]),
-                }
-                if isinstance(metadata.get("recording"), dict)
-                and metadata["recording"].get("vehicle_id") is not None
-                and metadata["recording"].get("recording_session_id")
-                else None
-            ),
+    inference_frame = InferenceFrame(
+        epoch=int(metadata["epoch"]),
+        seq=int(metadata["seq"]),
+        frame=frame,
+        encoded=bytes(metadata["_encoded"]),
+        pts=pts,
+        time_base=time_base,
+        media_time=(pts * time_base if pts is not None else None),
+        timestamp_us=timestamp_us,
+        keyframe=bool(metadata.get("keyframe", False)),
+        qr_source_timestamp_ns=qr_source_timestamp_ns,
+        qr_capture_timestamp_ns=_optional_int(qr.get("capture_timestamp_ns")),
+        qr_decode_success=qr_decode_success,
+        resolved_source_timestamp_ns=source_time.source_timestamp_ns,
+        source_timeline_status=source_time.status,
+        source_timeline_generation=source_time.generation,
+        prepared=prepared,
+        # tripId is None for a stream tracked without a trip: Live View still
+        # gets its telemetry, while detection persistence requires a trip.
+        recording_identity=(
+            {
+                "tripId": (
+                    str(metadata["recording"]["trip_id"])
+                    if metadata["recording"].get("trip_id") is not None
+                    else None
+                ),
+                "vehicleId": str(metadata["recording"]["vehicle_id"]),
+                "recordingSessionId": str(metadata["recording"]["recording_session_id"]),
+            }
+            if isinstance(metadata.get("recording"), dict)
+            and metadata["recording"].get("vehicle_id") is not None
+            and metadata["recording"].get("recording_session_id")
+            else None
         ),
     )
+    await _enqueue_inference_frame(state, inference_frame)
+    _schedule_playback_deadline(state, inference_frame, decoded_at)
 
 
 async def _decode_session(reader: asyncio.StreamReader, state: AppState) -> None:
@@ -1350,9 +1390,15 @@ async def yolo_worker(state: AppState) -> None:
         )
         async with state.result_condition:
             state.queued_sequences.discard((item.epoch, item.seq))
-            state.mark_completed(item.epoch, item.seq)
+            if (item.epoch, item.seq) in state.completed_sequences:
+                # The deadline already published a held-overlay item. Replace
+                # it so a viewer that has not been sent this seq yet, or a
+                # reconnect replay, gets the real result.
+                state.metrics.late_inference_results += 1
+            else:
+                state.mark_completed(item.epoch, item.seq)
+                state.metrics.playback_frames_published += 1
             state.put_result(item)
-            state.metrics.playback_frames_published += 1
             state.result_condition.notify_all()
         state.metrics.record_inference(result)
         completed_for_gc_freeze += 1

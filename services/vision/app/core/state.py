@@ -97,6 +97,8 @@ class VisionMetrics:
     publish_ms_total: float = 0.0
     skipped_publish_ms_total: float = 0.0
     skipped_frames_published: int = 0
+    deadline_frames_published: int = 0
+    late_inference_results: int = 0
     recording_samples_queued: int = 0
     recording_samples_dropped: int = 0
     recording_samples_uploaded: int = 0
@@ -147,6 +149,8 @@ class VisionMetrics:
             "publish_ms_total": self.publish_ms_total,
             "skipped_publish_ms_total": self.skipped_publish_ms_total,
             "skipped_frames_published": self.skipped_frames_published,
+            "deadline_frames_published": self.deadline_frames_published,
+            "late_inference_results": self.late_inference_results,
             "recording_samples_queued": self.recording_samples_queued,
             "recording_samples_dropped": self.recording_samples_dropped,
             "recording_samples_uploaded": self.recording_samples_uploaded,
