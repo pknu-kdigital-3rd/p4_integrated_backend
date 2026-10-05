@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The operator frontend remains plain browser JavaScript.
-import { matchesVehicle, vehicleStatus, vehicleDisplayName } from '../../operator-web/dashboard-ui.js';
+import { matchesVehicle, vehicleStatus, vehicleDisplayName, vehicleDetailRows } from '../../operator-web/dashboard-ui.js';
+// @ts-expect-error The operator frontend remains plain browser JavaScript.
+import { withPresentedTelemetry } from '../../operator-web/live-telemetry.js';
+
+describe('current replay vehicle details', () => {
+  it.each([undefined, 'IN_PROGRESS'])('refreshes frame speed with trip status %s and separates reception from source time', (tripStatus) => {
+    const item = { vehicleId: '3', vehicleStatus: 'READY', tripStatus, telemetry: {
+      speed_kmh: 1, telemetry_source: 'RECORDED_GPS', observed_at_utc: '2026-08-27T05:56:10.772Z',
+    } };
+    const current = withPresentedTelemetry(item, { telemetry: { gps: { latitude: 35, longitude: 129, speed_kmh: 42.5, bearing_deg: 90 } } }, Date.parse('2026-10-05T06:00:00Z'));
+    expect(vehicleDetailRows(current)).toContainEqual(['속도', '42.50 km/h']);
+    expect(vehicleDetailRows(current)).toContainEqual(['최근 수신 시각', '2026-10-05T06:00:00.000Z']);
+    expect(vehicleDetailRows(current)).toContainEqual(['원본 녹화 시각', '2026-08-27T05:56:10.772Z']);
+    expect(item.telemetry.speed_kmh).toBe(1);
+  });
+
+  it('clears a missing current speed and ignores a frame without GPS', () => {
+    const item = { telemetry: { speed_kmh: 10 } };
+    expect(withPresentedTelemetry(item, { telemetry: { gps: null } })).toBe(item);
+    expect(withPresentedTelemetry(item, { telemetry: { gps: { latitude: 35, longitude: 129 } } }).telemetry.speed_kmh).toBeNull();
+  });
+});
 
 describe('dashboard fleet presentation', () => {
   it('maps backend vehicle states without guessing an unknown state', () => {

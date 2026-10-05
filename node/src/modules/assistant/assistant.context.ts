@@ -50,6 +50,7 @@ import {
 } from "../fleet/fleet.labels.ts";
 import type { AssistantChatBody, AssistantScope } from "./assistant.schema.ts";
 import { AppError } from "../../common/errors/app-error.ts";
+import { trackingClient, type TrackingSnapshot } from "../tracking/tracking.client.ts";
 
 const ACTIVE_TRIP_STATES = ["READY", "IN_PROGRESS", "PAUSED"];
 const MOVING_SIM_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
@@ -76,7 +77,7 @@ export type RealVehicleDetail = {
     source: string;
     status: string;
     fix: {
-        recordedAt: string; ageSeconds: number; lat: number; lon: number;
+        recordedAt: string; receivedAt?: string; ageSeconds: number; lat: number; lon: number;
         speedKmh: number | null; headingDeg: number | null; accuracyM: number | null; telemetrySource: string;
     } | null;
     recentSpeed: { samples: number; minKmh: number; avgKmh: number; maxKmh: number } | null;
@@ -151,44 +152,51 @@ export function haversineM(a: { lat: number; lon: number }, b: { lat: number; lo
 // Collectors (read-only)
 // ---------------------------------------------------------------------------
 
-export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigint, now = new Date()): Promise<RealVehicleDetail | null> {
+type CurrentObservationReader = (externalId: string) => Promise<TrackingSnapshot["vehicles"][number] | null>;
+
+export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigint, now = new Date(), readCurrent: CurrentObservationReader = trackingClient.vehicle): Promise<RealVehicleDetail | null> {
     const vehicle = await db.vehicle.findUnique({
         where: { vehicleId },
-        select: { vehicleCode: true, vehicleName: true, vehicleSource: true, vehicleStatus: true },
+        select: { vehicleCode: true, vehicleName: true, vehicleSource: true, vehicleStatus: true, externalId: true },
     });
     if (!vehicle || vehicle.vehicleSource === "VIRTUAL") return null;
     const visionSince = new Date(now.getTime() - VISION_WINDOW_MINUTES * 60_000);
     const reportingSince = new Date(now.getTime() - STALE_FIX_SECONDS * 1000);
 
-    const [fixes, speeds, nearby, trip, byRisk, byClass, nearest, attitude, unconfirmed, recentAlerts] = await Promise.all([
-        db.$queryRaw<Array<{ recorded_at: Date; speed_kmh: unknown; heading_deg: unknown; horizontal_accuracy_m: unknown; telemetry_source: string; lat: number; lon: number }>>`
-            SELECT recorded_at, speed_kmh, heading_deg, horizontal_accuracy_m, telemetry_source,
+    const [fixes, speeds, nearby, trip, byRisk, byClass, nearest, attitude, unconfirmed, recentAlerts, current] = await Promise.all([
+        db.$queryRaw<Array<{ recorded_at: Date; received_at: Date; speed_kmh: unknown; heading_deg: unknown; horizontal_accuracy_m: unknown; telemetry_source: string; lat: number; lon: number }>>`
+            SELECT recorded_at, received_at, speed_kmh, heading_deg, horizontal_accuracy_m, telemetry_source,
                    ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
             FROM vehicle_position WHERE vehicle_id = ${vehicleId}
-            ORDER BY recorded_at DESC LIMIT 1`,
-        // Speed over the minute before the latest fix, so a momentary
-        // reading is not mistaken for the vehicle's pace.
+            ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1`,
+        // Replay source dates can go backwards. Current state and freshness
+        // follow reception time; speed history stays within the latest session.
         db.$queryRaw<Array<{ samples: bigint; min_kmh: unknown; avg_kmh: unknown; max_kmh: unknown }>>`
+            WITH latest AS (
+                SELECT received_at, recording_session_id FROM vehicle_position WHERE vehicle_id = ${vehicleId}
+                ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1
+            )
             SELECT count(speed_kmh) AS samples, min(speed_kmh) AS min_kmh, avg(speed_kmh) AS avg_kmh, max(speed_kmh) AS max_kmh
-            FROM vehicle_position
-            WHERE vehicle_id = ${vehicleId}
-              AND recorded_at >= (SELECT max(recorded_at) FROM vehicle_position WHERE vehicle_id = ${vehicleId}) - make_interval(secs => ${SPEED_WINDOW_SECONDS})`,
+            FROM vehicle_position p CROSS JOIN latest
+            WHERE p.vehicle_id = ${vehicleId}
+              AND p.recording_session_id IS NOT DISTINCT FROM latest.recording_session_id
+              AND p.received_at >= latest.received_at - make_interval(secs => ${SPEED_WINDOW_SECONDS})`,
         // Other real vehicles that are reporting now, nearest first.
-        db.$queryRaw<Array<{ vehicle_code: string; recorded_at: Date; speed_kmh: unknown; distance_m: number }>>`
+        db.$queryRaw<Array<{ vehicle_code: string; received_at: Date; speed_kmh: unknown; distance_m: number }>>`
             WITH me AS (
                 SELECT location FROM vehicle_position WHERE vehicle_id = ${vehicleId}
-                ORDER BY recorded_at DESC LIMIT 1
+                ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1
             )
-            SELECT v.vehicle_code, p.recorded_at, p.speed_kmh, ST_Distance(p.location, me.location) AS distance_m
+            SELECT v.vehicle_code, p.received_at, p.speed_kmh, ST_Distance(p.location, me.location) AS distance_m
             FROM vehicle v
             CROSS JOIN me
             JOIN LATERAL (
-                SELECT location, recorded_at, speed_kmh FROM vehicle_position vp
+                SELECT location, received_at, speed_kmh FROM vehicle_position vp
                 WHERE vp.vehicle_id = v.vehicle_id
-                ORDER BY recorded_at DESC LIMIT 1
+                ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1
             ) p ON true
             WHERE v.is_active AND v.vehicle_source <> 'VIRTUAL' AND v.vehicle_id <> ${vehicleId}
-              AND p.recorded_at >= ${reportingSince}
+              AND p.received_at >= ${reportingSince}
             ORDER BY distance_m ASC LIMIT ${NEARBY_LIMIT}`,
         db.trip.findFirst({
             where: { vehicleId, tripStatus: { in: ACTIVE_TRIP_STATES } },
@@ -216,23 +224,34 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
             where: { vehicleId, createdAt: { gte: visionSince } }, orderBy: { createdAt: "desc" }, take: 5,
             select: { alertType: true, severity: true, alertMessage: true, createdAt: true },
         }),
+        readCurrent(vehicle.vehicleSource === "BIMS" && vehicle.externalId ? vehicle.externalId : `device:${vehicleId}`).catch(() => null),
     ]);
 
     const fix = fixes[0];
     const speed = speeds[0];
     const samples = speed ? Number(speed.samples) : 0;
+    let currentFix: RealVehicleDetail["fix"] = fix ? {
+        recordedAt: fix.recorded_at.toISOString(), receivedAt: fix.received_at.toISOString(), ageSeconds: ageSeconds(now, fix.received_at) ?? 0,
+        lat: Number(fix.lat), lon: Number(fix.lon), speedKmh: toNumber(fix.speed_kmh), headingDeg: toNumber(fix.heading_deg),
+        accuracyM: toNumber(fix.horizontal_accuracy_m), telemetrySource: fix.telemetry_source,
+    } : null;
+    if (current && Number.isFinite(current.latitude) && Number.isFinite(current.longitude)) {
+        const received = current.source_metadata?.receivedAt ?? current.observed_at_utc;
+        const receivedAt = typeof received === "string" ? new Date(received) : null;
+        if (receivedAt && Number.isFinite(receivedAt.getTime())) currentFix = {
+            recordedAt: current.observed_at_utc ?? receivedAt.toISOString(), receivedAt: receivedAt.toISOString(),
+            ageSeconds: ageSeconds(now, receivedAt) ?? 0, lat: current.latitude, lon: current.longitude,
+            speedKmh: toNumber(current.speed_kmh), headingDeg: toNumber(current.heading_deg),
+            accuracyM: toNumber(current.source_metadata?.horizontalAccuracyM), telemetrySource: current.telemetry_source,
+        };
+    }
     return {
         vehicleCode: vehicle.vehicleCode,
         vehicleName: vehicle.vehicleName,
         source: vehicle.vehicleSource,
         // As the map shows it, so "대기" here is what the operator sees.
-        status: displayVehicleStatus(vehicle.vehicleStatus, trip?.tripStatus),
-        fix: fix ? {
-            recordedAt: fix.recorded_at.toISOString(), ageSeconds: ageSeconds(now, fix.recorded_at) ?? 0,
-            lat: Number(fix.lat), lon: Number(fix.lon),
-            speedKmh: toNumber(fix.speed_kmh), headingDeg: toNumber(fix.heading_deg),
-            accuracyM: toNumber(fix.horizontal_accuracy_m), telemetrySource: fix.telemetry_source,
-        } : null,
+        status: current?.source_metadata?.state === "stale" ? "GPS 지연" : displayVehicleStatus(vehicle.vehicleStatus, trip?.tripStatus),
+        fix: currentFix,
         recentSpeed: samples > 0 ? {
             samples, minKmh: toNumber(speed!.min_kmh) ?? 0, avgKmh: toNumber(speed!.avg_kmh) ?? 0, maxKmh: toNumber(speed!.max_kmh) ?? 0,
         } : null,
@@ -242,7 +261,7 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         } : null,
         nearby: nearby.map((row) => ({
             vehicleCode: row.vehicle_code, distanceM: Number(row.distance_m),
-            speedKmh: toNumber(row.speed_kmh), ageSeconds: ageSeconds(now, row.recorded_at),
+            speedKmh: toNumber(row.speed_kmh), ageSeconds: ageSeconds(now, row.received_at),
         })),
         detections: {
             total: byRisk.reduce((sum, row) => sum + row._count._all, 0),
@@ -409,6 +428,7 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
         const accuracy = fix.accuracyM === null ? "" : `, 정확도 ±${Math.round(fix.accuracyM)} m`;
         lines.push(`  위치: 위도 ${fix.lat.toFixed(5)}, 경도 ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)}, ${label(fix.telemetrySource, TELEMETRY_SOURCE_LABELS)}${accuracy})${stale}`);
         lines.push(`  속도 ${km(fix.speedKmh)}${fix.headingDeg === null ? "" : `, 진행 방향 ${Math.round(fix.headingDeg)}°`}`);
+        if (fix.telemetrySource === "RECORDED_GPS") lines.push(`  재생 GPS: 원본 녹화 시각 ${fix.recordedAt}, 최근 수신 시각 ${fix.receivedAt ?? "미상"} (원본 시각은 현재 수신 지연이 아님)`);
     }
     if (detail.recentSpeed) {
         const speed = detail.recentSpeed;
@@ -479,6 +499,7 @@ function realVehicleReport(detail: RealVehicleDetail): string {
         `| 출처 / 상태 | ${label(detail.source, VEHICLE_SOURCE_LABELS)} / ${label(detail.status, VEHICLE_STATUS_LABELS)} |`,
         `| 마지막 위치 | ${fix ? `${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)})` : "기록 없음"} |`,
         `| 현재 속도 | ${km(fix?.speedKmh ?? null)} |`,
+        ...(fix?.telemetrySource === "RECORDED_GPS" ? [`| 원본 녹화 시각 / 최근 수신 시각 | ${fix.recordedAt} / ${fix.receivedAt ?? "미상"} |`] : []),
         `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
         `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${label(detail.trip.status, TRIP_STATUS_LABELS)} → ${detail.trip.destinationName}` : "없음"} |`,
         `| 가장 가까운 실차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,

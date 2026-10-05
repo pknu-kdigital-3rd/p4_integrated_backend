@@ -1,7 +1,7 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleIcon, vehicleDisplayName, vehicleStatus, STATUS_LABELS, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=6';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleDetailRows, vehicleIcon, vehicleDisplayName, vehicleStatus, STATUS_LABELS, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=7';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
-import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder} from './live-telemetry.js?v=2';
+import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder,withPresentedTelemetry} from './live-telemetry.js?v=3';
 import {cancelGlide,createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,glideMarker,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js?v=2';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOnlyPosition,plannedProgress,recordedProgress,routeProgressAtPosition,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=14';
@@ -829,12 +829,7 @@ function selectVehicle(item){
     if(entry.marker.getTooltip())entry.marker.getTooltip().options.permanent=showLabel;
     if(showLabel)entry.marker.openTooltip();else entry.marker.closeTooltip();
   }
-  const t=item.telemetry;
-  fields.replaceChildren();
-  for(const [label,value] of [[uiText('Vehicle'),vehicleDisplayName(item)],[uiText('Source'),`${item.vehicleSource||'BIMS'} / ${t.telemetry_source}`],[uiText('Status'),item.vehicleStatus||t.source_metadata?.state||'ACTIVE'],[uiText('Speed'),formatSpeed(t.speed_kmh)],[uiText('Observed'),t.observed_at_utc||'—'],[uiText('Trip ID'),item.tripId??'—']]){
-    const term=document.createElement('dt'),description=document.createElement('dd');
-    term.textContent=label;description.textContent=String(value);fields.append(term,description);
-  }
+  renderVehicleFields(item);
   void loadSelectedTrip();
   selectRecordingTrip(item.tripId);
   // Keep the loaded trip's video and timeline when reselecting its vehicle.
@@ -846,6 +841,13 @@ function selectVehicle(item){
   // Open the live view as soon as a streaming vehicle is selected, where it is
   // visible: the "실시간 영상" tab. Only on selection, so closing it sticks.
   if(!liveView&&matchesLiveTarget(item)&&isLiveRecordingTabActive())openLiveView();
+}
+function renderVehicleFields(item){
+  fields.replaceChildren();
+  for(const [label,value] of vehicleDetailRows(item)){
+    const term=document.createElement('dt'),description=document.createElement('dd');
+    term.textContent=label;description.textContent=String(value);fields.append(term,description);
+  }
 }
 window.__operatorCancelMapPick=()=>{tripMapPick=undefined;document.querySelector('#map-pick-banner').hidden=true;document.querySelectorAll('[data-trip-map-pick]').forEach(button=>button.setAttribute('aria-pressed','false'));};
 function render(snapshot){
@@ -864,7 +866,12 @@ function render(snapshot){
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
     else{entry.item=item;entry.liveOnly=false}
-    if(selected?.telemetry?.external_id===key){selected=entry.item;syncLiveViewButton();renderVehicleDetails(item);void loadSelectedTrip()}
+    if(selected?.telemetry?.external_id===key){
+      selected=isLiveOverride(liveView,key,Date.now())&&lastLiveMessage
+        &&lastLiveMessage.recording?.recordingSessionId===t.source_metadata?.recordingSessionId
+        ?withPresentedTelemetry(entry.item,lastLiveMessage,liveView.lastUpdateAt):entry.item;
+      syncLiveViewButton();renderVehicleDetails(selected);renderVehicleFields(selected);void loadSelectedTrip();
+    }
     // A new Android stream reuses device:<vehicleId>; reveal it again when its
     // recording session changes, even though the Leaflet marker already exists.
     revealAndroidMarker(item,pos);
@@ -1379,6 +1386,11 @@ window.addEventListener('message',event=>{
   }
   if(position)setFreeEstimated(markers.get(liveView?.markerKey),false);
   if(position){
+    if(String(selected?.vehicleId)===String(liveView?.vehicleId)){
+      selected=withPresentedTelemetry(selected,message);
+      renderVehicleDetails(selected);
+      renderVehicleFields(selected);
+    }
     const snapped=currentTripDisplay&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId)
       ?updateRemainingTripRoute({latitude:position[0],longitude:position[1]},message.telemetry?.source_timestamp_ns):null;
     // A route-placed replay vehicle: only the camera follows; the route

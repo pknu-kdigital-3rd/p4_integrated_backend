@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("../src/modules/tracking/tracking.client.ts", () => ({ trackingClient: { vehicle: async () => null } }));
 
 import type { PrismaClient } from "../src/generated/prisma/client.ts";
 import {
     asksAboutScenario,
     buildAssistantContext,
+    collectRealVehicleDetail,
     haversineM,
     mentionedVehicleId,
     realVehicleContext,
@@ -191,6 +193,20 @@ function fakeDb() {
 }
 
 describe("buildAssistantContext scope routing", () => {
+    it("uses the current replay fix even when replaying an old recording without a trip", async () => {
+        const { db } = fakeDb();
+        const detail = await collectRealVehicleDetail(db, 2n, NOW, async (externalId) => {
+            expect(externalId).toBe("device:2");
+            return { external_id: externalId, latitude: 35.2, longitude: 129.2, speed_kmh: 42.5, heading_deg: 90,
+                telemetry_source: "RECORDED_GPS", observed_at_utc: "2026-08-27T05:56:10.772Z", route_progress_pct: null,
+                source_metadata: { receivedAt: "2026-10-02T00:59:59Z", recordingSessionId: "current" } };
+        });
+        expect(detail?.fix).toMatchObject({ speedKmh: 42.5, ageSeconds: 1, recordedAt: "2026-08-27T05:56:10.772Z" });
+        expect(detail?.trip).toBeNull();
+        const context = realVehicleContext(detail!, NOW.toISOString(), null);
+        expect(context.liveText).toContain("속도 42.5 km/h");
+        expect(context.liveText).not.toContain("위치 수신 지연");
+    });
     it("defaults to the selected real vehicle when no target is mentioned", async () => {
         const { db, calls } = fakeDb();
         const context = await buildAssistantContext(db, { question: "현재 상태는?", scope: { view: "monitoring", vehicleId: "2" } }, NOW);

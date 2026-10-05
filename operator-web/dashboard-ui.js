@@ -96,10 +96,19 @@ export function renderVehicleDetails(item) {
   write('selected-source', [vehicleDisplayName(item), item.vehicleSource,t.telemetry_source==='RECORDED_GPS'?null:t.telemetry_source].filter(Boolean).join(' · '));
   write('selected-speed', formatSpeed(t.speed_kmh));
   write('selected-state', TRIP_STATUS_LABELS[item.tripStatus]||STATUS_LABELS[state]); write('selected-trip', item.tripId ?? '—');
-  const observed = new Date(t.observed_at_utc);
+  const observed = new Date(t.source_metadata?.receivedAt ?? t.observed_at_utc);
   write('selected-updated', `최근 업데이트 ${Number.isNaN(observed.getTime()) ? '미확인' : observed.toLocaleTimeString('ko-KR', {hour12:false})}`);
   write('selected-status', STATUS_LABELS[state]);
   document.querySelector('#selected-status').className = `ui-chip ui-chip--${state === 'running' || state === 'ready' ? 'success' : state === 'maintenance' ? 'danger' : 'neutral'}`;
+}
+
+export function vehicleDetailRows(item) {
+  const t = item.telemetry || {};
+  const rows = [[uiText('Vehicle'),vehicleDisplayName(item)],[uiText('Source'),[item.vehicleSource,t.telemetry_source].filter(Boolean).join(' / ')],
+    [uiText('Status'),TRIP_STATUS_LABELS[item.tripStatus]||STATUS_LABELS[vehicleStatus(item)]],[uiText('Speed'),formatSpeed(t.speed_kmh)],
+    ['최근 수신 시각',t.source_metadata?.receivedAt??t.observed_at_utc??'—'],[uiText('Trip ID'),item.tripId??'—']];
+  if(t.telemetry_source==='RECORDED_GPS')rows.push(['원본 녹화 시각',t.observed_at_utc??'—']);
+  return rows;
 }
 export function initializeDashboard({ map, markers, selectVehicle, showFleet }) {
   let fleet = [], filter = 'all', query = '', drawerOpen = false;

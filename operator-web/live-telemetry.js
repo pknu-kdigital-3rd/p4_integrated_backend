@@ -96,6 +96,15 @@ export function isLiveOverride(liveView, markerKey, now) {
     && liveView.lastUpdateAt > 0 && now - liveView.lastUpdateAt <= LIVE_OVERRIDE_STALE_MS);
 }
 
+/** Apply an accepted presented frame to details, with or without a trip. */
+export function withPresentedTelemetry(item, message, now = Date.now()) {
+  const gps = message?.telemetry?.gps;
+  if (!gps || !Number.isFinite(gps.latitude) || !Number.isFinite(gps.longitude)) return item;
+  return { ...item, telemetry: { ...item.telemetry, latitude: gps.latitude, longitude: gps.longitude,
+    speed_kmh: gps.speed_kmh ?? null, heading_deg: gps.bearing_deg ?? null,
+    source_metadata: { ...item.telemetry?.source_metadata, receivedAt: new Date(now).toISOString() } } };
+}
+
 /** Operator-facing status text and level for the live telemetry line. */
 export function describeLiveTelemetry(liveView, message, now) {
   if (!liveView) return { text: 'Live telemetry: closed', level: 'idle' };

@@ -11,6 +11,7 @@ const internalToken = vi.hoisted(() => {
 import { createApp } from "../src/app.ts";
 import { prisma } from "../src/infrastructure/database/prisma.ts";
 import { resetDatabase } from "./helpers/reset-database.ts";
+import { collectRealVehicleDetail } from "../src/modules/assistant/assistant.context.ts";
 
 const app = createApp();
 
@@ -90,6 +91,19 @@ describe("POST /internal/telemetry/gps", () => {
     });
 
     const valid = () => batch({ tripId: String(tripId), vehicleId: String(vehicleId) });
+
+    it.each([true, false])("assistant reads the current replay rather than a newer recording date (trip=%s)", async (inTrip) => {
+        if (!inTrip) await prisma.trip.update({ where: { tripId }, data: { tripStatus: "CANCELLED" } });
+        const identity = { vehicleId: String(vehicleId), ...(inTrip ? { tripId: String(tripId) } : { tripId: undefined }) };
+        await post(batch({ ...identity, recordingSessionId: "old-session", receivedAt: "2026-09-18T02:40:14.123Z" },
+            { utcEpochMs: String(Date.parse("2026-09-01T00:00:00Z")), speedMps: 20 })).expect(200);
+        await post(batch({ ...identity, recordingSessionId: "current-session" },
+            { utcEpochMs: String(Date.parse("2026-08-27T05:56:10.772Z")), speedMps: 10 })).expect(200);
+        const detail = await collectRealVehicleDetail(prisma, vehicleId, new Date("2026-09-18T02:40:16.123Z"), async () => null);
+        expect(detail?.fix).toMatchObject({ recordedAt: "2026-08-27T05:56:10.772Z", receivedAt: "2026-09-18T02:40:15.123Z", ageSeconds: 1, speedKmh: 36 });
+        expect(detail?.recentSpeed).toMatchObject({ samples: 1, avgKmh: 36, maxKmh: 36 });
+        expect(detail?.trip !== null).toBe(inTrip);
+    });
 
     it("requires the internal service token", async () => {
         await post(valid(), null).expect(401);
