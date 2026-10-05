@@ -193,8 +193,9 @@ export function resolveTarget(value, auto, groups) {
 // instead of being sent to the model: 'destination' frames the trip's
 // destination with the vehicle, 'vehicle' returns to the vehicle. Questions
 // about the destination or vehicle ("목적지까지 얼마나 남았어?") are not commands,
+// except "where" ("목적지가 어디야?"), which the map answers best;
 // nor is naming another vehicle ("3호"): the map acts on the selected one.
-const MAP_VERB = /보여|보이|표시|띄워|이동|포커스|focus|찾아|돌아가|돌아와|비춰|확대|줌|센터|가운데|맞춰|가 ?줘|가자/i;
+const MAP_VERB = /보여|보이|표시|띄워|이동|포커스|focus|찾아|돌아가|돌아와|비춰|확대|줌|센터|가운데|맞춰|가 ?줘|가자|어디|where/i;
 const NOT_A_COMMAND = /얼마|몇|언제|왜|어떻|무엇|뭐|남았|걸려|상태|속도|보고|위험/;
 export function mapCommand(text) {
   const value = String(text ?? '').trim();
