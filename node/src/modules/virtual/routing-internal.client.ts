@@ -2,7 +2,15 @@ import { env } from "../../config/env.ts";
 import { AppError } from "../../common/errors/app-error.ts";
 import type { Coordinate, WaypointInput } from "./virtual.schema.ts";
 
+export type SearchTrace = {
+    events: Array<{ kind: "discovered" | "expanded"; stateId: string; legIndex: number; edgeId: string | null; g: number; h: number }>;
+    edges: Record<string, number[][]>;
+    counts: { discovered: number; expanded: number };
+    truncated: boolean;
+};
+
 export type InternalRoute = {
+    searchTrace?: SearchTrace;
     graphVersion: string;
     routeGeojson: { type: "LineString"; coordinates: number[][] };
     directedItinerary: Array<Record<string, unknown>>;
@@ -24,6 +32,7 @@ export type InternalRoadMatch = {
 };
 
 type RouteInput = {
+    includeSearchTrace?: boolean;
     origin: Coordinate;
     destination: Coordinate;
     waypoints: WaypointInput[];

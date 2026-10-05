@@ -53,6 +53,12 @@ export const routePreviewSchema = z.object({
     expectedRestrictionRevision: z.number().int().nonnegative().optional(),
 });
 
+export const searchTraceSchema = z.object({
+    draftId: z.string().regex(/^[1-9]\d*$/),
+    expectedRestrictionRevision: z.number().int().nonnegative(),
+});
+export type SearchTraceBody = z.infer<typeof searchTraceSchema>;
+
 export const snapPointSchema = coordinate;
 
 export const dispatchRequestSchema = z.object({

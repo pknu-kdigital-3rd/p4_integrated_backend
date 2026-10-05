@@ -21,6 +21,7 @@ import type {
     RestrictionBulkRemoveBody,
     RestrictionUpdateBody,
     RoutePreviewBody,
+    SearchTraceBody,
     WaypointsBody,
 } from "./virtual.schema.ts";
 
@@ -597,6 +598,43 @@ export const virtualService = {
                 data: { isActive },
             });
         });
+    },
+
+    async searchTrace(scenarioId: bigint, input: SearchTraceBody, signal?: AbortSignal) {
+        const draft = await prisma.virtualRouteDraft.findUnique({ where: { draftId: id(input.draftId) } });
+        if (!draft || draft.scenarioId !== scenarioId) throw new AppError(409, "Route draft is stale", "STALE_DRAFT");
+        const checkCurrent = async () => {
+            const scenario = await getScenario(scenarioId);
+            const vehicle = await getVirtualVehicle(draft.selectedVehicleId);
+            const dispatched = await prisma.virtualDispatchRequest.findFirst({ where: { draftId: draft.draftId } });
+            const active = await prisma.virtualTrip.findFirst({ where: activeTripWhere(draft.selectedVehicleId) });
+            const version = await routingInternalClient.graphVersion();
+            if (draft.expiresAt <= new Date() || dispatched || active || vehicle.vehicleStatus !== "READY") {
+                throw new AppError(409, "Route draft is expired or dispatched", "STALE_DRAFT");
+            }
+            if (scenario.restrictionRevision !== input.expectedRestrictionRevision ||
+                draft.restrictionRevision !== scenario.restrictionRevision || draft.graphVersion !== version.graphVersion) {
+                throw new AppError(409, "Road graph or restrictions changed; refresh the preview", "STALE_REVISION");
+            }
+        };
+        await checkCurrent();
+        const overlay = await restrictionOverlay(scenarioId);
+        const requestedProfile = draft.requestedProfile as { vehicleProfile: string };
+        let route;
+        try {
+            route = await routingInternalClient.route({
+                origin: draft.origin as Coordinate, destination: draft.destination as Coordinate,
+                waypoints: draft.waypoints as WaypointsBody["waypoints"],
+                vehicleProfile: requestedProfile.vehicleProfile, ...overlay, includeSearchTrace: true,
+            }, 8000, signal);
+        } catch (error) {
+            if (!signal?.aborted) await checkCurrent();
+            throw error;
+        }
+        if (signal?.aborted) return null;
+        await checkCurrent();
+        if (route.graphVersion !== draft.graphVersion) throw new AppError(409, "Road graph changed", "STALE_REVISION");
+        return { ...route, draftId: String(draft.draftId), restrictionRevision: draft.restrictionRevision };
     },
 
     async previewRoute(scenarioId: bigint, input: RoutePreviewBody, actorId?: bigint, signal?: AbortSignal) {

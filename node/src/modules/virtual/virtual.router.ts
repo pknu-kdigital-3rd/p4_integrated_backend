@@ -19,6 +19,7 @@ import {
     restrictionIdParamSchema,
     restrictionUpdateSchema,
     routePreviewSchema,
+    searchTraceSchema,
     scenarioIdParamSchema,
     snapPointSchema,
     virtualTripIdParamSchema,
@@ -37,6 +38,7 @@ virtualRouter.delete("/scenarios/:scenarioId", ...write, validateParams(scenario
 virtualRouter.get("/scenarios/:scenarioId", ...read, validateParams(scenarioIdParamSchema), virtualController.getScenario);
 virtualRouter.get("/scenarios/:scenarioId/vehicles", ...read, validateParams(scenarioIdParamSchema), virtualController.listVehicles);
 virtualRouter.post("/scenarios/:scenarioId/vehicles", ...write, validateParams(scenarioIdParamSchema), validateBody(createVirtualVehicleSchema), virtualController.createVehicle);
+virtualRouter.post("/scenarios/:scenarioId/routes/search-trace", ...write, validateParams(scenarioIdParamSchema), validateBody(searchTraceSchema), virtualController.searchTrace);
 virtualRouter.post("/scenarios/:scenarioId/routes/preview", ...write, validateParams(scenarioIdParamSchema), validateBody(routePreviewSchema), virtualController.previewRoute);
 virtualRouter.post("/scenarios/:scenarioId/route-points/snap", ...write, validateParams(scenarioIdParamSchema), validateBody(snapPointSchema), virtualController.snapRoutePoint);
 virtualRouter.get("/scenarios/:scenarioId/dispatch-requests", ...read, validateParams(scenarioIdParamSchema), virtualController.listRequests);

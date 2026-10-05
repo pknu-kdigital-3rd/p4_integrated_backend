@@ -7,6 +7,7 @@ import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=3';
 import { createBrushHistory } from './road-brush-history.js?v=1';
 import { installRoutePointToolbar } from './route-point-toolbar.js?v=3';
 import { createVirtualRouteMotion } from './virtual-route-motion.js?v=1';
+import { installSearchAnimation } from './astar-animation.js?v=1';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -269,6 +270,7 @@ function cancelInFlightRouteCalculation() {
   routeCalculationController = null;
 }
 function syncRouteProgress() {
+  syncAstarButton();
   const busy = routeOperations.size > 0;
   routePointToolbar.setBusy(busy);
   routeProgressIndicator.hidden = !busy;
@@ -280,6 +282,7 @@ function syncRouteProgress() {
   restrictionBulkRemove.disabled = busy || selectedRestrictionIds.size === 0;
 }
 function beginRouteCalculation(message = '경로를 계산하는 중…') {
+  stopAstarAnimation();
   const operation = Symbol('route calculation');
   routeOperations.set(operation, message);
   hideRouteContextMenu();
@@ -1235,6 +1238,8 @@ function updateRouteSummary(route, waypointCount = points.waypoints.length) {
   document.querySelector('#route-summary-revision').textContent=route?`경로 v${route.routeVersion??'미리보기'} · 도로 상태 v${route.restrictionRevision??scenarioRevision}`:'';
 }
 function renderDraft() {
+  if (astarKey && astarKey !== astarContextKey()) stopAstarAnimation();
+  syncAstarButton();
   updateRouteSummary(draft);
   if (!draft) {
     if (draftRouteSignature) clearRouteGroup(routeLayerGroup);
@@ -1404,6 +1409,8 @@ function renderVehicles({ updateVehicleSelect = true } = {}) {
   syncTurboModeUI();
 }
 function renderSelectedVehicle(vehicle) {
+  if (astarKey && astarKey !== astarContextKey()) stopAstarAnimation();
+  syncAstarButton();
   const controls = document.querySelector('#virtual-trip-controls');
   const trip = vehicle?.state?.trip;
   renderActiveTripRoute(vehicle);
@@ -1546,8 +1553,85 @@ async function previewRoute() {
     finishRouting();
   }
 }
+const astarShow = document.querySelector('#astar-show');
+const astarPlayback = document.querySelector('#astar-playback');
+const astarStatus = document.querySelector('#astar-status');
+const astarPause = document.querySelector('#astar-pause');
+let astarController = null, astarResult = null, astarKey = '', astarWatcher = null, astarPaused = false;
+function astarContextKey() {
+  return JSON.stringify([mode, modeGeneration, scenarioId, scenarioRevision, selectedVehicleId,
+    draft?.draftId, points, dispatchSubmitting]);
+}
+function syncAstarButton() {
+  astarShow.disabled = mode !== 'virtual' || !draft || dispatchSubmitting || routeOperations.size > 0 || Boolean(astarKey)
+    || String(draft.selectedVehicleId) !== String(selectedVehicleId) || draft.restrictionRevision !== scenarioRevision;
+}
+function stopAstarAnimation() {
+  astarController?.abort(); astarController = null;
+  astarAnimation.stop(); clearInterval(astarWatcher); astarWatcher = null;
+  astarKey = ''; astarResult = null; astarPlayback.hidden = true;
+  virtualMapLayers.addLayer(routeLayerGroup);
+  syncAstarButton();
+}
+const astarAnimation = installSearchAnimation(map, {
+  isCurrent: () => astarKey === astarContextKey(),
+  onProgress(state, truncated) {
+    const partial = truncated ? ' · 일부 탐색만 표시' : '';
+    astarStatus.textContent = state.index < state.total
+      ? `A* 탐색 ${state.index.toLocaleString()} / ${state.total.toLocaleString()}${partial}`
+      : state.done ? `${state.hasRoute ? '경로 탐색 완료' : '경로를 찾지 못했습니다'}${partial}`
+      : `최종 경로 그리는 중 ${Math.round(state.routeProgress * 100)}%${partial}`;
+  },
+  onDone(completed) {
+    if (!completed) { stopAstarAnimation(); return; }
+    astarPause.disabled = true;
+  },
+});
+function playAstarResult() {
+  astarPaused = false; astarPause.textContent = '일시 정지'; astarPause.disabled = false;
+  astarAnimation.setSpeed(Number(document.querySelector('#astar-speed').value));
+  virtualMapLayers.removeLayer(routeLayerGroup);
+  astarAnimation.start(astarResult);
+}
+async function showAstarAnimation() {
+  if (astarShow.disabled) return;
+  const controller = new AbortController(); astarController = controller;
+  astarKey = astarContextKey(); astarPlayback.hidden = false;
+  astarPause.disabled = true; document.querySelector('#astar-replay').disabled = true;
+  astarStatus.textContent = 'A* 탐색을 계산하는 중…'; syncAstarButton();
+  astarWatcher = setInterval(() => { if (astarKey !== astarContextKey()) stopAstarAnimation(); }, 200);
+  try {
+    const result = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/search-trace`, {
+      method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), expectedRestrictionRevision: scenarioRevision }), signal: controller.signal,
+    });
+    if (controller.signal.aborted || astarController !== controller) return;
+    if (astarKey !== astarContextKey()) { stopAstarAnimation(); return; }
+    astarResult = result;
+    playAstarResult();
+  } catch (error) {
+    if (controller.signal.aborted) return;
+    if (astarKey !== astarContextKey()) { stopAstarAnimation(); return; }
+    if (error.code === 'ROUTE_NOT_FOUND' && error.details?.searchTrace) {
+      astarResult = { searchTrace: error.details.searchTrace }; playAstarResult();
+    } else { stopAstarAnimation(); setStatus(error.message, true); }
+  } finally {
+    if (astarController === controller) {
+      astarController = null; document.querySelector('#astar-replay').disabled = !astarResult;
+    }
+  }
+}
+astarShow.addEventListener('click', showAstarAnimation);
+astarPause.addEventListener('click', () => {
+  astarPaused = !astarPaused; astarAnimation.pause(astarPaused);
+  astarPause.textContent = astarPaused ? '계속 재생' : '일시 정지';
+});
+document.querySelector('#astar-replay').addEventListener('click', () => { if (astarResult && astarKey === astarContextKey()) playAstarResult(); });
+document.querySelector('#astar-stop').addEventListener('click', stopAstarAnimation);
+document.querySelector('#astar-speed').addEventListener('change', event => astarAnimation.setSpeed(Number(event.target.value)));
+
 async function generateRequest() {
   if (!draft || dispatchSubmitting) return;
+  stopAstarAnimation();
   dispatchSubmitting = true;
   renderDraft();
   let request;
@@ -1899,6 +1983,7 @@ async function switchMode(next) {
   if (endpointDrag) finishEndpointDrag(endpointDrag.marker);
   pickMode = null;
   map.getContainer().style.cursor = '';
+  stopAstarAnimation();
   mode = next; window.__virtualMode = next === 'virtual';
   if (next === 'virtual') virtualMapLayers.addTo(map);
   else virtualMapLayers.remove();

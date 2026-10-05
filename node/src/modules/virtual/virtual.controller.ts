@@ -12,6 +12,7 @@ import type {
     RestrictionRestoreBody,
     RestrictionBulkRemoveBody,
     RoutePreviewBody,
+    SearchTraceBody,
     WaypointsBody,
     RestrictionUpdateBody,
     SnapPointBody,
@@ -49,6 +50,13 @@ export const virtualController = {
         // global by design so a virtual vehicle can be reused in consecutive scenarios.
         await virtualService.getScenario(BigInt(req.params.scenarioId));
         res.status(201).json({ data: await virtualService.createVehicle(req.body) });
+    },
+
+    async searchTrace(req: Request<{ scenarioId: string }, {}, SearchTraceBody>, res: Response) {
+        const controller = new AbortController();
+        res.once("close", () => { if (!res.writableEnded) controller.abort(); });
+        const result = await virtualService.searchTrace(BigInt(req.params.scenarioId), req.body, controller.signal);
+        if (!controller.signal.aborted) res.json({ data: result });
     },
 
     async previewRoute(req: Request<{ scenarioId: string }, {}, RoutePreviewBody>, res: Response) {

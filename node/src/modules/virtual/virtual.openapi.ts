@@ -12,6 +12,7 @@ import {
     restrictionBrushSchema,
     restrictionRestoreSchema,
     routePreviewSchema,
+    searchTraceSchema,
     scenarioIdParamSchema,
     snapPointSchema,
     virtualTripIdParamSchema,
@@ -164,4 +165,16 @@ registry.registerPath({
     security: bearer,
     request: { params: scenarioIdParamSchema, body: { content: { "application/json": { schema: createVirtualVehicleSchema } } } },
     responses: { 201: { description: "Virtual vehicle", content: { "application/json": { schema: dataResponse } } } },
+});
+
+registry.registerPath({
+    method: "post", path: "/api/v1/virtual/scenarios/{scenarioId}/routes/search-trace",
+    tags: ["Virtual Dispatch"], summary: "Replay the A* search for an undispatched route draft",
+    security: bearer,
+    request: { params: scenarioIdParamSchema, body: { content: { "application/json": { schema: searchTraceSchema } } } },
+    responses: {
+        200: { description: "Route and bounded search trace", content: { "application/json": { schema: dataResponse } } },
+        409: { description: "Stale or dispatched draft", content: { "application/json": { schema: apiErrorSchema } } },
+        422: { description: "No route; partial trace included in error details", content: { "application/json": { schema: apiErrorSchema } } },
+    },
 });

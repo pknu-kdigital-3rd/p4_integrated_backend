@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from graph_backend import load_graph, load_match_graph, TRUCK_PROFILES, get_override_locations
+from search_trace import SearchTrace
 from road_match import match_preview
 from hybrid_bus import HybridBusService, load_route_ids
 from telemetry import (
@@ -263,6 +264,7 @@ class InternalRouteRequest(BaseModel):
     origin: InternalCoordinate
     destination: InternalCoordinate
     waypoints: list[InternalWaypoint] = []
+    includeSearchTrace: bool = False
     vehicleProfile: str = "car"
     blockedEdgeIds: list[str] = []
     # Geometry is sent alongside persisted edge IDs so an existing restriction
@@ -357,6 +359,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
     profile = None if req.vehicleProfile in ("", "car", "unrestricted") else req.vehicleProfile
     if profile is not None and profile not in TRUCK_PROFILES:
         raise HTTPException(status_code=422, detail=f"Unknown vehicle profile: {profile}")
+    trace = SearchTrace() if req.includeSearchTrace else None
     stops = [req.origin, *req.waypoints, req.destination]
     route_coords: list[list[float]] = []
     directed_itinerary: list[dict] = []
@@ -419,6 +422,8 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
         leg_stats: dict = {}
         search_started = time.perf_counter()
         search_cpu_started = time.thread_time()
+        if trace is not None:
+            trace.leg = index - 1
         result = graph.route(
             previous_node,
             node_id,
@@ -431,6 +436,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
             # previous leg arrived on.
             initial_incoming_ways=incoming_ways,
             stats=leg_stats,
+            **({"trace": trace} if trace is not None else {}),
         )
         timing["legs"].append({
             "stopIndex": index,
@@ -461,6 +467,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
             raise HTTPException(status_code=422, detail={
                 "code": "ROUTE_NOT_FOUND",
                 "message": f"No route found for stop index {index}",
+                **({"searchTrace": trace.snapshot()} if trace is not None else {}),
                 "stopIndex": index,
             })
         incoming_ways = getattr(result, "final_incoming_ways", None)
@@ -499,6 +506,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
         "distanceM": distance_m,
         "durationSec": duration_s,
         "warnings": warnings,
+        **({"searchTrace": trace.snapshot()} if trace is not None else {}),
     }
 
 

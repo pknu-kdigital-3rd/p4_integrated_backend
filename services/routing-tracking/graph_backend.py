@@ -759,7 +759,7 @@ class OsmnxGraph:
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None,
-              initial_incoming_ways=None, stats=None):
+              initial_incoming_ways=None, stats=None, trace=None):
         # Hand-rolled edge-state A* instead of nx.astar_path. A node-only
         # search can discard a longer arrival at a junction even though its
         # incoming way permits a turn that the shorter arrival forbids. Keep
@@ -799,6 +799,7 @@ class OsmnxGraph:
         # came_from[state] = (previous_state, dist_m, edge_data,
         #                     way_ids_of_this_edge, edge_key, edge_time)
         came_from = {}
+        trace_parents = {} if trace is not None else None
         g_score = {start_state: 0.0}
         goal_state = None
         # Search counters for timing logs; local ints keep the loop cheap.
@@ -818,6 +819,12 @@ class OsmnxGraph:
             if g > g_score.get(state, float("inf")):
                 stale_pops += 1
                 continue
+            if trace is not None:
+                parent = came_from.get(state)
+                if parent is None:
+                    trace.record("expanded", state, g, h(current))
+                else:
+                    trace.record("expanded", state, g, h(current), trace_parents.get(state))
             if current == goal_id:
                 goal_state = state
                 break
@@ -854,6 +861,16 @@ class OsmnxGraph:
                     came_from[next_state] = (state, attrs.get("length", 0), attrs, way_ids, edge_key, edge_time)
                     heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
                     pushes += 1
+                    if trace is not None:
+                        if trace.truncated:
+                            trace.record("discovered", next_state, tentative, 0)
+                        else:
+                            edge_id = str(raw_edge_id)
+                            geometry = attrs.get("geometry")
+                            points = [[y, x] for x, y in geometry.coords] if geometry is not None else []
+                            points = _normalise_edge_geometry(points, list(_node_coords[current]), list(_node_coords[neighbor]))
+                            trace_parents[next_state] = edge_id
+                            trace.record("discovered", next_state, tentative, h(neighbor), edge_id, points)
 
         record_stats()
         if goal_state is None:
@@ -1068,7 +1085,7 @@ class PurePythonGraph:
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None,
-              initial_incoming_ways=None, stats=None):
+              initial_incoming_ways=None, stats=None, trace=None):
         import heapq
         from itertools import count
         coords = self.coords
@@ -1103,6 +1120,7 @@ class PurePythonGraph:
         # geometry_of_this_edge, way_id_of_this_edge, edge_time) so we can
         # stitch the real road curve and preserve turn context.
         came_from = {}
+        trace_parents = {} if trace is not None else None
         g_score = {start_state: 0.0}
         goal_state = None
         # Search counters for timing logs; local ints keep the loop cheap.
@@ -1122,6 +1140,12 @@ class PurePythonGraph:
             if g > g_score.get(state, float("inf")):
                 stale_pops += 1
                 continue
+            if trace is not None:
+                parent = came_from.get(state)
+                if parent is None:
+                    trace.record("expanded", state, g, h(current))
+                else:
+                    trace.record("expanded", state, g, h(current), trace_parents.get(state))
             if current == goal_id:
                 goal_state = state
                 break
@@ -1151,6 +1175,14 @@ class PurePythonGraph:
                     came_from[next_state] = (state, dist_m, geom, wid, edge_time)
                     heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
                     pushes += 1
+                    if trace is not None:
+                        if trace.truncated:
+                            trace.record("discovered", next_state, tentative, 0)
+                        else:
+                            edge_id = str(raw_edge_id)
+                            points = _normalise_edge_geometry(geom or [], list(coords[current]), list(coords[neighbor]))
+                            trace_parents[next_state] = edge_id
+                            trace.record("discovered", next_state, tentative, h(neighbor), edge_id, points)
 
         record_stats()
         if goal_state is None:

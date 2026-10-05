@@ -43,7 +43,7 @@ test('leaving during virtual startup detaches layers and cannot restart virtual 
   const context = vm.createContext({
     mode: 'normal', modeGeneration: 0, window: {},
     document: { body: { classList: { toggle: noop } } },
-    cancelInFlightRouteCalculation: noop, roadBrush: { reset: noop },
+    stopAstarAnimation: noop, cancelInFlightRouteCalculation: noop, roadBrush: { reset: noop },
     cancelPointPlacement: noop, hideRouteContextMenu: noop, endpointDrag: null,
     map: { getContainer: () => ({ style: {} }), invalidateSize: noop },
     virtualMapLayers: { addTo: () => { attached = true; }, remove: () => { attached = false; } },

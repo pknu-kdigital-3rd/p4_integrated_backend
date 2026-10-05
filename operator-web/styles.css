@@ -481,3 +481,9 @@ body.virtual-mode #virtual-legend,body.virtual-mode #virtual-route-summary { dis
 .recording-delete-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 #recording-delete-trip { background: var(--ui-danger); color: white; }
 #recording-delete-trip:hover:not(:disabled) { background: #b42318; }
+
+.astar-search-canvas { position:absolute; inset:0; z-index:450; pointer-events:none; }
+.astar-controls { margin:12px 0; }
+.astar-controls button { margin:4px 4px 4px 0; }
+.astar-legend, #astar-status { font-size:12px; line-height:1.6; }
+.astar-frontier { color:#b45309; } .astar-expanded { color:#2563eb; } .astar-final { color:#15803d; }
