@@ -76,6 +76,15 @@ mapContainer.addEventListener('mousedown',event=>{
   // to Leaflet so touch taps and pinch gestures are not treated as mouse pans.
   if(event.sourceCapabilities?.firesTouchEvents)return;
   if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log,.road-brush-toolbar,.route-point-placement-hint'))return;
+  // Right-drag belongs to map navigation, including over route pins and while
+  // the brush has disabled Leaflet's normal left-button dragging.
+  if(event.button===2){
+    event.preventDefault();
+    event.stopPropagation();
+    rightButtonPan={x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,moved:false};
+    mapContainer.classList.add('right-button-panning');
+    return;
+  }
   if(event.target.closest('.virtual-point-icon'))return;
   if(window.__operatorRoadBrushPointerDown?.(event)){event.preventDefault();event.stopImmediatePropagation();return;}
   if(event.button===0){
@@ -85,11 +94,6 @@ mapContainer.addEventListener('mousedown',event=>{
     mapContainer.classList.add('left-button-panning');
     return;
   }
-  if(event.button!==2)return;
-  event.preventDefault();
-  event.stopPropagation();
-  rightButtonPan={x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,moved:false};
-  mapContainer.classList.add('right-button-panning');
 },true);
 mapContainer.addEventListener('contextmenu',event=>event.preventDefault());
 document.addEventListener('mousemove',event=>{

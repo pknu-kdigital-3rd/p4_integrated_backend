@@ -40,6 +40,10 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
   }
   function appendStrokePoint(event) {
     if (!isActive() || !tool || busy) return;
+    if (event.pointerType !== 'touch' && (event.buttons & 2)) {
+      if (!stroke) clearPreview();
+      return;
+    }
     if (event.target?.closest?.('.road-brush-toolbar,.virtual-route-context-menu,.leaflet-control')) {
       if (!stroke) clearPreview();
       return;
