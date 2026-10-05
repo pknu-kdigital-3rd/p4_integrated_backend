@@ -92,10 +92,13 @@ test('mouse retains click placement and drag-release placement', () => {
   assert.equal(f.commits.length, 2);
 });
 
-for (const touch of [true, false]) {
-  test(`${touch ? 'touch' : 'mouse'} activation sets the appropriate map interaction`, () => {
+for (const touch of [true, false]) for (const kind of ['origin', 'destination', 'waypoint']) {
+  test(`${touch ? 'touch' : 'mouse'} ${kind} activation starts preview with the appropriate map interaction`, () => {
     let disabled = false;
     let instruction;
+    let options;
+    let touchDragInstalled = false;
+    let previewStarted = false;
     const pin = { getElement: () => null, addTo() { return this; } };
     const hint = { hidden: true, querySelector: () => ({ set textContent(value) { instruction = value; } }) };
     const context = vm.createContext({
@@ -103,16 +106,75 @@ for (const touch of [true, false]) {
       cancelPointPlacement() {}, map: { getCenter: () => ({}),
         dragging: { enabled: () => true, disable: () => { disabled = true; } },
         getContainer: () => ({ style: {} }) },
-      L: { marker: () => pin }, pointIcon() {}, startEndpointDrag() {}, setStatus() {},
+      L: { marker: (_point, value) => { options = value; return pin; } }, pointIcon() {},
+      startEndpointDrag: (value, marker) => { assert.equal(value, kind); assert.equal(marker, pin); previewStarted = true; },
+      installTouchPlacementDrag: () => { touchDragInstalled = true; }, setStatus() {},
       points: { waypoints: [] }, pointPlacementHint: hint,
     });
     const start = source.indexOf('function beginRoutePointPick(');
     const end = source.indexOf('\n}', start) + 2;
     vm.runInContext(source.slice(start, end), context);
-    context.beginRoutePointPick('origin');
+    context.beginRoutePointPick(kind);
     assert.equal(disabled, !touch);
     assert.equal(context.pointPlacement.touch, touch);
     assert.equal(hint.hidden, !touch);
+    assert.equal(options.draggable, touch);
+    assert.equal(options.interactive, touch);
+    assert.equal(touchDragInstalled, touch);
+    assert.equal(previewStarted, true);
     assert.ok(instruction.includes(touch ? '탭' : '클릭'));
+  });
+}
+
+test('touch pin dragging continuously previews snapping and places on release', () => {
+  const handlers = {};
+  let queued = 0;
+  const commits = [];
+  const pin = { on: (name, fn) => { handlers[name] = fn; }, getElement: () => null,
+    getLatLng: () => ({ lat: 35, lng: 129 }) };
+  const context = vm.createContext({
+    pointPlacement: { touch: true }, movingPin: pin, endpointDrag: { marker: pin },
+    pointPlacementPointerStart: {}, queueEndpointSnapPreview: () => queued++,
+    commitRoutePointPlacement: point => commits.push(point),
+  });
+  const start = source.indexOf('function installTouchPlacementDrag(');
+  const end = source.indexOf('\n}', start) + 2;
+  vm.runInContext(source.slice(start, end), context);
+  context.installTouchPlacementDrag(pin);
+  handlers.dragstart();
+  assert.equal(context.pointPlacementPointerStart, null);
+  handlers.drag();
+  handlers.drag();
+  assert.equal(queued, 2);
+  handlers.dragend();
+  assert.deepEqual(commits, [{ lat: 35, lng: 129 }]);
+  context.pointPlacement = null;
+  handlers.drag();
+  handlers.dragend();
+  assert.equal(queued, 2);
+  assert.equal(commits.length, 1);
+});
+
+for (const kind of ['origin', 'destination', 'waypoint']) {
+  test(`touch ${kind} shows initial loading and snapped coordinates with distance`, () => {
+    const info = {};
+    const marker = {};
+    const circle = { setLatLng() {} };
+    const context = vm.createContext({
+      pointPlacement: { touch: true }, movingPin: marker,
+      pointPlacementHint: { querySelector: () => info },
+      endpointSnapPreviewLayerGroup: { eachLayer() {} },
+      formatPoint: point => `${point.lat}, ${point.lon}`,
+      points: { waypoints: [] }, document: { querySelector: () => ({}) },
+    });
+    const start = source.indexOf('function renderEndpointSnapPreview(');
+    const end = source.indexOf('\n}', start) + 2;
+    vm.runInContext(source.slice(start, end), context);
+    const drag = { kind, marker, snapCircle: circle, snapRipple: circle };
+    context.renderEndpointSnapPreview(drag, { lat: 35, lon: 129 });
+    assert.match(info.textContent, /확인하는 중/);
+    context.renderEndpointSnapPreview(drag, { lat: 35.1, lon: 129.1, distanceM: 12.34 });
+    assert.match(info.textContent, /35.1, 129.1/);
+    assert.match(info.textContent, /12.3 m/);
   });
 }

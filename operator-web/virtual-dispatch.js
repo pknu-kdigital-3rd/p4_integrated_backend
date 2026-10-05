@@ -62,7 +62,7 @@ map.getContainer().append(routeContextMenu);
 const pointPlacementHint = document.createElement('div');
 pointPlacementHint.className = 'route-point-placement-hint';
 pointPlacementHint.hidden = true;
-pointPlacementHint.innerHTML = '<span role="status"></span><button type="button">취소</button>';
+pointPlacementHint.innerHTML = '<div><span role="status"></span><small data-point-snap-info aria-live="polite"></small></div><button type="button">취소</button>';
 map.getContainer().append(pointPlacementHint);
 L.DomEvent.disableClickPropagation(pointPlacementHint);
 L.DomEvent.disableScrollPropagation(pointPlacementHint);
@@ -639,6 +639,13 @@ function restoreRoutePlacementMapDragging() {
   routePlacementMapDraggingWasEnabled = null;
 }
 function renderEndpointSnapPreview(context, snapped) {
+  if (pointPlacement?.touch && context.marker === movingPin) {
+    const hasSnap = Number.isFinite(snapped.distanceM) || snapped.roadGeometry || snapped.nearbyRoadGeometry;
+    const distance = Number.isFinite(snapped.distanceM) ? ` · 도로까지 ${snapped.distanceM.toFixed(1)} m` : '';
+    pointPlacementHint.querySelector('[data-point-snap-info]').textContent = hasSnap
+      ? `스냅 위치 ${formatPoint({ lat: snapped.lat, lon: snapped.lon })}${distance}`
+      : '도로 스냅 위치를 확인하는 중…';
+  }
   endpointSnapPreviewLayerGroup.eachLayer(layer => {
     if (layer !== context.snapCircle && layer !== context.snapRipple) endpointSnapPreviewLayerGroup.removeLayer(layer);
   });
@@ -717,6 +724,9 @@ function queueEndpointSnapPreview(context, marker) {
       }
     }).catch((error) => {
       if (endpointDrag === context && requestId === context.requestId) {
+        if (pointPlacement?.touch && context.marker === movingPin) {
+          pointPlacementHint.querySelector('[data-point-snap-info]').textContent = '도로 스냅 미리보기를 확인할 수 없습니다.';
+        }
         setStatus(`도로 스냅 미리보기를 표시할 수 없습니다: ${error.message}`, true);
       }
     }).finally(() => {
@@ -1661,17 +1671,33 @@ function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getC
   pickMode = kind;
   pointPlacement = { kind, waypointIndex, originalMarker, touch };
   if (originalMarker) originalMarker.setOpacity(0);
-  movingPin = L.marker(initialPoint, { icon: pointIcon(kind, waypointIndex ?? points.waypoints.length), interactive: false, keyboard: false, opacity: 0.85, zIndexOffset: 10000 }).addTo(map);
+  movingPin = L.marker(initialPoint, { icon: pointIcon(kind, waypointIndex ?? points.waypoints.length), interactive: touch, draggable: touch, autoPan: touch, keyboard: false, opacity: 0.85, zIndexOffset: 10000 }).addTo(map);
+  if (touch) installTouchPlacementDrag(movingPin);
   movingPin.getElement()?.classList.add('is-moving');
   startEndpointDrag(kind, movingPin, waypointIndex);
   const label = kind === 'waypoint' ? `경유지 ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind === 'origin' ? '출발지' : '도착지';
   map.getContainer().style.cursor = 'crosshair';
   const instruction = touch
-    ? `${label}: 지도를 이동·확대한 뒤 원하는 도로를 탭하세요.`
+    ? `${label}: 핀을 드래그해 놓거나 원하는 도로를 탭하세요.`
     : `${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭해 놓으세요.`;
   pointPlacementHint.querySelector('span').textContent = instruction;
   pointPlacementHint.hidden = !touch;
   setStatus(instruction);
+}
+function installTouchPlacementDrag(pin) {
+  pin.on('dragstart', () => {
+    pointPlacementPointerStart = null;
+    pin.getElement()?.classList.add('is-dragging');
+  });
+  pin.on('drag', () => {
+    if (pointPlacement?.touch && movingPin === pin && endpointDrag?.marker === pin) {
+      queueEndpointSnapPreview(endpointDrag, pin);
+    }
+  });
+  pin.on('dragend', () => {
+    pin.getElement()?.classList.remove('is-dragging');
+    if (pointPlacement?.touch && movingPin === pin) commitRoutePointPlacement(pin.getLatLng());
+  });
 }
 window.__operatorPointPlacementActive = () => Boolean(pointPlacement);
 let routePointPointerType = 'mouse';
