@@ -836,9 +836,15 @@ class MainActivity : AppCompatActivity() {
                 dataset = telemetryDataset,
                 sessionContext = sessionContext,
                 sender = TelemetryDataChannelSender(publisher!!),
-                onStatus = { message -> runOnUiThread { if (streaming.get()) setTelemetryStatus(message) } },
+                onStatus = { message ->
+                    if (message.startsWith("Telemetry: seek detected") || message.startsWith("Telemetry: final GPS consumed")) {
+                        Log.i("TripReplay", message)
+                    }
+                    runOnUiThread { if (streaming.get()) setTelemetryStatus(message) }
+                },
                 onGpsReplayComplete = { context -> runOnUiThread {
                     val trip = assignedTrip
+                    Log.i("TripReplay", "GPS end: streamTrip=${context.tripId} assignedTrip=${trip?.tripId} status=${trip?.status} busy=$tripRequestBusy")
                     if (streaming.get() && trip != null && trip.tripId == context.tripId &&
                         trip.status == "IN_PROGRESS" && trip.routeMode == "REPLAY_ONLY") {
                         pendingGpsCompletionTripId = trip.tripId

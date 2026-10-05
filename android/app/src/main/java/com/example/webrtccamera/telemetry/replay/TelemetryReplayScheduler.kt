@@ -67,6 +67,9 @@ class TelemetryReplayScheduler(
 
     init {
         sourceClock.setOnDiscontinuityListener { oldSourceNs, newSourceNs ->
+            // A wrap can arrive between scheduler ticks. Consume the old interval first,
+            // including its final GPS, before the new QR anchor rewinds the cursors.
+            if (cursorsSynced) advanceCursors(oldSourceNs, elapsedMillis())
             resyncCursors(newSourceNs)
             onStatus("Telemetry: seek detected (${oldSourceNs}ns -> ${newSourceNs}ns); cursors reset")
         }
@@ -194,6 +197,7 @@ class TelemetryReplayScheduler(
             // Queue the final GPS before requesting completion; never wait for IMU or a wrap.
             flush(sourceNow, nowMs)
             completedGpsTripId = tripId
+            onStatus("Telemetry: final GPS consumed; completing trip $tripId")
             onGpsReplayComplete(sessionContext)
         }
         if (!endOfDatasetLogged && nextGpsIndex >= dataset.gps.size && nextImuIndex >= dataset.imu.size) {

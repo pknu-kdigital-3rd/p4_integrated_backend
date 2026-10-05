@@ -61,13 +61,17 @@ class QrSourceClock(
         val localDelta = newLocalElapsedNs - previousAnchor.localElapsedNs
 
         if (abs(sourceDelta) > seekThresholdNs) {
+            val previousSourceAtDiscontinuity = currentSourceTimestampNs(newLocalElapsedNs)
+                ?: previousAnchor.sourceTimestampNs
             // A jump this large is treated as a seek/footage-change/restart rather than an
             // implausible playback-rate estimate; the caller resets cursors instead of
             // backfilling the skipped interval.
             playbackRate = 1.0
             lastEstimatedPlaybackRate = 1.0
             anchor = QrAnchor(sourceTimestampNs, newLocalElapsedNs)
-            onDiscontinuity?.invoke(previousAnchor.sourceTimestampNs, sourceTimestampNs)
+            // The scheduler must finish the old clock before resetting for the new one.
+            // Capture the estimate before replacing the anchor, bounded by the stale timeout.
+            onDiscontinuity?.invoke(previousSourceAtDiscontinuity, sourceTimestampNs)
             return
         }
 

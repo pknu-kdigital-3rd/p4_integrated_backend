@@ -18,6 +18,22 @@ class QrSourceClockTest {
     }
 
     @Test
+    fun `discontinuity reports the old estimated time bounded by staleness`() {
+        val clock = FakeClock()
+        val sourceClock = QrSourceClock(nowNs = { clock.nowNs })
+        val oldTimes = mutableListOf<Long>()
+        sourceClock.setOnDiscontinuityListener { old, _ -> oldTimes.add(old) }
+        sourceClock.onQrTimestamp(10 * NS_PER_SECOND, 0, 0)
+        clock.advance(500_000_000L)
+        sourceClock.onQrTimestamp(0, 0, 0)
+        assertEquals(listOf(10_500_000_000L), oldTimes)
+        // A long pause must not extrapolate across the whole pause on a later seek.
+        clock.advance(100 * NS_PER_SECOND)
+        sourceClock.onQrTimestamp(20 * NS_PER_SECOND, 0, 0)
+        assertEquals(3 * NS_PER_SECOND, oldTimes.last())
+    }
+
+    @Test
     fun `waiting for first qr returns null`() {
         val clock = FakeClock()
         val sourceClock = QrSourceClock(nowNs = { clock.nowNs })
@@ -64,7 +80,7 @@ class QrSourceClockTest {
         sourceClock.onQrTimestamp(sourceTimestampNs = 100 * NS_PER_SECOND, captureTimestampNs = 0L, decodeLatencyMs = 0L)
         clock.advance(NS_PER_SECOND)
         sourceClock.onQrTimestamp(sourceTimestampNs = 25 * NS_PER_SECOND, captureTimestampNs = 0L, decodeLatencyMs = 0L)
-        assertEquals(100 * NS_PER_SECOND to 25 * NS_PER_SECOND, discontinuity)
+        assertEquals(101 * NS_PER_SECOND to 25 * NS_PER_SECOND, discontinuity)
         assertEquals(25 * NS_PER_SECOND, sourceClock.currentSourceTimestampNs())
     }
 

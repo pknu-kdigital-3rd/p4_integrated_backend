@@ -32,6 +32,50 @@ class TelemetryReplaySchedulerTest {
         )
 
     @Test
+    fun `wrap between ticks flushes the final gps before resetting cursors`() {
+        val second = 1_000_000_000L
+        var nowNs = 0L
+        val clock = QrSourceClock(nowNs = { nowNs })
+        val batches = mutableListOf<TelemetryBatch>()
+        val completions = mutableListOf<StreamSessionContext>()
+        val scheduler = TelemetryReplayScheduler(
+            TelemetryDataset("d", gps = listOf(gps(0), gps(9_900_000_000L)), imu = listOf(imu(12 * second))),
+            clock, SESSION, onBatchReady = { batches.add(it) },
+            onGpsReplayComplete = { completions.add(it) }, elapsedMillis = { nowNs / 1_000_000 })
+        clock.onQrTimestamp(9_700_000_000L, 0, 0)
+        scheduler.testResync(9_700_000_000L)
+        scheduler.advanceCursors(9_700_000_000L, 0)
+        assertTrue(completions.isEmpty())
+        // The footage loops before another scheduled tick can consume the final fix.
+        nowNs = 400_000_000L
+        clock.onQrTimestamp(0, 0, 0)
+        assertEquals(listOf(SESSION), completions)
+        assertEquals(listOf(0L, 9_900_000_000L), batches.flatMap { it.gps }.map { it.timestampNs })
+        assertEquals(0, scheduler.nextGpsIndex)
+        scheduler.advanceCursors(10 * second, 500)
+        assertEquals(1, completions.size)
+        scheduler.stop()
+    }
+
+    @Test
+    fun `rewinding in the middle does not complete a trip`() {
+        val second = 1_000_000_000L
+        var nowNs = 0L
+        val clock = QrSourceClock(nowNs = { nowNs })
+        val completions = mutableListOf<StreamSessionContext>()
+        val scheduler = TelemetryReplayScheduler(
+            TelemetryDataset("d", gps = listOf(gps(0), gps(20 * second)), imu = emptyList()),
+            clock, SESSION, onBatchReady = {}, onGpsReplayComplete = { completions.add(it) },
+            elapsedMillis = { nowNs / 1_000_000 })
+        clock.onQrTimestamp(10 * second, 0, 0)
+        scheduler.testResync(10 * second)
+        nowNs = 100_000_000L
+        clock.onQrTimestamp(0, 0, 0)
+        assertTrue(completions.isEmpty())
+        scheduler.stop()
+    }
+
+    @Test
     fun `gps endpoint completes once before imu end and before wrap`() {
         val dataset = TelemetryDataset("d", gps = listOf(gps(100), gps(200)), imu = listOf(imu(300)))
         val batches = mutableListOf<TelemetryBatch>()
