@@ -1,6 +1,7 @@
 -- Display an explicit camera-readable endpoint at EOF, independent of GPS timestamps.
 -- Marker protocol: P4_REPLAY_END_V1. Requires Android support for this marker.
 local mp = require 'mp'
+local options = require 'mp.options'
 local overlay = mp.create_osd_overlay('ass-events')
 local ended = false
 local matrix = {}
@@ -36,30 +37,54 @@ for row in ([=[
 00000000000000000000000000000
 ]=]):gmatch('[01]+') do matrix[#matrix + 1] = row end
 
+-- Where bake_timecode.py burns the timestamp QR, in video pixels: a qr_size
+-- square, bottom-center, margin pixels above the bottom edge. Match its
+-- --qr-size/--margin (defaults 160/12) in script-opts/p4-replay-end.conf.
+local opts = { qr_size = 160, margin = 12 }
+options.read_options(opts, 'p4-replay-end')
+
+-- The matrix has a 4-module quiet zone; the baked QR (qrcode border=2) has 2.
+-- Keep 2 so the marker's modules line up with the timestamp QR it replaces.
+local first = 1 + (4 - 2)
+local marker = {}
+for row = first, #matrix - first + 1 do
+    marker[#marker + 1] = matrix[row]:sub(first, #matrix - first + 1)
+end
+
+local function rect(left, top, right, bottom)
+    return string.format('m %d %d l %d %d %d %d %d %d', left, top, right, top, right, bottom, left, bottom)
+end
+
 local function draw_marker()
     if not ended then overlay:remove(); return end
-    local width, height = mp.get_osd_size()
-    if not width or not height or width <= 0 or height <= 0 then return end
-    local size = #matrix
-    local scale = math.max(1, math.floor(math.min(width * 0.45, height * 0.40) / size))
-    local x = math.floor((width - size * scale) / 2)
-    local y = math.floor(height - size * scale - height * 0.06)
+    local osd = mp.get_property_native('osd-dimensions')
+    local video = mp.get_property_native('video-params')
+    if not osd or not video or not osd.w or osd.w <= 0 or osd.h <= 0
+        or not video.w or video.w <= 0 or not video.h or video.h <= 0 then return end
+    -- The video's rectangle inside the window (letterbox/pillarbox margins).
+    local sx = (osd.w - osd.ml - osd.mr) / video.w
+    local sy = (osd.h - osd.mt - osd.mb) / video.h
+    local qr_x = math.floor((video.w - opts.qr_size) / 2)
+    local qr_y = video.h - opts.margin - opts.qr_size
+    local left, top = osd.ml + qr_x * sx, osd.mt + qr_y * sy
+    local width, height = opts.qr_size * sx, opts.qr_size * sy
+    local size = #marker
+    -- Round each module edge from the patch origin so modules tile without gaps.
+    local function edge_x(i) return math.floor(left + i * width / size + 0.5) end
+    local function edge_y(i) return math.floor(top + i * height / size + 0.5) end
     local paths = {}
     for row = 1, size do
         for col = 1, size do
-            if matrix[row]:sub(col, col) == '1' then
-                local left, top = x + (col - 1) * scale, y + (row - 1) * scale
-                paths[#paths + 1] = string.format('m %d %d l %d %d %d %d %d %d',
-                    left, top, left + scale, top, left + scale, top + scale, left, top + scale)
+            if marker[row]:sub(col, col) == '1' then
+                paths[#paths + 1] = rect(edge_x(col - 1), edge_y(row - 1), edge_x(col), edge_y(row))
             end
         end
     end
-    -- Cover the old timestamp QR throughout Android's bottom-center scan area.
-    local panel_top = math.floor(height * 0.40)
+    -- White only where the baked QR patch is (one extra pixel hides its edge).
+    local patch = rect(edge_x(0) - 1, edge_y(0) - 1, edge_x(size) + 1, edge_y(size) + 1)
     local prefix = '{\\an7\\pos(0,0)\\bord0\\shad0\\1a&H00&\\p1'
-    overlay.res_x, overlay.res_y = width, height
-    overlay.data = prefix .. '\\1c&HFFFFFF&}m 0 ' .. panel_top .. ' l ' .. width .. ' ' .. panel_top ..
-        ' ' .. width .. ' ' .. height .. ' 0 ' .. height .. '\n' ..
+    overlay.res_x, overlay.res_y = osd.w, osd.h
+    overlay.data = prefix .. '\\1c&HFFFFFF&}' .. patch .. '\n' ..
         prefix .. '\\1c&H000000&}' .. table.concat(paths, ' ')
     overlay:update()
 end
@@ -69,5 +94,6 @@ mp.observe_property('eof-reached', 'bool', function(_, value)
     draw_marker()
 end)
 mp.observe_property('osd-dimensions', 'native', function() draw_marker() end)
+mp.observe_property('video-params', 'native', function() draw_marker() end)
 mp.register_event('file-loaded', function() ended = false; overlay:remove() end)
 mp.register_event('shutdown', function() overlay:remove() end)
