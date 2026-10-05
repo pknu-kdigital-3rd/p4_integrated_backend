@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="256" height="256">
+  <!-- Coturn (unofficial): peer → relay → peer U-turn. Original design for this deck. -->
+  <defs>
+    <mask id="gap"><rect width="24" height="24" fill="#fff"/><circle cx="12" cy="4" r="3.7" fill="#000"/></mask>
+  </defs>
+  <g fill="#C8238E">
+    <path d="M5 18.5 V11 A7 7 0 0 1 19 11 V14.2" fill="none" stroke="#C8238E" stroke-width="2.6" stroke-linecap="round" mask="url(#gap)"/>
+    <polygon points="15.2,13.6 22.8,13.6 19,19.6" stroke="#C8238E" stroke-width="0.6" stroke-linejoin="round"/>
+    <circle cx="5" cy="20" r="2.4"/>
+    <circle cx="12" cy="4" r="2.6"/>
+  </g>
+</svg>
