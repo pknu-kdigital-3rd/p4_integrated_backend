@@ -121,7 +121,7 @@ body:not(.virtual-mode) .road-brush-toolbar { display: none; }
 .road-brush-toolbar-handle > span:last-child { margin-left: auto; font-size: 10px; font-weight: 400; }
 .road-brush-toolbar-actions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; }
 .road-brush-toolbar-actions button { padding: 9px 6px; border: 0; background: #eef2f6; color: var(--ui-text); font-size: 13px; }
-.road-brush-toolbar-actions button:hover:not(:disabled) { background: #dce5ef; }
+.road-brush-toolbar-actions button:hover:not(:disabled):not([aria-pressed=true]) { background: #dce5ef; }
 .road-brush-toolbar-actions button[aria-pressed=true] { background: #dc2626; color: white; box-shadow: none; }
 .road-brush-toolbar-actions button[data-road-tool=erase][aria-pressed=true] { background: #2563eb; }
 .road-brush-toolbar.dragging { opacity: .94; }
