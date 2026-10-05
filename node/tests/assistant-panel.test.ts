@@ -66,8 +66,8 @@ describe('assistant target choice', () => {
 
 describe('assistant panel map commands', () => {
   it('recognizes requests to show the destination or the vehicle', () => {
-    for (const text of ['목적지 보여줘', '도착지로 이동해 줘', '목적지 표시해줘', '목적지 포커스', '목적지가 어디야?']) expect(mapCommand(text)).toBe('destination');
-    for (const text of ['현재 차량으로 이동', '차량 위치로 돌아가줘', '트럭 보여줘', '현재 위치 보여줘', '차량 어디 있어?']) expect(mapCommand(text)).toBe('vehicle');
+    for (const text of ['목적지 보여줘', '도착지로 이동해 줘', '목적지 표시해줘', '목적지 포커스', '목적지가 어디야?', '목적지', '목적지는?', '도착지?']) expect(mapCommand(text)).toBe('destination');
+    for (const text of ['현재 차량으로 이동', '차량 위치로 돌아가줘', '트럭 보여줘', '현재 위치 보여줘', '차량 어디 있어?', '현재 위치', '차량 위치는?']) expect(mapCommand(text)).toBe('vehicle');
     expect(mapCommand('차량이랑 목적지 같이 보여줘')).toBe('destination');
   });
 

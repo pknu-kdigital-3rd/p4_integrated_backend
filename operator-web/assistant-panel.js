@@ -197,8 +197,13 @@ export function resolveTarget(value, auto, groups) {
 // nor is naming another vehicle ("3호"): the map acts on the selected one.
 const MAP_VERB = /보여|보이|표시|띄워|이동|포커스|focus|찾아|돌아가|돌아와|비춰|확대|줌|센터|가운데|맞춰|가 ?줘|가자|어디|where/i;
 const NOT_A_COMMAND = /얼마|몇|언제|왜|어떻|무엇|뭐|남았|걸려|상태|속도|보고|위험/;
+// A bare place noun ("목적지", "목적지는?", "현재 위치") is a request to see it.
+const BARE_DESTINATION = /^(목적지|도착지)\s*(는|은|가)?\s*[?？]?$/;
+const BARE_VEHICLE = /^(현재|차량|내 차량|현재 차량)\s*위치\s*(는|은|가)?\s*[?？]?$/;
 export function mapCommand(text) {
   const value = String(text ?? '').trim();
+  if (BARE_DESTINATION.test(value)) return 'destination';
+  if (BARE_VEHICLE.test(value)) return 'vehicle';
   if (!value || value.length > 60 || !MAP_VERB.test(value) || NOT_A_COMMAND.test(value) || /\d\s*호/.test(value)) return null;
   if (/목적지|도착지|destination/i.test(value)) return 'destination';
   if (/차량|화물차|트럭|운반차|자동차|현재 ?위치|vehicle|truck/i.test(value)) return 'vehicle';
