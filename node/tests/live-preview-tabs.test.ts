@@ -55,7 +55,7 @@ function setup(tab='saved',previousPreview=false) {
     refreshMapLayout:vi.fn(),renderLiveTelemetryStatus:vi.fn(),
     browserReachableUrl:(url: string)=>url,
     createLiveView:(item: any,frameOrigin: string)=>({item,frameOrigin,vehicleId:item.vehicleId,markerKey:item.telemetry.external_id}),
-    updateLiveTitle:vi.fn(),setLiveViewLoading:vi.fn(),
+    updateLiveTitle:vi.fn(),setLiveViewLoading:vi.fn(),syncLiveColorMode:vi.fn(),renderVehicleFields:vi.fn(),
     placeLivePanel:vi.fn(()=>expect(livePanel.hidden).toBe(true)),
     clearInterval:vi.fn(),setInterval:vi.fn(()=>1),
   };

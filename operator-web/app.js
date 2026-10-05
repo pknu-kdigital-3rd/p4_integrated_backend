@@ -463,6 +463,22 @@ function notifyLiveFrameFullscreen(fullscreen=liveDetailsHidden){
   // showFps: the Vision page's FPS counter is only for the real fullscreen view.
   liveFrame.contentWindow?.postMessage({type:'operator-live-view-fullscreen',fullscreen,showFps:document.fullscreenElement===livePanel},liveView.frameOrigin);
 }
+// The overlay toggle colors detections by class (person, car, ...) or by
+// distance. The Vision page owns and saves the choice; the toggle stays
+// disabled until that page reports it.
+const liveColorModeButtons=document.querySelectorAll('[data-live-color-mode]');
+function syncLiveColorMode(distance){
+  for(const button of liveColorModeButtons){
+    button.disabled=distance===null;
+    button.setAttribute('aria-pressed',String(distance!==null&&(button.dataset.liveColorMode==='distance')===distance));
+  }
+}
+function setLiveColorMode(distance){
+  if(!liveView)return;
+  syncLiveColorMode(distance);
+  liveFrame.contentWindow?.postMessage({type:'operator-live-view-distance-coloring',enabled:distance},liveView.frameOrigin);
+}
+for(const button of liveColorModeButtons)button.addEventListener('click',()=>setLiveColorMode(button.dataset.liveColorMode==='distance'));
 function retargetLiveView(item){
   if(!liveView||sameLiveTarget(liveView,item))return;
   // The video belongs to the vehicle it was opened for; selecting another
@@ -1368,6 +1384,7 @@ function stopLiveView(){
   // Navigating the iframe away from the Vision page closes its WebRTC peer
   // connection and releases the browser media resources.
   liveFrame.src='about:blank';
+  syncLiveColorMode(null);
   operatorLayout.classList.remove('live-view-open');
   document.querySelector('#live-view-diagnostic').textContent='';
   liveView=null;lastLiveMessage=null;liveVideoSize=null;liveDetections=null;fitLivePanelToVideo();
@@ -1391,6 +1408,10 @@ window.__operatorResumeLiveView=()=>{if(!liveView&&matchesLiveTarget(selected))o
 window.addEventListener('message',event=>{
   if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-playback-state'){
     setLiveViewLoading(event.data.loading===true,typeof event.data.text==='string'?event.data.text:undefined);
+    return;
+  }
+  if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-distance-coloring'){
+    syncLiveColorMode(event.data.enabled===true);
     return;
   }
   if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-video-size'){
@@ -1473,6 +1494,8 @@ function openLiveView(){
   fitLivePanelToVideo();
   // Set the URL only after opening the panel so navigation/playback starts as
   // part of the user's click instead of while the iframe is hidden.
+  // The reloaded Vision page reports its coloring mode again.
+  syncLiveColorMode(null);
   liveFrame.src=liveViewUrl;
   syncLiveViewButton();
 }
@@ -1496,7 +1519,8 @@ liveFrame.addEventListener('load',event=>{
 // selected, or when "저장된 녹화" is shown while it is docked.
 liveRecenterButton.addEventListener('click',()=>{clearDestinationPeek();liveMapFollower.recenter()});
 const liveFullscreenButton=document.querySelector('#live-fullscreen');
-function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.textContent=fullscreen?'전체 화면 종료':'전체 화면';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
+// An icon button in the video overlay; only its tooltip and label change.
+function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.title=fullscreen?'전체 화면 종료':'전체 화면';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
 if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
 else{
   liveFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===livePanel)await document.exitFullscreen();else await livePanel.requestFullscreen()}catch{document.querySelector('#live-view-diagnostic').textContent='Full-screen Live View is unavailable in this browser.'}});

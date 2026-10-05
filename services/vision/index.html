@@ -503,10 +503,19 @@
     saveDistanceColorSettings();
   }
   syncDistanceColorControls();
-  distanceColoringEnabledEl.addEventListener('change', () => {
-    distanceColorSettings = distanceColors.normalizeSettings({ ...distanceColorSettings, enabled: distanceColoringEnabledEl.checked });
+  // Tells the embedding operator page whether detections are colored by
+  // distance, so its overlay toggle shows this page's saved choice.
+  function postDistanceColoring() {
+    if (!parentOrigin) return;
+    window.parent.postMessage({ type: 'live-view-distance-coloring', enabled: distanceColorSettings.enabled }, parentOrigin);
+  }
+  function setDistanceColoringEnabled(enabled) {
+    distanceColorSettings = distanceColors.normalizeSettings({ ...distanceColorSettings, enabled: enabled === true });
+    syncDistanceColorControls();
     saveDistanceColorSettings();
-  });
+    postDistanceColoring();
+  }
+  distanceColoringEnabledEl.addEventListener('change', () => setDistanceColoringEnabled(distanceColoringEnabledEl.checked));
   distanceNearMaxEl.addEventListener('change', commitDistanceThresholds);
   distanceMidMaxEl.addEventListener('change', commitDistanceThresholds);
   for (const zone of distanceColors.ZONES) distanceColorInputs[zone].addEventListener('change', () => {
@@ -1254,6 +1263,10 @@
       document.documentElement.classList.toggle('operator-live-view-hide-fps', event.data.showFps === false);
       updateStageSize();
       postVideoSize();
+      // The operator sends this once the frame loads, so answer with the coloring mode too.
+      postDistanceColoring();
+    } else if (event.data?.type === 'operator-live-view-distance-coloring') {
+      setDistanceColoringEnabled(event.data.enabled === true);
     } else if (event.data?.type === 'operator-live-view-returned' && !document.hidden) resumeAtLive();
   });
   // The operator dashboard opts into immediate playback when it opens this

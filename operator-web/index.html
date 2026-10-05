@@ -319,9 +319,6 @@
        <button aria-controls="live-view-diagnostic live-telemetry-status" id="live-details" type="button">
         상세 보기
        </button>
-       <button id="live-fullscreen" type="button">
-        전체 화면
-       </button>
       </div>
      </header>
      <p id="live-view-diagnostic" role="status">
@@ -332,6 +329,18 @@
      <iframe allow="autoplay; camera; microphone; fullscreen" id="live-view-frame" loading="eager" title="Vehicle live view">
      </iframe>
      <div id="live-view-loading" role="status" hidden>실시간 영상 연결 중…</div>
+     <div id="live-view-overlay">
+      <div aria-label="탐지 색상 기준" class="live-color-mode" role="group">
+       <button aria-pressed="true" data-live-color-mode="class" disabled="" type="button">
+        클래스
+       </button>
+       <button aria-pressed="false" data-live-color-mode="distance" disabled="" type="button">
+        거리
+       </button>
+      </div>
+      <button aria-label="View Live View full screen" data-icon="fullscreen" id="live-fullscreen" title="전체 화면" type="button">
+      </button>
+     </div>
      <p aria-live="off" id="live-detection-status" role="status">
       YOLO 객체 탐지 대기 중
      </p>

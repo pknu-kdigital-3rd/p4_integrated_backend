@@ -243,3 +243,47 @@ test('pump stops decoding ahead once enough frames wait for their slot', () => {
   context.pump();
   assert.equal(decoded.length, 1);
 });
+
+// Cut at each function's own closing brace; top-level statements follow these.
+function functionBodies(...names) {
+  return names.map(name => {
+    const start = html.indexOf(`  function ${name}(`);
+    assert.ok(start >= 0, name);
+    return html.slice(start, html.indexOf('\n  }\n', start) + 4);
+  }).join('\n');
+}
+
+function distanceColoringPage(parentOrigin = 'https://operator.example') {
+  const posted = [], saved = [];
+  let synced = 0;
+  const context = vm.createContext({
+    parentOrigin,
+    distanceColorSettings: { enabled: false, nearMaxM: 15, midMaxM: 40, colors: {} },
+    distanceColors: { normalizeSettings: value => ({ ...value }) },
+    syncDistanceColorControls: () => synced++,
+    saveDistanceColorSettings: () => saved.push(context.distanceColorSettings.enabled),
+    window: { parent: { postMessage: (message, origin) => posted.push({ message, origin }) } },
+  });
+  vm.runInContext(functionBodies('postDistanceColoring', 'setDistanceColoringEnabled'), context);
+  return { context, posted, saved, synced: () => synced };
+}
+
+test('the operator overlay toggle switches distance coloring, saves it, and hears it back', () => {
+  const { context, posted, saved, synced } = distanceColoringPage();
+  context.setDistanceColoringEnabled(true);
+  assert.equal(context.distanceColorSettings.enabled, true);
+  assert.equal(context.distanceColorSettings.nearMaxM, 15);
+  assert.deepEqual(saved, [true]);
+  assert.equal(synced(), 1);
+  assert.equal(JSON.stringify(posted), JSON.stringify([{ message: { type: 'live-view-distance-coloring', enabled: true }, origin: 'https://operator.example' }]));
+  // Anything but true turns it off, as the message handler passes it through.
+  context.setDistanceColoringEnabled('yes');
+  assert.equal(context.distanceColorSettings.enabled, false);
+});
+
+test('a standalone Vision page does not report its coloring mode', () => {
+  const { context, posted, saved } = distanceColoringPage(null);
+  context.setDistanceColoringEnabled(true);
+  assert.deepEqual(saved, [true]);
+  assert.deepEqual(posted, []);
+});
