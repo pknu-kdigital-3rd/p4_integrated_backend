@@ -5,6 +5,7 @@ import {
     asksAboutScenario,
     buildAssistantContext,
     haversineM,
+    mentionedVehicleId,
     realVehicleContext,
     scenarioContext,
     virtualVehicleContext,
@@ -58,6 +59,20 @@ describe("assistant scope schema", () => {
         expect(assistantChatSchema.safeParse({ question: "q", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }).success).toBe(true);
         expect(assistantChatSchema.safeParse({ question: "q", scope: { view: "monitoring", vehicleId: "1; drop" } }).success).toBe(false);
         expect(assistantChatSchema.safeParse({ question: "q", scope: { view: "elsewhere" } }).success).toBe(false);
+    });
+});
+
+describe("question vehicle mentions", () => {
+    it.each(["9호 속도는?", "화물차 9호 상태", "화물차9호는?", "009 호 위치"])("extracts the vehicle id from %s", (question) => {
+        expect(mentionedVehicleId(question)).toBe("9");
+    });
+
+    it.each([undefined, "현재 속도는?", "모든 차량 상태", "모든 화물차와 9호 상태", "모든 운행 중인 트럭 상태", "모든 차량과 화물차 9호", "0호", "1.9호", "9호선"])("keeps the selected target for %s", (question) => {
+        expect(mentionedVehicleId(question)).toBeUndefined();
+    });
+
+    it("preserves large vehicle ids without number rounding", () => {
+        expect(mentionedVehicleId("화물차 9007199254740993호")).toBe("9007199254740993");
     });
 });
 
@@ -144,6 +159,7 @@ function fakeDb() {
             findMany: async () => { calls.push("fleet"); return []; },
             findUnique: async ({ where }: { where: { vehicleId: bigint } }) => {
                 calls.push(`vehicle:${where.vehicleId}`);
+                if (where.vehicleId === 2n) return { vehicleCode: "TRUCK-2", vehicleName: null, vehicleSource: "CUSTOM", vehicleStatus: "READY" };
                 if (where.vehicleId === 9n) {
                     return {
                         vehicleCode: "SIM-1", vehicleName: null, vehicleSource: "VIRTUAL",
@@ -158,7 +174,7 @@ function fakeDb() {
             },
         },
         $queryRaw: async () => [],
-        trip: { findMany: async () => [] },
+        trip: { findMany: async () => [], findFirst: async () => null },
         virtualScenario: {
             findMany: async () => [],
             findUnique: async ({ where }: { where: { scenarioId: bigint } }) => {
@@ -168,13 +184,54 @@ function fakeDb() {
                     : null;
             },
         },
-        detectionEvent: { groupBy: async () => [] },
+        detectionEvent: { groupBy: async () => [], findFirst: async () => null },
         alert: { count: async () => 0, findMany: async () => [] },
     };
     return { db: db as unknown as PrismaClient, calls };
 }
 
 describe("buildAssistantContext scope routing", () => {
+    it("defaults to the selected real vehicle when no target is mentioned", async () => {
+        const { db, calls } = fakeDb();
+        const context = await buildAssistantContext(db, { question: "현재 상태는?", scope: { view: "monitoring", vehicleId: "2" } }, NOW);
+        expect(context.subject).toBe("실차량 TRUCK-2");
+        expect(calls).toEqual(["vehicle:2"]);
+    });
+
+    it("switches from a virtual selection to the explicitly mentioned real vehicle", async () => {
+        const { db, calls } = fakeDb();
+        const context = await buildAssistantContext(db, { question: "2호 상태", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }, NOW);
+        expect(context.subject).toBe("실차량 TRUCK-2");
+        expect(calls).not.toContain("vehicle:9");
+    });
+
+    it("overrides the selected target with a numbered vehicle and collects its context", async () => {
+        const { db, calls } = fakeDb();
+        const context = await buildAssistantContext(db, { question: "화물차 9호 상태", scope: { view: "virtual", scenarioId: "7", vehicleId: "404" } }, NOW);
+        expect(context.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
+        expect(context.liveText).toContain("상태 도착 완료");
+        expect(calls).not.toContain("vehicle:404");
+    });
+
+    it("resolves a numbered virtual vehicle even outside virtual mode", async () => {
+        const { db } = fakeDb();
+        const context = await buildAssistantContext(db, { question: "9호 상태", scope: { view: "monitoring", vehicleId: "404" } }, NOW);
+        expect(context.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
+    });
+
+    it("keeps the current target for all-vehicle wording", async () => {
+        const { db, calls } = fakeDb();
+        const context = await buildAssistantContext(db, { question: "모든 화물차와 404호 상태", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }, NOW);
+        expect(context.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
+        expect(calls.filter((call) => call.startsWith("vehicle:"))).toEqual(["vehicle:9"]);
+    });
+
+    it("reports a missing numbered target instead of answering about another vehicle", async () => {
+        const { db } = fakeDb();
+        await expect(buildAssistantContext(db, { question: "404호 상태", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }, NOW))
+            .rejects.toMatchObject({ code: "VEHICLE_NOT_FOUND" });
+    });
+
     it("uses the fleet snapshot without a scope", async () => {
         const { db } = fakeDb();
         expect((await buildAssistantContext(db, { question: "q" }, NOW)).subject).toBe("전체 현황");

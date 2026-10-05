@@ -49,6 +49,7 @@ import {
     reasonText,
 } from "../fleet/fleet.labels.ts";
 import type { AssistantChatBody, AssistantScope } from "./assistant.schema.ts";
+import { AppError } from "../../common/errors/app-error.ts";
 
 const ACTIVE_TRIP_STATES = ["READY", "IN_PROGRESS", "PAUSED"];
 const MOVING_SIM_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
@@ -577,9 +578,32 @@ export function fleetContext(snapshot: FleetSnapshot, sections: SnapshotSections
 const MONITORING_SECTIONS: SnapshotSections = { real: true, virtual: false, vision: true };
 const VIRTUAL_SECTIONS: SnapshotSections = { real: false, virtual: true, vision: false };
 
-// Picks the context for a request from its scope.
+// "모든 차량" keeps the current target, including an explicitly chosen
+// panel target. Otherwise a numbered mention overrides the selection.
+export function mentionedVehicleId(question?: string): string | undefined {
+    if (!question || (/모든/.test(question) && /화물차|차량|운반차|트럭|자동차|차|vehicle|truck/i.test(question))) return undefined;
+    const number = question.match(/(?:^|[^\d.\-])(\d+)\s*호(?![\dA-Za-z]|선|실)/)?.[1];
+    if (!number || BigInt(number) === 0n) return undefined;
+    return BigInt(number).toString();
+}
+
+async function resolveQuestionScope(db: PrismaClient, body: Pick<AssistantChatBody, "question" | "scope">): Promise<AssistantScope | undefined> {
+    const vehicleId = mentionedVehicleId(body.question);
+    if (!vehicleId) return body.scope;
+    const vehicle = await db.vehicle.findUnique({
+        where: { vehicleId: BigInt(vehicleId) },
+        select: { vehicleSource: true, virtualState: { select: { scenarioId: true } } },
+    });
+    if (!vehicle) throw new AppError(404, `화물차 ${vehicleId}호를 찾을 수 없습니다.`, "VEHICLE_NOT_FOUND");
+    if (vehicle.vehicleSource !== "VIRTUAL") return { view: "monitoring", vehicleId };
+    const scenarioId = (body.scope?.view === "virtual" ? body.scope.scenarioId : undefined) ?? vehicle.virtualState?.scenarioId.toString();
+    if (!scenarioId) throw new AppError(400, `화물차 ${vehicleId}호의 시나리오를 선택해 주세요.`, "ASSISTANT_SCENARIO_REQUIRED");
+    return { view: "virtual", scenarioId, vehicleId };
+}
+
+// Picks the context from the question and the panel's current scope.
 export async function buildAssistantContext(db: PrismaClient, body: Pick<AssistantChatBody, "question" | "scope">, now = new Date()): Promise<AssistantContext> {
-    const scope: AssistantScope | undefined = body.scope;
+    const scope = await resolveQuestionScope(db, body);
     const generatedAt = now.toISOString();
     const aboutScenario = asksAboutScenario(body.question);
 
