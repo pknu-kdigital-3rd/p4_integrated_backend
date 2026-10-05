@@ -106,7 +106,8 @@ body:not(.virtual-mode) .virtual-routing-log { display: none; }
 .route-point-toolbar-pins svg { width: 36px; height: 48px; fill: #16a34a; pointer-events: none; }
 .route-point-toolbar-pins [data-point-kind=destination] svg { fill: #dc2626; }
 .route-point-toolbar-pins [data-point-kind=waypoint] svg { fill: #f59e0b; }
-.route-point-toolbar-pins text { fill: white; font-size: 24px; font-weight: 800; }
+.route-point-toolbar-pins text { fill: white; font-size: 22px; font-weight: 800; }
+.route-point-toolbar-pins [data-point-kind=waypoint] text { font-size: 16px; }
 .route-point-placement-hint { position: absolute; z-index: 1100; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100% - 24px); padding: 8px 12px; border: 1px solid var(--ui-border); border-radius: 10px; background: white; color: var(--ui-text); box-shadow: var(--ui-shadow-floating); font-size: 13px; }
 .route-point-placement-hint[hidden] { display: none; }
 .route-point-placement-hint > div { display: grid; gap: 4px; }

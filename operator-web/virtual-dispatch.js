@@ -5,7 +5,7 @@ import { createSectionVisibility } from './workspace-sections.js';
 import { installRoadBrush } from './road-brush.js?v=4';
 import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=2';
 import { createBrushHistory } from './road-brush-history.js?v=1';
-import { installRoutePointToolbar } from './route-point-toolbar.js?v=2';
+import { installRoutePointToolbar } from './route-point-toolbar.js?v=3';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -2013,7 +2013,7 @@ routeContextMenu.addEventListener('click', (event) => {
     if (!scenarioId) { setStatus('시나리오를 먼저 선택하세요.', true); return; }
     roadBrush.reset();
     cancelPointPlacement();
-    routePointToolbar.setPreview('O · D · W 핀을 지도에 드래그하세요.');
+    routePointToolbar.setPreview('출발 · 도착 · 경유지 핀을 지도에 드래그하세요.');
     routePointToolbar.open();
     return;
   }
