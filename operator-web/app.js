@@ -1519,8 +1519,7 @@ liveFrame.addEventListener('load',event=>{
 // selected, or when "저장된 녹화" is shown while it is docked.
 liveRecenterButton.addEventListener('click',()=>{clearDestinationPeek();liveMapFollower.recenter()});
 const liveFullscreenButton=document.querySelector('#live-fullscreen');
-// An icon button in the video overlay; only its tooltip and label change.
-function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.title=fullscreen?'전체 화면 종료':'전체 화면';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
+function syncLiveFullscreenButton(){const fullscreen=document.fullscreenElement===livePanel;liveFullscreenButton.textContent=fullscreen?'전체 화면 종료':'전체 화면';liveFullscreenButton.setAttribute('aria-label',fullscreen?'Exit full-screen Live View':'View Live View full screen')}
 if(!document.fullscreenEnabled||typeof livePanel.requestFullscreen!=='function')liveFullscreenButton.hidden=true;
 else{
   liveFullscreenButton.addEventListener('click',async()=>{try{if(document.fullscreenElement===livePanel)await document.exitFullscreen();else await livePanel.requestFullscreen()}catch{document.querySelector('#live-view-diagnostic').textContent='Full-screen Live View is unavailable in this browser.'}});
