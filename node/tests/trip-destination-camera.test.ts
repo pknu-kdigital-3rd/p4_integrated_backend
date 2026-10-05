@@ -32,12 +32,13 @@ function setup(withLiveView = true) {
     const follower = createLiveMapFollower({ map, markers, createEntry: vi.fn() });
     if (liveView) follower.begin(liveView);
     const context = {
-        map, markers, liveView, selected: item, liveMapFollower: follower,
+        map, markers, liveView, selected: item, liveMapFollower: follower, destinationMarker: null,
         currentTripDisplay: { vehicleId: "7", destinationName: "Destination", plannedRoute: { routeGeojson: { coordinates: [[129.1, 35.1], [129.8, 35.8]] } } },
         document: { querySelectorAll: () => [] },
         L: {
             latLngBounds: (points: unknown[]) => points,
-            circleMarker: () => ({ addTo() { return this; }, bindTooltip() { return this; } }),
+            divIcon: (options: unknown) => options,
+            marker: () => ({ addTo() { return this; }, bindTooltip() { return this; } }),
         },
     };
     runInNewContext(`${cameraHandlers}\nglobalThis.handlers={showTripDestination,returnToVehicle,clearDestinationPeek};`, context);

@@ -135,7 +135,7 @@ mapStyleSelect.addEventListener('change',()=>{
   localStorage.setItem('operatorMapStyle',mapStyleSelect.value);
   setMapStyle(mapStyleSelect.value);
 });
-const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let currentRouteBreaks=[];let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let activeTripByVehicle=new Map();let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let tripRecordingVideos=[];let recordingDeleteBusy=false;let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
+const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let originMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let currentRouteBreaks=[];let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let activeTripByVehicle=new Map();let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let tripRecordingVideos=[];let recordingDeleteBusy=false;let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.
 const tripRouteRenderer=L.svg({padding:3});
@@ -340,7 +340,7 @@ function syncVehicleMapLabel(entry){
 // a detached marker would never reappear for the rest of the session.
 function normalMapLayers(){
   return [...markers.values()].map(entry=>entry.marker)
-    .concat([...tripMapMarkers.values()],[routeLayer,replayRouteLayer,destinationMarker].filter(Boolean));
+    .concat([...tripMapMarkers.values()],[routeLayer,replayRouteLayer,originMarker,destinationMarker].filter(Boolean));
 }
 // Used by the virtual workspace, which takes the map over while it is open.
 window.__operatorDetachMapLayers=()=>{fleetViewport.save();for(const layer of normalMapLayers())map.removeLayer(layer)};
@@ -474,6 +474,20 @@ function retargetLiveView(item){
 // marker, as a trip that has not started draws no route). This is a one-time
 // camera move; users can then pan and zoom freely while the vehicle stays live.
 // The vehicle icon restores the zoom from before the destination peek.
+// Trip origin and destination pins, drawn like the virtual workspace's 출발/도착
+// pins (map-flags.css) but not draggable or removable.
+const ENDPOINT_PIN_PATH='M30 2C14.5 2 2 14.5 2 30c0 14 13 31 28 48 15-17 28-34 28-48C58 14.5 45.5 2 30 2Z';
+function tripEndpointIcon(kind){
+  const label=kind==='origin'?'출발':'도착';
+  return L.divIcon({className:`trip-endpoint-icon virtual-endpoint-${kind}`,
+    html:`<svg class="virtual-endpoint-pin" viewBox="0 0 60 80" aria-hidden="true"><path d="${ENDPOINT_PIN_PATH}"/><text x="30" y="34" text-anchor="middle">${label}</text></svg>`,
+    iconSize:[42,56],iconAnchor:[21,54.6],tooltipAnchor:[0,-50]});
+}
+function tripEndpointMarker(kind,latLng,name){
+  const marker=L.marker(latLng,{icon:tripEndpointIcon(kind),keyboard:false});
+  if(name)marker.bindTooltip(name,{direction:'top'});
+  return marker.addTo(map);
+}
 let destinationPeekMarker=null,destinationReturnZoom=null;
 function clearDestinationPeek(){
   destinationReturnZoom=null;
@@ -518,7 +532,7 @@ function mapOverlayPadding(){
 function frameVehicleAndDestination(target){
   const vehicle=framedVehiclePosition();
   const padding=mapOverlayPadding();
-  padding.top+=36; // the destination's label sits above its marker
+  padding.top+=56; // the destination pin rises above its point
   map.fitBounds(L.latLngBounds([vehicle??target,target]),
     {paddingTopLeft:[padding.left,padding.top],paddingBottomRight:[padding.right,padding.bottom],maxZoom:17});
 }
@@ -530,8 +544,8 @@ function showTripDestination(){
   map.stop();
   clearDestinationPeek();
   destinationReturnZoom=returnZoom;
-  destinationPeekMarker=L.circleMarker(target,{radius:9,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map)
-    .bindTooltip(`목적지 · ${currentTripDisplay.destinationName||'—'}`,{direction:'top',permanent:true});
+  // A trip that has not started draws no destination pin of its own.
+  if(!destinationMarker)destinationPeekMarker=tripEndpointMarker('destination',target,currentTripDisplay.destinationName);
   frameVehicleAndDestination(target);
 }
 function returnToVehicle(){
@@ -549,8 +563,8 @@ for(const [id,action] of [['#selected-destination',showTripDestination],['#trip-
 }
 function clearTripLayers(){
   clearDestinationPeek();
-  for(const layer of [routeLayer,replayRouteLayer,destinationMarker])if(layer)map.removeLayer(layer);
-  routeLayer=null;replayRouteLayer=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;currentRouteBreaks=[];routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);
+  for(const layer of [routeLayer,replayRouteLayer,originMarker,destinationMarker])if(layer)map.removeLayer(layer);
+  routeLayer=null;replayRouteLayer=null;originMarker=null;destinationMarker=null;displayedRouteKey='';currentTripDisplay=null;currentRouteCoordinates=null;currentRouteTiming=null;currentRouteBreaks=[];routePosition=0;shownRoutePosition=null;cancelAnimationFrame(routeAnimationFrame);
   for(const entry of markers.values())if(entry.estimated){entry.estimated=false;entry.freeEstimated=false;syncVehicleMapLabel(entry)}
 }
 // Source time of the frame the live view last painted, while it is fresh.
@@ -747,7 +761,9 @@ function showTripDisplay(display){
     if(running&&!replayOnly&&display.plannedRoute?.routeGeojson)routeLayer=L.polyline([],tripRouteStyle).addTo(map);
     if(replayOnly&&Array.isArray(currentRouteCoordinates)&&currentRouteCoordinates.length>1)replayRouteLayer=L.polyline([],tripRouteStyle).addTo(map);
     const target=!running?null:replayOnly?currentRouteCoordinates?.at(-1):display.plannedRoute?.routeGeojson?.coordinates?.at(-1);
-    if(target)destinationMarker=L.circleMarker([target[1],target[0]],{radius:8,color:'#fff',weight:2,fillColor:'#e53955',fillOpacity:1}).addTo(map).bindTooltip(display.destinationName);
+    if(target)destinationMarker=tripEndpointMarker('destination',[target[1],target[0]],display.destinationName);
+    const start=!running?null:replayOnly?currentRouteCoordinates?.[0]:display.plannedRoute?.routeGeojson?.coordinates?.[0];
+    if(start)originMarker=tripEndpointMarker('origin',[start[1],start[0]],display.originName);
   }
   currentTripDisplay=display;
   updateRemainingTripRoute();
@@ -1496,8 +1512,7 @@ map.on('click',event=>{
   let marker=tripMapMarkers.get(kind);
   if(marker)marker.setLatLng(event.latlng);
   else{
-    marker=L.circleMarker(event.latlng,{radius:9,color:'#fff',weight:3,fillColor:kind==='origin'?'#ff8a3d':'#20a4f3',fillOpacity:1}).addTo(map);
-    marker.bindTooltip(label,{permanent:true,direction:'top',offset:[0,-8],className:'trip-point-label'});
+    marker=tripEndpointMarker(kind,event.latlng);
     tripMapMarkers.set(kind,marker);
   }
   document.querySelector('#trip-status-message').textContent=`${label} set at ${latitude}, ${longitude}.`;
