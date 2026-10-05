@@ -1150,23 +1150,8 @@ async function start(role){
   clearInterval(tripListTimer);tripListTimer=demoMode?undefined:setInterval(()=>void loadTripAssignments().catch(ex=>console.warn('[operator trips]',ex)),5000);
   if(!refreshTimer)refreshTimer=setInterval(refresh,3000);
 }
-async function autoLogin(){
-  if(token)return true;
-  try{
-    const result=await api('/api/v1/auth/login',{method:'POST',body:JSON.stringify({loginId:'admin',password:'admin1234'})},true);
-    token=result.accessToken;
-    sessionStorage.setItem('itsToken',token);
-    return true;
-  }catch{return false}
-}
 async function requireRecordingLogin(){
   if(token&&!demoMode)return;
-  if(demoMode&&await autoLogin()){
-    demoMode=false;
-    const auth=await api('/api/v1/auth/me',{},true);
-    await start(auth.role);
-    return;
-  }
   throw new Error('Sign in before accessing trip recordings');
 }
 function replayPlayer(){return document.querySelector('#recording-player')}
@@ -1580,10 +1565,7 @@ async function boot(){
     demoMode=false;
     try{const auth=await api('/api/v1/auth/me',{},true);await start(auth.role);return}catch{token=null;sessionStorage.removeItem('itsToken')}
   }
-  if(await autoLogin()){
-    demoMode=false;
-    try{const auth=await api('/api/v1/auth/me',{},true);await start(auth.role);return}catch{token=null;sessionStorage.removeItem('itsToken')}
-  }
+  // Without a saved session the dashboard opens in demo mode with the login form.
   demoMode=true;
   try{await start()}catch(ex){demoMode=false;document.querySelector('#login').hidden=false;document.querySelector('#connection').textContent='로그인 대기';error.textContent=ex.message}
 }
