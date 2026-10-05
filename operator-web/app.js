@@ -96,6 +96,7 @@ mapContainer.addEventListener('mousedown',event=>{
   }
 },true);
 mapContainer.addEventListener('contextmenu',event=>event.preventDefault());
+// Capture navigation before interactive map layers can stop mouse events.
 document.addEventListener('mousemove',event=>{
   const pan=rightButtonPan||leftButtonPan;
   if(!pan)return;
@@ -107,7 +108,7 @@ document.addEventListener('mousemove',event=>{
   pan.x=event.clientX;
   pan.y=event.clientY;
   if(dx||dy)map.panBy([-dx,-dy],{animate:false});
-});
+},true);
 document.addEventListener('mouseup',event=>{
   if(event.button===0&&leftButtonPan){
     const wasDrag=leftButtonPan.moved;
@@ -122,7 +123,7 @@ document.addEventListener('mouseup',event=>{
     mapContainer.classList.remove('right-button-panning');
     if(wasClick)mapContainer.dispatchEvent(new CustomEvent('operator-map-contextrequest',{detail:{clientX:event.clientX,clientY:event.clientY}}));
   }
-});
+},true);
 window.addEventListener('blur',()=>{
   rightButtonPan=null;
   leftButtonPan=null;

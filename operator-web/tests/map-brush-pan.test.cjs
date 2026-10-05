@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 function setup() {
-  const handlers = {}, documentHandlers = {}, classes = new Set(), moves = [], menus = [], brushPresses = [];
+  const handlers = {}, documentHandlers = {}, documentCapture = {}, classes = new Set(), moves = [], menus = [], brushPresses = [];
   const container = {
     addEventListener: (type, fn) => { handlers[type] = fn; },
     classList: { add: value => classes.add(value), remove: (...values) => values.forEach(value => classes.delete(value)) },
@@ -16,7 +16,7 @@ function setup() {
     map: { panBy: delta => moves.push(delta), once() {}, dragging: { enabled: () => false } },
     window: { __operatorRoadBrushPointerDown: event => { brushPresses.push(event.button); return event.button === 0; },
       __operatorPointPlacementActive: () => false, addEventListener() {} },
-    document: { addEventListener: (type, fn) => { documentHandlers[type] = fn; } },
+    document: { addEventListener: (type, fn, capture = false) => { documentHandlers[type] = fn; documentCapture[type] = capture; } },
     pauseLiveMapForManualPan() {}, L: { DomEvent: { stop() {} } },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
   });
@@ -27,7 +27,12 @@ function setup() {
   const event = (button, x, y, pin = false) => ({ button, clientX: x, clientY: y,
     target: { closest: selector => pin && selector === '.virtual-point-icon' },
     preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} });
-  return { handlers, documentHandlers, classes, moves, menus, brushPresses, event };
+  const dispatchThroughLayer = (type, value) => {
+    // An interactive layer stops propagation at the target. Document capture
+    // listeners have already run; document bubble listeners never receive it.
+    if (documentCapture[type]) documentHandlers[type](value);
+  };
+  return { handlers, documentHandlers, classes, moves, menus, brushPresses, event, dispatchThroughLayer };
 }
 
 for (const pin of [false, true]) {
@@ -54,6 +59,20 @@ test('left press still belongs to the brush and stationary right-click opens the
   f.handlers.mousedown(f.event(2, 100, 200));
   f.documentHandlers.mouseup(f.event(2, 100, 200));
   assert.equal(f.menus.length, 1);
+});
+
+test('right-drag receives movement and release even when a map layer stops bubbling', () => {
+  const f = setup();
+  f.handlers.mousedown(f.event(2, 100, 200));
+  f.dispatchThroughLayer('mousemove', f.event(2, 140, 260));
+  f.dispatchThroughLayer('mouseup', f.event(2, 140, 260));
+  assert.equal(f.moves.length, 1);
+  assert.equal(f.moves[0][0], -40);
+  assert.equal(f.moves[0][1], -60);
+  assert.equal(f.classes.has('right-button-panning'), false);
+  assert.equal(f.menus.length, 0);
+  f.documentHandlers.mousemove(f.event(0, 160, 280));
+  assert.equal(f.moves.length, 1, 'release must end the drag');
 });
 
 test('right-button movement cannot extend a brush stroke, even with both buttons held', () => {
