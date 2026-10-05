@@ -33,8 +33,8 @@ function fakeDb(overrides: Record<string, unknown> = {}) {
             findMany: async () => [{
                 scenarioId: 7n, name: "도심 통제",
                 vehicleStates: [
-                    { simStatus: "DRIVING", blockedReason: null, vehicle: { vehicleCode: "V-1" } },
-                    { simStatus: "NO_ROUTE", blockedReason: "No viable path after road restriction", vehicle: { vehicleCode: "V-2" } },
+                    { simStatus: "DRIVING", blockedReason: null, vehicle: { vehicleId: 11n } },
+                    { simStatus: "NO_ROUTE", blockedReason: "No viable path after road restriction", vehicle: { vehicleId: 12n } },
                 ],
                 restrictions: [{ kind: "BLOCKED" }, { kind: "BLOCKED" }, { kind: "HEAVY_PENALTY" }],
                 events: [{ eventType: "ROAD_RESTRICTION_PAINTED" }, { eventType: "ROAD_RESTRICTION_PAINTED" }],
@@ -47,7 +47,7 @@ function fakeDb(overrides: Record<string, unknown> = {}) {
         },
         alert: {
             count: async () => 1,
-            findMany: async () => [{ alertType: "OBJECT_PROXIMITY", severity: "CRITICAL", alertMessage: "보행자 접근", createdAt: ago(120), vehicle: { vehicleCode: "TRUCK-2" } }],
+            findMany: async () => [{ alertType: "OBJECT_PROXIMITY", severity: "CRITICAL", alertMessage: "보행자 접근", createdAt: ago(120), vehicle: { vehicleId: 2n } }],
         },
         ...overrides,
     };
@@ -66,12 +66,12 @@ describe("fleet snapshot", () => {
         expect(real.activeTrips).toBe(1);
         // TRUCK-4 is READY without a trip, so missing positions are expected.
         expect(real.notable.map((note) => [note.vehicleCode, note.reason])).toEqual([
-            ["TRUCK-3", "NO_POSITION"],
-            ["TRUCK-2", "STALE_POSITION"],
+            ["화물차 3호", "NO_POSITION"],
+            ["화물차 2호", "STALE_POSITION"],
         ]);
         expect(real.notable[0]!.tripDestination).toBe("부산신항");
-        expect(real.reportingVehicles).toEqual([{ vehicleCode: "BIMS-1", speedKmh: 35.5, lastFixAgeSeconds: 20, tripDestination: null }]);
-        expect(renderSnapshotText(snapshot)).toContain("- BIMS-1 35.5 km/h, 마지막 위치 20초 전");
+        expect(real.reportingVehicles).toEqual([{ vehicleCode: "화물차 1호", speedKmh: 35.5, lastFixAgeSeconds: 20, tripDestination: null }]);
+        expect(renderSnapshotText(snapshot)).toContain("- 화물차 1호 35.5 km/h, 마지막 위치 20초 전");
     });
 
     it("summarises virtual scenarios and vision", async () => {
@@ -79,7 +79,7 @@ describe("fleet snapshot", () => {
         const scenario = snapshot.virtual.scenarios[0]!;
         expect(scenario.byStatus).toEqual({ DRIVING: 1, NO_ROUTE: 1 });
         expect(scenario.restrictions).toEqual({ blocked: 2, penalty: 1 });
-        expect(scenario.problemVehicles).toEqual([{ vehicleCode: "V-2", simStatus: "NO_ROUTE", blockedReason: "No viable path after road restriction" }]);
+        expect(scenario.problemVehicles).toEqual([{ vehicleCode: "화물차 12호", simStatus: "NO_ROUTE", blockedReason: "No viable path after road restriction" }]);
         expect(snapshot.vision.detections).toBe(42);
         expect(snapshot.vision.byRisk).toEqual({ DANGER: 2, NORMAL: 40 });
         expect(snapshot.vision.unconfirmedAlerts).toBe(1);
@@ -89,9 +89,9 @@ describe("fleet snapshot", () => {
         const text = renderSnapshotText(await collectFleetSnapshot(fakeDb(), NOW));
         expect(text).toContain("[기준 시각] 2026. 10. 02. 10:00 (KST)");
         expect(text).toContain("위치 수신: 정상 1대, 지연(2분 초과) 1대, 기록 없음 2대");
-        expect(text).toContain("TRUCK-2 (자체 등록, 운행중) 마지막 위치 10분 전");
-        expect(text).toContain("V-2 경로 없음 (도로 통제 후 우회 경로 없음)");
-        expect(text).toContain("객체 근접 심각 TRUCK-2: 보행자 접근");
+        expect(text).toContain("화물차 2호 (자체 등록, 운행중) 마지막 위치 10분 전");
+        expect(text).toContain("화물차 12호 경로 없음 (도로 통제 후 우회 경로 없음)");
+        expect(text).toContain("객체 근접 심각 화물차 2호: 보행자 접근");
     });
 
     it("caps the snapshot text", async () => {

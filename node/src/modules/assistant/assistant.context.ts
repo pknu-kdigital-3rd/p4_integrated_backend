@@ -26,6 +26,7 @@ import {
     renderSnapshotText,
     renderVirtualLines,
     reportRetrievalQuery,
+    vehicleDisplayName,
     type AlertNote,
     type CountMap,
     type FleetSnapshot,
@@ -179,12 +180,12 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
             WHERE vehicle_id = ${vehicleId} AND received_at >= ${speedSince}
             GROUP BY recording_session_id`,
         // Other real vehicles that are reporting now, nearest first.
-        db.$queryRaw<Array<{ vehicle_code: string; received_at: Date; speed_kmh: unknown; distance_m: number }>>`
+        db.$queryRaw<Array<{ vehicle_id: bigint; received_at: Date; speed_kmh: unknown; distance_m: number }>>`
             WITH me AS (
                 SELECT location FROM vehicle_position WHERE vehicle_id = ${vehicleId}
                 ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1
             )
-            SELECT v.vehicle_code, p.received_at, p.speed_kmh, ST_Distance(p.location, me.location) AS distance_m
+            SELECT v.vehicle_id, p.received_at, p.speed_kmh, ST_Distance(p.location, me.location) AS distance_m
             FROM vehicle v
             CROSS JOIN me
             JOIN LATERAL (
@@ -252,7 +253,7 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
     const speed = speeds.find((row) => (row.recording_session_id ?? null) === currentSession);
     const samples = speed ? Number(speed.samples) : 0;
     return {
-        vehicleCode: vehicle.vehicleCode,
+        vehicleCode: vehicleDisplayName(vehicleId),
         vehicleName: vehicle.vehicleName,
         source: vehicle.vehicleSource,
         // As the map shows it, so "대기" here is what the operator sees.
@@ -266,7 +267,7 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
             destinationName: trip.destinationName, startedAt: trip.startedAt?.toISOString() ?? null,
         } : null,
         nearby: nearby.map((row) => ({
-            vehicleCode: row.vehicle_code, distanceM: Number(row.distance_m),
+            vehicleCode: vehicleDisplayName(row.vehicle_id), distanceM: Number(row.distance_m),
             speedKmh: toNumber(row.speed_kmh), ageSeconds: ageSeconds(now, row.received_at),
         })),
         detections: {
@@ -285,7 +286,7 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         alerts: {
             unconfirmed,
             recent: recentAlerts.map((alert) => ({
-                alertType: alert.alertType, severity: alert.severity, vehicleCode: vehicle.vehicleCode,
+                alertType: alert.alertType, severity: alert.severity, vehicleCode: vehicleDisplayName(vehicleId),
                 message: alert.alertMessage, createdAt: alert.createdAt.toISOString(),
             })),
         },
@@ -300,7 +301,7 @@ export async function collectScenarioDetail(db: PrismaClient, scenarioId: bigint
             scenarioId: true, name: true, state: true,
             vehicleStates: {
                 where: { vehicle: { isActive: true } },
-                select: { simStatus: true, speedKmh: true, blockedReason: true, vehicle: { select: { vehicleCode: true } } },
+                select: { simStatus: true, speedKmh: true, blockedReason: true, vehicle: { select: { vehicleId: true } } },
             },
             restrictions: { where: { isActive: true }, select: { kind: true, reason: true } },
             events: { where: { createdAt: { gte: eventsSince } }, orderBy: { createdAt: "desc" }, select: { eventType: true, createdAt: true } },
@@ -309,13 +310,13 @@ export async function collectScenarioDetail(db: PrismaClient, scenarioId: bigint
     if (!scenario) return null;
     const states = [...scenario.vehicleStates].sort((a, b) =>
         Number(MOVING_SIM_STATES.includes(b.simStatus)) - Number(MOVING_SIM_STATES.includes(a.simStatus))
-        || a.vehicle.vehicleCode.localeCompare(b.vehicle.vehicleCode));
+        || (a.vehicle.vehicleId < b.vehicle.vehicleId ? -1 : a.vehicle.vehicleId > b.vehicle.vehicleId ? 1 : 0));
     return {
         scenarioId: scenario.scenarioId.toString(),
         name: scenario.name,
         state: scenario.state,
         vehicles: states.map((state) => ({
-            vehicleCode: state.vehicle.vehicleCode, simStatus: state.simStatus,
+            vehicleCode: vehicleDisplayName(state.vehicle.vehicleId), simStatus: state.simStatus,
             speedKmh: state.speedKmh, blockedReason: state.blockedReason,
         })),
         byStatus: countBy(states.map((state) => state.simStatus)),
@@ -360,13 +361,13 @@ export async function collectVirtualVehicleDetail(db: PrismaClient, scenarioId: 
     if (position && MOVING_SIM_STATES.includes(state!.simStatus)) {
         const others = await db.virtualVehicleState.findMany({
             where: { scenarioId, vehicleId: { not: vehicleId }, simStatus: { in: MOVING_SIM_STATES }, vehicle: { isActive: true } },
-            select: { lastPosition: true, speedKmh: true, lastCheckpointAt: true, vehicle: { select: { vehicleCode: true } } },
+            select: { lastPosition: true, speedKmh: true, lastCheckpointAt: true, vehicle: { select: { vehicleId: true } } },
         });
         nearby = others
             .map((other) => ({ other, at: point(other.lastPosition) }))
             .filter((item): item is { other: typeof others[number]; at: { lat: number; lon: number } } => item.at !== null)
             .map(({ other, at }) => ({
-                vehicleCode: other.vehicle.vehicleCode, distanceM: haversineM(position, at),
+                vehicleCode: vehicleDisplayName(other.vehicle.vehicleId), distanceM: haversineM(position, at),
                 speedKmh: other.speedKmh, ageSeconds: ageSeconds(now, other.lastCheckpointAt),
             }))
             .sort((a, b) => a.distanceM - b.distanceM)
@@ -375,7 +376,7 @@ export async function collectVirtualVehicleDetail(db: PrismaClient, scenarioId: 
     const trip = state?.trip ?? null;
     const route = trip?.routes[0] ?? null;
     return {
-        vehicleCode: vehicle.vehicleCode,
+        vehicleCode: vehicleDisplayName(vehicleId),
         vehicleName: vehicle.vehicleName,
         state: state ? {
             simStatus: state.simStatus, speedKmh: state.speedKmh, speedFactor: state.speedFactor,
@@ -424,7 +425,7 @@ function nearbyText(nearby: NearbyVehicle[]): string {
 }
 
 export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
-    const lines = [`[선택 실차량] ${detail.vehicleCode}${detail.vehicleName ? ` (${detail.vehicleName})` : ""}: 출처 ${label(detail.source, VEHICLE_SOURCE_LABELS)}, 상태 ${label(detail.status, VEHICLE_STATUS_LABELS)}`];
+    const lines = [`[선택 실차량] ${detail.vehicleCode}: 출처 ${label(detail.source, VEHICLE_SOURCE_LABELS)}, 상태 ${label(detail.status, VEHICLE_STATUS_LABELS)}`];
     lines.push(`  ${VEHICLE_STATUS_GLOSSARY}`);
     const fix = detail.fix;
     if (!fix) {
@@ -467,7 +468,7 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
 }
 
 export function renderVirtualVehicleLines(detail: VirtualVehicleDetail, scenarioName: string | null): string[] {
-    const lines = [`[선택 가상 차량] ${detail.vehicleCode}${detail.vehicleName ? ` (${detail.vehicleName})` : ""}${scenarioName ? `, 시나리오 '${scenarioName}'` : ""}`];
+    const lines = [`[선택 가상 차량] ${detail.vehicleCode}${scenarioName ? `, 시나리오 '${scenarioName}'` : ""}`];
     const state = detail.state;
     if (!state) {
         lines.push("  이 시나리오에서 운행 기록 없음 (대기 중)");
@@ -560,7 +561,7 @@ export function realVehicleContext(detail: RealVehicleDetail, generatedAt: strin
         generatedAt,
         subject: `실차량 ${detail.vehicleCode}`,
         liveText: capText(lines.join("\n")),
-        reportFigures: [reportHeader(`차량 ${detail.vehicleCode} 현황 보고서`, generatedAt), realVehicleReport(detail), ...(scenarios ? [renderScenarioTable(scenarios)] : [])].join("\n\n"),
+        reportFigures: [reportHeader(`${detail.vehicleCode} 현황 보고서`, generatedAt), realVehicleReport(detail), ...(scenarios ? [renderScenarioTable(scenarios)] : [])].join("\n\n"),
         retrievalQuery: topics.join(", "),
     };
 }

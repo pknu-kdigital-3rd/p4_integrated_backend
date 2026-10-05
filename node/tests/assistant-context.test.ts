@@ -89,7 +89,8 @@ describe("assistant context rendering", () => {
         expect(context.liveText).toContain("가장 가까운 감지 객체: 보행자 3.4 m (위험");
         expect(context.liveText).toContain("피치 2.1°, 롤 -0.4°");
         expect(context.liveText).not.toContain("[가상 시나리오]");
-        expect(context.reportFigures).toContain("## 차량 TRUCK-2 현황 보고서");
+        expect(context.reportFigures).toContain("## TRUCK-2 현황 보고서");
+        expect(context.liveText).not.toContain("2호 운반차");
         expect(context.retrievalQuery).toContain("충돌 방지");
     });
 
@@ -263,21 +264,21 @@ describe("buildAssistantContext scope routing", () => {
     it("defaults to the selected real vehicle when no target is mentioned", async () => {
         const { db, calls } = fakeDb();
         const context = await buildAssistantContext(db, { question: "현재 상태는?", scope: { view: "monitoring", vehicleId: "2" } }, NOW);
-        expect(context.subject).toBe("실차량 TRUCK-2");
+        expect(context.subject).toBe("실차량 화물차 2호");
         expect(calls).toEqual(["vehicle:2"]);
     });
 
     it("switches from a virtual selection to the explicitly mentioned real vehicle", async () => {
         const { db, calls } = fakeDb();
         const context = await buildAssistantContext(db, { question: "2호 상태", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }, NOW);
-        expect(context.subject).toBe("실차량 TRUCK-2");
+        expect(context.subject).toBe("실차량 화물차 2호");
         expect(calls).not.toContain("vehicle:9");
     });
 
     it("overrides the selected target with a numbered vehicle and collects its context", async () => {
         const { db, calls } = fakeDb();
         const context = await buildAssistantContext(db, { question: "화물차 9호 상태", scope: { view: "virtual", scenarioId: "7", vehicleId: "404" } }, NOW);
-        expect(context.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
+        expect(context.subject).toBe("가상 차량 화물차 9호 · 시나리오 도심 통제");
         expect(context.liveText).toContain("상태 도착 완료");
         expect(calls).not.toContain("vehicle:404");
     });
@@ -285,13 +286,13 @@ describe("buildAssistantContext scope routing", () => {
     it("resolves a numbered virtual vehicle even outside virtual mode", async () => {
         const { db } = fakeDb();
         const context = await buildAssistantContext(db, { question: "9호 상태", scope: { view: "monitoring", vehicleId: "404" } }, NOW);
-        expect(context.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
+        expect(context.subject).toBe("가상 차량 화물차 9호 · 시나리오 도심 통제");
     });
 
     it("keeps the current target for all-vehicle wording", async () => {
         const { db, calls } = fakeDb();
         const context = await buildAssistantContext(db, { question: "모든 화물차와 404호 상태", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }, NOW);
-        expect(context.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
+        expect(context.subject).toBe("가상 차량 화물차 9호 · 시나리오 도심 통제");
         expect(calls.filter((call) => call.startsWith("vehicle:"))).toEqual(["vehicle:9"]);
     });
 
@@ -327,7 +328,7 @@ describe("buildAssistantContext scope routing", () => {
         const scenario = await buildAssistantContext(db, { question: "q", scope: { view: "virtual", scenarioId: "7" } }, NOW);
         expect(scenario.subject).toBe("시나리오 도심 통제");
         const vehicle = await buildAssistantContext(db, { question: "q", scope: { view: "virtual", scenarioId: "7", vehicleId: "9" } }, NOW);
-        expect(vehicle.subject).toBe("가상 차량 SIM-1 · 시나리오 도심 통제");
+        expect(vehicle.subject).toBe("가상 차량 화물차 9호 · 시나리오 도심 통제");
         expect(vehicle.liveText).toContain("상태 도착 완료");
         expect(calls).toContain("vehicle:9");
     });

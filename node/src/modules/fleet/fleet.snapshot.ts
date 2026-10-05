@@ -126,7 +126,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
             select: {
                 scenarioId: true,
                 name: true,
-                vehicleStates: { select: { simStatus: true, blockedReason: true, vehicle: { select: { vehicleCode: true } } } },
+                vehicleStates: { select: { simStatus: true, blockedReason: true, vehicle: { select: { vehicleId: true } } } },
                 restrictions: { where: { isActive: true }, select: { kind: true } },
                 events: { where: { createdAt: { gte: eventsSince } }, select: { eventType: true } },
             },
@@ -139,7 +139,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
         db.alert.count({ where: { alertStatus: "UNCONFIRMED" } }),
         db.alert.findMany({
             where: { createdAt: { gte: visionSince } }, orderBy: { createdAt: "desc" }, take: 5,
-            select: { alertType: true, severity: true, alertMessage: true, createdAt: true, vehicle: { select: { vehicleCode: true } } },
+            select: { alertType: true, severity: true, alertMessage: true, createdAt: true, vehicle: { select: { vehicleId: true } } },
         }),
     ]);
 
@@ -156,7 +156,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
         if (reason === null) {
             reporting += 1;
             reportingVehicles.push({
-                vehicleCode: vehicle.vehicleCode, speedKmh: Number.isFinite(speed) ? speed : null, lastFixAgeSeconds: ageSeconds!,
+                vehicleCode: vehicleDisplayName(vehicle.vehicleId), speedKmh: Number.isFinite(speed) ? speed : null, lastFixAgeSeconds: ageSeconds!,
                 tripDestination: tripByVehicle.get(vehicle.vehicleId.toString())?.destinationName ?? null,
             });
         }
@@ -166,7 +166,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
         const expectedToReport = vehicle.vehicleStatus === "DRIVING" || tripByVehicle.has(vehicle.vehicleId.toString());
         if (reason && expectedToReport) {
             notable.push({
-                vehicleCode: vehicle.vehicleCode, source: vehicle.vehicleSource,
+                vehicleCode: vehicleDisplayName(vehicle.vehicleId), source: vehicle.vehicleSource,
                 status: displayVehicleStatus(vehicle.vehicleStatus, tripByVehicle.get(vehicle.vehicleId.toString())?.tripStatus),
                 lastFixAgeSeconds: ageSeconds, speedKmh: Number.isFinite(speed) ? speed : null,
                 tripDestination: tripByVehicle.get(vehicle.vehicleId.toString())?.destinationName ?? null, reason,
@@ -202,7 +202,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
                 problemVehicles: scenario.vehicleStates
                     .filter((state) => VIRTUAL_PROBLEM_STATES.includes(state.simStatus))
                     .slice(0, MAX_LISTED)
-                    .map((state) => ({ vehicleCode: state.vehicle.vehicleCode, simStatus: state.simStatus, blockedReason: state.blockedReason })),
+                    .map((state) => ({ vehicleCode: vehicleDisplayName(state.vehicle.vehicleId), simStatus: state.simStatus, blockedReason: state.blockedReason })),
             })).slice(0, MAX_LISTED),
         },
         vision: {
@@ -212,7 +212,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
             topClasses: detectionsByClass.map((row) => ({ className: row.className, count: row._count._all })),
             unconfirmedAlerts,
             recentAlerts: recentAlerts.map((alert) => ({
-                alertType: alert.alertType, severity: alert.severity, vehicleCode: alert.vehicle.vehicleCode,
+                alertType: alert.alertType, severity: alert.severity, vehicleCode: vehicleDisplayName(alert.vehicle.vehicleId),
                 message: alert.alertMessage, createdAt: alert.createdAt.toISOString(),
             })),
         },
@@ -235,6 +235,12 @@ export function formatKst(iso: string): string {
 export function formatCounts(counts: CountMap, labels: LabelMap = {}): string {
     const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     return entries.length ? entries.map(([name, value]) => `${label(name, labels)} ${value}`).join(", ") : "없음";
+}
+
+// The operator dashboard's name for a vehicle ("화물차 3호"), so the assistant
+// talks about vehicles the way the operator sees them.
+export function vehicleDisplayName(vehicleId: bigint | number | string): string {
+    return `화물차 ${String(vehicleId).replace(/^0+(?=\d)/, "")}호`;
 }
 
 export function formatAge(seconds: number | null): string {
