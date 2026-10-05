@@ -54,6 +54,7 @@ import { AppError } from "../../common/errors/app-error.ts";
 import { trackingClient, type TrackingSnapshot } from "../tracking/tracking.client.ts";
 import { logger } from "../../config/logger.ts";
 import { replayRemaining, routeRemaining, type TripRemaining } from "./trip.progress.ts";
+import { routingInternalClient } from "../virtual/routing-internal.client.ts";
 
 const ACTIVE_TRIP_STATES = ["READY", "IN_PROGRESS", "PAUSED"];
 const MOVING_SIM_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
@@ -157,10 +158,10 @@ export function haversineM(a: { lat: number; lon: number }, b: { lat: number; lo
 
 type CurrentObservationReader = (externalId: string) => Promise<TrackingSnapshot["vehicles"][number] | null>;
 
-export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigint, now = new Date(), readCurrent: CurrentObservationReader = trackingClient.vehicle): Promise<RealVehicleDetail | null> {
+export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigint, now = new Date(), readCurrent: CurrentObservationReader = trackingClient.vehicle, readRoute = routingInternalClient.route): Promise<RealVehicleDetail | null> {
     const vehicle = await db.vehicle.findUnique({
         where: { vehicleId },
-        select: { vehicleCode: true, vehicleName: true, vehicleSource: true, vehicleStatus: true, externalId: true },
+        select: { vehicleCode: true, vehicleName: true, vehicleSource: true, vehicleStatus: true, externalId: true, heightM: true, widthM: true },
     });
     if (!vehicle || vehicle.vehicleSource === "VIRTUAL") return null;
     const visionSince = new Date(now.getTime() - VISION_WINDOW_MINUTES * 60_000);
@@ -263,9 +264,30 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         .filter((value): value is string => typeof value === "string" && /^\d+$/.test(value));
     const sourceNow = sourceTimes.length ? sourceTimes.reduce((a, b) => (BigInt(a) >= BigInt(b) ? a : b)) : null;
     const route = trip?.routes?.[0];
-    const remaining = !trip ? null : trip.routeMode === "REPLAY_ONLY"
+    let remaining = !trip ? null : trip.routeMode === "REPLAY_ONLY"
         ? replayRemaining(trip.replayPreview?.points, sourceNow)
         : currentFix && route ? routeRemaining(route.routeGeojson, currentFix, route.distanceM, route.durationSec) : null;
+    // Timeline and proportional whole-route durations are not navigation
+    // ETAs. Keep only the known distance if the road router is unavailable.
+    if (remaining && remaining.distanceM > 0) remaining = { ...remaining, durationSec: null };
+    if (trip && destination && currentFix && currentFix.ageSeconds <= STALE_FIX_SECONDS
+        && remaining?.distanceM !== 0) {
+        const vehicleProfile = vehicle.vehicleSource === "BIMS" || Number(vehicle.widthM ?? 0) >= 2.3 || Number(vehicle.heightM ?? 0) >= 3.5 ? "semi" : "car";
+        try {
+            const navigation = await readRoute({
+                origin: { lat: currentFix.lat, lon: currentFix.lon },
+                destination: { lat: Number(destination.lat), lon: Number(destination.lon) },
+                waypoints: [], vehicleProfile,
+            });
+            if (Number.isFinite(navigation.distanceM) && navigation.distanceM >= 0
+                && Number.isFinite(navigation.durationSec) && navigation.durationSec >= 0) {
+                remaining = { distanceM: navigation.distanceM, durationSec: navigation.durationSec, basis: "NAVIGATION" };
+            }
+        } catch (error) {
+            logger.warn({ vehicleId: vehicleId.toString(), code: error instanceof AppError ? error.code : "ROUTING_LOOKUP_FAILED" },
+                "Assistant navigation estimate unavailable; retaining distance without ETA");
+        }
+    }
     // The speed window belongs to the stream the current fix comes from.
     const currentSession = current ? current.source_metadata?.recordingSessionId ?? null : fix?.recording_session_id ?? null;
     const speed = speeds.find((row) => (row.recording_session_id ?? null) === currentSession);
@@ -450,7 +472,7 @@ function minutesText(seconds: number): string {
 
 export function remainingText(remaining: TripRemaining): string {
     const distance = `남은 거리 ${(remaining.distanceM / 1000).toFixed(1)} km`;
-    const basis = remaining.basis === "REPLAY" ? "" : "계획 경로 기준";
+    const basis = remaining.basis === "REPLAY" ? "" : remaining.basis === "NAVIGATION" ? "도로 경로 기준" : "계획 경로 기준";
     return remaining.durationSec === null
         ? `${distance} (${basis ? `${basis}, ` : ""}남은 시간 확인 불가)`
         : `${distance}, 남은 시간 ${minutesText(remaining.durationSec)}${basis ? ` (${basis})` : ""}`;

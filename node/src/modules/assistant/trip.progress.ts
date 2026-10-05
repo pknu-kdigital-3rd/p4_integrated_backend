@@ -13,7 +13,7 @@ function haversineM(a: { lat: number; lon: number }, b: { lat: number; lon: numb
     return 2 * 6_371_000 * Math.asin(Math.sqrt(h));
 }
 
-export type TripRemaining = { distanceM: number; durationSec: number | null; basis: "REPLAY" | "ROUTE" };
+export type TripRemaining = { distanceM: number; durationSec: number | null; basis: "REPLAY" | "ROUTE" | "NAVIGATION" };
 
 type PreviewPoint = [string, number, number, number];
 

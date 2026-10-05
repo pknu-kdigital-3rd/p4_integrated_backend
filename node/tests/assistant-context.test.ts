@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 vi.mock("../src/modules/tracking/tracking.client.ts", () => ({ trackingClient: { vehicle: async () => null } }));
+vi.mock("../src/modules/virtual/routing-internal.client.ts", () => ({ routingInternalClient: { route: vi.fn(async () => { throw new Error("no routing in this fixture"); }) } }));
 
 import type { PrismaClient } from "../src/generated/prisma/client.ts";
 import {
@@ -346,5 +347,55 @@ describe("buildAssistantContext scope routing", () => {
         expect(context.subject).toBe("가상 시나리오 전체");
         expect(context.liveText).toContain("[가상 시나리오] 활성 시나리오 없음");
         expect(context.liveText).not.toContain("[실차량]");
+    });
+});
+
+describe("navigation-style remaining time", () => {
+    async function estimate(speedKmh: number, age = 1, fail = false) {
+        const { db } = fakeDb();
+        vi.spyOn(db.trip, "findFirst").mockResolvedValue({
+            tripId: 41n, tripStatus: "IN_PROGRESS", routeMode: "REPLAY_ONLY", originName: "출발", destinationName: "목적지", startedAt: NOW,
+            replayPreview: { points: [["100000000000", 129, 35, 0], ["1540000000000", 129.2, 35, 9800]] }, routes: [],
+        } as never);
+        const rows = [[], [], [], [{ lat: 35, lon: 129.2 }]];
+        vi.spyOn(db, "$queryRaw").mockImplementation(async () => rows.shift() as never);
+        const readRoute = vi.fn(async () => {
+            if (fail) throw new Error("routing down");
+            return { distanceM: 9500, durationSec: 1800, graphVersion: "graph",
+                routeGeojson: { type: "LineString" as const, coordinates: [[129, 35], [129.2, 35]] },
+                directedItinerary: [], snappedStops: [], warnings: [] };
+        });
+        const detail = await collectRealVehicleDetail(db, 2n, NOW, async () => ({
+            external_id: "device:2", latitude: 35, longitude: 129, speed_kmh: speedKmh, heading_deg: 90,
+            telemetry_source: "RECORDED_GPS", observed_at_utc: "2026-08-27T06:00:00Z", route_progress_pct: null,
+            source_metadata: { receivedAt: new Date(NOW.getTime() - age * 1000).toISOString(), sourceClockNs: "100000000000" },
+        }), readRoute);
+        return { detail: detail!, readRoute };
+    }
+
+    it("uses the road router's remaining distance and time, not replay duration or instantaneous speed", async () => {
+        const { detail, readRoute } = await estimate(28.5);
+        expect(detail.trip?.remaining).toEqual({ distanceM: 9500, durationSec: 1800, basis: "NAVIGATION" });
+        expect(readRoute).toHaveBeenCalledWith({ origin: { lat: 35, lon: 129 }, destination: { lat: 35, lon: 129.2 }, waypoints: [], vehicleProfile: "car" });
+        const context = realVehicleContext(detail, NOW.toISOString(), null);
+        expect(context.liveText).toContain("남은 거리 9.5 km, 남은 시간 약 30분 (도로 경로 기준)");
+        expect(context.reportFigures).toContain("남은 시간 약 30분 (도로 경로 기준)");
+    });
+
+    it("keeps a usable ETA while temporarily stopped", async () => {
+        const { detail } = await estimate(0);
+        expect(detail.trip?.remaining?.durationSec).toBe(1800);
+    });
+
+    it("does not present replay time as an ETA when routing fails", async () => {
+        const { detail } = await estimate(28.5, 1, true);
+        expect(detail.trip?.remaining).toEqual({ distanceM: 9800, durationSec: null, basis: "REPLAY" });
+        expect(realVehicleContext(detail, NOW.toISOString(), null).liveText).toContain("남은 시간 확인 불가");
+    });
+
+    it("does not calculate a route from a stale vehicle position", async () => {
+        const { detail, readRoute } = await estimate(28.5, 3600);
+        expect(readRoute).not.toHaveBeenCalled();
+        expect(detail.trip?.remaining?.durationSec).toBeNull();
     });
 });
