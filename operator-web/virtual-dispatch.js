@@ -2,8 +2,8 @@ import {uiText, applyRoadHatch, vehicleIcon, vehicleDisplayName} from './dashboa
 /* Dedicated virtual routing workspace. It owns its own layers and state so
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
-import { installRoadBrush } from './road-brush.js?v=5';
-import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=2';
+import { installRoadBrush } from './road-brush.js?v=6';
+import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=3';
 import { createBrushHistory } from './road-brush-history.js?v=1';
 import { installRoutePointToolbar } from './route-point-toolbar.js?v=3';
 

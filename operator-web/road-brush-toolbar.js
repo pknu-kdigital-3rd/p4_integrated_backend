@@ -7,7 +7,7 @@ export function installRoadBrushToolbar(container, { onSelect, onUndo, onRedo })
   panel.setAttribute('role', 'toolbar');
   panel.setAttribute('aria-label', '도로 차단 도구');
   panel.hidden = true;
-  panel.innerHTML = '<div class="road-brush-toolbar-handle" title="드래그하여 이동"><span aria-hidden="true">⠿</span><strong>도로 차단</strong><span>드래그하여 이동</span></div><div class="road-brush-toolbar-actions"><button type="button" data-road-tool="paint" aria-pressed="false">그리기</button><button type="button" data-road-tool="erase" aria-pressed="false">지우기</button><button type="button" data-road-tool="exit">종료</button></div><div class="road-brush-toolbar-history"><button type="button" data-road-history="undo" disabled>↶ 실행 취소</button><button type="button" data-road-history="redo" disabled>↷ 다시 실행</button></div>';
+  panel.innerHTML = '<div class="road-brush-toolbar-handle" title="드래그하여 이동"><span aria-hidden="true">⠿</span><strong>도로 차단</strong><span>드래그하여 이동</span></div><div class="road-brush-toolbar-actions"><button type="button" data-road-tool="paint" aria-pressed="false">그리기</button><button type="button" data-road-tool="erase" aria-pressed="false">지우기</button><button type="button" data-road-tool="pan" aria-pressed="false">이동</button><button type="button" data-road-tool="exit">종료</button></div><div class="road-brush-toolbar-history"><button type="button" data-road-history="undo" disabled>↶ 실행 취소</button><button type="button" data-road-history="redo" disabled>↷ 다시 실행</button></div>';
   container.append(panel);
   const buttons = [...panel.querySelectorAll('[data-road-tool]')];
   const historyButtons = [...panel.querySelectorAll('[data-road-history]')];

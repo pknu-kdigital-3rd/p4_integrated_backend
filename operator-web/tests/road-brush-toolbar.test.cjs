@@ -28,7 +28,7 @@ class Element {
 function setup() {
   const panel = new Element();
   const handle = new Element();
-  const buttons = ['paint', 'erase', 'exit'].map(tool => new Element(tool));
+  const buttons = ['paint', 'erase', 'pan', 'exit'].map(tool => new Element(tool));
   const historyButtons = ['undo', 'redo'].map(action => { const button = new Element(); button.dataset.roadHistory = action; button.disabled = true; return button; });
   panel.querySelector = () => handle;
   panel.querySelectorAll = selector => selector === '[data-road-history]' ? historyButtons : buttons;
@@ -56,8 +56,8 @@ test('draw and erase share a toolbar; exit closes it and busy state still allows
   toolbar.setBusy(true);
   panel.fire('click', { target: buttons[0] });
   assert.deepEqual(selected, ['erase']);
-  assert.equal(buttons[2].disabled, false);
-  panel.fire('click', { target: buttons[2] });
+  assert.equal(buttons[3].disabled, false);
+  panel.fire('click', { target: buttons[3] });
   assert.equal(panel.hidden, true);
   assert.deepEqual(selected, ['erase', null]);
 });
@@ -125,5 +125,46 @@ test('Escape and scenario resets hide the toolbar and restore map gestures', () 
   brush.setTool('erase');
   brush.reset();
   assert.equal(panel.hidden, true);
+  assert.equal(map.touchZoom.active, true);
+});
+
+test('move mode restores touch pan and pinch without drawing, and editing can resume', () => {
+  const { toolbar, panel, buttons } = setup();
+  const listeners = {}, timers = new Map();
+  let nextTimer = 0, strokes = 0;
+  const gesture = () => ({ active: true, enabled() { return this.active; }, disable() { this.active = false; }, enable() { this.active = true; } });
+  const container = { style: {} };
+  const map = { getContainer: () => container, dragging: gesture(), touchZoom: gesture(), on() {} };
+  const context = vm.createContext({
+    L: { layerGroup: () => ({ addTo() { return this; }, clearLayers() {} }) },
+    document: { addEventListener: (type, fn) => { listeners[type] = fn; } },
+    window: { addEventListener() {}, setTimeout: fn => { const id = ++nextTimer; timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id) },
+  });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../road-brush.js'), 'utf8').replace('export function', 'function'), context);
+  const brush = context.installRoadBrush(map, { isActive: () => true, onStroke: () => strokes++, onStatus() {}, onToolChange: toolbar.setTool });
+  brush.setTool('paint');
+  assert.equal(map.dragging.active, false);
+  assert.equal(brush.handleTouchPointerDown({ pointerType: 'touch', pointerId: 1, clientX: 100, clientY: 200 }), true);
+  assert.equal(timers.size, 1);
+  brush.setTool('pan');
+  assert.equal(timers.size, 0, 'switching to navigation cancels pending brush input');
+  assert.equal(panel.hidden, false);
+  assert.equal(buttons[2].attributes['aria-pressed'], 'true');
+  assert.equal(map.dragging.active, true);
+  assert.equal(map.touchZoom.active, true);
+  assert.equal(container.style.cursor, 'grab');
+  assert.equal(brush.handleTouchPointerDown({ pointerType: 'touch', pointerId: 2 }), false);
+  assert.equal(brush.handleMouseDown({ button: 0 }), false);
+  listeners.mousemove({ buttons: 1 });
+  listeners.pointerup({ pointerType: 'touch', pointerId: 1 });
+  assert.equal(strokes, 0);
+  brush.setTool('erase');
+  assert.equal(map.dragging.active, false);
+  assert.equal(map.touchZoom.active, false);
+  assert.equal(buttons[1].attributes['aria-pressed'], 'true');
+  brush.setTool('paint');
+  assert.equal(buttons[0].attributes['aria-pressed'], 'true');
+  brush.reset();
+  assert.equal(map.dragging.active, true);
   assert.equal(map.touchZoom.active, true);
 });

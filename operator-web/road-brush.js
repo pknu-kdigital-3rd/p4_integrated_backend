@@ -23,11 +23,15 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
     previousTouchZoom = null;
   }
   function setTool(next) {
+    if (pendingTouch) window.clearTimeout(pendingTouch.timer);
+    pendingTouch = null;
+    touchPointerId = null;
     cancel(); tool = next;
     onToolChange?.(tool);
-    setMapGestureHandling(Boolean(next));
-    container.style.cursor = next ? 'crosshair' : '';
-    onStatus(next ? `${next === 'paint' ? '차단 브러시' : '차단 지우개'} · 마우스 왼쪽 버튼 또는 터치로 드래그하세요. 터치 길게 누르기로 메뉴를 엽니다.` : '차단 도구를 종료했습니다.');
+    setMapGestureHandling(Boolean(next) && next !== 'pan');
+    container.style.cursor = next === 'pan' ? 'grab' : next ? 'crosshair' : '';
+    onStatus(next === 'pan' ? '지도 이동 · 한 손가락으로 이동하고 두 손가락으로 확대·축소하세요. 그리기 또는 지우기를 선택해 작업을 계속하세요.'
+      : next ? `${next === 'paint' ? '차단 브러시' : '차단 지우개'} · 마우스 왼쪽 버튼 또는 터치로 드래그하세요. 터치 길게 누르기로 메뉴를 엽니다.` : '차단 도구를 종료했습니다.');
   }
   function position(event) { return map.mouseEventToLatLng(event); }
   function radiusAt(point) {
@@ -39,7 +43,7 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
     cursor.setLatLng(point); cursor.setRadius(radius);
   }
   function appendStrokePoint(event) {
-    if (!isActive() || !tool || busy) return;
+    if (!isActive() || !tool || tool === 'pan' || busy) return;
     if (event.pointerType !== 'touch' && (event.buttons & 2)) {
       if (!stroke) clearPreview();
       return;
@@ -64,7 +68,7 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
     if (stroke.points.length >= 256) void finish();
   }
   function startStroke(event) {
-    if (!isActive() || !tool) return false;
+    if (!isActive() || !tool || tool === 'pan') return false;
     if (busy) return true;
     const point = position(event), radiusM = radiusAt(point);
     clearPreview(); showCursor(point, radiusM);
@@ -82,11 +86,11 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
     finally { busy = false; clearPreview(); }
   }
   function handleMouseDown(event) {
-    if (event.button !== 0 || !isActive() || !tool) return false;
+    if (event.button !== 0 || !isActive() || !tool || tool === 'pan') return false;
     return startStroke(event);
   }
   function handleTouchPointerDown(event) {
-    if (event.pointerType !== 'touch' || !isActive() || !tool) return false;
+    if (event.pointerType !== 'touch' || !isActive() || !tool || tool === 'pan') return false;
     if (touchPointerId !== null && touchPointerId !== event.pointerId) return true;
     touchPointerId = event.pointerId;
     pendingTouch = { pointerId: event.pointerId, event, x: event.clientX, y: event.clientY, timer: 0 };
