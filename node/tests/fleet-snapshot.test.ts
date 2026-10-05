@@ -23,10 +23,10 @@ function fakeDb(overrides: Record<string, unknown> = {}) {
             ],
         },
         $queryRaw: async () => [
-            { vehicle_id: 1n, recorded_at: ago(20), speed_kmh: "35.5" },
-            { vehicle_id: 2n, recorded_at: ago(600), speed_kmh: null },
-            { vehicle_id: 3n, recorded_at: null, speed_kmh: null },
-            { vehicle_id: 4n, recorded_at: null, speed_kmh: null },
+            { vehicle_id: 1n, received_at: ago(20), speed_kmh: "35.5" },
+            { vehicle_id: 2n, received_at: ago(600), speed_kmh: null },
+            { vehicle_id: 3n, received_at: null, speed_kmh: null },
+            { vehicle_id: 4n, received_at: null, speed_kmh: null },
         ],
         trip: { findMany: async () => [{ vehicleId: 3n, destinationName: "부산신항" }] },
         virtualScenario: {

@@ -105,14 +105,15 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
             where: { isActive: true, vehicleSource: { not: "VIRTUAL" } },
             select: { vehicleId: true, vehicleCode: true, vehicleSource: true, vehicleStatus: true },
         }),
-        // Latest fix per real vehicle; LATERAL uses idx_vehicle_position_vehicle_time.
-        db.$queryRaw<Array<{ vehicle_id: bigint; recorded_at: Date | null; speed_kmh: unknown }>>`
-            SELECT v.vehicle_id, p.recorded_at, p.speed_kmh
+        // Latest fix per real vehicle by reception: a replay's recorded date is
+        // the original drive's, so it says nothing about how current the fix is.
+        db.$queryRaw<Array<{ vehicle_id: bigint; received_at: Date | null; speed_kmh: unknown }>>`
+            SELECT v.vehicle_id, p.received_at, p.speed_kmh
             FROM vehicle v
             LEFT JOIN LATERAL (
-                SELECT recorded_at, speed_kmh FROM vehicle_position vp
+                SELECT received_at, speed_kmh FROM vehicle_position vp
                 WHERE vp.vehicle_id = v.vehicle_id
-                ORDER BY recorded_at DESC LIMIT 1
+                ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1
             ) p ON true
             WHERE v.is_active AND v.vehicle_source <> 'VIRTUAL'`,
         db.trip.findMany({
@@ -149,7 +150,7 @@ export async function collectFleetSnapshot(db: PrismaClient, now = new Date()): 
     const reportingVehicles: ReportingVehicle[] = [];
     for (const vehicle of vehicles) {
         const fix = fixByVehicle.get(vehicle.vehicleId.toString());
-        const ageSeconds = fix?.recorded_at ? Math.max(0, Math.round((now.getTime() - fix.recorded_at.getTime()) / 1000)) : null;
+        const ageSeconds = fix?.received_at ? Math.max(0, Math.round((now.getTime() - fix.received_at.getTime()) / 1000)) : null;
         const speed = fix?.speed_kmh == null ? null : Number(fix.speed_kmh);
         const reason = ageSeconds === null ? "NO_POSITION" : ageSeconds > STALE_FIX_SECONDS ? "STALE_POSITION" : null;
         if (reason === null) {
