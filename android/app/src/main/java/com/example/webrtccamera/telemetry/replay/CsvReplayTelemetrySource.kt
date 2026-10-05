@@ -44,6 +44,8 @@ class CsvReplayTelemetrySource(
     fun updateSessionContext(context: StreamSessionContext, announce: () -> Unit) =
         scheduler.updateSessionContext(context, announce)
 
+    fun onReplayEndMarker(tripId: Long) = scheduler.onReplayEndMarker(tripId)
+
     /** Only call this for a successful QR decode; a failed/absent decode must not touch the clock. */
     fun onQrTimestamp(sourceTimestampNs: Long, captureTimestampNs: Long, decodeLatencyMs: Long) {
         scheduler.onQrTimestamp(sourceTimestampNs, captureTimestampNs, decodeLatencyMs)

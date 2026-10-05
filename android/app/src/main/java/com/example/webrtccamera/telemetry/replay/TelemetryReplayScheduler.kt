@@ -15,7 +15,8 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Emits due GPS/IMU samples from [dataset] as the QR-derived source clock advances, batching
  * them for network transport without altering per-sample timestamps. Never interpolates: a
- * batch only ever contains samples whose original CSV timestamp has already become due.
+ * batch only ever contains samples whose original CSV timestamp has already become due,
+ * or the remaining recorded samples after an explicit player EOF marker.
  *
  * All mutable cursor/batching state is touched only from [executor]'s single thread, including
  * QR-driven clock updates (routed through [onQrTimestamp]) and discontinuity resets - this is
@@ -115,6 +116,15 @@ class TelemetryReplayScheduler(
             flush(sourceClock.currentSourceTimestampNs() ?: 0L, elapsedMillis())
             announce()
             sessionContext = context
+        }
+    }
+
+    /** Explicit mpv EOF: finish the remaining records without estimating a future clock. */
+    fun onReplayEndMarker(tripId: Long) {
+        postOrRun {
+            if (!running || sessionContext.tripId != tripId || completedGpsTripId == tripId) return@postOrRun
+            val endpoint = dataset.gpsEndNs ?: return@postOrRun
+            advanceCursors(endpoint, elapsedMillis())
         }
     }
 

@@ -19,6 +19,41 @@ private val SESSION = StreamSessionContext(1L, 2L, "session", TelemetryMode.REPL
 
 class TelemetryReplaySchedulerTest {
 
+    @Test
+    fun `explicit EOF consumes frozen timestamp tail before completing once`() {
+        val batches = java.util.concurrent.CopyOnWriteArrayList<TelemetryBatch>()
+        val completions = java.util.concurrent.CopyOnWriteArrayList<StreamSessionContext>()
+        val completed = java.util.concurrent.CountDownLatch(1)
+        val clock = QrSourceClock(nowNs = { 0L })
+        clock.onQrTimestamp(1_000_000_000L, 0, 0)
+        val scheduler = TelemetryReplayScheduler(
+            TelemetryDataset("d", gps = listOf(gps(1_000_000_000L), gps(4_621_722_612L)), imu = emptyList()),
+            clock, SESSION, onBatchReady = { batches.add(it) },
+            onGpsReplayComplete = {
+                assertEquals(4_621_722_612L, batches.flatMap { b -> b.gps }.last().timestampNs)
+                completions.add(it)
+                completed.countDown()
+            }, elapsedMillis = { 0L })
+        try {
+            scheduler.start()
+            scheduler.onReplayEndMarker(999L) // Wrong trip cannot finish the active session.
+            val checked = java.util.concurrent.CountDownLatch(1)
+            scheduler.updateSessionContext(SESSION) { checked.countDown() }
+            assertTrue(checked.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue(completions.isEmpty())
+            scheduler.onReplayEndMarker(SESSION.tripId!!)
+            assertTrue(completed.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            scheduler.onReplayEndMarker(SESSION.tripId!!)
+            val drained = java.util.concurrent.CountDownLatch(1)
+            scheduler.updateSessionContext(SESSION) { drained.countDown() }
+            assertTrue(drained.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals(listOf(SESSION), completions)
+            assertEquals(listOf(1_000_000_000L, 4_621_722_612L),
+                batches.flatMap { it.gps }.map { it.timestampNs }.distinct())
+            assertEquals(2L, scheduler.gpsSentCount.get())
+        } finally { scheduler.stop() }
+    }
+
     private fun newScheduler(
         dataset: TelemetryDataset,
         batches: MutableList<TelemetryBatch>,

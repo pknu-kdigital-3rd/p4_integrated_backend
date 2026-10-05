@@ -182,6 +182,7 @@ class MainActivity : AppCompatActivity() {
     private var tripStateRevision = 0L
     private var tripEventsGeneration = 0L
     private var pendingGpsCompletionTripId: Long? = null
+    private val replayEndMarkerGate = com.example.webrtccamera.telemetry.replay.ReplayEndMarkerGate()
     private val gpsCompletionRetry = Runnable { maybeCompleteGpsTrip() }
     // Non-null while a trip-related transfer runs; shown with the progress bar.
     private var tripBusyMessage: String? = null
@@ -1189,21 +1190,36 @@ class MainActivity : AppCompatActivity() {
                     if (activeQrScanAttempt.get() !== attempt) return@addOnSuccessListener
                     val raw = barcodes.firstOrNull()?.rawValue
                     val decoded = raw?.toLongOrNull()
+                    val replayEnded = raw == com.example.webrtccamera.telemetry.replay.ReplayEndMarkerGate.PAYLOAD
                     qrConsecutiveFailures.set(0)
                     val latencyMs = (System.nanoTime() - start) / 1_000_000
                     publisher?.sendQrEvent(timestamp, decoded, decoded != null, captureIndex, latencyMs)
                     // A failed/absent/malformed decode must not touch the replay clock.
-                    if (decoded != null) {
+                    if (decoded != null || replayEnded) {
                         qrFastRetriesRemaining.set(0)
                         qrMissedResults = 0
                         qrHighResolution = false
                         lastQrSuccessElapsedNs = SystemClock.elapsedRealtimeNanos()
-                        setQrStatus("QR: ts=$decoded")
-                        telemetryReplaySource?.onQrTimestamp(
-                            sourceTimestampNs = decoded,
-                            captureTimestampNs = timestamp,
-                            decodeLatencyMs = latencyMs,
-                        )
+                        val trip = assignedTrip?.takeIf {
+                            it.status == "IN_PROGRESS" && it.routeMode == "REPLAY_ONLY" &&
+                                it.tripId == activeSessionContext?.tripId && it.fingerprint == selectedDatasetFingerprint
+                        }
+                        if (decoded != null) {
+                            val dataset = selectedTelemetryDataset
+                            replayEndMarkerGate.observeTimestamp(trip?.tripId, decoded, dataset?.gpsStartNs, dataset?.gpsEndNs)
+                            setQrStatus("QR: ts=$decoded")
+                            telemetryReplaySource?.onQrTimestamp(
+                                sourceTimestampNs = decoded,
+                                captureTimestampNs = timestamp,
+                                decodeLatencyMs = latencyMs,
+                            )
+                        } else {
+                            setQrStatus("QR: replay ended")
+                            if (replayEndMarkerGate.consume(trip?.tripId) && trip != null) {
+                                Log.i("TripReplay", "mpv EOF marker accepted for trip ${trip.tripId}")
+                                telemetryReplaySource?.onReplayEndMarker(trip.tripId)
+                            }
+                        }
                     } else {
                         onQrMiss(attempt)
                         qrMissedResults++
