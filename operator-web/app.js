@@ -26,7 +26,7 @@ const cancelTouchMenu=()=>{
 };
 mapContainer.addEventListener('pointerdown',event=>{
   if(event.pointerType!=='touch')return;
-  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
+  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log,.road-brush-toolbar'))return;
   if(!event.target.closest('.virtual-point-icon')&&window.__operatorTouchRoadBrushPointerDown?.(event)){
     cancelTouchMenu();
     event.preventDefault();
@@ -37,7 +37,7 @@ mapContainer.addEventListener('pointerdown',event=>{
   // A second finger means this is a map gesture (usually pinch zoom), not a
   // request for the right-click menu.
   if(touchPresses.size!==1){cancelTouchMenu();return;}
-  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
+  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log,.road-brush-toolbar'))return;
   touchMenuPointerId=event.pointerId;
   touchMenuTimer=window.setTimeout(()=>{
     const point=touchPresses.get(event.pointerId);
@@ -74,7 +74,7 @@ mapContainer.addEventListener('mousedown',event=>{
   // Chromium emits compatibility mouse events after touch input. Leave those
   // to Leaflet so touch taps and pinch gestures are not treated as mouse pans.
   if(event.sourceCapabilities?.firesTouchEvents)return;
-  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
+  if(event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log,.road-brush-toolbar'))return;
   if(event.target.closest('.virtual-point-icon'))return;
   if(window.__operatorRoadBrushPointerDown?.(event)){event.preventDefault();event.stopImmediatePropagation();return;}
   if(event.button===0){
@@ -360,7 +360,7 @@ map.on('dragstart',pauseLiveMapForManualPan);
 // Pause before Leaflet starts the touch gesture: incoming live positions can
 // otherwise restart its pan animation while the finger is trying to drag.
 mapContainer.addEventListener('pointerdown',event=>{
-  if(event.pointerType!=='touch'||event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log'))return;
+  if(event.pointerType!=='touch'||event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log,.road-brush-toolbar'))return;
   pauseLiveMapForManualPan();
 },true);
 // Leaflet switches to the new zoom's projection as soon as its zoom animation

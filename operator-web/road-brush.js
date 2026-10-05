@@ -1,5 +1,5 @@
 // Mouse painting uses left-drag; the shared map keeps right-drag panning.
-export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLongPress }) {
+export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLongPress, onToolChange }) {
   const container = map.getContainer();
   const preview = L.layerGroup().addTo(map);
   let tool = null, stroke = null, cursor = null, line = null, busy = false, touchPointerId = null, pendingTouch = null;
@@ -24,6 +24,7 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
   }
   function setTool(next) {
     cancel(); tool = next;
+    onToolChange?.(tool);
     setMapGestureHandling(Boolean(next));
     container.style.cursor = next ? 'crosshair' : '';
     onStatus(next ? `${next === 'paint' ? '차단 브러시' : '차단 지우개'} · 마우스 왼쪽 버튼 또는 터치로 드래그하세요. 터치 길게 누르기로 메뉴를 엽니다.` : '차단 도구를 종료했습니다.');
@@ -39,6 +40,10 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
   }
   function appendStrokePoint(event) {
     if (!isActive() || !tool || busy) return;
+    if (event.target?.closest?.('.road-brush-toolbar,.virtual-route-context-menu,.leaflet-control')) {
+      if (!stroke) clearPreview();
+      return;
+    }
     const bounds = container.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
       if (!stroke) clearPreview();
@@ -125,5 +130,5 @@ export function installRoadBrush(map, { isActive, onStroke, onStatus, onTouchLon
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && tool) setTool(null); });
   window.addEventListener('blur', () => { if (stroke) void finish(); else clearPreview(); });
   map.on('zoomstart', () => { if (stroke) void finish(); else clearPreview(); });
-  return { setTool, handleMouseDown, handleTouchPointerDown, reset() { cancel(); tool = null; touchPointerId = null; if (pendingTouch) window.clearTimeout(pendingTouch.timer); pendingTouch = null; setMapGestureHandling(false); container.style.cursor = ''; } };
+  return { setTool, handleMouseDown, handleTouchPointerDown, reset() { cancel(); tool = null; onToolChange?.(null); touchPointerId = null; if (pendingTouch) window.clearTimeout(pendingTouch.timer); pendingTouch = null; setMapGestureHandling(false); container.style.cursor = ''; } };
 }
