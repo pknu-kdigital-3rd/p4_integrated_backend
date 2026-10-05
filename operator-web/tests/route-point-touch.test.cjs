@@ -110,6 +110,7 @@ for (const touch of [true, false]) for (const kind of ['origin', 'destination', 
       startEndpointDrag: (value, marker) => { assert.equal(value, kind); assert.equal(marker, pin); previewStarted = true; },
       installTouchPlacementDrag: () => { touchDragInstalled = true; }, setStatus() {},
       points: { waypoints: [] }, pointPlacementHint: hint,
+      routePointToolbar: { isOpen: () => false, open() {} },
     });
     const start = source.indexOf('function beginRoutePointPick(');
     const end = source.indexOf('\n}', start) + 2;
@@ -117,7 +118,7 @@ for (const touch of [true, false]) for (const kind of ['origin', 'destination', 
     context.beginRoutePointPick(kind);
     assert.equal(disabled, !touch);
     assert.equal(context.pointPlacement.touch, touch);
-    assert.equal(hint.hidden, !touch);
+    assert.equal(hint.hidden, true);
     assert.equal(options.draggable, touch);
     assert.equal(options.interactive, touch);
     assert.equal(touchDragInstalled, touch);
@@ -163,6 +164,7 @@ for (const kind of ['origin', 'destination', 'waypoint']) {
     const context = vm.createContext({
       pointPlacement: { touch: true }, movingPin: marker,
       pointPlacementHint: { querySelector: () => info },
+      routePointToolbar: { setPreview() {} },
       endpointSnapPreviewLayerGroup: { eachLayer() {} },
       formatPoint: point => `${point.lat}, ${point.lon}`,
       points: { waypoints: [] }, document: { querySelector: () => ({}) },

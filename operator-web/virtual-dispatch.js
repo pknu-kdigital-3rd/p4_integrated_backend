@@ -5,6 +5,7 @@ import { createSectionVisibility } from './workspace-sections.js';
 import { installRoadBrush } from './road-brush.js?v=4';
 import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=2';
 import { createBrushHistory } from './road-brush-history.js?v=1';
+import { installRoutePointToolbar } from './route-point-toolbar.js?v=1';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -59,6 +60,30 @@ routeContextMenu.setAttribute('aria-label', '경로 및 도로 차단');
 routeContextMenu.hidden = true;
 routeContextMenu.innerHTML = '<div class="route-point-menu-row"><button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button><button type="button" role="menuitem" data-route-point-kind="waypoint"><span aria-hidden="true" class="route-point-menu-icon waypoint">＋</span><span>경유지</span></button></div><button type="button" role="menuitem" data-road-tool="paint"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단 그리기</span></button>';
 map.getContainer().append(routeContextMenu);
+const touchLocateButton = document.createElement('button');
+touchLocateButton.type = 'button';
+touchLocateButton.dataset.routeLocate = 'true';
+touchLocateButton.textContent = '경로 위치 선택';
+touchLocateButton.hidden = true;
+routeContextMenu.prepend(touchLocateButton);
+const routePointToolbar = installRoutePointToolbar(map.getContainer(), {
+  onStart(kind, event) {
+    if (mode !== 'virtual' || !scenarioId || routeOperations.size > 0) return;
+    routePointPointerType = event.pointerType || routePointPointerType;
+    const previous = kind === 'waypoint' ? null : points[kind];
+    beginRoutePointPick(kind, null, previous ? { lat: previous.lat, lng: previous.lon } : map.getCenter());
+    routePointToolbar.open(kind);
+    pointPlacementHint.hidden = true;
+  },
+  onMove(event) {
+    if (!pointPlacement || !movingPin) return;
+    movingPin.setLatLng(map.mouseEventToLatLng(event));
+    if (endpointDrag?.marker === movingPin) queueEndpointSnapPreview(endpointDrag, movingPin);
+  },
+  onDrop(event) { commitRoutePointPlacement(map.mouseEventToLatLng(event)); },
+  onCancel() { cancelPointPlacement({ keepToolbar: true }); },
+  onExit() { cancelPointPlacement(); setStatus('경로 위치 선택을 종료했습니다.'); },
+});
 const pointPlacementHint = document.createElement('div');
 pointPlacementHint.className = 'route-point-placement-hint';
 pointPlacementHint.hidden = true;
@@ -228,6 +253,7 @@ function syncTurboModeUI() {
   }
   routeContextMenu.querySelectorAll('button').forEach((button) => { button.disabled = routeOperations.size > 0; });
   roadBrushToolbar.setBusy(routeOperations.size > 0);
+  routePointToolbar.setBusy(routeOperations.size > 0);
   restrictionList.querySelectorAll('button,input').forEach((control) => { control.disabled = routeOperations.size > 0; });
   [restrictionBulkToggle, restrictionSelectAll, restrictionBulkCancel].forEach((button) => {
     if (button) button.disabled = routeOperations.size > 0;
@@ -243,6 +269,7 @@ function cancelInFlightRouteCalculation() {
 }
 function syncRouteProgress() {
   const busy = routeOperations.size > 0;
+  routePointToolbar.setBusy(busy);
   routeProgressIndicator.hidden = !busy;
   map.getContainer().classList.toggle('route-calculating', busy);
   routeProgressMessage.textContent = [...routeOperations.values()].at(-1) || '경로를 계산하는 중…';
@@ -587,11 +614,13 @@ function hideRouteContextMenu() {
   routeContextMenu.hidden = true;
   contextRoutePoint = null;
 }
-function showRouteContextMenu({ clientX, clientY }) {
+function showRouteContextMenu({ clientX, clientY, touch = false }) {
   if (mode !== 'virtual' || routeOperations.size > 0) return;
   const container = map.getContainer();
   const bounds = container.getBoundingClientRect();
   contextRoutePoint = map.mouseEventToLatLng({ clientX, clientY });
+  routeContextMenu.querySelector('.route-point-menu-row').hidden = touch;
+  touchLocateButton.hidden = !touch;
   routeContextMenu.hidden = false;
   const maxLeft = Math.max(8, container.clientWidth - routeContextMenu.offsetWidth - 8);
   const maxTop = Math.max(8, container.clientHeight - routeContextMenu.offsetHeight - 8);
@@ -618,7 +647,9 @@ function pointIcon(kind, index) {
     iconAnchor: [21, 54.6],
   });
 }
-function cancelPointPlacement() {
+function cancelPointPlacement({ keepToolbar = false } = {}) {
+  if (!keepToolbar) routePointToolbar.close();
+  else routePointToolbar.setSelection(null);
   if (!pointPlacement) return;
   pointPlacementPointerStart = null;
   pointPlacementPointers.clear();
@@ -645,6 +676,7 @@ function renderEndpointSnapPreview(context, snapped) {
     pointPlacementHint.querySelector('[data-point-snap-info]').textContent = hasSnap
       ? `스냅 위치 ${formatPoint({ lat: snapped.lat, lon: snapped.lon })}${distance}`
       : '도로 스냅 위치를 확인하는 중…';
+    routePointToolbar.setPreview(pointPlacementHint.querySelector('[data-point-snap-info]').textContent);
   }
   endpointSnapPreviewLayerGroup.eachLayer(layer => {
     if (layer !== context.snapCircle && layer !== context.snapRipple) endpointSnapPreviewLayerGroup.removeLayer(layer);
@@ -726,6 +758,7 @@ function queueEndpointSnapPreview(context, marker) {
       if (endpointDrag === context && requestId === context.requestId) {
         if (pointPlacement?.touch && context.marker === movingPin) {
           pointPlacementHint.querySelector('[data-point-snap-info]').textContent = '도로 스냅 미리보기를 확인할 수 없습니다.';
+          routePointToolbar.setPreview('도로 스냅 미리보기를 확인할 수 없습니다.');
         }
         setStatus(`도로 스냅 미리보기를 표시할 수 없습니다: ${error.message}`, true);
       }
@@ -1664,7 +1697,7 @@ async function applySelectedSpeed() {
 function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getCenter(), originalMarker = null) {
   roadBrush.reset();
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
-  cancelPointPlacement();
+  cancelPointPlacement({ keepToolbar: routePointToolbar.isOpen() });
   routePlacementMapDraggingWasEnabled = map.dragging.enabled();
   const touch = routePointPointerType === 'touch';
   if (!touch) map.dragging.disable();
@@ -1682,6 +1715,7 @@ function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getC
     : `${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭해 놓으세요.`;
   pointPlacementHint.querySelector('span').textContent = instruction;
   pointPlacementHint.hidden = !touch;
+  if (touch) { routePointToolbar.open(kind); pointPlacementHint.hidden = true; }
   setStatus(instruction);
 }
 function installTouchPlacementDrag(pin) {
@@ -1894,6 +1928,7 @@ function commitRoutePointPlacement(latlng) {
   pointPlacementPointerStart = null;
   pointPlacementPointers.clear();
   pointPlacementHint.hidden = true;
+  routePointToolbar.setSelection(null);
   const point = { lat: latlng.lat, lon: latlng.lng };
   const selectedMode = pickMode;
   const selectedIndex = pointPlacement?.waypointIndex ?? null;
@@ -1973,6 +2008,15 @@ map.getContainer().addEventListener('operator-map-contextrequest', (event) => sh
 routeContextMenu.addEventListener('click', (event) => {
   event.stopPropagation();
   if (routeOperations.size > 0) return;
+  if (event.target.closest('[data-route-locate]')) {
+    hideRouteContextMenu();
+    if (!scenarioId) { setStatus('시나리오를 먼저 선택하세요.', true); return; }
+    roadBrush.reset();
+    cancelPointPlacement();
+    routePointToolbar.setPreview('O · D · W 핀을 지도에 드래그하세요.');
+    routePointToolbar.open();
+    return;
+  }
   const toolButton = event.target.closest('[data-road-tool]');
   if (toolButton) {
     selectRoadBrushTool(toolButton.dataset.roadTool);
@@ -1991,6 +2035,6 @@ document.addEventListener('pointerdown', (event) => {
   if (!routeContextMenu.hidden && !routeContextMenu.contains(event.target)) hideRouteContextMenu();
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && pointPlacement) { cancelPointPlacement(); setStatus('핀 이동을 취소했습니다.'); return; }
+  if (event.key === 'Escape' && (pointPlacement || routePointToolbar.isOpen())) { cancelPointPlacement(); setStatus('핀 이동을 취소했습니다.'); return; }
   if (event.key === 'Escape' && !routeContextMenu.hidden) hideRouteContextMenu();
 });
