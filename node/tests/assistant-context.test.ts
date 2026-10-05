@@ -193,6 +193,59 @@ function fakeDb() {
 }
 
 describe("buildAssistantContext scope routing", () => {
+    it("keeps live 80 km/h separate from stale 0.5 km/h history", async () => {
+        const { db } = fakeDb();
+        const rows = [
+            [{ recorded_at: new Date("2026-08-27T05:56:10.772Z"), received_at: new Date("2026-10-01T00:00:00Z"),
+                recording_session_id: "previous", lat: 35, lon: 129, speed_kmh: 0.5, heading_deg: null,
+                horizontal_accuracy_m: 2, telemetry_source: "RECORDED_GPS" }],
+            [{ recording_session_id: "previous", samples: 10n, min_kmh: 0.5, avg_kmh: 0.5, max_kmh: 0.5 }], [],
+        ];
+        vi.spyOn(db, "$queryRaw").mockImplementation(async () => rows.shift() as never);
+        const detail = await collectRealVehicleDetail(db, 2n, NOW, async () => ({
+            external_id: "device:2", latitude: 35.2, longitude: 129.2, speed_kmh: 80, heading_deg: 90,
+            telemetry_source: "RECORDED_GPS", observed_at_utc: "2026-08-27T06:00:00Z", route_progress_pct: null,
+            source_metadata: { receivedAt: "2026-10-02T00:59:59Z", recordingSessionId: "current" },
+        }));
+        expect(detail?.fix?.speedKmh).toBe(80);
+        expect(detail?.recentSpeed).toBeNull();
+        const context = realVehicleContext(detail!, NOW.toISOString(), null);
+        expect(context.liveText).toContain("속도 80.0 km/h");
+        expect(context.liveText).not.toContain("0.5 km/h");
+        expect(context.liveText).not.toContain("위치 수신 지연");
+    });
+
+    it("takes the speed window up to now from the live session only", async () => {
+        const { db } = fakeDb();
+        const queries: string[] = [];
+        const rows = [
+            [],
+            [{ recording_session_id: "previous", samples: 5n, min_kmh: 0.5, avg_kmh: 0.5, max_kmh: 0.5 },
+                { recording_session_id: "current", samples: 20n, min_kmh: 76, avg_kmh: 79.5, max_kmh: 82 }], [],
+        ];
+        vi.spyOn(db, "$queryRaw").mockImplementation((async (strings: TemplateStringsArray, ...values: unknown[]) => {
+            queries.push(strings.join("?"));
+            if (queries.length === 2) expect(values).toContainEqual(new Date(NOW.getTime() - 60_000));
+            return rows.shift();
+        }) as never);
+        const detail = await collectRealVehicleDetail(db, 2n, NOW, async () => ({
+            external_id: "device:2", latitude: 35.2, longitude: 129.2, speed_kmh: 80, heading_deg: 90,
+            telemetry_source: "RECORDED_GPS", observed_at_utc: "2026-08-27T06:00:00Z", route_progress_pct: null,
+            source_metadata: { receivedAt: "2026-10-02T00:59:59Z", recordingSessionId: "current" },
+        }));
+        expect(queries[1]).toContain("received_at >= ?");
+        expect(detail?.recentSpeed).toEqual({ samples: 20, minKmh: 76, avgKmh: 79.5, maxKmh: 82 });
+    });
+
+    it("does not send stale speed as a current speed when tracking is unavailable", async () => {
+        const stale = { ...REAL, fix: { ...REAL.fix!, speedKmh: 0.5, ageSeconds: 3600 } };
+        const context = realVehicleContext(stale, NOW.toISOString(), null);
+        expect(context.liveText).toContain("현재 속도: 확인 불가");
+        expect(context.liveText).not.toContain("0.5 km/h");
+        expect(context.liveText).not.toContain("최근 60초 속도");
+        expect(context.reportFigures).toContain("확인 불가 (최신 GPS 수신 없음)");
+    });
+
     it("uses the current replay fix even when replaying an old recording without a trip", async () => {
         const { db } = fakeDb();
         const detail = await collectRealVehicleDetail(db, 2n, NOW, async (externalId) => {

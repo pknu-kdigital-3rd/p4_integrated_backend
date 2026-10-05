@@ -51,6 +51,7 @@ import {
 import type { AssistantChatBody, AssistantScope } from "./assistant.schema.ts";
 import { AppError } from "../../common/errors/app-error.ts";
 import { trackingClient, type TrackingSnapshot } from "../tracking/tracking.client.ts";
+import { logger } from "../../config/logger.ts";
 
 const ACTIVE_TRIP_STATES = ["READY", "IN_PROGRESS", "PAUSED"];
 const MOVING_SIM_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
@@ -162,25 +163,21 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
     if (!vehicle || vehicle.vehicleSource === "VIRTUAL") return null;
     const visionSince = new Date(now.getTime() - VISION_WINDOW_MINUTES * 60_000);
     const reportingSince = new Date(now.getTime() - STALE_FIX_SECONDS * 1000);
+    const speedSince = new Date(now.getTime() - SPEED_WINDOW_SECONDS * 1000);
 
     const [fixes, speeds, nearby, trip, byRisk, byClass, nearest, attitude, unconfirmed, recentAlerts, current] = await Promise.all([
-        db.$queryRaw<Array<{ recorded_at: Date; received_at: Date; speed_kmh: unknown; heading_deg: unknown; horizontal_accuracy_m: unknown; telemetry_source: string; lat: number; lon: number }>>`
-            SELECT recorded_at, received_at, speed_kmh, heading_deg, horizontal_accuracy_m, telemetry_source,
+        db.$queryRaw<Array<{ recorded_at: Date; received_at: Date; recording_session_id: string | null; speed_kmh: unknown; heading_deg: unknown; horizontal_accuracy_m: unknown; telemetry_source: string; lat: number; lon: number }>>`
+            SELECT recorded_at, received_at, recording_session_id, speed_kmh, heading_deg, horizontal_accuracy_m, telemetry_source,
                    ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
             FROM vehicle_position WHERE vehicle_id = ${vehicleId}
             ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1`,
-        // Replay source dates can go backwards. Current state and freshness
-        // follow reception time; speed history stays within the latest session.
-        db.$queryRaw<Array<{ samples: bigint; min_kmh: unknown; avg_kmh: unknown; max_kmh: unknown }>>`
-            WITH latest AS (
-                SELECT received_at, recording_session_id FROM vehicle_position WHERE vehicle_id = ${vehicleId}
-                ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1
-            )
-            SELECT count(speed_kmh) AS samples, min(speed_kmh) AS min_kmh, avg(speed_kmh) AS avg_kmh, max(speed_kmh) AS max_kmh
-            FROM vehicle_position p CROSS JOIN latest
-            WHERE p.vehicle_id = ${vehicleId}
-              AND p.recording_session_id IS NOT DISTINCT FROM latest.recording_session_id
-              AND p.received_at >= latest.received_at - make_interval(secs => ${SPEED_WINDOW_SECONDS})`,
+        // Replay source dates can go backwards, so "recent" follows reception
+        // time up to now, per recording session; the current session is picked below.
+        db.$queryRaw<Array<{ recording_session_id: string | null; samples: bigint; min_kmh: unknown; avg_kmh: unknown; max_kmh: unknown }>>`
+            SELECT recording_session_id, count(speed_kmh) AS samples, min(speed_kmh) AS min_kmh, avg(speed_kmh) AS avg_kmh, max(speed_kmh) AS max_kmh
+            FROM vehicle_position
+            WHERE vehicle_id = ${vehicleId} AND received_at >= ${speedSince}
+            GROUP BY recording_session_id`,
         // Other real vehicles that are reporting now, nearest first.
         db.$queryRaw<Array<{ vehicle_code: string; received_at: Date; speed_kmh: unknown; distance_m: number }>>`
             WITH me AS (
@@ -224,12 +221,14 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
             where: { vehicleId, createdAt: { gte: visionSince } }, orderBy: { createdAt: "desc" }, take: 5,
             select: { alertType: true, severity: true, alertMessage: true, createdAt: true },
         }),
-        readCurrent(vehicle.vehicleSource === "BIMS" && vehicle.externalId ? vehicle.externalId : `device:${vehicleId}`).catch(() => null),
+        readCurrent(vehicle.vehicleSource === "BIMS" && vehicle.externalId ? vehicle.externalId : `device:${vehicleId}`).catch((error: unknown) => {
+            logger.warn({ vehicleId: vehicleId.toString(), code: error instanceof AppError ? error.code : "TRACKING_LOOKUP_FAILED" },
+                "Assistant current telemetry lookup failed; checking persisted GPS freshness");
+            return null;
+        }),
     ]);
 
     const fix = fixes[0];
-    const speed = speeds[0];
-    const samples = speed ? Number(speed.samples) : 0;
     let currentFix: RealVehicleDetail["fix"] = fix ? {
         recordedAt: fix.recorded_at.toISOString(), receivedAt: fix.received_at.toISOString(), ageSeconds: ageSeconds(now, fix.received_at) ?? 0,
         lat: Number(fix.lat), lon: Number(fix.lon), speedKmh: toNumber(fix.speed_kmh), headingDeg: toNumber(fix.heading_deg),
@@ -245,6 +244,13 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
             accuracyM: toNumber(current.source_metadata?.horizontalAccuracyM), telemetrySource: current.telemetry_source,
         };
     }
+    logger.debug({ vehicleId: vehicleId.toString(), telemetrySource: currentFix?.telemetrySource,
+        speedKmh: currentFix?.speedKmh, receivedAt: currentFix?.receivedAt, ageSeconds: currentFix?.ageSeconds,
+        currentTrackingAvailable: Boolean(current) }, "Assistant vehicle telemetry snapshot");
+    // The speed window belongs to the stream the current fix comes from.
+    const currentSession = current ? current.source_metadata?.recordingSessionId ?? null : fix?.recording_session_id ?? null;
+    const speed = speeds.find((row) => (row.recording_session_id ?? null) === currentSession);
+    const samples = speed ? Number(speed.samples) : 0;
     return {
         vehicleCode: vehicle.vehicleCode,
         vehicleName: vehicle.vehicleName,
@@ -427,10 +433,12 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
         const stale = fix.ageSeconds > STALE_FIX_SECONDS ? " — 위치 수신 지연" : "";
         const accuracy = fix.accuracyM === null ? "" : `, 정확도 ±${Math.round(fix.accuracyM)} m`;
         lines.push(`  위치: 위도 ${fix.lat.toFixed(5)}, 경도 ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)}, ${label(fix.telemetrySource, TELEMETRY_SOURCE_LABELS)}${accuracy})${stale}`);
-        lines.push(`  속도 ${km(fix.speedKmh)}${fix.headingDeg === null ? "" : `, 진행 방향 ${Math.round(fix.headingDeg)}°`}`);
+        lines.push(fix.ageSeconds > STALE_FIX_SECONDS
+            ? "  현재 속도: 확인 불가 (최신 GPS 수신 없음; 과거 속도로 현재 저속·정상 운행 여부를 판단하지 않음)"
+            : `  속도 ${km(fix.speedKmh)}${fix.headingDeg === null ? "" : `, 진행 방향 ${Math.round(fix.headingDeg)}°`}`);
         if (fix.telemetrySource === "RECORDED_GPS") lines.push(`  재생 GPS: 원본 녹화 시각 ${fix.recordedAt}, 최근 수신 시각 ${fix.receivedAt ?? "미상"} (원본 시각은 현재 수신 지연이 아님)`);
     }
-    if (detail.recentSpeed) {
+    if (detail.recentSpeed && fix && fix.ageSeconds <= STALE_FIX_SECONDS) {
         const speed = detail.recentSpeed;
         lines.push(`  최근 ${SPEED_WINDOW_SECONDS}초 속도: 최소 ${speed.minKmh.toFixed(1)}, 평균 ${speed.avgKmh.toFixed(1)}, 최대 ${speed.maxKmh.toFixed(1)} km/h (${speed.samples}건)`);
     }
@@ -441,6 +449,7 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
     lines.push(`  주변 실차량(위치 수신 중, 가까운 순): ${nearbyText(detail.nearby)}`);
     const detections = detail.detections;
     lines.push(`  [영상 감지 최근 ${VISION_WINDOW_MINUTES}분] 감지 ${detections.total}건 (위험도: ${formatCounts(detections.byRisk, RISK_LABELS)}), 주요 객체: ${detections.topClasses.length ? detections.topClasses.map((item) => `${label(item.className, OBJECT_CLASS_LABELS)} ${item.count}`).join(", ") : "없음"}`);
+    if (!detections.total) lines.push("  영상 감지 기록 없음은 영상·감지 시스템 정상이나 실제 위험 객체 없음의 증거가 아님");
     if (detections.nearest) {
         const nearest = detections.nearest;
         lines.push(`  가장 가까운 감지 객체: ${label(nearest.className, OBJECT_CLASS_LABELS)} ${nearest.distanceM.toFixed(1)} m (${label(nearest.riskLevel, RISK_LABELS)}, ${kstTime(nearest.detectedAt)})`);
@@ -498,9 +507,9 @@ function realVehicleReport(detail: RealVehicleDetail): string {
         "| 항목 | 값 |", "|---|---|",
         `| 출처 / 상태 | ${label(detail.source, VEHICLE_SOURCE_LABELS)} / ${label(detail.status, VEHICLE_STATUS_LABELS)} |`,
         `| 마지막 위치 | ${fix ? `${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)})` : "기록 없음"} |`,
-        `| 현재 속도 | ${km(fix?.speedKmh ?? null)} |`,
+        `| 현재 속도 | ${fix && fix.ageSeconds <= STALE_FIX_SECONDS ? km(fix.speedKmh) : "확인 불가 (최신 GPS 수신 없음)"} |`,
         ...(fix?.telemetrySource === "RECORDED_GPS" ? [`| 원본 녹화 시각 / 최근 수신 시각 | ${fix.recordedAt} / ${fix.receivedAt ?? "미상"} |`] : []),
-        `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
+        `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed && fix && fix.ageSeconds <= STALE_FIX_SECONDS ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
         `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${label(detail.trip.status, TRIP_STATUS_LABELS)} → ${detail.trip.destinationName}` : "없음"} |`,
         `| 가장 가까운 실차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,
         `| 영상 감지 (${VISION_WINDOW_MINUTES}분) | ${detail.detections.total}건 (${formatCounts(detail.detections.byRisk, RISK_LABELS)}) |`,
