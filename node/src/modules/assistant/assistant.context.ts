@@ -465,11 +465,12 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
     } else {
         const stale = fix.ageSeconds > STALE_FIX_SECONDS ? " — 위치 수신 지연" : "";
         const accuracy = fix.accuracyM === null ? "" : `, 정확도 ±${Math.round(fix.accuracyM)} m`;
-        lines.push(`  위치: 위도 ${fix.lat.toFixed(5)}, 경도 ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)}, ${label(fix.telemetrySource, TELEMETRY_SOURCE_LABELS)}${accuracy})${stale}`);
+        const source = fix.telemetrySource === "RECORDED_GPS" ? "" : `, ${label(fix.telemetrySource, TELEMETRY_SOURCE_LABELS)}`;
+        lines.push(`  위치: 위도 ${fix.lat.toFixed(5)}, 경도 ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)}${source}${accuracy})${stale}`);
         lines.push(fix.ageSeconds > STALE_FIX_SECONDS
             ? "  현재 속도: 확인 불가 (최신 GPS 수신 없음; 과거 속도로 현재 저속·정상 운행 여부를 판단하지 않음)"
             : `  속도 ${km(fix.speedKmh)}${fix.headingDeg === null ? "" : `, 진행 방향 ${Math.round(fix.headingDeg)}°`}`);
-        if (fix.telemetrySource === "RECORDED_GPS") lines.push(`  재생 GPS: 원본 녹화 시각 ${fix.recordedAt}, 최근 수신 시각 ${fix.receivedAt ?? "미상"} (원본 시각은 현재 수신 지연이 아님)`);
+        if (fix.telemetrySource === "RECORDED_GPS") lines.push(`  GPS 시각: 원본 시각 ${fix.recordedAt}, 최근 수신 시각 ${fix.receivedAt ?? "미상"} (원본 시각은 현재 수신 지연이 아님)`);
     }
     if (detail.recentSpeed && fix && fix.ageSeconds <= STALE_FIX_SECONDS) {
         const speed = detail.recentSpeed;
@@ -543,7 +544,7 @@ function realVehicleReport(detail: RealVehicleDetail): string {
         `| 출처 / 상태 | ${label(detail.source, VEHICLE_SOURCE_LABELS)} / ${label(detail.status, VEHICLE_STATUS_LABELS)} |`,
         `| 마지막 위치 | ${fix ? `${fix.lat.toFixed(5)}, ${fix.lon.toFixed(5)} (${formatAge(fix.ageSeconds)})` : "기록 없음"} |`,
         `| 현재 속도 | ${fix && fix.ageSeconds <= STALE_FIX_SECONDS ? km(fix.speedKmh) : "확인 불가 (최신 GPS 수신 없음)"} |`,
-        ...(fix?.telemetrySource === "RECORDED_GPS" ? [`| 원본 녹화 시각 / 최근 수신 시각 | ${fix.recordedAt} / ${fix.receivedAt ?? "미상"} |`] : []),
+        ...(fix?.telemetrySource === "RECORDED_GPS" ? [`| 원본 시각 / 최근 수신 시각 | ${fix.recordedAt} / ${fix.receivedAt ?? "미상"} |`] : []),
         `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed && fix && fix.ageSeconds <= STALE_FIX_SECONDS ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
         `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${label(detail.trip.status, TRIP_STATUS_LABELS)} → ${detail.trip.destinationName}` : "없음"} |`,
         ...(detail.trip?.remaining ? [`| 목적지까지 남은 거리 / 시간 | ${remainingText(detail.trip.remaining)} |`] : []),

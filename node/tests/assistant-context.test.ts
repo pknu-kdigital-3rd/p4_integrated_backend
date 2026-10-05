@@ -216,6 +216,9 @@ describe("buildAssistantContext scope routing", () => {
         expect(detail?.recentSpeed).toBeNull();
         const context = realVehicleContext(detail!, NOW.toISOString(), null);
         expect(context.liveText).toContain("속도 80.0 km/h");
+        expect(context.liveText).not.toContain("녹화 GPS 재생");
+        expect(context.liveText).not.toContain("녹화");
+        expect(context.reportFigures).not.toContain("녹화");
         expect(context.liveText).not.toContain("0.5 km/h");
         expect(context.liveText).not.toContain("위치 수신 지연");
     });
