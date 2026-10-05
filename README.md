@@ -15,6 +15,13 @@ Optional [private TURN administration](services/turn-admin/README.md) shows real
 allocations and ICE state and manually releases selected UDP allocations. It is
 disabled by default and independent of demo mode.
 
+For a **local UI presentation without GPUs or external APIs**, run
+`node tools/presentation/server.mjs` and open <http://127.0.0.1:3080/operator/>.
+This separate launcher includes sample vehicles, a schematic map, simulated
+video detections, and scripted assistant responses. No Docker, database, or
+API keys are required. See the [presentation guide](tools/presentation/README.md)
+for a walkthrough and the supported screens.
+
 ## BIMS history compensation
 
 In the operator dashboard, open **설정 → 데이터 소스** to enable

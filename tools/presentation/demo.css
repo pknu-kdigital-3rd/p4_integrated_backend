@@ -1,0 +1,5 @@
+.presentation-banner { background:#173b65; color:white; text-align:center; padding:7px 12px; font:12px/1.5 system-ui,sans-serif; }
+body { height:100dvh; display:flex; flex-direction:column; }
+.app-header { flex-shrink:0; }
+#operator-layout { flex:1; min-height:0; }
+.leaflet-container { background:#f7f8f4; }

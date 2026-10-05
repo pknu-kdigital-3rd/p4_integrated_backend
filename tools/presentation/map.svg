@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1000" viewBox="0 0 1200 1000">
+<defs><pattern id="blocks" width="70" height="60" patternUnits="userSpaceOnUse"><rect width="70" height="60" fill="#f7f8f4"/><rect x="8" y="8" width="48" height="37" rx="5" fill="#e8eae7"/><path d="M0 55H70M63 0V60" stroke="white" stroke-width="10"/></pattern></defs>
+<rect width="1200" height="1000" fill="url(#blocks)"/>
+<path d="M950 0Q890 140 990 320T970 570Q910 700 800 810L620 1000H1200V0Z" fill="#b9ddf5"/>
+<path d="M0 850Q170 700 140 500T200 0" fill="none" stroke="#b9ddf5" stroke-width="35"/>
+<g fill="#cfe8d2"><ellipse cx="370" cy="270" rx="120" ry="90"/><ellipse cx="650" cy="140" rx="150" ry="100"/><ellipse cx="300" cy="850" rx="130" ry="110"/></g>
+<g fill="none" stroke="#d8ccba" stroke-width="20"><path d="M60 930L280 720 550 500 720 290 850 50"/><path d="M120 380L460 420 720 500 990 500"/><path d="M170 730L520 680 810 790 990 710"/></g>
+<g fill="none" stroke="#fff7df" stroke-width="12"><path d="M60 930L280 720 550 500 720 290 850 50"/><path d="M120 380L460 420 720 500 990 500"/><path d="M170 730L520 680 810 790 990 710"/></g>
+<g font-family="sans-serif" text-anchor="middle" fill="#34465a"><text x="560" y="405" font-size="25">부산시청</text><text x="440" y="650" font-size="25">서면</text><text x="850" y="670" font-size="25">광안리</text><text x="690" y="230" font-size="25">연산</text><text x="380" y="280" font-size="19">공원</text><text x="1040" y="860" font-size="25" fill="#6188a5">바다</text><text x="600" y="970" font-size="17">부산 발표용 도식 지도 · 실제 도로와 다를 수 있습니다</text></g>
+</svg>
