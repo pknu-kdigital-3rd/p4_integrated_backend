@@ -192,9 +192,9 @@ function fitLivePanelToVideo(){
     const surface=document.querySelector('#map-surface').getBoundingClientRect();
     const maxPanelWidth=window.innerWidth<=767
       ?Math.min(surface.width-24,window.innerWidth-24)
-      :Math.min(460,window.innerWidth*0.22,surface.width-36);
+      :Math.min(640,window.innerWidth*0.35,surface.width-36);
     let videoWidth=Math.max(160,maxPanelWidth)-2*inset,videoHeight=videoWidth/ratio;
-    const maxVideoHeight=Math.max(90,Math.min(360,window.innerHeight*0.36,surface.height-36,surface.height*0.7)-header-footer);
+    const maxVideoHeight=Math.max(90,Math.min(500,window.innerHeight*0.5,surface.height-36,surface.height*0.7)-header-footer);
     if(videoHeight>maxVideoHeight){videoHeight=maxVideoHeight;videoWidth=videoHeight*ratio}
     livePanel.style.width=`${Math.round(videoWidth+2*inset)}px`;livePanel.style.height=`${Math.round(header+videoHeight+footer)}px`;
   }
