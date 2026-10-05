@@ -53,6 +53,7 @@ import type { AssistantChatBody, AssistantScope } from "./assistant.schema.ts";
 import { AppError } from "../../common/errors/app-error.ts";
 import { trackingClient, type TrackingSnapshot } from "../tracking/tracking.client.ts";
 import { logger } from "../../config/logger.ts";
+import { replayRemaining, routeRemaining, type TripRemaining } from "./trip.progress.ts";
 
 const ACTIVE_TRIP_STATES = ["READY", "IN_PROGRESS", "PAUSED"];
 const MOVING_SIM_STATES = ["DRIVING", "PAUSED", "REROUTING", "BLOCKED_AWAITING_OPERATOR", "NO_ROUTE"];
@@ -83,7 +84,7 @@ export type RealVehicleDetail = {
         speedKmh: number | null; headingDeg: number | null; accuracyM: number | null; telemetrySource: string;
     } | null;
     recentSpeed: { samples: number; minKmh: number; avgKmh: number; maxKmh: number } | null;
-    trip: { tripId: string; status: string; originName: string | null; destinationName: string; destination: { lat: number; lon: number } | null; startedAt: string | null } | null;
+    trip: { tripId: string; status: string; originName: string | null; destinationName: string; destination: { lat: number; lon: number } | null; remaining?: TripRemaining | null; startedAt: string | null } | null;
     nearby: NearbyVehicle[];
     detections: {
         total: number;
@@ -167,8 +168,8 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
     const speedSince = new Date(now.getTime() - SPEED_WINDOW_SECONDS * 1000);
 
     const [fixes, speeds, nearby, trip, byRisk, byClass, nearest, attitude, unconfirmed, recentAlerts, current] = await Promise.all([
-        db.$queryRaw<Array<{ recorded_at: Date; received_at: Date; recording_session_id: string | null; speed_kmh: unknown; heading_deg: unknown; horizontal_accuracy_m: unknown; telemetry_source: string; lat: number; lon: number }>>`
-            SELECT recorded_at, received_at, recording_session_id, speed_kmh, heading_deg, horizontal_accuracy_m, telemetry_source,
+        db.$queryRaw<Array<{ recorded_at: Date; received_at: Date; recording_session_id: string | null; source_timestamp_ns: string | null; speed_kmh: unknown; heading_deg: unknown; horizontal_accuracy_m: unknown; telemetry_source: string; lat: number; lon: number }>>`
+            SELECT recorded_at, received_at, recording_session_id, source_timestamp_ns::text AS source_timestamp_ns, speed_kmh, heading_deg, horizontal_accuracy_m, telemetry_source,
                    ST_Y(location::geometry) AS lat, ST_X(location::geometry) AS lon
             FROM vehicle_position WHERE vehicle_id = ${vehicleId}
             ORDER BY received_at DESC, source_timestamp_ns DESC NULLS LAST, position_id DESC LIMIT 1`,
@@ -199,7 +200,9 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         db.trip.findFirst({
             where: { vehicleId, tripStatus: { in: ACTIVE_TRIP_STATES } },
             orderBy: { tripId: "desc" },
-            select: { tripId: true, tripStatus: true, originName: true, destinationName: true, startedAt: true },
+            select: { tripId: true, tripStatus: true, originName: true, destinationName: true, startedAt: true, routeMode: true,
+                replayPreview: { select: { points: true } },
+                routes: { where: { isCurrent: true }, take: 1, orderBy: { routeVersion: "desc" }, select: { distanceM: true, durationSec: true, routeGeojson: true } } },
         }),
         db.detectionEvent.groupBy({ by: ["riskLevel"], where: { vehicleId, detectedAt: { gte: visionSince } }, _count: { _all: true } }),
         db.detectionEvent.groupBy({
@@ -253,6 +256,16 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
     logger.debug({ vehicleId: vehicleId.toString(), telemetrySource: currentFix?.telemetrySource,
         speedKmh: currentFix?.speedKmh, receivedAt: currentFix?.receivedAt, ageSeconds: currentFix?.ageSeconds,
         currentTrackingAvailable: Boolean(current) }, "Assistant vehicle telemetry snapshot");
+    // A replay trip is placed by how far the recording has played: the phone's
+    // replay clock, which keeps running where the recording has no GPS.
+    const currentMetadata = current?.source_metadata;
+    const sourceTimes = [currentMetadata?.sourceClockNs, currentMetadata?.sourceTimestampNs, current ? null : fix?.source_timestamp_ns]
+        .filter((value): value is string => typeof value === "string" && /^\d+$/.test(value));
+    const sourceNow = sourceTimes.length ? sourceTimes.reduce((a, b) => (BigInt(a) >= BigInt(b) ? a : b)) : null;
+    const route = trip?.routes?.[0];
+    const remaining = !trip ? null : trip.routeMode === "REPLAY_ONLY"
+        ? replayRemaining(trip.replayPreview?.points, sourceNow)
+        : currentFix && route ? routeRemaining(route.routeGeojson, currentFix, route.distanceM, route.durationSec) : null;
     // The speed window belongs to the stream the current fix comes from.
     const currentSession = current ? current.source_metadata?.recordingSessionId ?? null : fix?.recording_session_id ?? null;
     const speed = speeds.find((row) => (row.recording_session_id ?? null) === currentSession);
@@ -270,7 +283,7 @@ export async function collectRealVehicleDetail(db: PrismaClient, vehicleId: bigi
         trip: trip ? {
             tripId: trip.tripId.toString(), status: trip.tripStatus, originName: trip.originName,
             destinationName: trip.destinationName, startedAt: trip.startedAt?.toISOString() ?? null,
-            destination: destination ? { lat: Number(destination.lat), lon: Number(destination.lon) } : null,
+            destination: destination ? { lat: Number(destination.lat), lon: Number(destination.lon) } : null, remaining,
         } : null,
         nearby: nearby.map((row) => ({
             vehicleCode: vehicleDisplayName(row.vehicle_id), distanceM: Number(row.distance_m),
@@ -430,6 +443,17 @@ function nearbyText(nearby: NearbyVehicle[]): string {
         : "없음";
 }
 
+function minutesText(seconds: number): string {
+    const minutes = Math.round(seconds / 60);
+    return minutes < 1 ? "1분 미만" : minutes < 60 ? `약 ${minutes}분` : `약 ${Math.floor(minutes / 60)}시간 ${minutes % 60}분`;
+}
+
+export function remainingText(remaining: TripRemaining): string {
+    const distance = `남은 거리 ${(remaining.distanceM / 1000).toFixed(1)} km`;
+    const basis = remaining.basis === "REPLAY" ? "녹화 재생 기준" : "계획 경로 기준";
+    return remaining.durationSec === null ? `${distance} (${basis}, 남은 시간 확인 불가)` : `${distance}, 남은 시간 ${minutesText(remaining.durationSec)} (${basis})`;
+}
+
 export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
     const lines = [`[선택 실차량] ${detail.vehicleCode}: 출처 ${label(detail.source, VEHICLE_SOURCE_LABELS)}, 상태 ${label(detail.status, VEHICLE_STATUS_LABELS)}`];
     lines.push(`  ${VEHICLE_STATUS_GLOSSARY}`);
@@ -454,6 +478,7 @@ export function renderRealVehicleLines(detail: RealVehicleDetail): string[] {
         ? `  운행 #${trip.tripId} ${label(trip.status, TRIP_STATUS_LABELS)}: ${trip.originName ?? "출발지 미상"} → ${trip.destinationName}${trip.startedAt ? `, 시작 ${kstTime(trip.startedAt)}` : ""}`
         : "  진행 중 운행 없음");
     if (trip?.destination) lines.push(`  목적지 좌표: 위도 ${trip.destination.lat.toFixed(5)}, 경도 ${trip.destination.lon.toFixed(5)}`);
+    if (trip?.remaining) lines.push(`  목적지까지: ${remainingText(trip.remaining)}`);
     lines.push(`  주변 실차량(위치 수신 중, 가까운 순): ${nearbyText(detail.nearby)}`);
     const detections = detail.detections;
     lines.push(`  [영상 감지 최근 ${VISION_WINDOW_MINUTES}분] 감지 ${detections.total}건 (위험도: ${formatCounts(detections.byRisk, RISK_LABELS)}), 주요 객체: ${detections.topClasses.length ? detections.topClasses.map((item) => `${label(item.className, OBJECT_CLASS_LABELS)} ${item.count}`).join(", ") : "없음"}`);
@@ -519,6 +544,7 @@ function realVehicleReport(detail: RealVehicleDetail): string {
         ...(fix?.telemetrySource === "RECORDED_GPS" ? [`| 원본 녹화 시각 / 최근 수신 시각 | ${fix.recordedAt} / ${fix.receivedAt ?? "미상"} |`] : []),
         `| 최근 ${SPEED_WINDOW_SECONDS}초 평균 / 최대 | ${detail.recentSpeed && fix && fix.ageSeconds <= STALE_FIX_SECONDS ? `${detail.recentSpeed.avgKmh.toFixed(1)} / ${detail.recentSpeed.maxKmh.toFixed(1)} km/h` : "-"} |`,
         `| 운행 | ${detail.trip ? `#${detail.trip.tripId} ${label(detail.trip.status, TRIP_STATUS_LABELS)} → ${detail.trip.destinationName}` : "없음"} |`,
+        ...(detail.trip?.remaining ? [`| 목적지까지 남은 거리 / 시간 | ${remainingText(detail.trip.remaining)} |`] : []),
         ...(detail.trip?.destination ? [`| 목적지 좌표 | ${detail.trip.destination.lat.toFixed(5)}, ${detail.trip.destination.lon.toFixed(5)} |`] : []),
         `| 가장 가까운 실차량 | ${detail.nearby[0] ? `${detail.nearby[0].vehicleCode} ${meters(detail.nearby[0].distanceM)}` : "없음"} |`,
         `| 영상 감지 (${VISION_WINDOW_MINUTES}분) | ${detail.detections.total}건 (${formatCounts(detail.detections.byRisk, RISK_LABELS)}) |`,

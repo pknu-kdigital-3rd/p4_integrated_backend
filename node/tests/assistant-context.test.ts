@@ -24,7 +24,7 @@ const REAL: RealVehicleDetail = {
     vehicleCode: "TRUCK-2", vehicleName: "2호 운반차", source: "CUSTOM", status: "DRIVING",
     fix: { recordedAt: "2026-10-02T00:59:57Z", ageSeconds: 3, lat: 35.10674, lon: 128.94709, speedKmh: 32.4, headingDeg: 118, accuracyM: 4.2, telemetrySource: "DEVICE_GPS" },
     recentSpeed: { samples: 60, minKmh: 12, avgKmh: 27.3, maxKmh: 38.9 },
-    trip: { tripId: "41", status: "IN_PROGRESS", originName: "1부두", destinationName: "부산신항", destination: { lat: 35.07778, lon: 128.83333 }, startedAt: "2026-10-02T00:40:00Z" },
+    trip: { tripId: "41", status: "IN_PROGRESS", originName: "1부두", destinationName: "부산신항", destination: { lat: 35.07778, lon: 128.83333 }, remaining: { distanceM: 8300, durationSec: 840, basis: "ROUTE" }, startedAt: "2026-10-02T00:40:00Z" },
     nearby: [{ vehicleCode: "TRUCK-5", distanceM: 42.6, speedKmh: 20, ageSeconds: 2 }],
     detections: {
         total: 12, byRisk: { DANGER: 1, NORMAL: 11 }, topClasses: [{ className: "person", count: 8 }],
@@ -93,6 +93,8 @@ describe("assistant context rendering", () => {
         expect(context.liveText).not.toContain("2호 운반차");
         expect(context.liveText).toContain("목적지 좌표: 위도 35.07778, 경도 128.83333");
         expect(context.reportFigures).toContain("| 목적지 좌표 | 35.07778, 128.83333 |");
+        expect(context.liveText).toContain("목적지까지: 남은 거리 8.3 km, 남은 시간 약 14분 (계획 경로 기준)");
+        expect(context.reportFigures).toContain("| 목적지까지 남은 거리 / 시간 | 남은 거리 8.3 km, 남은 시간 약 14분 (계획 경로 기준) |");
         expect(context.retrievalQuery).toContain("충돌 방지");
     });
 
