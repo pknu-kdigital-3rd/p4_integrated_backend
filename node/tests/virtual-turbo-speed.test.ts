@@ -15,16 +15,17 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-05T00:
 afterEach(() => vi.useRealTimers());
 
 describe("route-length turbo speed", () => {
-    it("scales short and medium routes to 30 seconds, capped at the previous maximum", () => {
-        for (const distance of [10, 100, 1000, 10000]) {
+    it("scales every route to 5 seconds without capping long-route speed", () => {
+        for (const distance of [10, 100, 1000, 10000, 100000, 1000000]) {
             const effectiveMps = turboSpeedKmh(distance) / 3.6 * TURBO_FACTOR;
-            expect(distance / effectiveMps).toBeCloseTo(TURBO_ROUTE_SECONDS);
+            expect(distance / effectiveMps).toBeCloseTo(5);
         }
         expect(turboSpeedKmh(100)).toBeLessThan(turboSpeedKmh(1000));
-        expect(turboSpeedKmh(100000)).toBe(200);
+        expect(turboSpeedKmh(100000)).toBe(3600);
+        expect(turboSpeedKmh(1000000)).toBe(36000);
     });
 
-    for (const distance of [100, 1000, 10000]) {
+    for (const distance of [100, 1000, 10000, 1000000]) {
         it(`advances a ${distance} m turbo route by a small fraction per tick, including existing turbo states`, async () => {
             const durationSec = distance / 10;
             mocks.states.mockResolvedValue([{
@@ -40,7 +41,7 @@ describe("route-length turbo speed", () => {
             expect(mocks.checkpoint).toHaveBeenCalledOnce();
             const data = mocks.checkpoint.mock.calls[0]![0].data;
             expect(data.speedKmh).toBeCloseTo(turboSpeedKmh(distance));
-            expect(Number(data.simElapsedMs) / (durationSec * 1000)).toBeCloseTo(0.25 / 30, 3);
+            expect(Number(data.simElapsedMs) / (durationSec * 1000)).toBeCloseTo(0.25 / TURBO_ROUTE_SECONDS, 3);
         });
     }
 
