@@ -3,7 +3,8 @@ import {uiText, applyRoadHatch, vehicleIcon, vehicleDisplayName} from './dashboa
  * virtual vehicles never enter the normal tracking/live/replay selection path. */
 import { createSectionVisibility } from './workspace-sections.js';
 import { installRoadBrush } from './road-brush.js?v=4';
-import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=1';
+import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=2';
+import { createBrushHistory } from './road-brush-history.js?v=1';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -393,13 +394,47 @@ const virtualVehicleMarkers = new Map();
 const cancelledVirtualTripIds = new Set();
 const dismissedCompletedTripIds = new Set();
 const virtualVehicleAnimationFrames = new Map();
-const roadBrushToolbar = installRoadBrushToolbar(map.getContainer(), { onSelect: selectRoadBrushTool });
+const roadBrushToolbar = installRoadBrushToolbar(map.getContainer(), { onSelect: selectRoadBrushTool, onUndo: () => restoreBrushHistory('undo'), onRedo: () => restoreBrushHistory('redo') });
+const brushHistory = createBrushHistory(state => roadBrushToolbar.setHistory(state));
+async function restoreBrushHistory(direction) {
+  if (mode !== 'virtual' || !scenarioId || routeOperations.size > 0) return;
+  brushHistory.sync(scenarioId, scenarioRevision);
+  const targetScenario = scenarioId;
+  const finishRouting = beginRouteCalculation(direction === 'undo' ? '차단 작업을 실행 취소하는 중…' : '차단 작업을 다시 실행하는 중…');
+  try {
+    const changed = await brushHistory[direction](async (states, scope) => {
+      const result = await api(`/api/v1/virtual/scenarios/${encodeURIComponent(scope.scenarioId)}/road-restrictions/restore`, {
+        method: 'POST', body: JSON.stringify({ states, expectedRestrictionRevision: scope.expectedRestrictionRevision }),
+      });
+      if (scenarioId === targetScenario && mode === 'virtual') {
+        scenarioRevision = result.restrictionRevision;
+        showBrushRoutingFailures(result, targetScenario);
+      }
+      return result;
+    });
+    if (changed && scenarioId === targetScenario && mode === 'virtual') await refreshAfterRestrictionChange(direction === 'undo' ? '차단 작업을 실행 취소했습니다.' : '차단 작업을 다시 실행했습니다.');
+  } catch (error) {
+    if (scenarioId !== targetScenario) return;
+    if (error.code === 'STALE_REVISION') brushHistory.clear();
+    setStatus(error.message, true);
+    try { await loadScenarioData(); } catch {}
+  } finally { finishRouting(); }
+}
 function selectRoadBrushTool(tool) {
   if (tool && routeOperations.size > 0) return;
   if (tool && !scenarioId) { setStatus('시나리오를 먼저 선택하세요.', true); return; }
   hideRouteContextMenu();
   cancelPointPlacement();
   roadBrush.setTool(tool);
+}
+function showBrushRoutingFailures(result, targetScenario) {
+  for (const failure of result.routingFailures || []) {
+    if (!failure.stateChangedToNoRoute) showRoutingLog(failure.message || failure.code || '경로 계산에 실패했습니다.', failure.details, failure);
+    else {
+      seenNoRouteKeys.add(`${targetScenario}:${failure.vehicleId}:${failure.tripId}`);
+      showNoRouteAlarm(failure.vehicleId, failure.tripId, '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.');
+    }
+  }
 }
 const roadBrush = installRoadBrush(map, {
   isActive: () => mode === 'virtual' && Boolean(scenarioId),
@@ -410,6 +445,7 @@ const roadBrush = installRoadBrush(map, {
     const finishRouting = beginRouteCalculation(stroke.mode === 'paint' ? '차단 구간을 적용하고 경로를 다시 계산하는 중…' : '차단 구간을 해제하고 경로를 다시 계산하는 중…');
     const targetScenario = scenarioId;
     let requestRevision = scenarioRevision;
+    brushHistory.begin(targetScenario, requestRevision);
     setStatus(stroke.mode === 'paint' ? '도로 차단을 적용하는 중…' : '도로 차단을 지우는 중…');
     try {
       let result;
@@ -426,6 +462,8 @@ const roadBrush = installRoadBrush(map, {
           if (scenarioId !== targetScenario || mode !== 'virtual') return;
           requestRevision = Number(latestScenario.restrictionRevision || 0);
           scenarioRevision = Math.max(scenarioRevision, requestRevision);
+          brushHistory.finish();
+          brushHistory.begin(targetScenario, requestRevision);
         }
       }
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
@@ -434,24 +472,15 @@ const roadBrush = installRoadBrush(map, {
         return;
       }
       scenarioRevision = Math.max(scenarioRevision, result.restrictionRevision);
-      for (const failure of result.routingFailures || []) {
-        // A confirmed NO_ROUTE already raises the centre-top alarm; the log
-        // keeps only failures that left the trip state unchanged.
-        if (!failure.stateChangedToNoRoute) {
-          showRoutingLog(failure.message || failure.code || '경로 계산에 실패했습니다.', failure.details, failure);
-        }
-        if (failure.stateChangedToNoRoute) {
-          const key = `${targetScenario}:${failure.vehicleId}:${failure.tripId}`;
-          seenNoRouteKeys.add(key);
-          showNoRouteAlarm(failure.vehicleId, failure.tripId, '차단 구간을 피해 갈 수 있는 경로를 찾지 못했습니다.');
-        }
-      }
+      brushHistory.record(result.history, result.restrictionRevision);
+      showBrushRoutingFailures(result, targetScenario);
       await refreshAfterRestrictionChange(stroke.mode === 'paint' ? '도로 차단을 적용했습니다.' : '지운 영역의 도로 차단을 해제했습니다.');
     } catch (error) {
       if (scenarioId !== targetScenario || mode !== 'virtual') return;
       try { await loadScenarioData(); } catch {}
       throw error;
     } finally {
+      brushHistory.finish();
       finishRouting();
     }
   },
@@ -1344,6 +1373,7 @@ async function loadScenarios() {
   if (!scenarios.some((scenario) => String(scenario.scenarioId) === scenarioId)) scenarioId = scenarios[0] ? String(scenarios[0].scenarioId) : '';
   const selectedScenario = scenarios.find((scenario) => String(scenario.scenarioId) === scenarioId);
   scenarioRevision = Number(selectedScenario?.restrictionRevision || 0);
+  brushHistory.sync(scenarioId, scenarioRevision);
   scenarioSelect.value = scenarioId;
   removeScenarioButton.disabled = !scenarioId;
   if (!scenarioId) setStatus(uiText('Create a scenario to begin.'));
@@ -1353,6 +1383,7 @@ async function loadScenarioData() {
   const requestedGeneration = modeGeneration;
   const requestedScenarioId = scenarioId;
   if (!scenarioId) {
+    brushHistory.sync('', 0);
     vehicles = [];
     selectedVehicleId = '';
     renderRestrictions([]);
@@ -1376,7 +1407,9 @@ async function loadScenarioData() {
     api(`/api/v1/virtual/scenarios/${scenarioId}/events${lastEventId ? `?after=${encodeURIComponent(lastEventId)}` : ''}`),
   ]);
   if (mode !== 'virtual' || requestedGeneration !== modeGeneration || scenarioId !== requestedScenarioId) return;
+  if (Number(scenario?.restrictionRevision || 0) < scenarioRevision) return;
   scenarioRevision = Number(scenario?.restrictionRevision || 0);
+  brushHistory.sync(scenarioId, scenarioRevision);
   renderRestrictions(scenario?.restrictions);
   vehicles = scenarioVehicles;
   syncTripCompletions(scenarioVehicles);

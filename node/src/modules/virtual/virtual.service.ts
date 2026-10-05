@@ -16,6 +16,7 @@ import type {
     FollowingBody,
     RestrictionBody,
     RestrictionBrushBody,
+    RestrictionRestoreBody,
     RestrictionBulkRemoveBody,
     RestrictionUpdateBody,
     RoutePreviewBody,
@@ -1124,6 +1125,7 @@ export const virtualService = {
         }
         const revision = scenario.restrictionRevision + 1;
         const previousOverlay = await restrictionOverlay(scenarioId);
+        const history: { before: Array<{ restrictionId: string; isActive: boolean; geometry: unknown }>; after: Array<{ restrictionId: string; isActive: boolean; geometry: unknown }> } = { before: [], after: [] };
         await prisma.$transaction(async tx => {
             const updated = await tx.virtualScenario.updateMany({
                 where: { scenarioId, restrictionRevision: scenario.restrictionRevision }, data: { restrictionRevision: revision },
@@ -1140,14 +1142,19 @@ export const virtualService = {
                     } : {}),
                 };
                 if (change.restrictionId) {
-                    await tx.virtualRoadRestriction.update({ where: { restrictionId: BigInt(change.restrictionId) }, data });
+                    const before = existing.find(item => item.restrictionId.toString() === change.restrictionId)!;
+                    const after = await tx.virtualRoadRestriction.update({ where: { restrictionId: BigInt(change.restrictionId) }, data });
+                    history.before.push({ restrictionId: change.restrictionId, isActive: before.isActive, geometry: before.geometry });
+                    history.after.push({ restrictionId: change.restrictionId, isActive: after.isActive, geometry: after.geometry });
                 } else if (change.resolved) {
-                    await tx.virtualRoadRestriction.create({ data: {
+                    const after = await tx.virtualRoadRestriction.create({ data: {
                         ...data, scenarioId, kind: "BLOCKED", geometry: json(change.geometry),
                         affectedDirectedEdgeIds: json(change.resolved.affectedDirectedEdgeIds),
                         affectedPhysicalSegmentIds: json(change.resolved.affectedPhysicalSegmentIds),
                         graphVersion: change.resolved.graphVersion, createdBy: actorId ?? null,
                     } });
+                    history.before.push({ restrictionId: after.restrictionId.toString(), isActive: false, geometry: after.geometry });
+                    history.after.push({ restrictionId: after.restrictionId.toString(), isActive: true, geometry: after.geometry });
                 }
             }
             await createEvent(tx, { scenarioId, actorId: actorId ?? null,
@@ -1163,7 +1170,38 @@ export const virtualService = {
             previousOverlay,
         });
         logRoadChangeTiming(`brush-${input.mode}`, scenarioId, startedAt, refreshStartedAt, { changed: prepared.length, failureCount: routingFailures.length });
-        return { restrictionRevision: revision, changed: prepared.length, routingFailures };
+        return { restrictionRevision: revision, changed: prepared.length, routingFailures, history };
+    },
+
+    async restoreRestrictions(scenarioId: bigint, input: RestrictionRestoreBody, actorId?: bigint) {
+        const scenario = await getScenario(scenarioId);
+        if (input.expectedRestrictionRevision !== scenario.restrictionRevision) throw new AppError(409, "Road state changed; brush history is no longer current", "STALE_REVISION");
+        const existing = await prisma.virtualRoadRestriction.findMany({ where: { scenarioId, kind: "BLOCKED", restrictionId: { in: input.states.map(state => BigInt(state.restrictionId)) } } });
+        if (existing.length !== input.states.length) throw new AppError(404, "A blockage in this history no longer exists in the scenario", "RESTRICTION_NOT_FOUND");
+        const previousOverlay = await restrictionOverlay(scenarioId);
+        const occupants = await occupyingVehicleStates(scenarioId);
+        const prepared: Array<{ state: RestrictionRestoreBody["states"][number]; resolved: Awaited<ReturnType<typeof routingInternalClient.resolveRestriction>> | null }> = [];
+        for (const state of input.states) {
+            const resolved = state.isActive ? await routingInternalClient.resolveRestriction({ geometry: state.geometry }) : null;
+            if (resolved && occupiedVehicleIds(occupants, resolved).length) throw new AppError(409, "Cannot restore a blockage on an occupied road", "ROAD_OCCUPIED");
+            prepared.push({ state, resolved });
+        }
+        const revision = scenario.restrictionRevision + 1;
+        await prisma.$transaction(async tx => {
+            const updated = await tx.virtualScenario.updateMany({ where: { scenarioId, restrictionRevision: scenario.restrictionRevision }, data: { restrictionRevision: revision } });
+            if (!updated.count) throw new AppError(409, "Road state changed; brush history is no longer current", "STALE_REVISION");
+            for (const { state, resolved } of prepared) {
+                await tx.virtualRoadRestriction.update({ where: { restrictionId: BigInt(state.restrictionId) }, data: {
+                    revision, isActive: state.isActive, geometry: json(state.geometry), updatedAt: new Date(),
+                    ...(resolved ? { affectedDirectedEdgeIds: json(resolved.affectedDirectedEdgeIds), affectedPhysicalSegmentIds: json(resolved.affectedPhysicalSegmentIds), graphVersion: resolved.graphVersion } : {}),
+                } });
+            }
+            await createEvent(tx, { scenarioId, actorId: actorId ?? null, eventType: "ROAD_RESTRICTION_UPDATED", payload: { revision, restored: input.states.map(state => state.restrictionId) } });
+        });
+        const change = diffRoadState(previousOverlay, await restrictionOverlay(scenarioId));
+        const relaxing = !change.blockedAdded;
+        const routingFailures = await this.refreshFollowingTrips(scenarioId, { previousOverlay, preserveMotionOnFailure: relaxing, recoverStoppedTrips: relaxing });
+        return { restrictionRevision: revision, changed: input.states.length, routingFailures };
     },
 
     async createRestriction(scenarioId: bigint, input: RestrictionBody, actorId?: bigint) {

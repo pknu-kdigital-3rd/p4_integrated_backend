@@ -20,7 +20,7 @@ class Element {
     const event = { button: 0, pointerId: 1, target: this, stopPropagation() {}, preventDefault() {}, ...values };
     for (const callback of this.listeners[type] ?? []) callback(event);
   }
-  closest(selector) { return this.dataset.roadTool && (selector === 'button' || selector === '[data-road-tool]') ? this : null; }
+  closest(selector) { return (this.dataset.roadTool && (selector === 'button' || selector === '[data-road-tool]')) || (this.dataset.roadHistory && (selector === 'button' || selector === '[data-road-history]')) ? this : null; }
   setPointerCapture() {}
   getBoundingClientRect() { return { left: parseFloat(this.style.left ?? '350'), top: parseFloat(this.style.top ?? '12'), width: 300, height: 80 }; }
 }
@@ -29,17 +29,19 @@ function setup() {
   const panel = new Element();
   const handle = new Element();
   const buttons = ['paint', 'erase', 'exit'].map(tool => new Element(tool));
+  const historyButtons = ['undo', 'redo'].map(action => { const button = new Element(); button.dataset.roadHistory = action; button.disabled = true; return button; });
   panel.querySelector = () => handle;
-  panel.querySelectorAll = () => buttons;
+  panel.querySelectorAll = selector => selector === '[data-road-history]' ? historyButtons : buttons;
   const container = { append() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 600 }) };
   const selected = [];
+  const historyActions = [];
   const context = vm.createContext({ document: { createElement: () => panel }, ResizeObserver: class { observe() {} } });
   for (const file of ['panel-drag.js', 'road-brush-toolbar.js']) {
     const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8').replace(/^import .*;\r?\n/gm, '').replaceAll('export function', 'function');
     vm.runInContext(source, context);
   }
-  const toolbar = context.installRoadBrushToolbar(container, { onSelect: tool => { selected.push(tool); toolbar.setTool(tool); } });
-  return { panel, handle, buttons, toolbar, selected };
+  const toolbar = context.installRoadBrushToolbar(container, { onSelect: tool => { selected.push(tool); toolbar.setTool(tool); }, onUndo: () => historyActions.push('undo'), onRedo: () => historyActions.push('redo') });
+  return { panel, handle, buttons, toolbar, selected, historyButtons, historyActions };
 }
 
 test('draw and erase share a toolbar; exit closes it and busy state still allows exit', () => {
@@ -85,6 +87,21 @@ test('toolbar pointer events cannot bubble into map drawing or panning', () => {
     panel.fire(type, { stopPropagation() { stopped = true; } });
     assert.equal(stopped, true, type);
   }
+});
+
+test('undo and redo reflect available history and are disabled while processing', () => {
+  const { panel, toolbar, historyButtons, historyActions } = setup();
+  toolbar.setHistory({ canUndo: true, canRedo: false });
+  panel.fire('click', { target: historyButtons[0] });
+  panel.fire('click', { target: historyButtons[1] });
+  assert.deepEqual(historyActions, ['undo']);
+  toolbar.setBusy(true);
+  panel.fire('click', { target: historyButtons[0] });
+  assert.deepEqual(historyActions, ['undo']);
+  toolbar.setHistory({ canUndo: false, canRedo: true });
+  toolbar.setBusy(false);
+  panel.fire('click', { target: historyButtons[1] });
+  assert.deepEqual(historyActions, ['undo', 'redo']);
 });
 
 test('Escape and scenario resets hide the toolbar and restore map gestures', () => {

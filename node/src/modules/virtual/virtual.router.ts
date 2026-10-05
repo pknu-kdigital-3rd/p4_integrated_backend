@@ -14,6 +14,7 @@ import {
     requestIdParamSchema,
     restrictionSchema,
     restrictionBrushSchema,
+    restrictionRestoreSchema,
     restrictionBulkRemoveSchema,
     restrictionIdParamSchema,
     restrictionUpdateSchema,
@@ -50,6 +51,7 @@ virtualRouter.put("/trips/:tripId/waypoints", ...write, validateParams(virtualTr
 virtualRouter.put("/trips/:tripId/destination", ...write, validateParams(virtualTripIdParamSchema), validateBody(destinationSchema), virtualController.replaceDestination);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions/preview", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionSchema), virtualController.previewRestriction);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions/brush", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionBrushSchema), virtualController.brushRestriction);
+virtualRouter.post("/scenarios/:scenarioId/road-restrictions/restore", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionRestoreSchema), virtualController.restoreRestrictions);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions/bulk-remove", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionBulkRemoveSchema), virtualController.bulkRemoveRestrictions);
 virtualRouter.post("/scenarios/:scenarioId/road-restrictions", ...write, validateParams(scenarioIdParamSchema), validateBody(restrictionSchema), virtualController.createRestriction);
 virtualRouter.patch("/road-restrictions/:restrictionId", ...write, validateParams(restrictionIdParamSchema), validateBody(restrictionUpdateSchema), virtualController.updateRestriction);

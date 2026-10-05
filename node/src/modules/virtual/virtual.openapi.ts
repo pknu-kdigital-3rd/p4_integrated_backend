@@ -10,6 +10,7 @@ import {
     followingSchema,
     requestIdParamSchema,
     restrictionBrushSchema,
+    restrictionRestoreSchema,
     routePreviewSchema,
     scenarioIdParamSchema,
     snapPointSchema,
@@ -20,6 +21,14 @@ import {
 
 const dataResponse = z.object({ data: z.unknown() });
 const bearer = [{ bearerAuth: [] }];
+
+registry.registerPath({
+    method: "post", path: "/api/v1/virtual/scenarios/{scenarioId}/road-restrictions/restore",
+    tags: ["Virtual Dispatch"], summary: "Atomically restore blockage states for brush undo or redo",
+    security: bearer,
+    request: { params: scenarioIdParamSchema, body: { content: { "application/json": { schema: restrictionRestoreSchema } } } },
+    responses: { 200: { description: "Restored restrictions", content: { "application/json": { schema: dataResponse } } } },
+});
 
 registry.registerPath({
     method: "post", path: "/api/v1/virtual/scenarios/{scenarioId}/road-restrictions/brush",

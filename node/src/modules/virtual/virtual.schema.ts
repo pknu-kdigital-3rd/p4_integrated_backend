@@ -99,6 +99,18 @@ export const restrictionBrushSchema = z.object({
     expectedRestrictionRevision: z.number().int().nonnegative(),
 });
 export type RestrictionBrushBody = z.infer<typeof restrictionBrushSchema>;
+export const restrictionRestoreSchema = z.object({
+    expectedRestrictionRevision: z.number().int().nonnegative(),
+    states: z.array(z.object({
+        restrictionId: z.string().regex(/^[1-9]\d*$/),
+        isActive: z.boolean(),
+        geometry: z.discriminatedUnion("type", [
+            z.object({ type: z.literal("Polygon"), coordinates: polygonCoordinates }),
+            z.object({ type: z.literal("MultiPolygon"), coordinates: z.array(polygonCoordinates).min(1).max(1000) }),
+        ]),
+    })).min(1).max(500).refine(states => new Set(states.map(state => state.restrictionId)).size === states.length),
+});
+export type RestrictionRestoreBody = z.infer<typeof restrictionRestoreSchema>;
 export const restrictionSchema = z.object({
     kind: z.enum(["BLOCKED", "HEAVY_PENALTY"]),
     geometry: z.object({

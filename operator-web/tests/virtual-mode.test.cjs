@@ -18,8 +18,8 @@ for (const change of ['monitoring', 'mode round trip', 'scenario change']) {
     let renders = 0;
     const response = new Promise(done => { resolve = done; });
     const context = vm.createContext({
-      mode: 'virtual', modeGeneration: 1, scenarioId: 's1', eventScenarioId: 's1', lastEventId: '',
-      api: () => response,
+      mode: 'virtual', modeGeneration: 1, scenarioId: 's1', scenarioRevision: 0, eventScenarioId: 's1', lastEventId: '',
+      api: () => response, brushHistory: { sync() {} },
       renderRestrictions: () => renders++, renderVehicles() {}, renderRequests() {}, renderEvents() {},
       syncTripCompletions() {}, syncNoRouteAlarms() {},
     });
@@ -49,7 +49,7 @@ test('leaving during virtual startup detaches layers and cannot restart virtual 
     virtualMapLayers: { addTo: () => { attached = true; }, remove: () => { attached = false; } },
     virtualPanel: {}, normalTab: { setAttribute: noop }, virtualTab: { setAttribute: noop },
     liveViewBeforeVirtual: false, normalSectionVisibility: { hide: noop, restore: noop },
-    loadScenarios: () => new Promise(done => { resolveStartup = done; }),
+    loadScenarios: () => new Promise(done => { resolveStartup = done; }), brushHistory: { sync() {} },
     loadScenarioData: async () => {}, setStatus: noop,
     pollTimer: null, vehiclePollTimer: null,
     setInterval: () => { polls++; return polls; }, clearInterval: noop, setTimeout: noop,
