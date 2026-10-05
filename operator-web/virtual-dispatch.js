@@ -59,6 +59,17 @@ routeContextMenu.setAttribute('aria-label', '경로 및 도로 차단');
 routeContextMenu.hidden = true;
 routeContextMenu.innerHTML = '<div class="route-point-menu-row"><button type="button" role="menuitem" data-route-point-kind="origin"><span aria-hidden="true" class="route-point-menu-icon origin">O</span><span>출발</span></button><button type="button" role="menuitem" data-route-point-kind="destination"><span aria-hidden="true" class="route-point-menu-icon destination">D</span><span>도착</span></button><button type="button" role="menuitem" data-route-point-kind="waypoint"><span aria-hidden="true" class="route-point-menu-icon waypoint">＋</span><span>경유지</span></button></div><button type="button" role="menuitem" data-road-tool="paint"><span class="route-point-menu-icon destination" aria-hidden="true">⊘</span><span>차단 그리기</span></button>';
 map.getContainer().append(routeContextMenu);
+const pointPlacementHint = document.createElement('div');
+pointPlacementHint.className = 'route-point-placement-hint';
+pointPlacementHint.hidden = true;
+pointPlacementHint.innerHTML = '<span role="status"></span><button type="button">취소</button>';
+map.getContainer().append(pointPlacementHint);
+L.DomEvent.disableClickPropagation(pointPlacementHint);
+L.DomEvent.disableScrollPropagation(pointPlacementHint);
+pointPlacementHint.querySelector('button').addEventListener('click', () => {
+  cancelPointPlacement();
+  setStatus('핀 이동을 취소했습니다.');
+});
 const routingLogOverlay = document.createElement('section');
 routingLogOverlay.className = 'virtual-routing-log';
 routingLogOverlay.setAttribute('role', 'log');
@@ -610,6 +621,8 @@ function pointIcon(kind, index) {
 function cancelPointPlacement() {
   if (!pointPlacement) return;
   pointPlacementPointerStart = null;
+  pointPlacementPointers.clear();
+  pointPlacementHint.hidden = true;
   if (endpointDrag?.marker === movingPin) finishEndpointDrag(movingPin);
   movingPin?.remove();
   movingPin = null;
@@ -1643,21 +1656,32 @@ function beginRoutePointPick(kind, waypointIndex = null, initialPoint = map.getC
   if (!scenarioId) { setStatus('Select or create a scenario first.', true); return; }
   cancelPointPlacement();
   routePlacementMapDraggingWasEnabled = map.dragging.enabled();
-  map.dragging.disable();
+  const touch = routePointPointerType === 'touch';
+  if (!touch) map.dragging.disable();
   pickMode = kind;
-  pointPlacement = { kind, waypointIndex, originalMarker };
+  pointPlacement = { kind, waypointIndex, originalMarker, touch };
   if (originalMarker) originalMarker.setOpacity(0);
   movingPin = L.marker(initialPoint, { icon: pointIcon(kind, waypointIndex ?? points.waypoints.length), interactive: false, keyboard: false, opacity: 0.85, zIndexOffset: 10000 }).addTo(map);
   movingPin.getElement()?.classList.add('is-moving');
   startEndpointDrag(kind, movingPin, waypointIndex);
   const label = kind === 'waypoint' ? `경유지 ${waypointIndex === null ? points.waypoints.length + 1 : waypointIndex + 1}` : kind === 'origin' ? '출발지' : '도착지';
   map.getContainer().style.cursor = 'crosshair';
-  setStatus(`${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭하거나 탭해 놓으세요.`);
+  const instruction = touch
+    ? `${label}: 지도를 이동·확대한 뒤 원하는 도로를 탭하세요.`
+    : `${label} 핀이 이동 중입니다. 지도에서 한 번 더 클릭해 놓으세요.`;
+  pointPlacementHint.querySelector('span').textContent = instruction;
+  pointPlacementHint.hidden = !touch;
+  setStatus(instruction);
 }
 window.__operatorPointPlacementActive = () => Boolean(pointPlacement);
+let routePointPointerType = 'mouse';
+document.addEventListener('pointerdown', event => {
+  routePointPointerType = event.pointerType || 'mouse';
+}, true);
 let pointPlacementPointerStart = null;
+const pointPlacementPointers = new Set();
 map.on('mousemove', event => {
-  if (!pointPlacement || !movingPin) return;
+  if (!pointPlacement || pointPlacement.touch || !movingPin) return;
   movingPin.setLatLng(event.latlng);
   if (endpointDrag?.marker === movingPin) queueEndpointSnapPreview(endpointDrag, movingPin);
 });
@@ -1737,6 +1761,11 @@ restrictionBulkToggle.addEventListener('click', () => {
 });
 map.getContainer().addEventListener('pointermove', event => {
   if (!pointPlacement || !movingPin) return;
+  if (pointPlacementPointerStart?.id === event.pointerId
+      && Math.hypot(event.clientX - pointPlacementPointerStart.x, event.clientY - pointPlacementPointerStart.y) >= 10) {
+    pointPlacementPointerStart.moved = true;
+  }
+  if (pointPlacement.touch) return;
   const point = map.mouseEventToLatLng(event);
   movingPin.setLatLng(point);
   if (endpointDrag?.marker === movingPin) queueEndpointSnapPreview(endpointDrag, movingPin);
@@ -1830,12 +1859,15 @@ async function switchMode(next) {
 }
 map.on('click', (event) => {
   hideRouteContextMenu();
-  if (mode !== 'virtual' || !pickMode) return;
+  // Touch is committed by pointerup only, after excluding pan/pinch gestures.
+  if (mode !== 'virtual' || !pickMode || pointPlacement?.touch) return;
   commitRoutePointPlacement(event.latlng);
 });
 function commitRoutePointPlacement(latlng) {
   if (mode !== 'virtual' || !pickMode || !pointPlacement) return;
   pointPlacementPointerStart = null;
+  pointPlacementPointers.clear();
+  pointPlacementHint.hidden = true;
   const point = { lat: latlng.lat, lon: latlng.lng };
   const selectedMode = pickMode;
   const selectedIndex = pointPlacement?.waypointIndex ?? null;
@@ -1853,16 +1885,29 @@ function commitRoutePointPlacement(latlng) {
 }
 map.getContainer().addEventListener('pointerdown', event => {
   if (!pointPlacement || event.button !== 0) return;
-  pointPlacementPointerStart = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  if (event.target.closest('.leaflet-control,.virtual-route-context-menu,.virtual-routing-log,.road-brush-toolbar,.route-point-placement-hint,.virtual-point-icon')) return;
+  pointPlacementPointers.add(event.pointerId);
+  if (pointPlacementPointers.size !== 1) {
+    pointPlacementPointerStart = null;
+    return;
+  }
+  pointPlacementPointerStart = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, time: Date.now() };
 });
 map.getContainer().addEventListener('pointerup', event => {
   const start = pointPlacementPointerStart;
+  pointPlacementPointers.delete(event.pointerId);
   pointPlacementPointerStart = null;
   if (!start || start.id !== event.pointerId || !pointPlacement) return;
-  if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
+  const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+  if (pointPlacement.touch) {
+    if (pointPlacementPointers.size || start.moved || distance >= 10 || Date.now() - start.time >= 500) return;
+  } else if (distance < 6) return;
   commitRoutePointPlacement(map.mouseEventToLatLng(event));
 });
-map.getContainer().addEventListener('pointercancel', () => { pointPlacementPointerStart = null; });
+map.getContainer().addEventListener('pointercancel', event => {
+  pointPlacementPointers.delete(event.pointerId);
+  pointPlacementPointerStart = null;
+});
 normalTab.addEventListener('click', () => void switchMode('normal'));
 virtualTab.addEventListener('click', () => void switchMode('virtual'));
 scenarioSelect.addEventListener('change', () => { cancelInFlightRouteCalculation(); roadBrush.reset(); cancelPointPlacement(); scenarioId = scenarioSelect.value; speedControlEditing = false; draft = null; renderDraft(); void loadScenarios().then(loadScenarioData); });
