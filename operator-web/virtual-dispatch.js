@@ -7,7 +7,7 @@ import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=3';
 import { createBrushHistory } from './road-brush-history.js?v=1';
 import { installRoutePointToolbar } from './route-point-toolbar.js?v=3';
 import { createVirtualRouteMotion } from './virtual-route-motion.js?v=1';
-import { installSearchAnimation } from './astar-animation.js?v=2';
+import { installSearchAnimation } from './astar-animation.js?v=3';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');

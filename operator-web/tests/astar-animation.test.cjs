@@ -67,7 +67,7 @@ test('a late cancelled search cannot overwrite or stop a newer animation request
 test('stop, pause, hidden-page resume, and invalidation clean up animation resources', () => {
   const callbacks = new Map(), listeners = new Map(), draws = [];
   let nextFrame = 0, current = true, removed = 0;
-  const ctx = { setTransform() {}, beginPath() {}, moveTo(x, y) { draws.push([x, y]); }, lineTo() {}, stroke() {} };
+  const ctx = { setTransform() {}, clearRect() {}, drawImage() {}, beginPath() {}, moveTo(x, y) { draws.push([x, y]); }, lineTo() {}, stroke() {} };
   const canvas = { style: {}, setAttribute() {}, getContext: () => ctx, remove() { removed++; } };
   const doc = { hidden: false, createElement: () => canvas,
     addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) };
@@ -98,11 +98,12 @@ test('stop, pause, hidden-page resume, and invalidation clean up animation resou
 
 function animationFixture(reducedMotion = false) {
   const callbacks = new Map(), handlers = new Map(), progress = [], draws = [];
-  let frameId = 0, zoom = 1, offset = { x: 0, y: 0 }, completed = 0;
+  let frameId = 0, zoom = 1, offset = { x: 0, y: 0 }, completed = 0, segments = 0, clears = 0;
   const point = (x, y) => ({ x, y, distanceTo(b) { return Math.hypot(x - b.x, y - b.y); } });
   const project = ([lat, lon]) => point(lon * 2 ** zoom, lat * 2 ** zoom);
   const canvas = { style: {}, setAttribute() {}, remove() {}, getContext: () => ({
-    setTransform() {}, beginPath() {}, moveTo(x, y) { draws.push([x, y]); }, lineTo() {}, stroke() {},
+    setTransform() {}, clearRect() { clears++; }, drawImage() {}, beginPath() {},
+    moveTo(x, y) { draws.push([x, y]); }, lineTo() { segments++; }, stroke() {},
   }) };
   const map = { getZoom: () => zoom, project,
     latLngToContainerPoint: coords => { const p = project(coords); return point(p.x - offset.x, p.y - offset.y); },
@@ -123,9 +124,52 @@ function animationFixture(reducedMotion = false) {
   return { animation, canvas, progress, draws, handlers, callbacks,
     view(nextZoom, nextOffset) { zoom = nextZoom; offset = nextOffset; },
     completed: () => completed,
+    segments: () => segments, clears: () => clears,
     tick(time) { const [id, fn] = callbacks.entries().next().value; callbacks.delete(id); fn(time); },
   };
 }
+
+test('large exploration draws new edges once rather than redrawing its growing history', () => {
+  const edges = {}, events = [];
+  for (let i = 0; i < 50000; i++) {
+    const edgeId = String(i);
+    edges[edgeId] = [[129, 35], [129.001, 35]];
+    events.push({ kind: 'discovered', edgeId }, { kind: 'expanded', edgeId });
+  }
+  const f = animationFixture();
+  f.animation.start({ searchTrace: { edges, events } });
+  f.tick(0);
+  for (let time = 100; time <= 20000; time += 100) f.tick(time);
+  assert.equal(f.progress.at(-1).index, 100000);
+  // Depending on frame boundaries, discovery and expansion may be painted
+  // together or separately. Each edge must be painted at most twice.
+  assert.ok(f.segments() >= 50000 && f.segments() <= 100000);
+  const before = f.segments();
+  for (let time = 20100; time <= 25000; time += 100) f.tick(time);
+  assert.equal(f.segments(), before);
+  assert.equal(f.completed(), 1);
+  // Rebuild all visible geometry exactly once when a completed view is panned.
+  f.view(1, { x: 10, y: 20 });
+  f.handlers.get('move')();
+  assert.equal(f.segments(), before + 50000);
+  f.handlers.get('moveend')();
+  assert.equal(f.segments(), before + 50000);
+});
+
+test('repeated discoveries cannot recolor expanded roads or add drawing work', () => {
+  const f = animationFixture();
+  f.animation.start({ searchTrace: trace });
+  f.tick(0);
+  for (let time = 100; time <= 14000; time += 100) f.tick(time);
+  assert.equal(f.segments(), 2);
+  for (let time = 14100; time <= 20000; time += 100) f.tick(time);
+  assert.equal(f.segments(), 2);
+  assert.equal(f.progress.at(-1).edges.get('a'), 'expanded');
+  const before = f.clears();
+  f.animation.start({ searchTrace: trace });
+  assert.ok(f.clears() >= before + 3);
+  assert.equal(f.progress.at(-1).edges.size, 0);
+});
 
 test('completed and paused animations restart, including an explicit reduced-motion replay', () => {
   const f = animationFixture(true), result = { searchTrace: trace, routeGeojson: route };

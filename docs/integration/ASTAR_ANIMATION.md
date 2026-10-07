@@ -14,6 +14,12 @@ During zoom transitions, playback pauses and the canvas briefly hides, then
 redraws at the new zoom level. Panning, resizing, and zooming also update paused
 and completed overlays without restarting the search.
 
+Exploration uses persistent discovered/expanded canvas caches. Each frame paints
+only newly discovered or expanded roads, then composites the caches beneath the
+final route. Map view changes rebuild the caches; normal playback does not
+redraw the entire exploration history. Road geometry is projected on demand
+and reused until the zoom changes.
+
 The button is for undispatched drafts. Changing the route points, vehicle,
 scenario, road restrictions, or workspace cancels the animation. Stop restores
 the normal preview line. No draft, trip, or vehicle state is written by tracing.
