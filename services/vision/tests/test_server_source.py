@@ -3,6 +3,7 @@ import json
 import io
 import tempfile
 import time
+import threading
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -12,7 +13,7 @@ from fractions import Fraction
 import av
 import numpy as np
 
-from app.services.server_source import ServerSource, server_frame_receiver, read_samples, next_frame
+from app.services.server_source import PreparedFrameBuffer, ServerSource, server_frame_receiver, read_samples, next_frame
 from app.services.telemetry import GpsSampleIn, ImuSampleIn
 from pydantic import ValidationError
 from app.core.state import AppState
@@ -52,6 +53,97 @@ class RecordedCsvTests(unittest.TestCase):
         sample = self.parse("timestamp_ns,pitch_deg,roll_deg,yaw_deg,accuracy\n1000000000,1,2,3,NaN\n", ImuSampleIn)[0]
         self.assertIsNone(sample.accuracy)
         self.assertEqual(sample.yaw_deg, 3)
+
+
+class PreparedFrameBufferTests(unittest.TestCase):
+    def test_prefetch_is_bounded_and_keeps_prepared_frames_in_order(self):
+        async def check():
+            calls = []
+            worker_names = []
+            def frames():
+                for i in range(20):
+                    yield i, i, b"encoded", i == 0
+            def prepare(frame):
+                calls.append(frame)
+                worker_names.append(threading.current_thread().name)
+                return f"prepared-{frame}"
+            buffer = PreparedFrameBuffer(frames(), prepare)
+            try:
+                async def wait_full():
+                    while len(calls) < 3:
+                        await asyncio.sleep(0.001)
+                await asyncio.wait_for(wait_full(), 2)
+                await asyncio.sleep(0.05)
+                self.assertEqual(calls, [0, 1, 2])
+                self.assertEqual(buffer.queue.qsize(), 2)
+                results = []
+                while len(results) < 20:
+                    try:
+                        results.append(buffer.poll())
+                    except asyncio.QueueEmpty:
+                        await asyncio.sleep(0.001)
+                self.assertEqual([item[0] for item in results], list(range(20)))
+                self.assertEqual([item[4] for item in results], [f"prepared-{i}" for i in range(20)])
+                self.assertTrue(all(name.startswith("server-decode") for name in worker_names))
+            finally:
+                await buffer.close()
+        asyncio.run(check())
+
+    def test_close_waits_for_native_work_before_closing_generator(self):
+        async def check():
+            entered = threading.Event()
+            released = threading.Event()
+            closed = threading.Event()
+            def frames():
+                try:
+                    entered.set()
+                    released.wait(2)
+                    yield 0, 0, b"", True
+                finally:
+                    closed.set()
+            buffer = PreparedFrameBuffer(frames(), None)
+            try:
+                while not entered.is_set():
+                    await asyncio.sleep(0.001)
+                closing = asyncio.create_task(buffer.close())
+                await asyncio.sleep(0.02)
+                self.assertFalse(closing.done())
+                released.set()
+                await asyncio.wait_for(closing, 2)
+                self.assertTrue(closed.is_set())
+            finally:
+                released.set()
+        asyncio.run(check())
+
+    def test_decode_errors_reach_the_receiver(self):
+        async def check():
+            def frames():
+                raise ValueError("bad input")
+                yield 0, 0, b"", True
+            buffer = PreparedFrameBuffer(frames(), None)
+            try:
+                while not buffer.task.done():
+                    await asyncio.sleep(0.001)
+                with self.assertRaisesRegex(ValueError, "bad input"):
+                    buffer.poll()
+            finally:
+                await buffer.close()
+        asyncio.run(check())
+
+    def test_preparation_failure_preserves_frame_for_inference_retry(self):
+        async def check():
+            def frames():
+                yield 0, 0, b"encoded", True
+            def fail(frame):
+                raise ValueError("bad preparation")
+            buffer = PreparedFrameBuffer(frames(), fail)
+            try:
+                while buffer.queue.empty():
+                    await asyncio.sleep(0.001)
+                self.assertEqual(buffer.poll(), (0, 0, b"encoded", True, None))
+            finally:
+                await buffer.close()
+        asyncio.run(check())
 
 
 class ServerSourceTests(unittest.TestCase):
@@ -117,6 +209,9 @@ class ServerSourceTests(unittest.TestCase):
             from app.services.yolo import _publish_skipped_frames
             state = AppState(server_source=self.source, viewer_connected=True)
             async def publish(state, frame):
+                self.assertIsNotNone(frame.prepared)
+                self.assertEqual((frame.prepared.source_width, frame.prepared.source_height), (64, 48))
+                self.assertFalse(frame.prepared.depth_enabled)
                 await _publish_skipped_frames(state, [frame], None, None)
             with patch('app.services.yolo._enqueue_inference_frame', side_effect=publish), patch('app.services.yolo._schedule_playback_deadline'):
                 self.source.set_loop(0.5, 0.9)

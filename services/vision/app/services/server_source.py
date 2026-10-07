@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import math
+from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
 from pathlib import Path
 from time import monotonic
@@ -112,12 +113,62 @@ def next_frame(iterator):
     return next(iterator, None)
 
 
+class PreparedFrameBuffer:
+    """Two ready frames plus one in flight, owned by a single decode worker."""
+
+    def __init__(self, iterator, prepare):
+        self.iterator = iterator
+        self.prepare = prepare
+        self.queue = asyncio.Queue(maxsize=2)
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="server-decode")
+        self.task = asyncio.create_task(self._produce())
+
+    def _next(self):
+        item = next_frame(self.iterator)
+        if item is None:
+            return None
+        prepared = None
+        if self.prepare:
+            try:
+                prepared = self.prepare(item[1])
+            except Exception as exc:
+                # Match Android: retain the frame so run_yolo's existing
+                # preparation retry/fault handling remains responsible.
+                print(f"frame preparation failed on server decode thread: {type(exc).__name__}: {exc}", flush=True)
+        return (*item, prepared)
+
+    async def _produce(self):
+        while True:
+            item = await asyncio.get_running_loop().run_in_executor(self.executor, self._next)
+            await self.queue.put(item)
+            if item is None:
+                return
+
+    def poll(self):
+        if self.queue.empty():
+            if self.task.done():
+                self.task.result()  # Surface decode/preparation failures.
+            raise asyncio.QueueEmpty
+        return self.queue.get_nowait()
+
+    async def close(self):
+        self.task.cancel()
+        await asyncio.gather(self.task, return_exceptions=True)
+        try:
+            # A cancelled executor await cannot interrupt native decode. Queue
+            # close on that same worker so it runs after any in-flight call.
+            await asyncio.get_running_loop().run_in_executor(self.executor, self.iterator.close)
+        finally:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+
+
 async def server_frame_receiver(state):
-    from app.services.yolo import _discard_inference_queue, _enqueue_inference_frame, _schedule_playback_deadline
+    from app.core.settings import settings
+    from app.services.yolo import _discard_inference_queue, _enqueue_inference_frame, _schedule_playback_deadline, prepare_inference_inputs
     from time import perf_counter
 
     source = state.server_source
-    iterator = None
+    buffer = None
     seq = 0
     active = False
     pending_seek = 0.0
@@ -133,6 +184,10 @@ async def server_frame_receiver(state):
                 pass
             if command and command["type"] == "stop":
                 active = False
+                if buffer is not None:
+                    await buffer.close()
+                    buffer = None
+                pending_item = None
             if command and command["type"] in {"seek", "resync", "jump_to_live"}:
                 try:
                     if not source.ready:
@@ -141,9 +196,13 @@ async def server_frame_receiver(state):
                         pending_seek = source.seek(command["position"])
                     else:
                         pending_seek = 0.0 if source.end_seq is not None else min(source.position, max(0, source.duration - 0.1))
-                    if iterator is not None:
-                        await asyncio.to_thread(iterator.close)
-                    iterator = source.frames(pending_seek)
+                    if buffer is not None:
+                        await buffer.close()
+                    depth_enabled = state.depth_model is not None
+                    prepare = None
+                    if settings.VISION_FRAME_PREP_THREAD == "decode":
+                        prepare = lambda frame: prepare_inference_inputs(frame, depth_enabled)
+                    buffer = PreparedFrameBuffer(source.frames(pending_seek), prepare)
                     pending_item = None
                     anchor_time = None
                     async with state.result_condition:
@@ -170,20 +229,24 @@ async def server_frame_receiver(state):
                 continue
             try:
                 if pending_item is None:
-                    pending_item = await asyncio.to_thread(next_frame, iterator)
+                    try:
+                        pending_item = buffer.poll()
+                    except asyncio.QueueEmpty:
+                        await asyncio.sleep(0.002)
+                        continue
                 item = pending_item
                 if item is None:
                     source.end_seq = seq - 1
                     active = False
                     continue
-                seconds, frame, encoded, keyframe = item
-                # Stop prefetch at the loop endpoint; the browser seeks when
+                seconds, frame, encoded, keyframe, prepared = item
+                # Stop emission at the loop endpoint; the browser seeks when
                 # its presented frame reaches the last frame in the interval.
                 if source.loop and seconds >= source.loop[1]:
                     source.end_seq = seq - 1
                     active = False
                     continue
-                # Decode/encode one frame ahead, then emit on the source clock.
+                # Emit prepared frames on the source clock.
                 # Sleeping a full frame period AFTER processing accumulates
                 # decode/encode cost and slows a 25 FPS file below real time.
                 now = monotonic()
@@ -202,7 +265,8 @@ async def server_frame_receiver(state):
                     media_time=seconds, epoch=state.current_epoch, encoded=encoded,
                     timestamp_us=round(seconds * 1_000_000), keyframe=keyframe,
                     resolved_source_timestamp_ns=source.start_ns + round(seconds * 1_000_000_000),
-                    source_timeline_status="server", recording_identity=source.identity)
+                    source_timeline_status="server", recording_identity=source.identity,
+                    prepared=prepared)
                 state.queued_sequences.add((state.current_epoch, seq))
                 state.metrics.decoded_frames_received += 1
                 await _enqueue_inference_frame(state, inference_frame)
@@ -215,5 +279,5 @@ async def server_frame_receiver(state):
                     state.fault = f"Server video decode: {exc}"
                     state.result_condition.notify_all()
     finally:
-        if iterator is not None:
-            await asyncio.to_thread(iterator.close)
+        if buffer is not None:
+            await buffer.close()
