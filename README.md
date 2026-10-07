@@ -29,6 +29,12 @@ the playback source still explicitly displays recorded GPS data.
 
 ## HTTPS startup
 
+For Jupyter or a server without Docker access, see the
+[native startup guide](docs/integration/NATIVE_STARTUP.md). It launches the
+existing services as user processes and serves operator-web and live preview
+through one HTTPS port. PostgreSQL/PostGIS is required for the dashboard;
+preview-only mode works without it.
+
 Docker Compose runs Node, routing, vision, relay, PostgreSQL, MinIO, Nginx,
 and Coturn. The Compose files use the repository layout directly, so no
 `env.local` file or host-path variables are required for the default stack.
