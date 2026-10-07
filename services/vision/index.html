@@ -70,7 +70,7 @@
   <button id="start">Start</button><button id="stop">Stop</button><button id="live" hidden>Jump to Live</button>
   <fieldset id="server-controls" disabled>
     <legend>Video timeline</legend>
-    <input id="seek-range" type="range" min="0" max="0" step="0.01" value="0" aria-label="Video position" style="width:100%" />
+    <input id="seek-range" type="range" min="0" max="0" step="0.01" value="0" aria-label="Video position" style="width:100%;touch-action:none" />
     <output id="video-position">0.00 / 0.00 s</output>
     <label>Seek seconds <input id="seek-seconds" type="number" min="0" step="0.01" value="0" /></label>
     <button id="seek-button">Seek</button>
@@ -1050,7 +1050,7 @@
     else maybeStart();
   }
   let serverMode = true, videoDuration = 0, videoPosition = 0, loopRange = null, endSeq = null;
-  let seekDragging = false, seekDragStart = null, requestedSeekPosition = null;
+  let seekDragging = false, seekPointerActive = false, seekDragStart = null, requestedSeekPosition = null;
   const timeline = document.getElementById('server-controls');
   const seekRange = document.getElementById('seek-range');
   function renderVideoPosition() {
@@ -1067,6 +1067,7 @@
   }
   function cancelSeekDrag() {
     seekDragging = false;
+    seekPointerActive = false;
     seekDragStart = null;
     renderVideoPosition();
   }
@@ -1105,20 +1106,32 @@
     const expanded = document.documentElement.classList.toggle('timeline-open');
     document.getElementById('timeline-toggle').setAttribute('aria-expanded', String(expanded));
   };
-  seekRange.onpointerdown = () => { seekDragging = true; seekDragStart = seekRange.value; };
-  seekRange.oninput = () => { seekDragging = true; renderVideoPosition(); };
-  seekRange.onchange = () => {
+  function commitSeekDrag() {
     const position = Math.min(Number(seekRange.value), videoDuration - 0.001);
     seekDragging = false;
     seekDragStart = null;
+    // Native change may run before or after pointerup. Commit only once.
+    if (requestedSeekPosition === position) return;
     seekServer(position);
+  }
+  seekRange.onpointerdown = event => {
+    seekPointerActive = true;
+    seekDragging = true;
+    seekDragStart = seekRange.value;
+    if (event?.pointerId != null) seekRange.setPointerCapture?.(event.pointerId);
+  };
+  seekRange.oninput = () => { seekDragging = true; renderVideoPosition(); };
+  seekRange.onchange = () => {
+    if (!seekPointerActive) commitSeekDrag();
   };
   seekRange.onpointerup = () => {
-    // Clicking without changing the value has no native change event.
-    if (seekDragging && seekRange.value === seekDragStart) cancelSeekDrag();
+    if (!seekPointerActive) return;
+    seekPointerActive = false;
+    if (seekRange.value === seekDragStart) cancelSeekDrag();
+    else commitSeekDrag();
   };
   seekRange.onpointercancel = cancelSeekDrag;
-  seekRange.onblur = cancelSeekDrag;
+  seekRange.onblur = () => { if (!seekPointerActive) cancelSeekDrag(); };
   document.getElementById('seek-back').onclick = () => seekServer(Math.max(0, videoPosition - 10));
   document.getElementById('seek-forward').onclick = () => seekServer(Math.min(videoDuration - 0.001, videoPosition + 10));
   document.getElementById('mark-start').onclick = () => { document.getElementById('loop-start').value = videoPosition.toFixed(2); };

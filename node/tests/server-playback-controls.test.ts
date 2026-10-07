@@ -37,6 +37,7 @@ describe("server inference timeline", () => {
         expect(page.elements.get("video-position").textContent).toBe("70.00 / 100.00 s");
         expect(page.sent).toEqual([]);
         slider.onchange();
+        expect(page.sent).toEqual([]);
         slider.onpointerup();
         expect(page.sent).toEqual([{type:"seek", position:70}]);
         page.run("updateVideoPosition(13)");
@@ -69,7 +70,27 @@ describe("server inference timeline", () => {
         page.run('updateSource({mode:"server", ready:true, duration:100, loop:[2,4], end_seq:2})');
         expect(page.sent).toEqual([]);
         slider.onchange();
+        slider.onpointerup();
         expect(page.sent).toEqual([{type:"seek",position:30}]);
+    });
+
+    it("ignores native changes and focus changes during pointer drag, then commits once on release", () => {
+        const page=viewer();
+        page.run('updateSource({mode:"server", ready:true, duration:100}); updateVideoPosition(10)');
+        const slider=page.elements.get("seek-range");
+        slider.onpointerdown();
+        slider.value="50";
+        slider.oninput();
+        slider.onchange();
+        slider.onblur();
+        page.run("updateVideoPosition(11)");
+        expect(slider.value).toBe("50");
+        expect(page.sent).toEqual([]);
+        slider.value="70";
+        slider.oninput();
+        slider.onpointerup();
+        slider.onchange();
+        expect(page.sent).toEqual([{type:"seek",position:70}]);
     });
     it("waits for the last presented frame before looping", () => {
         const page = viewer();
