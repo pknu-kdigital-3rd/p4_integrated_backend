@@ -14,9 +14,21 @@ from app.services.telemetry import GpsSampleIn, ImuSampleIn, SessionTelemetry, T
 
 
 def read_samples(path, model):
+    # Android's CSV parser treats unavailable/non-finite optional numeric
+    # readings as null. Keep required coordinates, angles and clocks strict.
+    optional_fields = {name for name, field in model.model_fields.items() if not field.is_required()}
+    samples = []
     with path.open(encoding="utf-8-sig", newline="") as stream:
-        samples = [model.model_validate({k.strip(): v.strip() for k, v in row.items() if v and v.strip()})
-                   for row in csv.DictReader(stream)]
+        for row in csv.DictReader(stream):
+            values = {k.strip(): v.strip() for k, v in row.items() if v and v.strip()}
+            for name in optional_fields & values.keys():
+                try:
+                    available = math.isfinite(float(values[name]))
+                except ValueError:
+                    available = False
+                if not available:
+                    values[name] = None
+            samples.append(model.model_validate(values))
     if not samples:
         raise ValueError(f"Telemetry file is empty: {path.name}")
     if any(a.timestamp_ns > b.timestamp_ns for a, b in zip(samples, samples[1:])):

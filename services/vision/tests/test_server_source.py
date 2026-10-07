@@ -1,5 +1,6 @@
 import asyncio
 import json
+import io
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,9 +11,46 @@ from fractions import Fraction
 import av
 import numpy as np
 
-from app.services.server_source import ServerSource, server_frame_receiver
+from app.services.server_source import ServerSource, server_frame_receiver, read_samples
+from app.services.telemetry import GpsSampleIn, ImuSampleIn
+from pydantic import ValidationError
 from app.core.state import AppState
 from app.api.playback import _frame_telemetry, _receive_controls
+
+
+class RecordedCsvTests(unittest.TestCase):
+    def parse(self, text, model=GpsSampleIn):
+        path = SimpleNamespace(name="telemetry.csv", open=lambda **kwargs: io.StringIO(text))
+        return read_samples(path, model)
+
+    def test_missing_optional_gps_measurements_keep_the_fix(self):
+        for marker in ("NaN", "nan", " NaN ", "Inf", "-Infinity", "", "unavailable"):
+            with self.subTest(marker=marker):
+                sample = self.parse("timestamp_ns,latitude,longitude,speed_mps,bearing_deg,altitude_m,horizontal_accuracy_m\n"
+                                    f"1000000000,35,129,{marker},{marker},{marker},{marker}\n")[0]
+                self.assertEqual((sample.latitude, sample.longitude), (35, 129))
+                self.assertIsNone(sample.speed_mps)
+                self.assertIsNone(sample.bearing_deg)
+                self.assertIsNone(sample.altitude_m)
+                self.assertIsNone(sample.horizontal_accuracy_m)
+
+    def test_finite_optional_readings_remain_validated(self):
+        sample = self.parse("timestamp_ns,latitude,longitude,speed_mps,bearing_deg\n1000000000,35,129,3.5,359\n")[0]
+        self.assertEqual((sample.speed_mps, sample.bearing_deg), (3.5, 359))
+        for speed, bearing in (("-1", "20"), ("1", "360")):
+            with self.assertRaises(ValidationError):
+                self.parse(f"timestamp_ns,latitude,longitude,speed_mps,bearing_deg\n1000000000,35,129,{speed},{bearing}\n")
+
+    def test_nonfinite_required_readings_still_fail(self):
+        with self.assertRaises(ValidationError):
+            self.parse("timestamp_ns,latitude,longitude\n1000000000,NaN,129\n")
+        with self.assertRaises(ValidationError):
+            self.parse("timestamp_ns,pitch_deg,roll_deg,yaw_deg\n1000000000,NaN,0,0\n", ImuSampleIn)
+
+    def test_optional_imu_accuracy_can_be_unavailable(self):
+        sample = self.parse("timestamp_ns,pitch_deg,roll_deg,yaw_deg,accuracy\n1000000000,1,2,3,NaN\n", ImuSampleIn)[0]
+        self.assertIsNone(sample.accuracy)
+        self.assertEqual(sample.yaw_deg, 3)
 
 
 class ServerSourceTests(unittest.TestCase):
