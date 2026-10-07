@@ -46,11 +46,13 @@ test('a late cancelled search cannot overwrite or stop a newer animation request
   const start = source.indexOf('async function showAstarAnimation()');
   const end = source.indexOf('\n}', start) + 2;
   const responses = []; let plays = 0, stops = 0;
+  const cachedResults = new Map();
   const fixture = vm.createContext({ AbortController,
     astarShow: { disabled: false }, astarPlayback: {}, astarPause: {}, astarStatus: {},
     document: { querySelector: () => ({}) }, scenarioId: '1', scenarioRevision: 2, draft: { draftId: '4' },
     astarController: null, astarKey: '', astarResult: null,
-    astarContextKey: () => 'current', syncAstarButton() {}, setStatus() {}, setInterval: () => 1,
+    astarContextKey: () => 'current', syncSearchCache: () => cachedResults,
+    syncAstarButton() {}, setStatus() {}, setInterval: () => 1,
     api: () => new Promise(resolve => responses.push(resolve)),
     playAstarResult: () => { plays++; }, stopAstarAnimation: () => { stops++; },
   });
@@ -60,6 +62,7 @@ test('a late cancelled search cannot overwrite or stop a newer animation request
   responses[0]({ marker: 'old' }); await old;
   assert.equal(fixture.astarResult, null); assert.equal(fixture.astarController, controller);
   assert.equal(stops, 0); assert.equal(plays, 0);
+  assert.equal(cachedResults.size, 0);
   responses[1]({ marker: 'new' }); await newer;
   assert.equal(fixture.astarResult.marker, 'new'); assert.equal(plays, 1);
 });
@@ -253,4 +256,94 @@ test('speed is available before starting and replay applies it while resetting p
   element('#search-algorithm').change();
   await element('#astar-show').click();
   assert.equal(requests.at(-1).algorithm, 'greedy');
+});
+
+function searchControllerFixture(response) {
+  const elements = new Map(), requests = [], starts = [];
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { disabled: false, value: id === '#search-algorithm' ? 'astar' : '1',
+      addEventListener(name, fn) { this[name] = fn; } });
+    return elements.get(id);
+  };
+  const env = vm.createContext({ AbortController, document: { querySelector: element }, map: {},
+    mode: 'virtual', modeGeneration: 1, scenarioId: 's', scenarioRevision: 2, selectedVehicleId: 'v',
+    draft: { draftId: 'd', selectedVehicleId: 'v', restrictionRevision: 2, graphVersion: 'g',
+      requestedProfile: { vehicleProfile: 'semi' } },
+    points: { origin: { lat: 35, lon: 129 }, waypoints: [{ lat: 35.01, lon: 129.01 }],
+      destination: { lat: 35.02, lon: 129.02 } }, dispatchSubmitting: false,
+    routeOperations: new Set(), setInterval: () => 1, clearInterval() {}, setStatus() {},
+    api: async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return response ? response(options) : { searchTrace: trace, routeGeojson: route };
+    },
+    virtualMapLayers: { removeLayer() {}, addLayer() {} }, routeLayerGroup: {},
+    installSearchAnimation: () => ({ start: result => starts.push(result), setSpeed() {}, pause() {}, stop() {} }),
+  });
+  const source = fs.readFileSync(path.join(__dirname, '../virtual-dispatch.js'), 'utf8');
+  vm.runInContext(source.slice(source.indexOf('const astarShow ='), source.indexOf('\nasync function generateRequest')), env);
+  return { env, element, requests, starts,
+    stop: () => element('#astar-stop').click(),
+    start: () => element('#astar-show').click(),
+    algorithm(value) { element('#search-algorithm').value = value; element('#search-algorithm').change(); },
+  };
+}
+
+test('algorithm switches, stopping, speed changes, and identical new drafts reuse search results', async () => {
+  const f = searchControllerFixture();
+  for (const algorithm of ['astar', 'dijkstra', 'greedy', 'astar', 'dijkstra', 'greedy']) {
+    f.algorithm(algorithm); await f.start();
+  }
+  assert.equal(f.requests.length, 3);
+  f.stop();
+  f.env.draft = { ...f.env.draft, draftId: 'new-draft' };
+  f.element('#astar-speed').value = '0.25';
+  f.element('#astar-speed').change({ target: f.element('#astar-speed') });
+  await f.start();
+  assert.equal(f.requests.length, 3);
+  assert.equal(f.starts.at(-1).draftId, 'new-draft');
+});
+
+for (const point of ['origin', 'waypoints', 'destination']) {
+  test(`changing ${point} invalidates every algorithm's cached search`, async () => {
+    const f = searchControllerFixture();
+    for (const algorithm of ['astar', 'dijkstra', 'greedy']) { f.algorithm(algorithm); await f.start(); }
+    f.stop();
+    if (point === 'waypoints') f.env.points.waypoints.push({ lat: 35.015, lon: 129.015 });
+    else f.env.points[point].lat += 0.001;
+    for (const algorithm of ['astar', 'dijkstra', 'greedy']) { f.algorithm(algorithm); await f.start(); }
+    assert.equal(f.requests.length, 6);
+  });
+}
+
+test('scenario, restrictions, vehicle profile, and graph changes invalidate the cache', async () => {
+  const f = searchControllerFixture();
+  await f.start();
+  const changes = [
+    () => { f.env.scenarioId = 'another'; },
+    () => { f.env.scenarioRevision++; f.env.draft.restrictionRevision++; },
+    () => { f.env.selectedVehicleId = 'another'; f.env.draft.selectedVehicleId = 'another'; },
+    () => { f.env.draft.requestedProfile.vehicleProfile = 'small'; },
+    () => { f.env.draft.graphVersion = 'new-graph'; },
+  ];
+  for (const change of changes) { f.stop(); change(); await f.start(); }
+  assert.equal(f.requests.length, 6);
+  f.stop();
+  f.env.draft.expiresAt = new Date(0).toISOString();
+  await f.start();
+  assert.equal(f.requests.length, 6);
+  assert.equal(f.element('#astar-show').disabled, true);
+});
+
+test('transient failures retry, while no-route exploration can be replayed from cache', async () => {
+  let calls = 0;
+  const f = searchControllerFixture(() => {
+    if (++calls === 1) throw { code: 'ROUTING_UNAVAILABLE', message: 'Unavailable' };
+    throw { code: 'ROUTE_NOT_FOUND', details: { searchTrace: trace } };
+  });
+  await f.start();
+  await f.start();
+  assert.equal(f.requests.length, 2);
+  f.stop(); await f.start();
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.starts.at(-1).searchTrace.events.length, 3);
 });

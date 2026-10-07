@@ -1562,13 +1562,31 @@ function searchAlgorithmLabel() {
   return { astar: 'A*', dijkstra: 'Dijkstra', greedy: 'Greedy best-first' }[searchAlgorithm.value] || 'A*';
 }
 let astarController = null, astarResult = null, astarKey = '', astarWatcher = null, astarPaused = false;
+// Keep at most one trace per algorithm for the current route inputs.
+let searchCacheContext = '';
+const searchResults = new Map();
+function searchCacheKey() {
+  const coordinate = point => point ? [point.lat, point.lon] : null;
+  return JSON.stringify([scenarioId, scenarioRevision, selectedVehicleId,
+    draft?.graphVersion, draft?.requestedProfile,
+    coordinate(points.origin), (points.waypoints || []).map(coordinate), coordinate(points.destination)]);
+}
+function syncSearchCache() {
+  const key = searchCacheKey();
+  if (key !== searchCacheContext) {
+    searchResults.clear(); searchCacheContext = key;
+  }
+  return searchResults;
+}
 function astarContextKey() {
   return JSON.stringify([mode, modeGeneration, scenarioId, scenarioRevision, selectedVehicleId,
     draft?.draftId, points, dispatchSubmitting, searchAlgorithm.value]);
 }
 function syncAstarButton() {
+  if (draft) syncSearchCache();
   astarShow.disabled = mode !== 'virtual' || !draft || dispatchSubmitting || routeOperations.size > 0 || Boolean(astarKey)
-    || String(draft.selectedVehicleId) !== String(selectedVehicleId) || draft.restrictionRevision !== scenarioRevision;
+    || String(draft.selectedVehicleId) !== String(selectedVehicleId) || draft.restrictionRevision !== scenarioRevision
+    || Boolean(draft.expiresAt && Date.parse(draft.expiresAt) <= Date.now());
 }
 function stopAstarAnimation() {
   astarController?.abort(); astarController = null;
@@ -1599,26 +1617,37 @@ function playAstarResult({ animate = false } = {}) {
   document.querySelector('#astar-replay').disabled = false;
 }
 async function showAstarAnimation() {
+  syncAstarButton();
   if (astarShow.disabled) return;
+  const algorithm = document.querySelector('#search-algorithm')?.value || 'astar';
+  const cachedResults = syncSearchCache();
   const controller = new AbortController(); astarController = controller;
   astarKey = astarContextKey(); astarPlayback.hidden = false;
   astarPause.disabled = true; document.querySelector('#astar-replay').disabled = true;
   astarStatus.textContent = '탐색을 계산하는 중…'; syncAstarButton();
   astarWatcher = setInterval(() => { if (astarKey !== astarContextKey()) stopAstarAnimation(); }, 200);
   try {
+    const cached = cachedResults.get(algorithm);
+    if (cached) {
+      astarResult = { ...cached, draftId: String(draft.draftId), restrictionRevision: scenarioRevision };
+      playAstarResult();
+      return;
+    }
     const result = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/search-trace`, {
       method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), expectedRestrictionRevision: scenarioRevision,
-        algorithm: document.querySelector('#search-algorithm')?.value || 'astar' }), signal: controller.signal,
+        algorithm }), signal: controller.signal,
     });
     if (controller.signal.aborted || astarController !== controller) return;
     if (astarKey !== astarContextKey()) { stopAstarAnimation(); return; }
     astarResult = result;
+    cachedResults.set(algorithm, result);
     playAstarResult();
   } catch (error) {
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted || astarController !== controller) return;
     if (astarKey !== astarContextKey()) { stopAstarAnimation(); return; }
     if (error.code === 'ROUTE_NOT_FOUND' && error.details?.searchTrace) {
-      astarResult = { searchTrace: error.details.searchTrace }; playAstarResult();
+      astarResult = { searchTrace: error.details.searchTrace };
+      cachedResults.set(algorithm, astarResult); playAstarResult();
     } else { stopAstarAnimation(); setStatus(error.message, true); }
   } finally {
     if (astarController === controller) {

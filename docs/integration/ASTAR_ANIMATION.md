@@ -32,6 +32,14 @@ costs, vehicle profiles, closures, penalties, and incoming-way turn context.
 Greedy may produce a longer route. These are comparison animations; dispatch
 continues to use the saved A* preview.
 
+The browser caches one search result per algorithm for the current origin,
+ordered waypoints, and destination. Stopping, replaying, changing speed, or
+switching algorithms reuses completed results. An identical replacement draft
+also reuses them. Coordinate, scenario, restriction revision, selected vehicle,
+profile, or graph-version changes invalidate all cached algorithms. Expired
+drafts cannot start playback. No-route exploration is cached; transient failures
+and cancelled requests are not. This cache lasts only for the current page.
+
 ## API and limits
 
 `POST /api/v1/virtual/scenarios/:scenarioId/routes/search-trace` requires an
