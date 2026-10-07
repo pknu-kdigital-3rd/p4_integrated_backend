@@ -25,6 +25,52 @@ function viewer() {
 }
 
 describe("server inference timeline", () => {
+    it("keeps the dragged position while older video frames continue painting", () => {
+        const page = viewer();
+        page.run('updateSource({mode:"server", ready:true, duration:100}); updateVideoPosition(10)');
+        const slider = page.elements.get("seek-range");
+        slider.onpointerdown();
+        slider.value = "70";
+        slider.oninput();
+        page.run("updateVideoPosition(11); updateVideoPosition(12)");
+        expect(slider.value).toBe("70");
+        expect(page.elements.get("video-position").textContent).toBe("70.00 / 100.00 s");
+        expect(page.sent).toEqual([]);
+        slider.onchange();
+        slider.onpointerup();
+        expect(page.sent).toEqual([{type:"seek", position:70}]);
+        page.run("updateVideoPosition(13)");
+        expect(slider.value).toBe("70");
+        page.context.awaitingLiveEpoch = false;
+        page.run("updateVideoPosition(70.02)");
+        expect(slider.value).toBe("70.02");
+    });
+
+    it("cancels a drag without seeking and restores the current playback position", () => {
+        const page = viewer();
+        page.run('updateSource({mode:"server", ready:true, duration:100}); updateVideoPosition(10)');
+        const slider = page.elements.get("seek-range");
+        slider.onpointerdown();
+        slider.value = "70";
+        slider.oninput();
+        page.run("updateVideoPosition(12)");
+        slider.onpointercancel();
+        expect(slider.value).toBe("12");
+        expect(page.sent).toEqual([]);
+    });
+
+    it("does not loop back over an active drag at the end of an interval", () => {
+        const page = viewer();
+        page.run('updateSource({mode:"server", ready:true, duration:100, loop:[2,4]})');
+        const slider = page.elements.get("seek-range");
+        slider.onpointerdown();
+        slider.value = "30";
+        slider.oninput();
+        page.run('updateSource({mode:"server", ready:true, duration:100, loop:[2,4], end_seq:2})');
+        expect(page.sent).toEqual([]);
+        slider.onchange();
+        expect(page.sent).toEqual([{type:"seek",position:30}]);
+    });
     it("waits for the last presented frame before looping", () => {
         const page = viewer();
         page.run('updateSource({mode:"server", ready:true, duration:10, loop:[2,4], end_seq:3})');

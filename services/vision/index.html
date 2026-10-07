@@ -750,9 +750,7 @@
     renderTelemetry(pair.telemetry, pair.source);
     postPresentedTelemetry(pair);
     if (serverMode) {
-      videoPosition = Number(pair.source.time || 0);
-      document.getElementById('seek-range').value = String(videoPosition);
-      document.getElementById('video-position').textContent = `${videoPosition.toFixed(2)} / ${videoDuration.toFixed(2)} s`;
+      updateVideoPosition(Number(pair.source.time || 0));
       finishServerPlayback();
     }
     awaitingPaint = Math.max(0, awaitingPaint - 1);
@@ -1052,7 +1050,26 @@
     else maybeStart();
   }
   let serverMode = true, videoDuration = 0, videoPosition = 0, loopRange = null, endSeq = null;
+  let seekDragging = false, seekDragStart = null, requestedSeekPosition = null;
   const timeline = document.getElementById('server-controls');
+  const seekRange = document.getElementById('seek-range');
+  function renderVideoPosition() {
+    // Playback keeps advancing, but the user owns the thumb while scrubbing.
+    // Keep the committed target visible until a frame from the new epoch paints.
+    if (!seekDragging && requestedSeekPosition === null) seekRange.value = String(videoPosition);
+    const displayed = seekDragging ? Number(seekRange.value) : requestedSeekPosition ?? videoPosition;
+    document.getElementById('video-position').textContent = `${displayed.toFixed(2)} / ${videoDuration.toFixed(2)} s`;
+  }
+  function updateVideoPosition(position) {
+    videoPosition = position;
+    if (!awaitingLiveEpoch) requestedSeekPosition = null;
+    renderVideoPosition();
+  }
+  function cancelSeekDrag() {
+    seekDragging = false;
+    seekDragStart = null;
+    renderVideoPosition();
+  }
   function updateSource(message) {
     serverMode = message.mode === 'server';
     document.getElementById('live').hidden = serverMode;
@@ -1068,13 +1085,16 @@
     finishServerPlayback();
   }
   function finishServerPlayback() {
-    if (!serverMode || endSeq === null || lastPresentedSeq < endSeq || awaitingLiveEpoch) return;
+    if (!serverMode || seekDragging || endSeq === null || lastPresentedSeq < endSeq || awaitingLiveEpoch) return;
     if (endSeq < 0) { playing = false; foregroundResumePending = false; clearForegroundResumeTimer(); setLoading(false); setStatus('No video frames in the selected interval', '#fc6'); return; }
     if (loopRange) seekServer(loopRange[0]);
     else { playing = false; clearForegroundResumeTimer(); setStatus('Video ended'); }
   }
   function seekServer(position) {
     if (stopped || !Number.isFinite(position) || position < 0 || position >= videoDuration) return;
+    requestedSeekPosition = position;
+    seekRange.value = String(position);
+    renderVideoPosition();
     resetPlayback();
     endSeq = null;
     setLoading(true, 'Seeking server video…');
@@ -1085,7 +1105,20 @@
     const expanded = document.documentElement.classList.toggle('timeline-open');
     document.getElementById('timeline-toggle').setAttribute('aria-expanded', String(expanded));
   };
-  document.getElementById('seek-range').onchange = event => seekServer(Math.min(Number(event.target.value), videoDuration - 0.001));
+  seekRange.onpointerdown = () => { seekDragging = true; seekDragStart = seekRange.value; };
+  seekRange.oninput = () => { seekDragging = true; renderVideoPosition(); };
+  seekRange.onchange = () => {
+    const position = Math.min(Number(seekRange.value), videoDuration - 0.001);
+    seekDragging = false;
+    seekDragStart = null;
+    seekServer(position);
+  };
+  seekRange.onpointerup = () => {
+    // Clicking without changing the value has no native change event.
+    if (seekDragging && seekRange.value === seekDragStart) cancelSeekDrag();
+  };
+  seekRange.onpointercancel = cancelSeekDrag;
+  seekRange.onblur = cancelSeekDrag;
   document.getElementById('seek-back').onclick = () => seekServer(Math.max(0, videoPosition - 10));
   document.getElementById('seek-forward').onclick = () => seekServer(Math.min(videoDuration - 0.001, videoPosition + 10));
   document.getElementById('mark-start').onclick = () => { document.getElementById('loop-start').value = videoPosition.toFixed(2); };
@@ -1125,7 +1158,7 @@
         const message = JSON.parse(event.data);
         if (message.type === 'source') updateSource(message);
         if (message.type === 'session' && message.source) updateSource(message.source);
-        if (message.type === 'control_error') { awaitingLiveEpoch = false; setLoading(false); setStatus(message.detail, '#fc6'); }
+        if (message.type === 'control_error') { awaitingLiveEpoch = false; requestedSeekPosition = null; renderVideoPosition(); setLoading(false); setStatus(message.detail, '#fc6'); }
         if (message.type === 'session' && Array.isArray(message.overlay_classes)) {
           overlayClasses = message.overlay_classes.map(String);
           localStorage.setItem('playback-overlay-classes', JSON.stringify(overlayClasses));
