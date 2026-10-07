@@ -13,9 +13,6 @@ import sys
 import time
 from urllib.parse import urlparse
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_postgres import LocalPostgres, configure_database, database_session, install_database
-
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -76,7 +73,7 @@ def native_environment(env):
     for name in ("YOLO_MODEL", "UNIDEPTH_MODEL_DIR"):
         if env[name].startswith("/workspace/"):
             env[name] = str(ROOT / env[name][len("/workspace/"):])
-    return configure_database(env, ROOT)
+    return env
 
 
 def execute(command, cwd, env):
@@ -162,16 +159,6 @@ def run(env, vision_only):
         raise KeyboardInterrupt
     previous_handler = signal.signal(signal.SIGTERM, interrupted)
     try:
-        if not vision_only and env["NATIVE_LOCAL_DB"] == "true":
-            database = LocalPostgres(env, ROOT)
-            database.initialize()
-            with (logs / "postgres.log").open("ab", buffering=0) as log:
-                postgres = subprocess.Popen(database.command(), cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                            start_new_session=os.name != "nt")
-            processes.append(("postgres", postgres))
-            database.ready(postgres)
-            database.provision()
-            print("Local PostgreSQL/PostGIS ready", flush=True)
         for name, command, cwd, service_env in service_commands(env, vision_only):
             with (logs / f"{name}.log").open("ab", buffering=0) as log:
                 process = subprocess.Popen(command, cwd=cwd, env=service_env, stdout=log, stderr=subprocess.STDOUT,
@@ -191,10 +178,10 @@ def run(env, vision_only):
         pass
     finally:
         signal.signal(signal.SIGTERM, previous_handler)
-        for name, process in reversed(processes):
+        for _, process in reversed(processes):
             if process.poll() is None:
                 try:
-                    process.terminate() if os.name == "nt" else os.killpg(process.pid, signal.SIGINT if name == "postgres" else signal.SIGTERM)
+                    process.terminate() if os.name == "nt" else os.killpg(process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
         for _, process in processes:
@@ -207,28 +194,25 @@ def run(env, vision_only):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["setup", "db-setup", "db-check", "db-init", "vision-check", "run"])
+    parser.add_argument("action", choices=["setup", "db-check", "db-init", "vision-check", "run"])
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--vision-only", action="store_true")
     args = parser.parse_args()
     env = native_environment(load_environment(args.env_file))
     if args.action == "setup":
         setup(env, args.vision_only)
-    elif args.action == "db-setup":
-        install_database(env, ROOT)
     elif args.action == "run":
         run(env, args.vision_only)
     elif args.action == "vision-check":
         execute(vision_command([str(ROOT / "scripts/native-vision-check.py")]), ROOT / "services/vision", vision_environment(env))
     else:
         require_database(env)
-        with database_session(env, ROOT):
-            if args.action == "db-check":
-                execute(["node", str(ROOT / "scripts/native-db-check.mjs")], ROOT / "node", env)
-            else:
-                execute(["node", "node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "prisma7.config.ts"], ROOT / "node", env)
-                ensure_keys(env)
-                execute(["node", "node_modules/tsx/dist/cli.mjs", "prisma/seed.ts"], ROOT / "node", env)
+        if args.action == "db-check":
+            execute(["node", str(ROOT / "scripts/native-db-check.mjs")], ROOT / "node", env)
+        else:
+            execute(["node", "node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "prisma7.config.ts"], ROOT / "node", env)
+            ensure_keys(env)
+            execute(["node", "node_modules/tsx/dist/cli.mjs", "prisma/seed.ts"], ROOT / "node", env)
 
 
 if __name__ == "__main__":
