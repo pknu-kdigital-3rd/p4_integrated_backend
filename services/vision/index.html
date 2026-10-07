@@ -41,6 +41,12 @@
     html.operator-live-view-fullscreen body { padding: 0; display: grid; place-items: center; }
     html.operator-live-view-fullscreen main { width: 100%; height: 100%; max-width: none; margin: 0; display: grid; place-items: center; }
     html.operator-live-view-fullscreen main > :not(#stage) { display: none; }
+    #timeline-toggle { display: none; }
+    #timeline-toggle[hidden], #server-controls[hidden] { display: none !important; }
+    html.operator-live-view-fullscreen main { position: relative; }
+    html.operator-live-view-fullscreen #timeline-toggle { display: block; position: absolute; bottom: 4px; right: 8px; z-index: 4; margin: 0; }
+    html.operator-live-view-fullscreen.timeline-open #server-controls { display: block; position: absolute; bottom: 44px; left: 8px; right: 8px; max-height: 55%; overflow: auto; z-index: 4; background: #181818ed; margin: 0; }
+    #server-controls input[type="number"] { width: 6em; }
     html.operator-live-view-fullscreen #stage { max-width: none; max-height: none; }
     #detailedSettings { margin: 8px 0; }
     #detailedSettings summary { cursor: pointer; }
@@ -59,9 +65,23 @@
 </head>
 <body>
 <main>
-  <h2>Android stream · YOLO inference</h2>
-  <div id="stage"><canvas id="video"></canvas><canvas id="overlay"></canvas><div id="fps-overlay">Browser FPS: --</div><div id="playback-loading" role="status" hidden>Connecting to live video…</div></div>
-  <button id="start">Start</button><button id="stop">Stop</button><button id="live">Jump to Live</button>
+  <h2>Server video · YOLO inference</h2>
+  <div id="stage"><canvas id="video"></canvas><canvas id="overlay"></canvas><div id="fps-overlay">Browser FPS: --</div><button id="timeline-toggle" aria-expanded="false" aria-controls="server-controls">Video controls</button><div id="playback-loading" role="status" hidden>Connecting to video…</div></div>
+  <button id="start">Start</button><button id="stop">Stop</button><button id="live" hidden>Jump to Live</button>
+  <fieldset id="server-controls" disabled>
+    <legend>Video timeline</legend>
+    <input id="seek-range" type="range" min="0" max="0" step="0.01" value="0" aria-label="Video position" style="width:100%" />
+    <output id="video-position">0.00 / 0.00 s</output>
+    <label>Seek seconds <input id="seek-seconds" type="number" min="0" step="0.01" value="0" /></label>
+    <button id="seek-button">Seek</button>
+    <button id="seek-back">−10 s</button><button id="seek-forward">+10 s</button>
+    <label>Loop start <input id="loop-start" type="number" min="0" step="0.01" value="0" /></label>
+    <button id="mark-start">Set start here</button>
+    <label>Loop end <input id="loop-end" type="number" min="0" step="0.01" value="0" /></label>
+    <button id="mark-end">Set end here</button>
+    <button id="set-loop">Set loop</button><button id="clear-loop">Clear loop</button>
+    <output id="loop-status">Loop off</output>
+  </fieldset>
   <label><input id="boxes" type="checkbox" checked /> boxes</label>
   <label><input id="masks" type="checkbox" checked /> segmentation</label>
   <label>overlay style
@@ -618,7 +638,7 @@
         }
         pending.delete(frame.timestamp);
         if (!playing) { frame.close(); decoding = false; pump(); return; }
-        if (bufferedSeconds() > MAX_LIVE_LAG_S) {
+        if (!serverMode && bufferedSeconds() > MAX_LIVE_LAG_S) {
           // Decode dependencies, but omit stale rendering/overlay work. The
           // next painted frame cumulatively ACKs these decoded frames; only
           // that painted frame supplies map telemetry.
@@ -669,6 +689,10 @@
     if (previous && previous.state !== 'closed') { try { previous.close(); } catch (_) {} }
   }
   function playoutPaintAt(pair, now) {
+    if (serverMode) {
+      if (!playoutAnchor) playoutAnchor = { wall: now, ts: pair.timestamp_us };
+      return playoutAnchor.wall + (pair.timestamp_us - playoutAnchor.ts) / 1000;
+    }
     const arrivedAt = pair.receivedAt ?? now;
     if (playoutAnchor) {
       const paintAt = playoutAnchor.wall + (pair.timestamp_us - playoutAnchor.ts) / 1000;
@@ -725,6 +749,12 @@
     // The map follows the frame actually painted, not the newest received.
     renderTelemetry(pair.telemetry, pair.source);
     postPresentedTelemetry(pair);
+    if (serverMode) {
+      videoPosition = Number(pair.source.time || 0);
+      document.getElementById('seek-range').value = String(videoPosition);
+      document.getElementById('video-position').textContent = `${videoPosition.toFixed(2)} / ${videoDuration.toFixed(2)} s`;
+      finishServerPlayback();
+    }
     awaitingPaint = Math.max(0, awaitingPaint - 1);
     // Keep the session in the playing state even when the queue momentarily
     // empties. The pump is naturally idle until enqueue() supplies the next
@@ -1011,8 +1041,8 @@
     // Never try to paint an unbounded history at display refresh speed.
     // H.264 delta frames cannot be skipped arbitrarily: request a new live
     // keyframe/epoch and discard the old decoder and transport together.
-    if (bufferedSeconds() > MAX_QUEUED_LIVE_SECONDS || queue.length > MAX_QUEUED_LIVE_FRAMES
-        || queue.reduce((n, p) => n + p.data.byteLength, 0) > maxBufferBytes) {
+    if (!serverMode && (bufferedSeconds() > MAX_QUEUED_LIVE_SECONDS || queue.length > MAX_QUEUED_LIVE_FRAMES
+        || queue.reduce((n, p) => n + p.data.byteLength, 0) > maxBufferBytes)) {
       reconnectAtLive('Playback fell behind; jumping to live…');
       return;
     }
@@ -1021,6 +1051,52 @@
     if (playing) pump();
     else maybeStart();
   }
+  let serverMode = true, videoDuration = 0, videoPosition = 0, loopRange = null, endSeq = null;
+  const timeline = document.getElementById('server-controls');
+  function updateSource(message) {
+    serverMode = message.mode === 'server';
+    document.getElementById('live').hidden = serverMode;
+    timeline.hidden = !serverMode;
+    timeline.disabled = !message.ready;
+    document.getElementById('timeline-toggle').disabled = !message.ready;
+    document.getElementById('timeline-toggle').hidden = !serverMode;
+    videoDuration = Number(message.duration || 0);
+    loopRange = message.loop || null;
+    endSeq = message.end_seq ?? null;
+    document.getElementById('seek-range').max = String(videoDuration);
+    document.getElementById('loop-status').textContent = loopRange ? `Loop ${loopRange[0].toFixed(2)}–${loopRange[1].toFixed(2)} s` : 'Loop off';
+    finishServerPlayback();
+  }
+  function finishServerPlayback() {
+    if (!serverMode || endSeq === null || lastPresentedSeq < endSeq || awaitingLiveEpoch) return;
+    if (endSeq < 0) { playing = false; foregroundResumePending = false; clearForegroundResumeTimer(); setLoading(false); setStatus('No video frames in the selected interval', '#fc6'); return; }
+    if (loopRange) seekServer(loopRange[0]);
+    else { playing = false; clearForegroundResumeTimer(); setStatus('Video ended'); }
+  }
+  function seekServer(position) {
+    if (stopped || !Number.isFinite(position) || position < 0 || position >= videoDuration) return;
+    resetPlayback();
+    endSeq = null;
+    setLoading(true, 'Seeking server video…');
+    send({ type: 'seek', position });
+  }
+  document.getElementById('seek-button').onclick = () => seekServer(Number(document.getElementById('seek-seconds').value));
+  document.getElementById('timeline-toggle').onclick = () => {
+    const expanded = document.documentElement.classList.toggle('timeline-open');
+    document.getElementById('timeline-toggle').setAttribute('aria-expanded', String(expanded));
+  };
+  document.getElementById('seek-range').onchange = event => seekServer(Math.min(Number(event.target.value), videoDuration - 0.001));
+  document.getElementById('seek-back').onclick = () => seekServer(Math.max(0, videoPosition - 10));
+  document.getElementById('seek-forward').onclick = () => seekServer(Math.min(videoDuration - 0.001, videoPosition + 10));
+  document.getElementById('mark-start').onclick = () => { document.getElementById('loop-start').value = videoPosition.toFixed(2); };
+  document.getElementById('mark-end').onclick = () => { document.getElementById('loop-end').value = videoPosition.toFixed(2); };
+  document.getElementById('set-loop').onclick = () => {
+    const start = Number(document.getElementById('loop-start').value), end = Number(document.getElementById('loop-end').value);
+    if (!(0 <= start && start < end && end <= videoDuration)) { setStatus('Loop requires 0 ≤ start < end ≤ video duration', '#fc6'); return; }
+    resetPlayback(); endSeq = null;
+    send({ type: 'set_loop', start, end });
+  };
+  document.getElementById('clear-loop').onclick = () => { const position = Math.min(videoPosition, videoDuration - 0.001); resetPlayback(); endSeq = null; send({ type: 'clear_loop', position }); };
   function openSocket() {
     if (stopped) return;
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1047,15 +1123,18 @@
       if (socket !== ws) return;
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
+        if (message.type === 'source') updateSource(message);
+        if (message.type === 'session' && message.source) updateSource(message.source);
+        if (message.type === 'control_error') { awaitingLiveEpoch = false; setLoading(false); setStatus(message.detail, '#fc6'); }
         if (message.type === 'session' && Array.isArray(message.overlay_classes)) {
           overlayClasses = message.overlay_classes.map(String);
           localStorage.setItem('playback-overlay-classes', JSON.stringify(overlayClasses));
           renderClassStyleList();
         }
         if (message.type === 'session') { sessionId = message.session_id; epoch = message.epoch; targetSeconds = message.buffer.target_seconds; lowWatermarkSeconds = message.buffer.low_watermark_seconds; maxBufferBytes = message.buffer.client_max_bytes; sessionStorage.setItem('playback-session-id', sessionId); }
-        else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; awaitingPaint = 0; playoutAnchor = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); awaitingLiveEpoch = false; setStatus('Live IDR received; starting playback', '#4fdb8a'); updateStats(); }
+        else if (message.type === 'epoch') { epoch = message.epoch; lastPresentedSeq = -1; sessionStorage.setItem('playback-epoch', String(epoch)); sessionStorage.setItem('playback-last-seq', '-1'); queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; awaitingPaint = 0; playoutAnchor = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); awaitingLiveEpoch = false; setStatus(serverMode ? 'Server video ready' : 'Live IDR received; starting playback', '#4fdb8a'); updateStats(); }
         else if (message.type === 'fault') setStatus(message.detail, '#f66');
-        else if (message.type === 'resyncing') { resetPlayback(); setLoading(true, 'Playback fell behind; joining live video…'); foregroundResumePending = true; armForegroundResumeWatchdog(); }
+        else if (message.type === 'resyncing') { resetPlayback(); setLoading(true, serverMode ? 'Loading server video…' : 'Playback fell behind; joining live video…'); foregroundResumePending = true; armForegroundResumeWatchdog(); }
         else if (message.type === 'resume_unavailable') { setStatus(`Resume unavailable: ${message.reason}; resyncing`, '#fc6'); awaitingLiveEpoch = true; queue = []; known.clear(); pending.clear(); resetCompensation(); decoding = false; awaitingPaint = 0; playoutAnchor = null; lastPresentedTs = null; presentedCount = 0; playing = false; invalidateDecoder(); }
         return;
       }
@@ -1088,7 +1167,7 @@
   function scheduleReconnect() { if (reconnectTimer || stopped) return; const delay = Math.min(3000, 250 * 2 ** reconnectAttempt++); reconnectTimer = setTimeout(() => { reconnectTimer = null; openSocket(); }, delay); }
   function start() {
     if (!stopped) return;
-    setLoading(true, 'Connecting to live video…');
+    setLoading(true, 'Connecting to video…');
     if (!('VideoDecoder' in window) || !('EncodedVideoChunk' in window)) {
       if (window.isSecureContext === false) {
         setStatus('WebCodecs requires HTTPS (secure context). Please access via https://', '#f66');
@@ -1118,7 +1197,7 @@
       if (decoding && performance.now() - decodeStartedAt >= DECODE_STALL_MS) {
         jumpLive(false);
       } else {
-        setLoading(true, 'Waiting for live video from Android…');
+        setLoading(true, 'Waiting for video source…');
         armForegroundResumeWatchdog();
       }
       return;
@@ -1169,7 +1248,7 @@
     updateStats();
   }
   function checkPlaybackHealth() {
-    if (stopped || !playing || document.hidden) return;
+    if (stopped || !playing || document.hidden || (serverMode && endSeq !== null)) return;
     if (lastPaintedAt !== null && performance.now() - lastPaintedAt >= DECODE_STALL_MS) {
       jumpLive(false);
       return;

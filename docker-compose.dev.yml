@@ -65,6 +65,8 @@ services:
         condition: service_completed_successfully
     working_dir: /workspace/node
     environment:
+      VISION_SOURCE: ${VISION_SOURCE:-server}
+      SERVER_VEHICLE_ID: ${SERVER_VEHICLE_ID:-server}
       NODE_ENV: development
       HOST: 0.0.0.0
       PORT: "3000"
@@ -217,6 +219,13 @@ services:
     depends_on:
       - p4-relay
     environment:
+      VISION_SOURCE: ${VISION_SOURCE:-server}
+      SERVER_DATASET_DIR: /data/vision-dataset
+      SERVER_VEHICLE_ID: ${SERVER_VEHICLE_ID:-server}
+      SERVER_VIDEO_FILE: ${SERVER_VIDEO_FILE:-video.mp4}
+      SERVER_GPS_FILE: ${SERVER_GPS_FILE:-gps.csv}
+      SERVER_IMU_FILE: ${SERVER_IMU_FILE:-imu.csv}
+      SERVER_SOURCE_START_NS: ${SERVER_SOURCE_START_NS:-}
       HOST: 0.0.0.0
       PORT: "39011"
       YOLO_MODEL: ${YOLO_MODEL:-/workspace/services/vision/models/a4_best.engine}
@@ -287,6 +296,10 @@ services:
               count: all
               capabilities: [ gpu ]
     volumes:
+      - type: bind
+        source: ${SERVER_DATASET_DIR:-./data/vision_dataset}
+        target: /data/vision-dataset
+        read_only: true
       - ./services/vision:/workspace/services/vision
       - ./services/vision/container-entrypoint.sh:/usr/local/bin/p4-vision-entrypoint:ro
       - ./services/vision/.ultralytics-custom:/workspace/services/vision/.ultralytics-custom:ro

@@ -171,6 +171,7 @@ class AppState:
 
     yolo_model: YOLO | None = None
     android_live: bool = False
+    server_source: Any | None = None
     current_epoch: int = 0
     session_id: str | None = None
     viewer_connected: bool = False

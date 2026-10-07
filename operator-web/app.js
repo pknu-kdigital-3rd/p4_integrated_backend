@@ -427,6 +427,7 @@ function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.t
 // Any vehicle whose phone is streaming can be watched; a running trip only
 // decides whether the relay also records it.
 function matchesLiveTarget(item){
+  if(bootstrap?.videoSource?.mode==='server')return item?.vehicleId!=null&&String(item.vehicleId)===bootstrap.videoSource.vehicleId;
   const metadata=item?.telemetry?.source_metadata||{};
   return item?.vehicleId!=null
     &&String(metadata.vehicleId??'')===String(item.vehicleId)
@@ -945,7 +946,7 @@ function render(snapshot){
     }
     const session=t.source_metadata?.recordingSessionId;
     // A new stream session supersedes the old one; reject its late frames.
-    if(liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId){liveView.recordingSessionId=session;resetLiveFrameOrder(liveView)}
+    if(bootstrap?.videoSource?.mode!=='server'&&liveView?.markerKey===key&&typeof session==='string'&&session!==liveView.recordingSessionId){liveView.recordingSessionId=session;resetLiveFrameOrder(liveView)}
     syncVehicleMapLabel(entry);
   }
   dashboard.update(snapshot.vehicles);
@@ -1465,6 +1466,7 @@ function openLiveView(){
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
   liveView=createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
+  if(bootstrap?.videoSource?.mode==='server')liveView.recordingSessionId='server-dataset';
   liveMapFollower.begin(liveView);
   refreshLiveMarkerIcons();
   updateLiveTitle();

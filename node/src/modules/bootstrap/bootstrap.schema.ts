@@ -8,6 +8,7 @@ export const bootstrapResponseSchema = z.object({
         routingTracking: z.object({ baseUrl: z.url() }),
     }),
     liveViewUrl: z.url(),
+    videoSource: z.object({ mode: z.enum(["server", "relay"]), vehicleId: z.string() }).optional(),
 });
 
 export const bootstrapSchema = z.object({
@@ -18,6 +19,7 @@ export const bootstrapSchema = z.object({
         routingTracking: z.object({ baseUrl: z.string().url() }),
     }),
     liveViewUrl: z.string().url(),
+    videoSource: z.object({ mode: z.enum(["server", "relay"]), vehicleId: z.string() }).optional(),
 });
 
 export type BootstrapResponse = z.infer<

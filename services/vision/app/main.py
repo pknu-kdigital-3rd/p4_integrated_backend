@@ -55,7 +55,12 @@ async def lifespan(app: FastAPI):
     # and no restart. This bit us in practice: frame_receiver's task was
     # silently destroyed under GC pressure, which looked like an unrelated
     # TCP "broken pipe" on the Go relay's side minutes later.
-    frame_receiver_task = asyncio.create_task(frame_receiver(state))
+    if settings.VISION_SOURCE == "server":
+        from app.services.server_source import ServerSource, server_frame_receiver
+        state.server_source = ServerSource(settings)
+        frame_receiver_task = asyncio.create_task(server_frame_receiver(state))
+    else:
+        frame_receiver_task = asyncio.create_task(frame_receiver(state))
     yolo_worker_task = asyncio.create_task(yolo_worker(state))
     metrics_task = asyncio.create_task(metrics_worker(state))
     detection_writer_task = (
@@ -65,7 +70,7 @@ async def lifespan(app: FastAPI):
     )
     # Backgrounded, not awaited here: it retries a few times over ~1.5s if
     # the relay isn't reachable yet, and startup shouldn't block on that.
-    android_live_sync_task = asyncio.create_task(sync_android_live_from_relay(state))
+    android_live_sync_task = asyncio.create_task(sync_android_live_from_relay(state)) if settings.VISION_SOURCE == "relay" else None
 
     yield
 
@@ -77,12 +82,13 @@ async def lifespan(app: FastAPI):
     frame_receiver_task.cancel()
     yolo_worker_task.cancel()
     metrics_task.cancel()
-    android_live_sync_task.cancel()
+    if android_live_sync_task is not None:
+        android_live_sync_task.cancel()
     await asyncio.gather(
         frame_receiver_task,
         yolo_worker_task,
         metrics_task,
-        android_live_sync_task,
+        *([android_live_sync_task] if android_live_sync_task is not None else []),
         return_exceptions=True,
     )
     if detection_writer_task is not None:
@@ -100,7 +106,7 @@ async def lifespan(app: FastAPI):
         state.depth_model = None
 
 
-app = FastAPI(lifespan=lifespan, title="Android to Web Relay YOLO Stream")
+app = FastAPI(lifespan=lifespan, title="Server video inference")
 
 
 @app.get("/health/live")

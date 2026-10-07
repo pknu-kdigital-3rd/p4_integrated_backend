@@ -66,7 +66,8 @@ def _frame_telemetry(state: AppState, source: dict) -> dict:
         source_timestamp_ns = None if resolved is None else int(resolved)
     except (TypeError, ValueError):
         source_timestamp_ns = None
-    telemetry = state.telemetry_store.match(source.get("recording"), source_timestamp_ns)
+    store = state.server_source.telemetry if state.server_source is not None else state.telemetry_store
+    telemetry = store.match(source.get("recording"), source_timestamp_ns)
     telemetry["source_timeline_status"] = source.get("source_timeline_status", "unavailable")
     return telemetry
 
@@ -195,6 +196,24 @@ async def _receive_controls(
                     state.result_condition.notify_all()
             elif message_type in {"jump_to_live", "resync"}:
                 await _request_resync(state, message_type)
+            elif message_type in {"seek", "set_loop", "clear_loop"} and state.server_source is not None:
+                try:
+                    source = state.server_source
+                    if message_type == "seek":
+                        position = source.seek(message.get("position"))
+                    elif message_type == "set_loop":
+                        source.set_loop(message.get("start"), message.get("end"))
+                        position = source.loop[0]
+                    else:
+                        position = source.seek(message.get("position", min(source.position, source.duration - 0.1)))
+                        source.loop = None
+                    async with state.result_condition:
+                        state.clear_all_results()
+                        state.resync_generation += 1
+                        state.result_condition.notify_all()
+                    await state.feed_commands.put({"type": "seek", "position": position})
+                except (TypeError, ValueError) as exc:
+                    await websocket.send_json({"type": "control_error", "detail": str(exc)})
             elif message_type == "stop":
                 logger.info("playback stop received client=%s", websocket.client)
                 await state.feed_commands.put({"type": "stop"})
@@ -254,7 +273,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
         state.viewer_websocket = websocket
 
         requested_epoch = int(first.get("epoch", state.current_epoch))
-        live_mode = first.get("live") is True
+        live_mode = first.get("live") is True and state.server_source is None
         requested_seq = int(first.get("last_presented_seq", -1)) + 1
         decoder_state_preserved = bool(first.get("decoder_state_preserved"))
         decoder_reset = bool(first.get("session_id")) and not decoder_state_preserved
@@ -287,6 +306,7 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
                         "max_bytes": settings.BACKLOG_MAX_BYTES,
                     },
                     "android_live": state.android_live,
+                    "source": state.server_source.status() if state.server_source is not None else {"mode": "relay"},
                     "overlay_classes": _overlay_classes(state),
                 }
             )
@@ -337,9 +357,17 @@ async def playback(websocket: WebSocket, state: AppState = Depends(get_app_state
         reported_fault = False
         sent_sizes: dict[tuple[int, int], int] = {}
         seen_resync_generation = state.resync_generation
+        last_source_status = None
         while True:
             if not _owns_viewer_slot(state, token):
                 break
+            if state.server_source is not None:
+                source_status = state.server_source.status()
+                # Position comes from painted frame metadata in the browser.
+                source_status.pop("position", None)
+                if source_status != last_source_status:
+                    await websocket.send_json({"type": "source", **source_status})
+                    last_source_status = source_status
             if state.resync_generation != seen_resync_generation:
                 sent_sizes.clear()
                 seen_resync_generation = state.resync_generation

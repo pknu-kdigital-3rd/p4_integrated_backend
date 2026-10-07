@@ -1,6 +1,6 @@
 # ITS Platform
 
-This repository integrates the existing control backend, BIMS routing/tracking, and Android/WebRTC/YOLO prototypes as independently runnable services. Node owns persistent business data; Python routing/tracking owns transient telemetry and route calculations; the existing media stack remains behavior-frozen.
+This repository integrates the existing control backend, BIMS routing/tracking, and server video/YOLO processing as independently runnable services. Node owns persistent business data; Python routing/tracking owns transient telemetry and route calculations; Vision reads video and matching GPS/IMU directly from server files by default.
 
 ## Layout
 
@@ -62,8 +62,58 @@ live BIMS feed and the replay dataset without restarting Compose. The selected
 source is persisted in `data/routing_state/`; the routing container only needs
 to be restarted after code or container configuration changes.
 
-## Android GPS/IMU telemetry
+## Server video inference
 
-With `ANDROID_TELEMETRY_ENABLED=true` (relay and Node), Android's `telemetry-events` DataChannel feeds the live map and Live View: the Go relay binds each batch to the Node-validated trip/vehicle/recording session, persists every GPS fix through `POST /internal/telemetry/gps` (`vehicle_position`, see [docs/v18_its_integrated_erd.md](docs/v18_its_integrated_erd.md)), forwards GPS/IMU to Vision for source-time matching against the displayed video, and publishes current device positions that routing/tracking merges with BIMS. Vision's Live View shows the telemetry of the presented frame and posts it to the operator page, where it moves the selected vehicle's marker; the 3-second fleet poll still drives all other markers. See [docs/pipeline_architecture_control_vision_v6_notes.md](docs/pipeline_architecture_control_vision_v6_notes.md) for the flows.
+Vision runs without an Android publisher. Set `SERVER_DATASET_DIR` to the host
+folder containing the recording. Compose mounts it read-only at
+`/data/vision-dataset`. For a direct Python process, the same variable is the
+local directory path. The file names are independently configurable:
 
-GPU-dependent vision tests and Android device streaming require their original environment and are not part of CPU-only verification. No SUMO, Tauri, route reassignment, or multi-stream media routing is included.
+```dotenv
+VISION_SOURCE=server
+SERVER_DATASET_DIR=/srv/recordings/my-drive
+SERVER_VIDEO_FILE=video.mp4
+SERVER_GPS_FILE=gps.csv
+SERVER_IMU_FILE=imu.csv
+# Optional: the timestamp_ns corresponding exactly to video time zero.
+# When omitted, the first GPS sample is treated as time zero.
+SERVER_SOURCE_START_NS=123456789000000
+# Optional: existing fleet vehicle ID to associate with the operator map.
+SERVER_VEHICLE_ID=1
+```
+
+The video can use any codec readable by the installed PyAV/FFmpeg build and
+must have a known duration and frame presentation timestamps. Vision decodes
+it on the server and encodes baseline H.264 for the browser; audio is omitted.
+GPS and IMU use the Android CSV schema, including optional columns:
+
+```csv
+timestamp_ns,utc_epoch_ms,latitude,longitude,altitude_m,speed_mps,bearing_deg,horizontal_accuracy_m
+```
+
+```csv
+timestamp_ns,pitch_deg,roll_deg,yaw_deg,accuracy
+```
+
+Nanoseconds stay integers throughout synchronization. Set
+`SERVER_SOURCE_START_NS` if video zero differs from the first GPS timestamp;
+this explicit offset replaces the Android QR clock anchor. GPS interpolation
+and IMU matching use the existing source-time rules. Missing or distant samples
+show a stale state. Seeking and looping can revisit the full recorded telemetry.
+
+Open the inference page and press **Start**. Use the timeline slider, **Seek**,
+or **−10 s / +10 s**. Enter loop start/end seconds or mark the current frame,
+then choose **Set loop**. **Clear loop** restores normal playback. In the
+operator's embedded video, **Video controls** opens the same controls.
+Seeking starts a fresh video/overlay epoch. Loop endpoints exclude the end
+frame; playback restarts after the last frame in the interval is presented.
+
+Set the same `SERVER_VEHICLE_ID` for Node and Vision to open this source for
+that vehicle in the operator dashboard and drive its map marker from presented
+GPS. Compose passes the shared variable to both services. Without it, standalone
+inference uses the display identity `server`. Playback does not create a trip or
+persist interpolated GPS or detection records as a real recording session.
+The historical Android client and relay remain available through
+`VISION_SOURCE=relay` for existing live-stream deployments.
+
+GPU inference and the real dataset require validation on the deployment host.

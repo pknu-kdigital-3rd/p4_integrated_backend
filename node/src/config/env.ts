@@ -37,6 +37,8 @@ const envSchema = z.object({
     PUBLIC_OPERATOR_URL: z.url().optional(),
     VISION_PUBLIC_BASE_URL: z.url().default("https://127.0.0.1:39002"),
     LIVE_VIEW_URL: z.url().optional(),
+    VISION_SOURCE: z.enum(["server", "relay"]).default("server"),
+    SERVER_VEHICLE_ID: z.string().default("server"),
     ROUTING_TRACKING_BASE_URL: z.url().default("http://127.0.0.1:8000"),
     // ITS fleet assistant API (services/llm, KOSHA transport-guide RAG). Empty disables
     // POST /api/v1/assistant/chat with a 503.

@@ -13,6 +13,7 @@ export const bootstrapService = {
                 },
             },
             liveViewUrl: env.LIVE_VIEW_URL ?? env.VISION_PUBLIC_BASE_URL,
+            videoSource: { mode: env.VISION_SOURCE, vehicleId: env.SERVER_VEHICLE_ID },
         };
     },
 };

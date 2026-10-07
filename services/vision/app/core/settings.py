@@ -27,6 +27,20 @@ def _default_yolo_device() -> str:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
+    VISION_SOURCE: Literal["server", "relay"] = "server"
+    SERVER_DATASET_DIR: str = str(BASE_DIR / "dataset")
+    SERVER_VIDEO_FILE: str = "video.mp4"
+    SERVER_GPS_FILE: str = "gps.csv"
+    SERVER_IMU_FILE: str = "imu.csv"
+    SERVER_VEHICLE_ID: str = "server"
+    # Source clock at video time zero; defaults to the first GPS timestamp.
+    SERVER_SOURCE_START_NS: int | None = Field(default=None, gt=0)
+
+    @field_validator("SERVER_SOURCE_START_NS", mode="before")
+    @classmethod
+    def empty_source_start(cls, value):
+        return None if value == "" else value
+
     # --- YOLO / inference ---
     # Segmentation checkpoints use the -seg suffix. Custom trained
     # segmentation checkpoints can be supplied through YOLO_MODEL as usual.

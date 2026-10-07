@@ -64,6 +64,8 @@ services:
       p4-node-migrate:
         condition: service_completed_successfully
     environment:
+      VISION_SOURCE: ${VISION_SOURCE:-server}
+      SERVER_VEHICLE_ID: ${SERVER_VEHICLE_ID:-server}
       NODE_ENV: ${NODE_ENV:-production}
       HOST: 0.0.0.0
       PORT: "3000"
@@ -208,6 +210,13 @@ services:
     depends_on:
       - p4-relay
     environment:
+      VISION_SOURCE: ${VISION_SOURCE:-server}
+      SERVER_DATASET_DIR: /data/vision-dataset
+      SERVER_VEHICLE_ID: ${SERVER_VEHICLE_ID:-server}
+      SERVER_VIDEO_FILE: ${SERVER_VIDEO_FILE:-video.mp4}
+      SERVER_GPS_FILE: ${SERVER_GPS_FILE:-gps.csv}
+      SERVER_IMU_FILE: ${SERVER_IMU_FILE:-imu.csv}
+      SERVER_SOURCE_START_NS: ${SERVER_SOURCE_START_NS:-}
       HOST: 0.0.0.0
       PORT: "39011"
       YOLO_MODEL: ${YOLO_MODEL:-/workspace/services/vision/models/a4_best.engine}
@@ -277,6 +286,10 @@ services:
               count: all
               capabilities: [ gpu ]
     volumes:
+      - type: bind
+        source: ${SERVER_DATASET_DIR:-./data/vision_dataset}
+        target: /data/vision-dataset
+        read_only: true
       - p4_vision_compile_cache:/var/cache/p4-vision-compile
       - type: volume
         source: p4_relay_socket
