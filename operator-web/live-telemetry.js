@@ -29,6 +29,18 @@ export function createLiveView(item, frameOrigin) {
   };
 }
 
+/** Server recordings have their own map marker, independent of fleet positions. */
+export function createServerPlaybackView(source, frameOrigin) {
+  const item = {
+    serverPlayback: true,
+    vehicleId: source?.vehicleId || 'server',
+    tripId: null,
+    telemetry: { external_id: 'server:dataset', latitude: null, longitude: null,
+      telemetry_source: 'RECORDED_GPS', source_metadata: { recordingSessionId: 'server-dataset' } },
+  };
+  return { ...createLiveView(item, frameOrigin), serverPlayback: true };
+}
+
 /**
  * Returns the telemetry payload when the message is a presented-frame update
  * for this live view, or null when it must be ignored.
@@ -110,6 +122,7 @@ export function describeLiveTelemetry(liveView, message, now) {
   if (!liveView) return { text: 'Live telemetry: closed', level: 'idle' };
   if (!liveView.lastUpdateAt && !message) return { text: 'Live telemetry: waiting for synchronized frames', level: 'idle' };
   if (liveView.lastUpdateAt && now - liveView.lastUpdateAt > LIVE_OVERRIDE_STALE_MS) {
+    if (liveView.serverPlayback) return { text: 'Recorded GPS: waiting for frames - holding last GPS position', level: 'warn' };
     return { text: 'Live telemetry: stale - marker follows fleet polling', level: 'warn' };
   }
   const telemetry = message?.telemetry || {};

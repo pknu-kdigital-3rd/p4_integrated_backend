@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
+import { createServerPlaybackView } from '../operator-web/live-telemetry.js';
 
 const source=readFileSync(new URL('../../operator-web/app.js',import.meta.url),'utf8');
 function appFunction(name: string) {
@@ -55,6 +56,7 @@ function setup(tab='saved',previousPreview=false) {
     refreshMapLayout:vi.fn(),renderLiveTelemetryStatus:vi.fn(),
     browserReachableUrl:(url: string)=>url,
     createLiveView:(item: any,frameOrigin: string)=>({item,frameOrigin,vehicleId:item.vehicleId,markerKey:item.telemetry.external_id}),
+    createServerPlaybackView,
     updateLiveTitle:vi.fn(),setLiveViewLoading:vi.fn(),syncLiveColorMode:vi.fn(),renderVehicleFields:vi.fn(),
     placeLivePanel:vi.fn(()=>expect(livePanel.hidden).toBe(true)),
     clearInterval:vi.fn(),setInterval:vi.fn(()=>1),
@@ -64,6 +66,27 @@ function setup(tab='saved',previousPreview=false) {
 }
 
 describe('live preview and saved recordings',()=>{
+  it('opens server footage without choosing a fleet vehicle',()=>{
+    const {context,navigations,livePanel}=setup('live');
+    context.bootstrap.videoSource={mode:'server',vehicleId:'server'};
+    context.selected=null;
+    context.openLiveView();
+    expect(navigations).toHaveLength(1);
+    expect(livePanel.hidden).toBe(false);
+    expect(context.liveView.markerKey).toBe('server:dataset');
+    expect(context.liveView.item.telemetry.latitude).toBeNull();
+    expect(context.liveView.serverPlayback).toBe(true);
+  });
+
+  it('keeps server playback independent when a fixed fleet vehicle is selected',()=>{
+    const {context,navigations}=setup('live');
+    context.bootstrap.videoSource={mode:'server',vehicleId:'server'};
+    context.openLiveView();
+    const view=context.liveView;
+    context.retargetLiveView({vehicleId:'2',telemetry:{external_id:'fixed:2',latitude:35,longitude:129}});
+    expect(context.liveView).toBe(view);
+    expect(navigations).toHaveLength(1);
+  });
   it('keeps the loaded recording when its vehicle is selected again',()=>{
     const {context,streaming,navigations}=setup();
     context.replayTripId='21';context.replayTimeline=[{start:0,duration:10}];

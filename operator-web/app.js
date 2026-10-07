@@ -1,7 +1,7 @@
 import {uiText, initializeDashboard, renderVehicleDetails, vehicleDetailRows, vehicleIcon, vehicleDisplayName, vehicleStatus, STATUS_LABELS, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=7';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
-import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder,withPresentedTelemetry} from './live-telemetry.js?v=3';
+import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,createServerPlaybackView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder,withPresentedTelemetry} from './live-telemetry.js?v=4';
 import {cancelGlide,createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,glideMarker,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js?v=2';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOnlyPosition,plannedProgress,recordedProgress,routeProgressAtPosition,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=14';
@@ -325,14 +325,14 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
   const marker=L.marker(position,{icon:vehicleIcon(item,liveOnly,false,matchesLiveTarget(item)),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const icon=marker.options.icon;
   const entry={marker,item,liveOnly,labelOnTrip:null,iconKey:icon?.options?`${icon.options.className}|${icon.options.html}`:null};
-  marker.on('click',()=>selectVehicle(entry.item));
+  marker.on('click',()=>{if(entry.item.serverPlayback){liveMapFollower.recenter();return}selectVehicle(entry.item)});
   syncVehicleMapLabel(entry);
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
   return entry;
 }
 function syncVehicleMapLabel(entry){
   const item=entry.item,telemetry=item?.telemetry||{},onTrip=item?.tripStatus==='IN_PROGRESS';
-  const name=telemetry.telemetry_source==='RECORDED_GPS'?vehicleDisplayName(item):isAndroidGpsItem(item)?`Android GPS · ${vehicleDisplayName(item)}`:vehicleDisplayName(item);
+  const name=item.serverPlayback?'서버 영상 · GPS':telemetry.telemetry_source==='RECORDED_GPS'?vehicleDisplayName(item):isAndroidGpsItem(item)?`Android GPS · ${vehicleDisplayName(item)}`:vehicleDisplayName(item);
   const label=document.createElement('span');label.textContent=entry.estimated?`${name} · 추정 위치`:name;
   if(entry.labelOnTrip!==onTrip){
     entry.marker.unbindTooltip();
@@ -427,7 +427,7 @@ function sameLiveTarget(liveTarget,item){return liveTarget?.markerKey===(item?.t
 // Any vehicle whose phone is streaming can be watched; a running trip only
 // decides whether the relay also records it.
 function matchesLiveTarget(item){
-  if(bootstrap?.videoSource?.mode==='server')return item?.vehicleId!=null&&String(item.vehicleId)===bootstrap.videoSource.vehicleId;
+  if(bootstrap?.videoSource?.mode==='server')return item?.serverPlayback===true;
   const metadata=item?.telemetry?.source_metadata||{};
   return item?.vehicleId!=null
     &&String(metadata.vehicleId??'')===String(item.vehicleId)
@@ -440,6 +440,10 @@ function isLiveRecordingTabActive(){
 // Live View opens by itself on selection (or from the "실시간 영상" tab); this
 // only tells the operator whether the selected vehicle can be watched.
 function syncLiveViewButton(item=selected){
+  if(bootstrap?.videoSource?.mode==='server'){
+    document.querySelector('#recording-live-status').textContent=liveView?'':'서버 영상과 GPS 재생 · 실시간 영상 탭을 누르면 열립니다';
+    return;
+  }
   const available=Boolean(bootstrap)&&matchesLiveTarget(item);
   document.querySelector('#recording-live-status').textContent=available
     ?(liveView?'':'선택 차량의 실시간 영상 연결 가능 · 실시간 영상 탭을 누르면 다시 열립니다')
@@ -455,7 +459,7 @@ function releaseLiveMarker(){
     if(Number.isFinite(telemetry?.latitude)&&Number.isFinite(telemetry?.longitude))entry.marker.setLatLng([telemetry.latitude,telemetry.longitude]);
   }
 }
-function liveTargetLabel(item){return vehicleDisplayName(item)}
+function liveTargetLabel(item){return item?.serverPlayback?'서버 영상 · GPS':vehicleDisplayName(item)}
 // The Vision page's "fullscreen" mode shows only the video, scaled to fit the
 // frame. It is used whenever details are hidden; with fullscreen details on,
 // the page shows its full information and options.
@@ -481,6 +485,7 @@ function setLiveColorMode(distance){
 }
 for(const button of liveColorModeButtons)button.addEventListener('click',()=>setLiveColorMode(button.dataset.liveColorMode==='distance'));
 function retargetLiveView(item){
+  if(liveView?.serverPlayback)return;
   if(!liveView||sameLiveTarget(liveView,item))return;
   // The video belongs to the vehicle it was opened for; selecting another
   // vehicle closes it instead of relabelling that stream.
@@ -661,7 +666,7 @@ function updateRemainingTripRoute(fixOverride=null,sourceTimeOverride=null){
   // recording has no GPS for it (a tunnel: "GPS stale"), so the vehicle keeps
   // moving with the footage instead of waiting on the phone's placeholder fixes.
   const liveSourceTime=liveGps?lastLiveMessage?.telemetry?.source_timestamp_ns
-    :replayOnly&&String(liveView?.vehicleId)===String(display.vehicleId)?presentedFrameTime():null;
+    :replayOnly&&!liveView?.serverPlayback&&String(liveView?.vehicleId)===String(display.vehicleId)?presentedFrameTime():null;
   // The replay clock from the phone's batches keeps advancing where the recording
   // has no GPS (a tunnel, an underground car park), so it places the vehicle by
   // how far the recording has actually played; the last fix is the fallback.
@@ -849,7 +854,7 @@ async function loadSelectedTrip(){
 function deselectVehicle(){
   if(!selected)return;
   selected=null;displayRequest++;
-  if(liveView)stopLiveView();
+  if(liveView&&!liveView.serverPlayback)stopLiveView();
   clearTripLayers();
   document.querySelector('#trip-progress-card').hidden=true;
   details.hidden=true;
@@ -1390,7 +1395,7 @@ function stopLiveView(){
 window.__operatorStopLiveView=stopLiveView;
 // Virtual mode closes Live View; these let it reopen for the same vehicle on return.
 window.__operatorLiveViewOpen=()=>Boolean(liveView);
-window.__operatorResumeLiveView=()=>{if(!liveView&&matchesLiveTarget(selected))openLiveView()};
+window.__operatorResumeLiveView=()=>{if(!liveView&&(bootstrap?.videoSource?.mode==='server'||matchesLiveTarget(selected)))openLiveView()};
 window.addEventListener('message',event=>{
   if(liveView&&event.origin===liveView.frameOrigin&&event.source===liveFrame.contentWindow&&event.data?.type==='live-view-playback-state'){
     setLiveViewLoading(event.data.loading===true,typeof event.data.text==='string'?event.data.text:undefined);
@@ -1416,6 +1421,11 @@ window.addEventListener('message',event=>{
     frameTime:message.telemetry?.source_timestamp_ns??message.sourceTimestampNs??null,tripShown:currentTripDisplay?.tripId??null,
     routeMode:currentTripDisplay?.routeMode??null,sameVehicle:String(liveView?.vehicleId)===String(currentTripDisplay?.vehicleId)};
   const position=applyLiveTelemetry(liveView,message,Date.now());
+  if(liveView.serverPlayback){
+    if(position)setFreeEstimated(liveMapFollower.update(position),false);
+    renderLiveTelemetryStatus();
+    return;
+  }
   const tripRunsHere=currentTripDisplay?.tripStatus==='IN_PROGRESS'&&String(liveView?.vehicleId)===String(currentTripDisplay.vehicleId);
   if(!position&&tripRunsHere&&currentTripDisplay.routeMode==='REPLAY_ONLY'){
     // No GPS for this frame (a tunnel): place the replay vehicle by its time.
@@ -1450,6 +1460,7 @@ installForegroundResume(window,document,()=>{
 });
 // Keep the displayed road position moving briefly through a replay GPS gap.
 setInterval(()=>{
+  if(liveView?.serverPlayback)return;
   if(document.hidden||currentTripDisplay?.routeMode!=='REPLAY_ONLY'||currentTripDisplay.tripStatus!=='IN_PROGRESS')return;
   const snapped=updateRemainingTripRoute();
   if(snapped&&liveView?.vehicleId===String(currentTripDisplay.vehicleId)&&liveMapFollower.isFollowing())liveMapFollower.follow(snapped);
@@ -1457,7 +1468,9 @@ setInterval(()=>{
 // With no open button, the "실시간 영상" tab reopens a closed preview for a streaming vehicle.
 document.querySelector('#recording-live-tab').addEventListener('click',()=>{if(!liveView)openLiveView()});
 function openLiveView(){
-  if(window.__virtualMode||!isLiveRecordingTabActive()||!bootstrap||!matchesLiveTarget(selected))return;
+  if(window.__virtualMode||!isLiveRecordingTabActive()||!bootstrap)return;
+  const serverPlayback=bootstrap.videoSource?.mode==='server';
+  if(!serverPlayback&&!matchesLiveTarget(selected))return;
   const liveViewUrlObject=new URL(browserReachableUrl(bootstrap.liveViewUrl));
   liveViewUrlObject.searchParams.set('autostart','1');
   liveViewUrlObject.searchParams.set('embedded','1');
@@ -1465,8 +1478,7 @@ function openLiveView(){
   const diagnostic=document.querySelector('#live-view-diagnostic');
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
-  liveView=createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
-  if(bootstrap?.videoSource?.mode==='server')liveView.recordingSessionId='server-dataset';
+  liveView=serverPlayback?createServerPlaybackView(bootstrap.videoSource,new URL(liveViewUrl).origin):createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
   liveMapFollower.begin(liveView);
   refreshLiveMarkerIcons();
   updateLiveTitle();

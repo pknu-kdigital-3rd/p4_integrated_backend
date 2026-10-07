@@ -78,8 +78,8 @@ SERVER_IMU_FILE=imu.csv
 # Optional: the timestamp_ns corresponding exactly to video time zero.
 # When omitted, the first GPS sample is treated as time zero.
 SERVER_SOURCE_START_NS=123456789000000
-# Optional: existing fleet vehicle ID to associate with the operator map.
-SERVER_VEHICLE_ID=1
+# Optional transport identity; no fleet vehicle selection is required.
+SERVER_VEHICLE_ID=server
 ```
 
 The video can use any codec readable by the installed PyAV/FFmpeg build and
@@ -108,11 +108,15 @@ operator's embedded video, **Video controls** opens the same controls.
 Seeking starts a fresh video/overlay epoch. Loop endpoints exclude the end
 frame; playback restarts after the last frame in the interval is presented.
 
-Set the same `SERVER_VEHICLE_ID` for Node and Vision to open this source for
-that vehicle in the operator dashboard and drive its map marker from presented
-GPS. Compose passes the shared variable to both services. Without it, standalone
-inference uses the display identity `server`. Playback does not create a trip or
-persist interpolated GPS or detection records as a real recording session.
+In the operator dashboard, open **실시간 영상** without selecting a fleet vehicle.
+The recording has its own **서버 영상 · GPS** marker, created at the first valid
+presented GPS fix. It follows the CSV positions, including backward seeks and
+loops. Fleet polling and planned trip routes do not control this marker. If GPS
+is missing or playback stops, it holds the last valid GPS position until the
+view closes. `SERVER_VEHICLE_ID` is only a transport identity shared between
+Node and Vision; it does not associate playback with a fleet vehicle or choose
+its location. The default `server` is sufficient. Playback does not create a
+trip or persist interpolated GPS or detections as a real recording session.
 The historical Android client and relay remain available through
 `VISION_SOURCE=relay` for existing live-stream deployments.
 
