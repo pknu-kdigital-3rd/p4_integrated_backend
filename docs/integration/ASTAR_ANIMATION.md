@@ -34,7 +34,7 @@ OSM ways so restricted turns do not collapse into a node-only search.
 `edges` maps references to directed road geometry in `[longitude, latitude]`
 order. Counts cover the whole search, including events omitted by the budget.
 
-Collection stops at 5,000 events or 20,000 geometry vertices across all legs,
+Collection stops at 100,000 events or 400,000 geometry vertices across all legs,
 but A* continues to completion. `truncated` marks a partial exploration replay;
 the final route remains complete. Normal routing does not collect traces.
 `ROUTE_NOT_FOUND` includes the partial trace in error details. Obsolete graph

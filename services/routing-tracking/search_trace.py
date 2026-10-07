@@ -2,7 +2,7 @@
 
 
 class SearchTrace:
-    def __init__(self, max_events=5000, max_vertices=20000):
+    def __init__(self, max_events=100000, max_vertices=400000):
         self.max_events = max_events
         self.max_vertices = max_vertices
         self.events = []
