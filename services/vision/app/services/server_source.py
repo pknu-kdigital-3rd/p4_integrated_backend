@@ -6,6 +6,7 @@ import csv
 import math
 from fractions import Fraction
 from pathlib import Path
+from time import monotonic
 
 import av
 
@@ -72,7 +73,7 @@ class ServerSource:
     def status(self):
         return {"mode": "server", "ready": self.ready, "duration": self.duration,
                 "position": self.position, "loop": self.loop, "video": self.video.name,
-                "end_seq": self.end_seq}
+                "end_seq": self.end_seq, "fps": self.fps}
 
     def seek(self, value):
         position = float(value)
@@ -120,6 +121,9 @@ async def server_frame_receiver(state):
     seq = 0
     active = False
     pending_seek = 0.0
+    pending_item = None
+    anchor_time = None
+    anchor_position = 0.0
     try:
         while True:
             command = None
@@ -140,6 +144,8 @@ async def server_frame_receiver(state):
                     if iterator is not None:
                         await asyncio.to_thread(iterator.close)
                     iterator = source.frames(pending_seek)
+                    pending_item = None
+                    anchor_time = None
                     async with state.result_condition:
                         state.current_epoch += 1
                         state.playback_reset_generation += 1
@@ -163,7 +169,9 @@ async def server_frame_receiver(state):
                 await asyncio.sleep(0.02)
                 continue
             try:
-                item = await asyncio.to_thread(next_frame, iterator)
+                if pending_item is None:
+                    pending_item = await asyncio.to_thread(next_frame, iterator)
+                item = pending_item
                 if item is None:
                     source.end_seq = seq - 1
                     active = False
@@ -175,6 +183,19 @@ async def server_frame_receiver(state):
                     source.end_seq = seq - 1
                     active = False
                     continue
+                # Decode/encode one frame ahead, then emit on the source clock.
+                # Sleeping a full frame period AFTER processing accumulates
+                # decode/encode cost and slows a 25 FPS file below real time.
+                now = monotonic()
+                if anchor_time is None:
+                    anchor_time, anchor_position = now, seconds
+                delay = anchor_time + seconds - anchor_position - now
+                if delay > 0:
+                    # Return to the command loop regularly so seek/stop can
+                    # interrupt the wait, including long source timestamp gaps.
+                    await asyncio.sleep(min(0.02, delay))
+                    continue
+                pending_item = None
                 source.position = seconds
                 inference_frame = InferenceFrame(
                     seq=seq, frame=frame, pts=round(seconds * 90000), time_base=1 / 90000,
@@ -187,7 +208,7 @@ async def server_frame_receiver(state):
                 await _enqueue_inference_frame(state, inference_frame)
                 _schedule_playback_deadline(state, inference_frame, perf_counter())
                 seq += 1
-                await asyncio.sleep(min(0.1, 1 / source.fps))
+                await asyncio.sleep(0)
             except Exception as exc:
                 active = False
                 async with state.result_condition:

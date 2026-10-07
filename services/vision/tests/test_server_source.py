@@ -2,6 +2,7 @@ import asyncio
 import json
 import io
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -11,7 +12,7 @@ from fractions import Fraction
 import av
 import numpy as np
 
-from app.services.server_source import ServerSource, server_frame_receiver, read_samples
+from app.services.server_source import ServerSource, server_frame_receiver, read_samples, next_frame
 from app.services.telemetry import GpsSampleIn, ImuSampleIn
 from pydantic import ValidationError
 from app.core.state import AppState
@@ -138,6 +139,36 @@ class ServerSourceTests(unittest.TestCase):
                     await asyncio.wait_for(wait_epoch(), 3)
                     self.assertTrue(all(key[0] == state.current_epoch for key in state.result_store))
                     self.assertIsNone(state.last_presented)
+                finally:
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+        asyncio.run(check())
+
+    def test_receiver_does_not_add_processing_time_to_every_frame_interval(self):
+        async def check():
+            from app.services.yolo import _publish_skipped_frames
+            state = AppState(server_source=self.source, viewer_connected=True)
+            async def publish(state, frame):
+                await _publish_skipped_frames(state, [frame], None, None)
+            def slow_decode(iterator):
+                # The source is 10 FPS. Add 40 ms of work per frame: the old
+                # post-processing 100 ms sleep made a 2 s clip take ~2.8 s.
+                time.sleep(0.04)
+                return next_frame(iterator)
+            with patch('app.services.yolo._enqueue_inference_frame', side_effect=publish), patch('app.services.yolo._schedule_playback_deadline'), patch('app.services.server_source.next_frame', side_effect=slow_decode):
+                task = asyncio.create_task(server_frame_receiver(state))
+                started = time.monotonic()
+                try:
+                    await state.feed_commands.put({"type":"seek", "position":0})
+                    while self.source.end_seq is None:
+                        await asyncio.sleep(0.01)
+                        if time.monotonic() - started > 4:
+                            self.fail("Server playback did not finish")
+                    elapsed = time.monotonic() - started
+                    self.assertLess(elapsed, 2.5)
+                    self.assertGreater(elapsed, 1.8)
+                    self.assertEqual(len(state.result_store),20)
+                    self.assertEqual(state.result_store[(state.current_epoch,19)].timestamp_us,1900000)
                 finally:
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
