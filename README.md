@@ -32,8 +32,8 @@ the playback source still explicitly displays recorded GPS data.
 For Jupyter or a server without Docker access, see the
 [native startup guide](docs/integration/NATIVE_STARTUP.md). It launches the
 existing services as user processes and serves operator-web and live preview
-through one HTTPS port. PostgreSQL/PostGIS is required for the dashboard;
-preview-only mode works without it.
+through one HTTPS port. PostgreSQL/PostGIS can run inside the same existing
+Jupyter container; preview-only mode works without a database.
 
 Docker Compose runs Node, routing, vision, relay, PostgreSQL, MinIO, Nginx,
 and Coturn. The Compose files use the repository layout directly, so no

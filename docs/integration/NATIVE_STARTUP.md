@@ -33,11 +33,35 @@ Python 3.12 development headers, as the Vision Dockerfile installs. Routing's
 locked `osmnx` extra may require native build tools. If these are unavailable,
 ask the provider to supply them or use a suitable user-space environment.
 
-For the complete dashboard, provide a reachable PostgreSQL/PostGIS database.
-The launcher does not install a database server or replace PostGIS with SQLite.
-The database must exist; migrations require its owner's privileges and an
-installed PostGIS extension. The database's Docker-internal `p4-db` hostname
-will not work from another Jupyter environment.
+The complete dashboard can run PostgreSQL 17 and PostGIS directly inside the
+same existing Jupyter container. No Docker socket, nested containers or external
+database are required. Set `NATIVE_LOCAL_DB=true` (the example's default).
+`db-setup` installs matching PostgreSQL/PostGIS packages from conda-forge into
+`.runtime/native/postgres-env` using an available conda, mamba or micromamba.
+It does not change the notebook's base environment. If none is available,
+install micromamba in your user environment first.
+
+PostgreSQL must run as a non-root OS user. With an ordinary Jupyter user it
+runs as that user. If Jupyter runs as root, `db-setup` creates a system
+`postgres` account if missing and `useradd` is available; the launcher uses
+`runuser` for PostgreSQL only. Override that account with `NATIVE_PG_RUN_AS`.
+The checkout and PostgreSQL binaries must be accessible to that account;
+a checkout under a private `/root` directory will need to be moved to an
+accessible directory. Node and Vision continue as the Jupyter user.
+
+The database listens on loopback with SCRAM password authentication. Data
+persists in `.runtime/native/pgdata`, or the `NATIVE_PGDATA` path you specify.
+Use a persistent Jupyter volume if it must survive container replacement.
+Choose `NATIVE_PG_PORT` if 5432 is occupied. The launcher verifies the running
+server's data directory before provisioning, so it does not use an unrelated
+cluster on that port. Existing clusters are reused and never erased or
+reinitialized; changing `POSTGRES_PASSWORD` later does not update their password.
+
+For an already installed PostgreSQL/PostGIS distribution, set
+`NATIVE_POSTGRES_BIN` to its bin directory and skip `db-setup`. The launcher
+checks that distribution's `postgis.control` file. To use an external database
+instead, set `NATIVE_LOCAL_DB=false` and provide `DATABASE_URL`; the
+Docker-internal `p4-db` hostname is not reachable from a separate notebook.
 
 The routing files, including `services/routing-tracking/busan-roads_osm.pbf`,
 must be present. The BIMS key and AI assistant are optional; an existing
@@ -50,7 +74,8 @@ From the project root:
 
 ```bash
 cp deploy/native.env.example .env.native
-# Edit .env.native: database URL, dataset directory and visible GPU indices.
+# Edit .env.native: local database password, dataset and visible GPU indices.
+python scripts/run-native-stack.py db-setup --env-file .env.native
 python scripts/run-native-stack.py setup --env-file .env.native
 python scripts/run-native-stack.py db-check --env-file .env.native
 python scripts/run-native-stack.py db-init --env-file .env.native
@@ -58,8 +83,14 @@ python scripts/run-native-stack.py vision-check --env-file .env.native
 python scripts/run-native-stack.py run --env-file .env.native
 ```
 
-`db-check` tests authentication and PostGIS without changing data. `db-init`
-applies the existing migrations and seed data; it does not erase the database.
+In local database mode, `db-check` and `db-init` temporarily start the cluster
+if it is stopped. On the first start, the launcher initializes the cluster,
+creates the selected database, enables PostGIS and verifies a geography query.
+They stop their own temporary server afterward; a server already running for
+this same data directory is left running. For external databases, `db-check`
+only tests authentication and PostGIS. `db-init` applies the existing migrations
+and seed data; it does not erase the database. `run` starts local PostgreSQL
+before the application services and shuts it down with the stack.
 The seed creates the existing development administrator (`admin` / `admin1234`)
 if missing. Only run it against the database intended for this project.
 `vision-check` validates both CSV files, decodes the actual video and executes
@@ -70,8 +101,10 @@ Existing `env.local` files with `export KEY=value` are also accepted. Values
 are read without executing shell code; variable substitutions and shell
 commands are not evaluated. Later assignments win. The launcher disables
 recording and Android ingestion, replaces Docker service addresses and maps
-model paths beginning with `/workspace/` to this checkout. Set `DATABASE_URL`
-and `NATIVE_PUBLIC_URL` explicitly instead of the Docker public URL variables.
+model paths beginning with `/workspace/` to this checkout. Set
+`NATIVE_PUBLIC_URL` instead of the Docker public URL variables. In local database
+mode, `DATABASE_URL` is constructed from `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`POSTGRES_DB` and `NATIVE_PG_PORT` automatically.
 
 JWT and self-signed HTTPS keys persist in `.runtime/native/`; logs are in
 `.runtime/native/logs/`. Backend services bind to loopback. Press Ctrl+C to stop
@@ -99,7 +132,7 @@ python scripts/run-native-stack.py run --env-file .env.native --vision-only
 ```
 
 This starts Vision and the gateway only. `/live/` works; operator-web and the
-fleet map require the full stack and a database.
+fleet map require the full stack. This mode does not install or start PostgreSQL.
 
 ## Jupyter
 
@@ -160,7 +193,9 @@ forward just that one port to the gateway.
 ## Validation limits
 
 The native gateway is tested with real HTTP, HTTPS and binary upgraded
-connections. Launcher configuration, database checks and service lifecycle
-are independently verifiable. The deployment environment must still pass
-`vision-check`: Linux dependency installation and GPU inference cannot be
-inferred from Windows tests or a successful import.
+connections. Database configuration, initialization/reuse, password handling,
+port-conflict protection and service lifecycle have focused tests. Actual
+Linux PostgreSQL/PostGIS package installation and spatial queries must still
+pass `db-check` in the deployment environment. It must also pass `vision-check`:
+Linux dependency installation and GPU inference cannot be inferred from
+Windows tests or a successful import.
