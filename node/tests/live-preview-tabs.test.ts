@@ -41,7 +41,7 @@ function setup(tab='saved',previousPreview=false) {
   const context: any={
     document,livePanel,liveFrame,URL,window:{isSecureContext:true,__virtualMode:false},
     bootstrap:{liveViewUrl:'https://vision.example/live'},selected:{vehicleId:'1',telemetry:{external_id:'device:1'}},
-    liveView:previousPreview?{vehicleId:'1',markerKey:'device:1'}:null,
+    liveView:previousPreview?{vehicleId:'1',markerKey:'device:1'}:null,serverPlaybackItem:null,
     liveDocked:false,lastLiveMessage:null,liveVideoSize:null,liveDetections:null,liveStatusTimer:undefined,
     replayTripId:'',replayTimeline:[],replayIndex:0,
     markers:new Map(),details:element('#details'),fields:element('#fields'),

@@ -1,8 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createServerPlaybackView, acceptLiveTelemetry, applyLiveTelemetry, describeLiveTelemetry } from '../operator-web/live-telemetry.js';
+import { createServerPlaybackView, acceptLiveTelemetry, applyLiveTelemetry, describeLiveTelemetry, withServerPlaybackVehicle, withPresentedTelemetry } from '../operator-web/live-telemetry.js';
 import { createLiveMapFollower } from '../operator-web/live-map.js';
+import { vehicleDisplayName } from '../operator-web/dashboard-ui.js';
+import { fleetPosition } from '../operator-web/fleet-view.js';
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 
 describe('server dataset GPS marker',()=>{
+  it('keeps the GPS vehicle in normal monitoring snapshots after fleet polls and closing preview',()=>{
+    const view=createServerPlaybackView({vehicleId:'2'},'https://vision');
+    const fleet=[{vehicleId:'2',telemetry:{external_id:'fleet:2',latitude:35,longitude:129}}];
+    const item=withPresentedTelemetry(view.item,{telemetry:{gps:{latitude:36,longitude:128}}},1000);
+    const displayed=withServerPlaybackVehicle(fleet,item);
+    expect(displayed).toHaveLength(2);
+    expect(vehicleDisplayName(displayed[1])).toBe('서버 영상 · GPS');
+    expect(fleetPosition(displayed[1])).toEqual([36,128]);
+    expect(displayed[1].vehicleId).toBeNull();
+    expect(withServerPlaybackVehicle(displayed,item)).toHaveLength(2);
+    expect(withServerPlaybackVehicle([],item)[0]).toBe(item);
+    expect(fleet[0].telemetry.latitude).toBe(35);
+  });
+
+  it('shows the server GPS vehicle in the dropdown before and after the first GPS frame',()=>{
+    const source=readFileSync(new URL('../../operator-web/app.js',import.meta.url),'utf8');
+    const begin=source.indexOf('function renderVehiclePickers(');
+    const end=source.indexOf('\n}',begin)+2;
+    const pickers=[{replaceChildren:vi.fn(),options:[{}],add:vi.fn()}];
+    const context:any={vehiclePickers:pickers,vehiclePickerSignature:'',fleetPosition,
+      vehiclePickerLabel:vehicleDisplayName,syncVehiclePickers:vi.fn(),
+      Option:function(this:any,label:string,value:string){this.label=label;this.value=value;}};
+    runInNewContext(source.slice(begin,end),context);
+    const view=createServerPlaybackView({},'https://vision');
+    context.renderVehiclePickers([view.item]);
+    expect(pickers[0].add).toHaveBeenCalledWith(expect.objectContaining({label:'서버 영상 · GPS',value:'server:dataset'}));
+    const item=withPresentedTelemetry(view.item,{telemetry:{gps:{latitude:36,longitude:128}}});
+    context.renderVehiclePickers([item]);
+    expect(pickers[0].add).toHaveBeenCalledTimes(1);
+  });
+
   it('uses presented GPS and seeks backwards without moving a fixed fleet vehicle',()=>{
     const origin='https://vision.example';
     const frameWindow={};

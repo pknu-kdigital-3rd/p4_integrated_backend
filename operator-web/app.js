@@ -1,7 +1,7 @@
-import {uiText, initializeDashboard, renderVehicleDetails, vehicleDetailRows, vehicleIcon, vehicleDisplayName, vehicleStatus, STATUS_LABELS, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=7';
+import {uiText, initializeDashboard, renderVehicleDetails, vehicleDetailRows, vehicleIcon, vehicleDisplayName, vehicleStatus, STATUS_LABELS, TRIP_STATUS_LABELS, formatSpeed} from './dashboard-ui.js?v=8';
 import {fleetPosition, createFleetViewport} from './fleet-view.js';
 import {buildReplayTimeline,detectionSampleAtPts,entryForTime} from './replay-timeline.js';
-import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,createServerPlaybackView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder,withPresentedTelemetry} from './live-telemetry.js?v=4';
+import {acceptLiveTelemetry,applyLiveTelemetry,createLiveView,createServerPlaybackView,describeLiveTelemetry,isLiveOverride,LIVE_OVERRIDE_STALE_MS,resetLiveFrameOrder,withPresentedTelemetry,withServerPlaybackVehicle} from './live-telemetry.js?v=5';
 import {cancelGlide,createAndroidMarkerRevealer,createLiveMapFollower,fleetMarkerStyle,glideMarker,isAndroidGpsItem,LIVE_MARKER_STYLE} from './live-map.js?v=2';
 import {FOREGROUND_RESUME_MESSAGE,installForegroundResume} from './foreground-resume.js';
 import {estimatedReplayTimestamp,recordingGapAt,recordingGapThresholdS,forwardOnlyPosition,plannedProgress,recordedProgress,routeProgressAtPosition,matchedRoutePosition,replayClock,replayProgressOnRoute,replayRouteLine,remainingRoute,routeDisplayFromPosition,SNAP_SEARCH_AHEAD_M,tripTimes} from './trip-route-ui.js?v=14';
@@ -141,6 +141,7 @@ mapStyleSelect.addEventListener('change',()=>{
   localStorage.setItem('operatorMapStyle',mapStyleSelect.value);
   setMapStyle(mapStyleSelect.value);
 });
+let serverPlaybackItem=null;
 const markers=new Map(),tripMapMarkers=new Map();let token=sessionStorage.getItem('itsToken');let bootstrap;let selected;let routeLayer;let replayRouteLayer;let destinationMarker;let originMarker;let displayedRouteKey='';let currentTripDisplay=null;let currentRouteCoordinates=null;let currentRouteTiming=null;let currentRouteBreaks=[];let routePosition=0;let shownRoutePosition=null;let routeAnimationFrame=0;let displayRequest=0;let latestFleet=[];let assignmentPreview=null;let assignmentPreviewVehicleId='';let activeTripByVehicle=new Map();let demoMode=false;let currentRole='';let recordingsRequest=0;let refreshTimer;let telemetryModeTimer;let tripListTimer;let tripMapPick;let replayTimeline=[];let tripRecordingVideos=[];let recordingDeleteBusy=false;let replayDuration=0;let replayIndex=-1;let replayGeneration=0;let replayTripId='';let recordingDeleteRange=null;let recordingDeleteDrag=null;let replayScrubbing=false;let replayScrubWasPlaying=false;let replaySeekGeneration=0;let replaySeekPending=false;let liveView=null;let lastLiveMessage=null;let liveStatusTimer;
 // The default Leaflet renderer clips paths close to the viewport. A wider
 // drawing area keeps the remaining route visible immediately while dragging.
@@ -296,7 +297,7 @@ function vehiclePickerLabel(item){
   return t.telemetry_source!=='RECORDED_GPS'&&isAndroidGpsItem(item)?`${name} · Android GPS`:name;
 }
 function renderVehiclePickers(vehicles){
-  const options=vehicles.filter(item=>item.telemetry?.external_id&&fleetPosition(item))
+  const options=vehicles.filter(item=>item.telemetry?.external_id&&(item.serverPlayback||fleetPosition(item)))
     .map(item=>({value:item.telemetry.external_id,label:vehiclePickerLabel(item)}))
     .sort((a,b)=>a.label.localeCompare(b.label,'ko'));
   const signature=JSON.stringify(options);
@@ -325,7 +326,7 @@ function createMarkerEntry(item,position,{liveOnly=false}={}){
   const marker=L.marker(position,{icon:vehicleIcon(item,liveOnly,false,matchesLiveTarget(item)),zIndexOffset:liveOnly?1000:0}).addTo(map);
   const icon=marker.options.icon;
   const entry={marker,item,liveOnly,labelOnTrip:null,iconKey:icon?.options?`${icon.options.className}|${icon.options.html}`:null};
-  marker.on('click',()=>{if(entry.item.serverPlayback){liveMapFollower.recenter();return}selectVehicle(entry.item)});
+  marker.on('click',()=>selectVehicle(entry.item));
   syncVehicleMapLabel(entry);
   if(item?.telemetry?.external_id)markers.set(item.telemetry.external_id,entry);
   return entry;
@@ -453,7 +454,7 @@ function releaseLiveMarker(){
   const markerState=liveMapFollower.end();
   if(!markerState.markerKey)return;
   const entry=markers.get(markerState.markerKey);
-  if(entry?.liveOnly){map.removeLayer(entry.marker);markers.delete(markerState.markerKey)}
+  if(entry?.liveOnly&&!entry.item?.serverPlayback){map.removeLayer(entry.marker);markers.delete(markerState.markerKey)}
   else if(entry){
     const telemetry=entry.item?.telemetry;
     if(Number.isFinite(telemetry?.latitude)&&Number.isFinite(telemetry?.longitude))entry.marker.setLatLng([telemetry.latitude,telemetry.longitude]);
@@ -609,6 +610,7 @@ function presentedFrameTime(){
 // the vehicle through such gaps by the replay time, labelled "추정 위치".
 let freeReplay=null,freeReplayLoading=null;
 function freeReplayWanted(item){
+  if(item?.serverPlayback)return false;
   return item?.telemetry?.telemetry_source==='RECORDED_GPS'&&item?.tripStatus!=='IN_PROGRESS';
 }
 function ensureFreeReplay(vehicleId){
@@ -911,6 +913,7 @@ window.__operatorCancelMapPick=()=>{tripMapPick=undefined;document.querySelector
 function render(snapshot){
   if(window.__virtualMode)return;
   if(!Array.isArray(snapshot?.vehicles))throw new Error('차량 응답 형식이 올바르지 않습니다.');
+  snapshot={...snapshot,vehicles:withServerPlaybackVehicle(snapshot.vehicles,serverPlaybackItem)};
   latestFleet=snapshot.vehicles;
   renderVehiclePickers(snapshot.vehicles);
   let invalidPositions=0;
@@ -919,7 +922,7 @@ function render(snapshot){
   if(selected&&!snapshot.vehicles.some(item=>item.telemetry?.external_id===selected.telemetry?.external_id))syncLiveViewButton(null);
   for(const item of snapshot.vehicles){
     const pos=fleetPosition(item);
-    if(!pos){invalidPositions++;const invalidEntry=markers.get(item.telemetry?.external_id);if(invalidEntry){map.removeLayer(invalidEntry.marker);markers.delete(item.telemetry.external_id);}continue;}
+    if(!pos){if(!item.serverPlayback)invalidPositions++;const invalidEntry=markers.get(item.telemetry?.external_id);if(invalidEntry){map.removeLayer(invalidEntry.marker);markers.delete(item.telemetry.external_id);}continue;}
     const t=item.telemetry,key=t.external_id;
     let entry=markers.get(key);
     if(!entry)entry=createMarkerEntry(item,pos);
@@ -938,7 +941,7 @@ function render(snapshot){
     entry.marker.setZIndexOffset(liveSelected||selected?.telemetry?.external_id===key?1000:0);
     // Live frames own the selected marker between successful fleet polls.
     if(!isLiveOverride(liveView,key,Date.now())){
-      if(!routeControlsMarker(item)){
+      if(!item.serverPlayback&&!routeControlsMarker(item)){
         const estimate=freeReplayWanted(item)?freeReplayEstimate(item.vehicleId,streamReplayTime(item)):null;
         glideMarker(entry.marker,estimate?.inGap?estimate.latLng:pos,FLEET_POLL_MS);
         setFreeEstimated(entry,Boolean(estimate?.inGap));
@@ -1139,6 +1142,7 @@ async function start(role){
   document.querySelector('#login').hidden=!demoMode;
   telemetrySettings.hidden=false;
   bootstrap=await api('/api/v1/bootstrap');
+  serverPlaybackItem=bootstrap.videoSource?.mode==='server'?createServerPlaybackView(bootstrap.videoSource,new URL(browserReachableUrl(bootstrap.liveViewUrl)).origin).item:null;
   document.querySelector('#trip-panel').hidden=demoMode;
   // Demo mode never loads trips, so the recordings picker has none to offer.
   if(demoMode)renderRecordingTripOptions([]);
@@ -1147,6 +1151,7 @@ async function start(role){
     document.querySelector('#trip-status-message').textContent=['ADMIN','OPERATOR'].includes(role)?uiText('Choose a vehicle and destination.'):'You can review recent trips; an operator or admin can create one.';
   }
   await refresh();
+  if(serverPlaybackItem&&isLiveRecordingTabActive())openLiveView();
   if(!demoMode){
     // BIMS vehicle identities are populated by the fleet snapshot before the assignment list loads.
     void loadTripAssignments().catch(ex=>{document.querySelector('#trip-status-message').textContent=`운행 목록을 불러올 수 없습니다: ${ex.message}`;console.error('[operator trips]',ex)});
@@ -1422,7 +1427,16 @@ window.addEventListener('message',event=>{
     routeMode:currentTripDisplay?.routeMode??null,sameVehicle:String(liveView?.vehicleId)===String(currentTripDisplay?.vehicleId)};
   const position=applyLiveTelemetry(liveView,message,Date.now());
   if(liveView.serverPlayback){
-    if(position)setFreeEstimated(liveMapFollower.update(position),false);
+    if(position){
+      serverPlaybackItem=withPresentedTelemetry(liveView.item,message);
+      liveView.item=serverPlaybackItem;
+      const entry=liveMapFollower.update(position);
+      if(entry){entry.item=serverPlaybackItem;entry.liveOnly=false;syncVehicleMapLabel(entry)}
+      latestFleet=withServerPlaybackVehicle(latestFleet,serverPlaybackItem);
+      renderVehiclePickers(latestFleet);
+      if(selected?.serverPlayback){selected=serverPlaybackItem;renderVehicleDetails(selected);renderVehicleFields(selected)}
+      if(!entry?.listed){dashboard.update(latestFleet);if(entry)entry.listed=true}
+    }
     renderLiveTelemetryStatus();
     return;
   }
@@ -1479,6 +1493,7 @@ function openLiveView(){
   diagnostic.textContent=`Live View origin: ${new URL(liveViewUrl).origin}`;
   if(!window.isSecureContext)diagnostic.textContent+=' — dashboard is not a secure context; open its HTTPS URL';
   liveView=serverPlayback?createServerPlaybackView(bootstrap.videoSource,new URL(liveViewUrl).origin):createLiveView(selected,new URL(liveViewUrl).origin);lastLiveMessage=null;
+  if(serverPlayback&&serverPlaybackItem)liveView.item=serverPlaybackItem;
   liveMapFollower.begin(liveView);
   refreshLiveMarkerIcons();
   updateLiveTitle();

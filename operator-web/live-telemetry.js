@@ -33,12 +33,20 @@ export function createLiveView(item, frameOrigin) {
 export function createServerPlaybackView(source, frameOrigin) {
   const item = {
     serverPlayback: true,
-    vehicleId: source?.vehicleId || 'server',
+    vehicleId: null,
+    vehicleCode: 'SERVER-GPS',
+    vehicleSource: 'SERVER_DATASET',
     tripId: null,
     telemetry: { external_id: 'server:dataset', latitude: null, longitude: null,
       telemetry_source: 'RECORDED_GPS', source_metadata: { recordingSessionId: 'server-dataset' } },
   };
-  return { ...createLiveView(item, frameOrigin), serverPlayback: true };
+  return { ...createLiveView(item, frameOrigin), vehicleId: source?.vehicleId || 'server', serverPlayback: true };
+}
+
+/** Include the dataset vehicle in normal monitoring without registering a DB vehicle. */
+export function withServerPlaybackVehicle(vehicles, item) {
+  if (!item?.serverPlayback) return vehicles;
+  return [...vehicles.filter(vehicle => vehicle.telemetry?.external_id !== item.telemetry.external_id), item];
 }
 
 /**

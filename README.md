@@ -109,11 +109,13 @@ Seeking starts a fresh video/overlay epoch. Loop endpoints exclude the end
 frame; playback restarts after the last frame in the interval is presented.
 
 In the operator dashboard, open **실시간 영상** without selecting a fleet vehicle.
-The recording has its own **서버 영상 · GPS** marker, created at the first valid
-presented GPS fix. It follows the CSV positions, including backward seeks and
-loops. Fleet polling and planned trip routes do not control this marker. If GPS
-is missing or playback stops, it holds the last valid GPS position until the
-view closes. `SERVER_VEHICLE_ID` is only a transport identity shared between
+The recording appears as **서버 영상 · GPS** in the normal-monitoring vehicle
+list and dropdown, with its own map marker created at the first valid presented
+GPS fix. Playback opens automatically when the live-footage tab is active. The
+marker follows the CSV positions, including backward seeks and loops. Fleet
+polling and planned trip routes do not control it. If GPS is missing, playback
+stops, or the preview closes, normal monitoring retains the last valid GPS
+position. No map position is invented before the first GPS fix. `SERVER_VEHICLE_ID` is only a transport identity shared between
 Node and Vision; it does not associate playback with a fleet vehicle or choose
 its location. The default `server` is sufficient. Playback does not create a
 trip or persist interpolated GPS or detections as a real recording session.

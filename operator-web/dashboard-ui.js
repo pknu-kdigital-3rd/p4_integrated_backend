@@ -25,6 +25,7 @@ export const uiText = text => UI_LABELS[text] || text;
 
 /** Korean display names; codes and IDs still identify vehicles in API calls. */
 export function vehicleDisplayName(item) {
+  if (item?.serverPlayback) return '서버 영상 · GPS';
   const identity=String(item?.vehicleCode??item?.externalId??item?.telemetry?.external_id??'');
   const suffix=identity.match(/(?:^|[-_:])(\d+)$/)?.[1];
   const number=String(item?.vehicleId??suffix??'').trim().replace(/^0+(?=\d)/,'');
