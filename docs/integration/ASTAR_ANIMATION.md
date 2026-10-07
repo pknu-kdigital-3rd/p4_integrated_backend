@@ -4,8 +4,15 @@ In the virtual workspace, select an available vehicle and set the origin,
 waypoints, and destination. After the draft is ready, press **A* 탐색 보기**.
 The server recalculates that draft with tracing enabled, then the browser
 replays discovered roads (amber), expanded roads (blue), and the final route
-(green). Pause, replay, stop, and 0.5×/1×/2× controls affect playback only.
-Reduced-motion users see the result immediately.
+(green). Choose 0.1×/0.25×/0.5×/1×/2× speed before starting or during playback.
+At 1×, exploration takes about 20 seconds and the final route takes 5 seconds.
+Pause, replay, stop, and speed controls affect playback only. Reduced-motion
+users initially see the result immediately; pressing replay explicitly starts
+the animation from the beginning at the selected speed.
+
+During zoom transitions, playback pauses and the canvas briefly hides, then
+redraws at the new zoom level. Panning, resizing, and zooming also update paused
+and completed overlays without restarting the search.
 
 The button is for undispatched drafts. Changing the route points, vehicle,
 scenario, road restrictions, or workspace cancels the animation. Stop restores

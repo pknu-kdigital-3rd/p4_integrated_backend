@@ -7,7 +7,7 @@ import { installRoadBrushToolbar } from './road-brush-toolbar.js?v=3';
 import { createBrushHistory } from './road-brush-history.js?v=1';
 import { installRoutePointToolbar } from './route-point-toolbar.js?v=3';
 import { createVirtualRouteMotion } from './virtual-route-motion.js?v=1';
-import { installSearchAnimation } from './astar-animation.js?v=1';
+import { installSearchAnimation } from './astar-animation.js?v=2';
 
 const map = window.__operatorMap;
 const virtualPanel = document.querySelector('#virtual-workspace');
@@ -1587,11 +1587,12 @@ const astarAnimation = installSearchAnimation(map, {
     astarPause.disabled = true;
   },
 });
-function playAstarResult() {
+function playAstarResult({ animate = false } = {}) {
   astarPaused = false; astarPause.textContent = '일시 정지'; astarPause.disabled = false;
   astarAnimation.setSpeed(Number(document.querySelector('#astar-speed').value));
   virtualMapLayers.removeLayer(routeLayerGroup);
-  astarAnimation.start(astarResult);
+  astarAnimation.start(astarResult, { animate });
+  document.querySelector('#astar-replay').disabled = false;
 }
 async function showAstarAnimation() {
   if (astarShow.disabled) return;
@@ -1625,7 +1626,9 @@ astarPause.addEventListener('click', () => {
   astarPaused = !astarPaused; astarAnimation.pause(astarPaused);
   astarPause.textContent = astarPaused ? '계속 재생' : '일시 정지';
 });
-document.querySelector('#astar-replay').addEventListener('click', () => { if (astarResult && astarKey === astarContextKey()) playAstarResult(); });
+document.querySelector('#astar-replay').addEventListener('click', () => {
+  if (astarResult && astarKey === astarContextKey()) playAstarResult({ animate: true });
+});
 document.querySelector('#astar-stop').addEventListener('click', stopAstarAnimation);
 document.querySelector('#astar-speed').addEventListener('change', event => astarAnimation.setSpeed(Number(event.target.value)));
 

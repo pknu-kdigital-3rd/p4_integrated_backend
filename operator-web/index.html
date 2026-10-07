@@ -159,12 +159,12 @@
      </div>
      <div class="astar-controls">
       <button id="astar-show" type="button" disabled>A* 탐색 보기</button>
+      <label for="astar-speed">탐색 재생 속도</label>
+      <select id="astar-speed"><option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
       <div id="astar-playback" hidden>
        <button id="astar-pause" type="button">일시 정지</button>
        <button id="astar-replay" type="button">다시 보기</button>
        <button id="astar-stop" type="button">종료</button>
-       <label for="astar-speed">탐색 재생 속도</label>
-       <select id="astar-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
        <p class="astar-legend"><span class="astar-frontier">● 발견한 도로</span> · <span class="astar-expanded">● 탐색한 도로</span> · <span class="astar-final">● 최종 경로</span></p>
        <p id="astar-status" role="status"></p>
       </div>
@@ -727,7 +727,7 @@
   </script>
   <script src="app.js?v=82" type="module">
   </script>
-  <script src="virtual-dispatch.js?v=58" type="module">
+  <script src="virtual-dispatch.js?v=59" type="module">
   </script>
  </body>
 </html>

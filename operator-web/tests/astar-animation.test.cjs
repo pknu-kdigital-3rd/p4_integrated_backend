@@ -11,13 +11,13 @@ const trace = { edges: { a: [[129, 35], [129.001, 35]] }, events: [
 const route = { coordinates: [[129, 35], [129.001, 35]] };
 test('exploration precedes final route and expanded roads remain expanded', () => {
   const replay = context.createSearchReplay(trace, route);
-  assert.equal(replay.advance(4000).edges.get('a'), 'discovered');
-  let state = replay.advance(4000);
+  assert.equal(replay.advance(10000).edges.get('a'), 'discovered');
+  let state = replay.advance(10000);
   assert.equal(state.edges.get('a'), 'expanded');
   assert.equal(state.routeProgress, 0);
-  state = replay.advance(1000);
+  state = replay.advance(2500);
   assert.equal(state.routeProgress, 0.5);
-  assert.equal(replay.advance(1000).done, true);
+  assert.equal(replay.advance(2500).done, true);
 });
 test('trace processing is bounded per frame and never draws the final route early', () => {
   const replay = context.createSearchReplay({ ...trace, events: Array(100).fill(trace.events[0]) }, route);
@@ -74,7 +74,7 @@ test('stop, pause, hidden-page resume, and invalidation clean up animation resou
   const point = (x, y) => ({ x, y, distanceTo(b) { return Math.hypot(x - b.x, y - b.y); } });
   const mapListeners = new Set();
   const map = { getZoom: () => 10, project: ([lat, lon]) => point(lon * 100, lat * 100),
-    getSize: () => ({ x: 640, y: 480 }), getPixelBounds: () => ({ min: { x: 0, y: 0 } }),
+    getSize: () => ({ x: 640, y: 480 }), latLngToContainerPoint: ([lat, lon]) => point(lon * 100, lat * 100),
     getContainer: () => ({ append() {} }), on: (_, fn) => mapListeners.add(fn), off: (_, fn) => mapListeners.delete(fn) };
   const env = vm.createContext({ document: doc, performance: { now: () => 0 },
     window: { devicePixelRatio: 1, matchMedia: () => ({ matches: false }) },
@@ -94,4 +94,110 @@ test('stop, pause, hidden-page resume, and invalidation clean up animation resou
   assert.equal(invalidated, true); assert.equal(mapListeners.size, 0); assert.equal(listeners.size, 0);
   assert.ok(removed >= 2);
   animation.stop(); assert.equal(callbacks.size, 0);
+});
+
+function animationFixture(reducedMotion = false) {
+  const callbacks = new Map(), handlers = new Map(), progress = [], draws = [];
+  let frameId = 0, zoom = 1, offset = { x: 0, y: 0 }, completed = 0;
+  const point = (x, y) => ({ x, y, distanceTo(b) { return Math.hypot(x - b.x, y - b.y); } });
+  const project = ([lat, lon]) => point(lon * 2 ** zoom, lat * 2 ** zoom);
+  const canvas = { style: {}, setAttribute() {}, remove() {}, getContext: () => ({
+    setTransform() {}, beginPath() {}, moveTo(x, y) { draws.push([x, y]); }, lineTo() {}, stroke() {},
+  }) };
+  const map = { getZoom: () => zoom, project,
+    latLngToContainerPoint: coords => { const p = project(coords); return point(p.x - offset.x, p.y - offset.y); },
+    getSize: () => ({ x: 640, y: 480 }), getContainer: () => ({ append() {} }),
+    on: (names, fn) => names.split(' ').forEach(name => handlers.set(name, fn)),
+    off: names => names.split(' ').forEach(name => handlers.delete(name)),
+  };
+  const env = vm.createContext({ performance: { now: () => 0 },
+    document: { hidden: false, createElement: () => canvas, addEventListener() {}, removeEventListener() {} },
+    window: { devicePixelRatio: 1, matchMedia: () => ({ matches: reducedMotion }) },
+    requestAnimationFrame: fn => { callbacks.set(++frameId, fn); return frameId; },
+    cancelAnimationFrame: id => callbacks.delete(id),
+  });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../astar-animation.js'), 'utf8').replaceAll('export function', 'function'), env);
+  const animation = env.installSearchAnimation(map, {
+    onProgress: state => progress.push({ ...state }), onDone: () => completed++, isCurrent: () => true,
+  });
+  return { animation, canvas, progress, draws, handlers, callbacks,
+    view(nextZoom, nextOffset) { zoom = nextZoom; offset = nextOffset; },
+    completed: () => completed,
+    tick(time) { const [id, fn] = callbacks.entries().next().value; callbacks.delete(id); fn(time); },
+  };
+}
+
+test('completed and paused animations restart, including an explicit reduced-motion replay', () => {
+  const f = animationFixture(true), result = { searchTrace: trace, routeGeojson: route };
+  f.animation.start(result);
+  assert.equal(f.completed(), 1);
+  assert.equal(f.callbacks.size, 0);
+  f.animation.start(result, { animate: true });
+  assert.equal(f.progress.at(-1).index, 0);
+  assert.equal(f.progress.at(-1).routeProgress, 0);
+  f.animation.setSpeed(2);
+  f.tick(0);
+  for (let time = 100; time <= 12500; time += 100) f.tick(time);
+  assert.equal(f.completed(), 2);
+  f.animation.start(result, { animate: true });
+  f.animation.pause(true);
+  assert.equal(f.callbacks.size, 0);
+  f.animation.start(result, { animate: true });
+  assert.equal(f.callbacks.size, 1);
+  assert.equal(f.progress.at(-1).done, false);
+});
+
+test('zoom and pan realign a paused overlay without advancing playback', () => {
+  const f = animationFixture(true);
+  f.animation.start({ searchTrace: trace, routeGeojson: route });
+  f.animation.pause(true);
+  f.handlers.get('zoomstart')();
+  assert.equal(f.canvas.style.visibility, 'hidden');
+  f.view(2, { x: 40, y: 20 });
+  const before = f.draws.length;
+  f.handlers.get('move')();
+  assert.equal(f.draws.length, before);
+  f.handlers.get('zoomend')();
+  assert.equal(f.canvas.style.visibility, '');
+  assert.deepEqual(f.draws.at(-1), [129 * 4 - 40, 35 * 4 - 20]);
+  f.view(2, { x: 50, y: 30 });
+  f.handlers.get('move')();
+  assert.deepEqual(f.draws.at(-1), [129 * 4 - 50, 35 * 4 - 30]);
+  assert.equal(f.progress.length, 1);
+  f.animation.stop();
+  assert.equal(f.handlers.size, 0);
+});
+
+test('speed is available before starting and replay applies it while resetting pause', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
+  assert.ok(html.indexOf('id="astar-speed"') < html.indexOf('id="astar-playback" hidden'));
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { disabled: false, value: '0.25',
+      addEventListener(name, fn) { this[name] = fn; } });
+    return elements.get(id);
+  };
+  const starts = [], speeds = [];
+  const source = fs.readFileSync(path.join(__dirname, '../virtual-dispatch.js'), 'utf8');
+  const env = vm.createContext({ AbortController, document: { querySelector: element }, map: {},
+    mode: 'virtual', modeGeneration: 1, scenarioId: 's', scenarioRevision: 2, selectedVehicleId: 'v',
+    draft: { draftId: 'd', selectedVehicleId: 'v', restrictionRevision: 2 }, points: {}, dispatchSubmitting: false,
+    routeOperations: new Set(), setInterval: () => 1, clearInterval() {}, setStatus() {},
+    api: async () => ({ searchTrace: trace, routeGeojson: route }),
+    virtualMapLayers: { removeLayer() {}, addLayer() {} }, routeLayerGroup: {},
+    installSearchAnimation: () => ({ start: (result, options) => starts.push({ result, options }),
+      setSpeed: speed => speeds.push(speed), pause() {}, stop() {} }),
+  });
+  vm.runInContext(source.slice(source.indexOf('const astarShow ='), source.indexOf('\nasync function generateRequest')), env);
+  await element('#astar-show').click();
+  assert.equal(element('#astar-replay').disabled, false);
+  element('#astar-pause').click();
+  element('#astar-speed').value = '0.1';
+  element('#astar-replay').click();
+  assert.equal(starts.length, 2);
+  assert.equal(starts[1].result, starts[0].result);
+  assert.equal(starts[1].options.animate, true);
+  assert.equal(speeds.at(-1), 0.1);
+  assert.equal(element('#astar-pause').textContent, '일시 정지');
+  assert.equal(element('#astar-pause').disabled, false);
 });
