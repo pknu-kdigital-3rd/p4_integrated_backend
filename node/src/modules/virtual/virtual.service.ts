@@ -626,7 +626,8 @@ export const virtualService = {
                 origin: draft.origin as Coordinate, destination: draft.destination as Coordinate,
                 waypoints: draft.waypoints as WaypointsBody["waypoints"],
                 vehicleProfile: requestedProfile.vehicleProfile, ...overlay, includeSearchTrace: true,
-            }, 8000, signal);
+                searchAlgorithm: input.algorithm ?? "astar",
+            }, 60000, signal);
         } catch (error) {
             if (!signal?.aborted) await checkCurrent();
             throw error;

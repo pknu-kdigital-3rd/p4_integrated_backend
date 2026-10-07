@@ -11,6 +11,16 @@ import math
 import os
 
 
+def _search_priority(algorithm, heuristic):
+    if algorithm == "astar":
+        return lambda node, cost: cost + heuristic(node)
+    if algorithm == "dijkstra":
+        return lambda node, cost: cost
+    if algorithm == "greedy":
+        return lambda node, cost: heuristic(node)
+    raise ValueError(f"Unknown search algorithm: {algorithm}")
+
+
 def haversine_m(lat1, lon1, lat2, lon2):
     R = 6371000.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -759,7 +769,7 @@ class OsmnxGraph:
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None,
-              initial_incoming_ways=None, stats=None, trace=None):
+              initial_incoming_ways=None, stats=None, trace=None, algorithm="astar"):
         # Hand-rolled edge-state A* instead of nx.astar_path. A node-only
         # search can discard a longer arrival at a junction even though its
         # incoming way permits a turn that the shorter arrival forbids. Keep
@@ -795,7 +805,9 @@ class OsmnxGraph:
         start_ways = tuple(initial_incoming_ways) if initial_incoming_ways and start_id in turns_by_via else None
         start_state = (start_id, start_ways)
         push_order = count()
-        open_set = [(h(start_id), 0.0, next(push_order), start_state)]
+        priority = _search_priority(algorithm, h)
+        settled = set() if algorithm == "greedy" else None
+        open_set = [(priority(start_id, 0.0), 0.0, next(push_order), start_state)]
         # came_from[state] = (previous_state, dist_m, edge_data,
         #                     way_ids_of_this_edge, edge_key, edge_time)
         came_from = {}
@@ -816,6 +828,10 @@ class OsmnxGraph:
                 return None
             _f, g, _order, state = heapq.heappop(open_set)
             current, incoming_osmids = state
+            if settled is not None:
+                if state in settled:
+                    continue
+                settled.add(state)
             if g > g_score.get(state, float("inf")):
                 stale_pops += 1
                 continue
@@ -856,10 +872,12 @@ class OsmnxGraph:
                 edge_time = times[profile_index] * penalty
                 tentative = g + edge_time
                 next_state = (neighbor, way_ids if neighbor in turns_by_via else None)
+                if settled is not None and next_state in settled:
+                    continue
                 if tentative < g_score.get(next_state, float("inf")):
                     g_score[next_state] = tentative
                     came_from[next_state] = (state, attrs.get("length", 0), attrs, way_ids, edge_key, edge_time)
-                    heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
+                    heapq.heappush(open_set, (priority(neighbor, tentative), tentative, next(push_order), next_state))
                     pushes += 1
                     if trace is not None:
                         if trace.truncated:
@@ -1085,7 +1103,7 @@ class PurePythonGraph:
         return {"type": "LineString", "coordinates": [[point[1], point[0]] for point in points]}
 
     def route(self, start_id, goal_id, truck_class=None, blocked_edge_ids=None, penalty_edge_factors=None, avoid_initial_reverse_of_edge_id=None, cancel_event=None,
-              initial_incoming_ways=None, stats=None, trace=None):
+              initial_incoming_ways=None, stats=None, trace=None, algorithm="astar"):
         import heapq
         from itertools import count
         coords = self.coords
@@ -1115,7 +1133,9 @@ class PurePythonGraph:
         start_ways = tuple(initial_incoming_ways) if initial_incoming_ways and start_id in turns_by_via else None
         start_state = (start_id, start_ways)
         push_order = count()
-        open_set = [(h(start_id), 0.0, next(push_order), start_state)]
+        priority = _search_priority(algorithm, h)
+        settled = set() if algorithm == "greedy" else None
+        open_set = [(priority(start_id, 0.0), 0.0, next(push_order), start_state)]
         # came_from[state] stores (previous_state, dist_m,
         # geometry_of_this_edge, way_id_of_this_edge, edge_time) so we can
         # stitch the real road curve and preserve turn context.
@@ -1137,6 +1157,10 @@ class PurePythonGraph:
                 return None
             _f, g, _order, state = heapq.heappop(open_set)
             current, incoming_ways = state
+            if settled is not None:
+                if state in settled:
+                    continue
+                settled.add(state)
             if g > g_score.get(state, float("inf")):
                 stale_pops += 1
                 continue
@@ -1170,10 +1194,12 @@ class PurePythonGraph:
                 edge_time = times[profile_index] * penalty
                 tentative = g + edge_time
                 next_state = (neighbor, way_ids if neighbor in turns_by_via else None)
+                if settled is not None and next_state in settled:
+                    continue
                 if tentative < g_score.get(next_state, float("inf")):
                     g_score[next_state] = tentative
                     came_from[next_state] = (state, dist_m, geom, wid, edge_time)
-                    heapq.heappush(open_set, (tentative + h(neighbor), tentative, next(push_order), next_state))
+                    heapq.heappush(open_set, (priority(neighbor, tentative), tentative, next(push_order), next_state))
                     pushes += 1
                     if trace is not None:
                         if trace.truncated:

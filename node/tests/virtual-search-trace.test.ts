@@ -42,12 +42,23 @@ beforeEach(() => {
 });
 
 describe("on-demand virtual search trace", () => {
+    it.each(["astar", "dijkstra", "greedy"] as const)("forwards %s for animation only", async algorithm => {
+        await virtualService.searchTrace(1n, { ...input, algorithm });
+        expect(mocks.route).toHaveBeenCalledWith(expect.objectContaining({ searchAlgorithm: algorithm,
+            includeSearchTrace: true }), 60000, undefined);
+    });
+    it("rejects unknown algorithms at the API boundary", async () => {
+        const response = await request(app()).post("/virtual/scenarios/1/routes/search-trace")
+            .set("x-test-role", "OPERATOR").send({ ...input, algorithm: "unknown" });
+        expect(response.status).toBe(400);
+        expect(mocks.route).not.toHaveBeenCalled();
+    });
     it("uses the saved draft profile and performs only reads", async () => {
         const result = await virtualService.searchTrace(1n, input);
         expect(result).toMatchObject({ draftId: "4", restrictionRevision: 2, searchTrace: {} });
         expect(mocks.route).toHaveBeenCalledWith(expect.objectContaining({
-            includeSearchTrace: true, vehicleProfile: "semi", waypoints: [],
-        }), 8000, undefined);
+            includeSearchTrace: true, vehicleProfile: "semi", waypoints: [], searchAlgorithm: "astar",
+        }), 60000, undefined);
         // The mock database intentionally exposes no create/update/upsert operations.
         expect(mocks.scenario).toHaveBeenCalledTimes(2);
     });

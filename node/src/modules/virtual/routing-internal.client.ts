@@ -3,6 +3,7 @@ import { AppError } from "../../common/errors/app-error.ts";
 import type { Coordinate, WaypointInput } from "./virtual.schema.ts";
 
 export type SearchTrace = {
+    algorithm?: "astar" | "dijkstra" | "greedy";
     events: Array<{ kind: "discovered" | "expanded"; stateId: string; legIndex: number; edgeId: string | null; g: number; h: number }>;
     edges: Record<string, number[][]>;
     counts: { discovered: number; expanded: number };
@@ -32,6 +33,7 @@ export type InternalRoadMatch = {
 };
 
 type RouteInput = {
+    searchAlgorithm?: "astar" | "dijkstra" | "greedy";
     includeSearchTrace?: boolean;
     origin: Coordinate;
     destination: Coordinate;

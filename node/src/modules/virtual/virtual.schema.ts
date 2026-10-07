@@ -54,6 +54,7 @@ export const routePreviewSchema = z.object({
 });
 
 export const searchTraceSchema = z.object({
+    algorithm: z.enum(["astar", "dijkstra", "greedy"]).optional(),
     draftId: z.string().regex(/^[1-9]\d*$/),
     expectedRestrictionRevision: z.number().int().nonnegative(),
 });

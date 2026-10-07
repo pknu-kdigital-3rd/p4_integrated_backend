@@ -217,17 +217,17 @@ test('speed is available before starting and replay applies it while resetting p
   assert.ok(html.indexOf('id="astar-speed"') < html.indexOf('id="astar-playback" hidden'));
   const elements = new Map();
   const element = id => {
-    if (!elements.has(id)) elements.set(id, { disabled: false, value: '0.25',
+    if (!elements.has(id)) elements.set(id, { disabled: false, value: id === '#search-algorithm' ? 'astar' : '0.25',
       addEventListener(name, fn) { this[name] = fn; } });
     return elements.get(id);
   };
-  const starts = [], speeds = [];
+  const starts = [], speeds = [], requests = [];
   const source = fs.readFileSync(path.join(__dirname, '../virtual-dispatch.js'), 'utf8');
   const env = vm.createContext({ AbortController, document: { querySelector: element }, map: {},
     mode: 'virtual', modeGeneration: 1, scenarioId: 's', scenarioRevision: 2, selectedVehicleId: 'v',
     draft: { draftId: 'd', selectedVehicleId: 'v', restrictionRevision: 2 }, points: {}, dispatchSubmitting: false,
     routeOperations: new Set(), setInterval: () => 1, clearInterval() {}, setStatus() {},
-    api: async () => ({ searchTrace: trace, routeGeojson: route }),
+    api: async (_url, options) => { requests.push(JSON.parse(options.body)); return { searchTrace: trace, routeGeojson: route }; },
     virtualMapLayers: { removeLayer() {}, addLayer() {} }, routeLayerGroup: {},
     installSearchAnimation: () => ({ start: (result, options) => starts.push({ result, options }),
       setSpeed: speed => speeds.push(speed), pause() {}, stop() {} }),
@@ -244,4 +244,13 @@ test('speed is available before starting and replay applies it while resetting p
   assert.equal(speeds.at(-1), 0.1);
   assert.equal(element('#astar-pause').textContent, '일시 정지');
   assert.equal(element('#astar-pause').disabled, false);
+  element('#search-algorithm').value = 'dijkstra';
+  element('#search-algorithm').change();
+  assert.equal(element('#astar-playback').hidden, true);
+  await element('#astar-show').click();
+  assert.equal(requests.at(-1).algorithm, 'dijkstra');
+  element('#search-algorithm').value = 'greedy';
+  element('#search-algorithm').change();
+  await element('#astar-show').click();
+  assert.equal(requests.at(-1).algorithm, 'greedy');
 });

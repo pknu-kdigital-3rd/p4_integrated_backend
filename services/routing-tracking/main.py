@@ -265,6 +265,7 @@ class InternalRouteRequest(BaseModel):
     destination: InternalCoordinate
     waypoints: list[InternalWaypoint] = []
     includeSearchTrace: bool = False
+    searchAlgorithm: Literal["astar", "dijkstra", "greedy"] = "astar"
     vehicleProfile: str = "car"
     blockedEdgeIds: list[str] = []
     # Geometry is sent alongside persisted edge IDs so an existing restriction
@@ -359,7 +360,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
     profile = None if req.vehicleProfile in ("", "car", "unrestricted") else req.vehicleProfile
     if profile is not None and profile not in TRUCK_PROFILES:
         raise HTTPException(status_code=422, detail=f"Unknown vehicle profile: {profile}")
-    trace = SearchTrace() if req.includeSearchTrace else None
+    trace = SearchTrace(algorithm=req.searchAlgorithm) if req.includeSearchTrace else None
     stops = [req.origin, *req.waypoints, req.destination]
     route_coords: list[list[float]] = []
     directed_itinerary: list[dict] = []
@@ -436,7 +437,7 @@ def _calculate_internal_route(req: InternalRouteRequest, cancel_event=None, timi
             # previous leg arrived on.
             initial_incoming_ways=incoming_ways,
             stats=leg_stats,
-            **({"trace": trace} if trace is not None else {}),
+            **({"trace": trace, "algorithm": req.searchAlgorithm} if trace is not None else {}),
         )
         timing["legs"].append({
             "stopIndex": index,

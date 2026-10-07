@@ -169,7 +169,7 @@ registry.registerPath({
 
 registry.registerPath({
     method: "post", path: "/api/v1/virtual/scenarios/{scenarioId}/routes/search-trace",
-    tags: ["Virtual Dispatch"], summary: "Replay the A* search for an undispatched route draft",
+    tags: ["Virtual Dispatch"], summary: "Replay A*, Dijkstra, or greedy best-first search for an undispatched route draft",
     security: bearer,
     request: { params: scenarioIdParamSchema, body: { content: { "application/json": { schema: searchTraceSchema } } } },
     responses: {

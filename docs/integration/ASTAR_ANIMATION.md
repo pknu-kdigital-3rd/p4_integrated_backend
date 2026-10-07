@@ -1,8 +1,9 @@
 # Virtual route search replay
 
 In the virtual workspace, select an available vehicle and set the origin,
-waypoints, and destination. After the draft is ready, press **A* 탐색 보기**.
-The server recalculates that draft with tracing enabled, then the browser
+waypoints, and destination. After the draft is ready, choose **A***, **Dijkstra**,
+or **Greedy best-first**, then press **탐색 보기**.
+The server recalculates that draft with the selected algorithm and tracing enabled, then the browser
 replays discovered roads (amber), expanded roads (blue), and the final route
 (green). Choose 0.1×/0.25×/0.5×/1×/2× speed before starting or during playback.
 At 1×, exploration takes about 20 seconds and the final route takes 5 seconds.
@@ -22,17 +23,27 @@ and reused until the zoom changes.
 
 The button is for undispatched drafts. Changing the route points, vehicle,
 scenario, road restrictions, or workspace cancels the animation. Stop restores
-the normal preview line. No draft, trip, or vehicle state is written by tracing.
+the normal preview line. Changing the algorithm cancels the current animation
+and requires a new trace. No draft, trip, or vehicle state is written by tracing.
+
+A* prioritizes `g + h`, Dijkstra prioritizes `g`, and greedy best-first prioritizes
+`h` and does not reopen expanded states. All use directed roads, travel-time
+costs, vehicle profiles, closures, penalties, and incoming-way turn context.
+Greedy may produce a longer route. These are comparison animations; dispatch
+continues to use the saved A* preview.
 
 ## API and limits
 
 `POST /api/v1/virtual/scenarios/:scenarioId/routes/search-trace` requires an
-ADMIN or OPERATOR token and `{draftId, expectedRestrictionRevision}`. The
+ADMIN or OPERATOR token and `{draftId, expectedRestrictionRevision, algorithm?}`.
+`algorithm` accepts `astar` (default), `dijkstra`, or `greedy`. The
 response uses the normal `{data: ...}` envelope and contains the recalculated
 route, draft ID, restriction revision, and `searchTrace`.
 
 The internal route request accepts optional `includeSearchTrace` (default
-false). Trace events are ordered successful frontier updates (`discovered`)
+false) and `searchAlgorithm` (default `astar`, applied only to trace requests).
+Trace metadata includes `algorithm`. Animation requests allow up to 60 seconds
+for routing. Trace events are ordered successful frontier updates (`discovered`)
 and non-stale heap expansions (`expanded`), including the destination.
 Each event includes its edge-state ID, zero-based waypoint-leg index, edge
 reference, and `g`/`h` travel-time costs in seconds. State IDs preserve incoming
@@ -41,7 +52,7 @@ OSM ways so restricted turns do not collapse into a node-only search.
 order. Counts cover the whole search, including events omitted by the budget.
 
 Collection stops at 100,000 events or 400,000 geometry vertices across all legs,
-but A* continues to completion. `truncated` marks a partial exploration replay;
+but the selected search continues to completion. `truncated` marks a partial exploration replay;
 the final route remains complete. Normal routing does not collect traces.
 `ROUTE_NOT_FOUND` includes the partial trace in error details. Obsolete graph
 versions, restriction revisions, expired drafts, and dispatched drafts are

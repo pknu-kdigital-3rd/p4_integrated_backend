@@ -158,7 +158,10 @@
       </button>
      </div>
      <div class="astar-controls">
-      <button id="astar-show" type="button" disabled>A* 탐색 보기</button>
+      <label for="search-algorithm">탐색 알고리즘</label>
+      <select id="search-algorithm"><option value="astar">A*</option><option value="dijkstra">Dijkstra</option><option value="greedy">Greedy best-first</option></select>
+      <button id="astar-show" type="button" disabled>탐색 보기</button>
+      <p class="astar-legend">알고리즘 비교용 재생입니다. Greedy는 최단 경로를 보장하지 않습니다. 배차 경로는 기존 A* 미리보기를 사용합니다.</p>
       <label for="astar-speed">탐색 재생 속도</label>
       <select id="astar-speed"><option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
       <div id="astar-playback" hidden>
@@ -727,7 +730,7 @@
   </script>
   <script src="app.js?v=82" type="module">
   </script>
-  <script src="virtual-dispatch.js?v=60" type="module">
+  <script src="virtual-dispatch.js?v=61" type="module">
   </script>
  </body>
 </html>

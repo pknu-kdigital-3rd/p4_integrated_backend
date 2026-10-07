@@ -1557,10 +1557,14 @@ const astarShow = document.querySelector('#astar-show');
 const astarPlayback = document.querySelector('#astar-playback');
 const astarStatus = document.querySelector('#astar-status');
 const astarPause = document.querySelector('#astar-pause');
+const searchAlgorithm = document.querySelector('#search-algorithm');
+function searchAlgorithmLabel() {
+  return { astar: 'A*', dijkstra: 'Dijkstra', greedy: 'Greedy best-first' }[searchAlgorithm.value] || 'A*';
+}
 let astarController = null, astarResult = null, astarKey = '', astarWatcher = null, astarPaused = false;
 function astarContextKey() {
   return JSON.stringify([mode, modeGeneration, scenarioId, scenarioRevision, selectedVehicleId,
-    draft?.draftId, points, dispatchSubmitting]);
+    draft?.draftId, points, dispatchSubmitting, searchAlgorithm.value]);
 }
 function syncAstarButton() {
   astarShow.disabled = mode !== 'virtual' || !draft || dispatchSubmitting || routeOperations.size > 0 || Boolean(astarKey)
@@ -1578,8 +1582,8 @@ const astarAnimation = installSearchAnimation(map, {
   onProgress(state, truncated) {
     const partial = truncated ? ' · 일부 탐색만 표시' : '';
     astarStatus.textContent = state.index < state.total
-      ? `A* 탐색 ${state.index.toLocaleString()} / ${state.total.toLocaleString()}${partial}`
-      : state.done ? `${state.hasRoute ? '경로 탐색 완료' : '경로를 찾지 못했습니다'}${partial}`
+      ? `${searchAlgorithmLabel()} 탐색 ${state.index.toLocaleString()} / ${state.total.toLocaleString()}${partial}`
+      : state.done ? `${searchAlgorithmLabel()} · ${state.hasRoute ? '경로 탐색 완료' : '경로를 찾지 못했습니다'}${partial}`
       : `최종 경로 그리는 중 ${Math.round(state.routeProgress * 100)}%${partial}`;
   },
   onDone(completed) {
@@ -1599,11 +1603,12 @@ async function showAstarAnimation() {
   const controller = new AbortController(); astarController = controller;
   astarKey = astarContextKey(); astarPlayback.hidden = false;
   astarPause.disabled = true; document.querySelector('#astar-replay').disabled = true;
-  astarStatus.textContent = 'A* 탐색을 계산하는 중…'; syncAstarButton();
+  astarStatus.textContent = '탐색을 계산하는 중…'; syncAstarButton();
   astarWatcher = setInterval(() => { if (astarKey !== astarContextKey()) stopAstarAnimation(); }, 200);
   try {
     const result = await api(`/api/v1/virtual/scenarios/${scenarioId}/routes/search-trace`, {
-      method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), expectedRestrictionRevision: scenarioRevision }), signal: controller.signal,
+      method: 'POST', body: JSON.stringify({ draftId: String(draft.draftId), expectedRestrictionRevision: scenarioRevision,
+        algorithm: document.querySelector('#search-algorithm')?.value || 'astar' }), signal: controller.signal,
     });
     if (controller.signal.aborted || astarController !== controller) return;
     if (astarKey !== astarContextKey()) { stopAstarAnimation(); return; }
@@ -1631,6 +1636,7 @@ document.querySelector('#astar-replay').addEventListener('click', () => {
 });
 document.querySelector('#astar-stop').addEventListener('click', stopAstarAnimation);
 document.querySelector('#astar-speed').addEventListener('change', event => astarAnimation.setSpeed(Number(event.target.value)));
+searchAlgorithm.addEventListener('change', stopAstarAnimation);
 
 async function generateRequest() {
   if (!draft || dispatchSubmitting) return;

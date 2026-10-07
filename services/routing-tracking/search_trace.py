@@ -2,7 +2,8 @@
 
 
 class SearchTrace:
-    def __init__(self, max_events=100000, max_vertices=400000):
+    def __init__(self, max_events=100000, max_vertices=400000, algorithm="astar"):
+        self.algorithm = algorithm
         self.max_events = max_events
         self.max_vertices = max_vertices
         self.events = []
@@ -35,5 +36,5 @@ class SearchTrace:
                             "g": g, "h": h})
 
     def snapshot(self):
-        return {"events": self.events, "edges": self.edges,
+        return {"algorithm": self.algorithm, "events": self.events, "edges": self.edges,
                 "counts": dict(self.counts), "truncated": self.truncated}

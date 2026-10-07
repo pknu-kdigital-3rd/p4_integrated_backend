@@ -8,10 +8,10 @@ from search_trace import SearchTrace
 import main
 
 
-def make_graph(backend):
-    coords = {1: (35, 129), 2: (35, 129.001), 3: (35.001, 129.001), 4: (35, 129.002)}
+def make_graph(backend, coords=None, roads=None):
+    coords = coords or {1: (35, 129), 2: (35, 129.001), 3: (35.001, 129.001), 4: (35, 129.002)}
     # Direct continuation 10 -> 30 is forbidden, preserving edge-state context.
-    roads = [(1, 2, 100, 10), (1, 2, 120, 11), (2, 4, 100, 30), (2, 3, 150, 20), (3, 4, 150, 21)]
+    roads = roads or [(1, 2, 100, 10), (1, 2, 120, 11), (2, 4, 100, 30), (2, 3, 150, 20), (3, 4, 150, 21)]
     graph = object.__new__(backend)
     graph.turn_restrictions = {(10, 2, 30)}
     if backend is PurePythonGraph:
@@ -35,7 +35,38 @@ def make_graph(backend):
 
 
 class SearchTraceTests(unittest.TestCase):
+    def test_selected_algorithm_changes_actual_search_and_greedy_can_be_longer(self):
+        coords = {1: (35, 129), 2: (35, 129.019), 3: (35.001, 129), 4: (35, 129.02)}
+        roads = [(1, 2, 3000, 10), (2, 4, 100, 11), (1, 3, 120, 20), (3, 4, 2000, 21)]
+        for backend in (PurePythonGraph, OsmnxGraph):
+            graph = make_graph(backend, coords, roads)
+            results = {}
+            for algorithm in ("astar", "dijkstra", "greedy"):
+                trace = SearchTrace(algorithm=algorithm)
+                results[algorithm] = graph.route(1, 4, algorithm=algorithm, trace=trace)
+                expanded = [e["stateId"].split("/")[0] for e in trace.events if e["kind"] == "expanded"]
+                self.assertEqual(expanded[1], "2" if algorithm == "greedy" else "3")
+                self.assertEqual(trace.snapshot()["algorithm"], algorithm)
+            self.assertEqual(results["astar"].time_s, results["dijkstra"].time_s)
+            self.assertGreater(results["greedy"].time_s, results["dijkstra"].time_s)
+
+    def test_algorithm_requests_and_waypoint_trace_metadata(self):
+        graph = make_graph(PurePythonGraph)
+        with patch.object(main, "graph", graph), patch.object(main, "_graph_version", return_value="test"):
+            for algorithm in ("astar", "dijkstra", "greedy"):
+                req = main.InternalRouteRequest(origin={"lat": 35, "lon": 129},
+                    destination={"lat": 35, "lon": 129.002}, waypoints=[{"lat": 35, "lon": 129.001}],
+                    includeSearchTrace=True, searchAlgorithm=algorithm)
+                result = main._calculate_internal_route(req)
+                self.assertEqual(result["searchTrace"]["algorithm"], algorithm)
+                self.assertEqual({e["legIndex"] for e in result["searchTrace"]["events"]}, {0, 1})
+        from pydantic import ValidationError
+        with self.assertRaises(ValidationError):
+            main.InternalRouteRequest(origin={"lat": 35, "lon": 129},
+                destination={"lat": 35, "lon": 129.002}, searchAlgorithm="unknown")
+
     def test_trace_does_not_change_route_with_turns_parallel_edges_overlays_or_profiles(self):
+        # Default requests retain the original A* behavior.
         for backend in (PurePythonGraph, OsmnxGraph):
             graph = make_graph(backend)
             for options in ({}, {"truck_class": "semi"}, {"blocked_edge_ids": ["1:2:11"]},
@@ -60,6 +91,23 @@ class SearchTraceTests(unittest.TestCase):
                 self.assertTrue(trace.truncated)
                 self.assertLessEqual(len(trace.events), trace.max_events)
                 self.assertLessEqual(trace.vertices, trace.max_vertices)
+
+    def test_all_algorithms_keep_constraints_after_trace_truncation(self):
+        for backend in (PurePythonGraph, OsmnxGraph):
+            for algorithm in ("astar", "dijkstra", "greedy"):
+                graph = make_graph(backend)
+                options = {"algorithm": algorithm, "truck_class": "semi",
+                           "blocked_edge_ids": ["1:2:11"], "penalty_edge_factors": {"2:3:20": 4}}
+                trace = SearchTrace(max_events=2, algorithm=algorithm)
+                normal = graph.route(1, 4, **options)
+                observed = graph.route(1, 4, trace=trace, **options)
+                self.assertIsNotNone(observed)
+                self.assertEqual(normal.edge_ids, observed.edge_ids)
+                self.assertEqual(normal.time_s, observed.time_s)
+                # The remaining direct turn (way 10 -> way 30) is forbidden.
+                self.assertIn([35.001, 129.001], observed.coords)
+                self.assertTrue(trace.truncated)
+                self.assertEqual(len(trace.events), 2)
 
     def test_cancel_and_unreachable(self):
         for backend in (PurePythonGraph, OsmnxGraph):
