@@ -1,13 +1,14 @@
 # ngrok setup for the Docker deployment
 
-Run ngrok on the Docker host where the project's published ports are reachable:
+The Docker ingress serves the dashboard and Vision preview through one domain:
 
-- `39001`: operator dashboard.
-- `39002`: Vision inference and live preview.
+- `/operator/`: operator dashboard and Node APIs.
+- `/live/`: Vision inference page and preview scripts.
+- `/ws/playback`: Vision video and synchronized telemetry WebSocket.
 
-The current Docker Nginx configuration uses HTTPS on both ports. ngrok can
-connect to those endpoints using their existing self-signed certificates.
-Visitors receive ngrok's publicly trusted HTTPS certificate.
+Run ngrok on the Docker host where HTTPS port `39001` is reachable. The existing
+self-signed local certificate is supported; visitors receive ngrok's trusted
+HTTPS certificate. Port `39002` remains available for direct LAN preview access.
 
 ## 1. Save the ngrok auth token
 
@@ -21,112 +22,104 @@ ngrok config check
 The token is saved in ngrok's configuration. See the
 [ngrok CLI documentation](https://ngrok.com/docs/gateway/agent/cli).
 
-## 2. Test the dashboard tunnel
+## 2. Configure the project's public URLs
+
+Add these assignments at the end of `env.local`. This example uses the assigned
+domain `henchman-prescribe-supermom.ngrok-free.dev`; substitute your account's
+domain if different, from [ngrok Domains](https://dashboard.ngrok.com/domains).
 
 ```bash
-ngrok http https://localhost:39001 --upstream-tls-verify=false
+export PUBLIC_OPERATOR_URL=https://henchman-prescribe-supermom.ngrok-free.dev
+export VISION_PUBLIC_BASE_URL=https://henchman-prescribe-supermom.ngrok-free.dev/live
+export LIVE_VIEW_URL=https://henchman-prescribe-supermom.ngrok-free.dev/live/
+export LIVE_VIEW_PARENT_ORIGINS=https://henchman-prescribe-supermom.ngrok-free.dev
 ```
 
-Keep the terminal open. ngrok displays a public HTTPS URL. Append `/operator/`
-to that URL to open the dashboard.
-
-`--upstream-tls-verify=false` allows the agent to connect to the local
-self-signed HTTPS endpoint. Browser-facing HTTPS still uses ngrok's trusted
-certificate.
-
-This tunnel exposes the dashboard. The embedded preview also requires its
-own reachable URL with the current Docker routing.
-
-## 3. Start dashboard and preview tunnels
-
-The current Docker configuration requires two different public URLs. Use
-domains available in your ngrok account; the names below are placeholders.
-
-In the first terminal:
+Keep the trailing `/` on `LIVE_VIEW_URL` so the preview's relative scripts load
+under `/live/`. The parent origin has no path. For optional LAN dashboard access:
 
 ```bash
-ngrok http https://localhost:39001 \
-  --url https://YOUR-OPERATOR-DOMAIN \
-  --upstream-tls-verify=false
+export LIVE_VIEW_PARENT_ORIGINS=https://henchman-prescribe-supermom.ngrok-free.dev,https://10.174.96.119:39001
 ```
 
-In the second terminal:
+## 3. Apply the updated routing and environment
 
-```bash
-ngrok http https://localhost:39002 \
-  --url https://YOUR-VISION-DOMAIN \
-  --upstream-tls-verify=false
-```
-
-Keep both processes running. Video playback uses WebSocket through the Vision
-tunnel; server dataset playback does not require TURN ports.
-
-## 4. Configure the project's public URLs
-
-Add these assignments to `env.local`, replacing both domain placeholders:
-
-```bash
-export PUBLIC_OPERATOR_URL=https://YOUR-OPERATOR-DOMAIN
-export VISION_PUBLIC_BASE_URL=https://YOUR-VISION-DOMAIN
-export LIVE_VIEW_URL=https://YOUR-VISION-DOMAIN/
-export LIVE_VIEW_PARENT_ORIGINS=https://YOUR-OPERATOR-DOMAIN
-```
-
-If you also need direct LAN access, allow both dashboard origins:
-
-```bash
-export LIVE_VIEW_PARENT_ORIGINS=https://YOUR-OPERATOR-DOMAIN,https://10.174.96.119:39001
-```
-
-The preview URL must be reachable by the outside browser. The parent origin
-must match the dashboard's public origin so synchronized telemetry can reach
-the dashboard and map.
-
-## 5. Apply the environment settings
-
+Use a checkout containing the single-domain change to `deploy/nginx/nginx.conf`.
 From the project root:
 
 ```bash
 source env.local
-docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate p4-node p4-vision
+docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate p4-node p4-vision p4-nginx
 ```
 
-These are environment-only changes, so no image rebuild is needed. Recreate
-the containers to apply them; a container restart does not update its
-environment.
+No image rebuild is required for this change. Node and Vision need new containers
+to receive the environment settings. Nginx's configuration is an individual file
+bind mount: after Git replaces that host file, recreate Nginx so it mounts the
+new file. `docker compose restart` or a process reload can retain the old inode.
 
-Verify the effective configuration inside the running containers:
+Verify the effective configuration:
 
 ```bash
 docker exec p4-node printenv PUBLIC_OPERATOR_URL VISION_PUBLIC_BASE_URL LIVE_VIEW_URL
 docker exec p4-vision printenv LIVE_VIEW_PARENT_ORIGINS
+docker exec p4-nginx nginx -t
+docker exec p4-nginx nginx -T 2>&1 | grep -A 16 -E 'location (= /live|\^~ /live/|= /ws/playback)'
 ```
 
-Expected values should contain your actual ngrok domains. These checks confirm
-the container environment; open the pages to verify browser playback too.
+Check the local preview route without opening a playback session:
 
-## 6. Open the pages
+```bash
+curl -k --fail https://localhost:39001/live/health/live
+curl -k --fail https://localhost:39001/live/live-view-tracks.js -o /dev/null
+```
+
+The health response should be `{"status":"ok"}`. After opening the preview,
+inspect actual upstream routing in the access log:
+
+```bash
+docker exec p4-nginx sh -c 'tail -n 50 /var/log/nginx/its-access.log'
+```
+
+`/live/` requests should use Vision's internal port `39011`; dashboard requests
+should use Node's internal port `3000`. A closed `/ws/playback` connection should
+log status `101` and upstream port `39011`.
+
+## 4. Start one tunnel
+
+Stop any earlier tunnel using this domain, then run:
+
+```bash
+ngrok http https://localhost:39001 \
+  --url https://henchman-prescribe-supermom.ngrok-free.dev \
+  --upstream-tls-verify=false
+```
+
+Keep the terminal open. `--upstream-tls-verify=false` permits the local
+self-signed certificate; browser-facing HTTPS uses ngrok's trusted certificate.
+WebSocket traffic uses this same tunnel. No second domain or TURN ports are
+needed for the server video/GPS/IMU dataset view.
+
+## 5. Open the pages
 
 ```text
-Dashboard: https://YOUR-OPERATOR-DOMAIN/operator/
-Preview:   https://YOUR-VISION-DOMAIN/
+Dashboard: https://henchman-prescribe-supermom.ngrok-free.dev/operator/
+Preview:   https://henchman-prescribe-supermom.ngrok-free.dev/live/
 ```
 
-Saved MinIO recording playback uses port `39003` and needs a separate reachable
-recording endpoint if you want that feature. It is unnecessary for the local
-server video/GPS/IMU dataset view.
+The dashboard's live preview iframe uses `/live/` on the same domain. If ngrok
+shows its free-plan browser interstitial, visit the public page and continue,
+then reload the dashboard. Confirm playback, seeking and map telemetry in the
+browser; configuration checks alone do not verify video delivery.
 
-## Free-plan limitation
+Saved MinIO recording playback still uses port `39003` and its configured
+recording endpoint. This single-domain setup covers the server dataset preview,
+not public access to saved MinIO recordings.
 
-The ngrok free plan currently provides one development domain. It cannot
-provide the two independent public domains used by this procedure. Starting
-two tunnels on the same public URL does not separate dashboard and preview
-traffic.
+## Free-plan and TLS notes
 
-To serve both Docker pages with one domain, add path routing to the Docker
-ingress and configure the preview and its WebSocket accordingly. The native
-launcher's single-domain gateway is separate from the Docker Nginx setup;
-`NATIVE_TLS=false` does not change Docker Nginx.
-
+The free plan provides one assigned development domain, which this setup uses.
 See [ngrok free-plan limits](https://ngrok.com/docs/pricing-limits/free-plan-limits)
-for current domain, transfer and browser-interstitial restrictions.
+for transfer limits and browser-interstitial restrictions.
+
+`NATIVE_TLS=false` applies to the native launcher only. Docker Nginx continues
+to use its local TLS certificate on port `39001`.
