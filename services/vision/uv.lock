@@ -1454,15 +1454,20 @@ name = "poc-server-webrtc"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "aiortc" },
+    { name = "av" },
     { name = "fastapi", extra = ["standard"] },
     { name = "httpx" },
-    { name = "lap" },
-    { name = "openai" },
-    { name = "opencv-python-headless" },
     { name = "orjson" },
     { name = "psutil" },
     { name = "pydantic-settings" },
+]
+
+[package.dev-dependencies]
+inference = [
+    { name = "aiortc" },
+    { name = "lap" },
+    { name = "openai" },
+    { name = "opencv-python-headless" },
     { name = "tensorrt-cu13" },
     { name = "torch" },
     { name = "torchvision" },
@@ -1473,15 +1478,20 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiortc" },
+    { name = "av" },
     { name = "fastapi", extras = ["standard"] },
     { name = "httpx" },
-    { name = "lap", specifier = ">=0.5.12" },
-    { name = "openai" },
-    { name = "opencv-python-headless" },
     { name = "orjson" },
     { name = "psutil" },
     { name = "pydantic-settings" },
+]
+
+[package.metadata.requires-dev]
+inference = [
+    { name = "aiortc" },
+    { name = "lap", specifier = ">=0.5.12" },
+    { name = "openai" },
+    { name = "opencv-python-headless" },
     { name = "tensorrt-cu13" },
     { name = "torch", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/cu130" },

@@ -1,0 +1,35 @@
+# Apply after docker-compose.dev.yml or docker-compose.prod.yml.
+# Requires Compose supporting !reset / !override (2.24.4 or later).
+services:
+  p4-vision:
+    image: ${VISION_PLAYBACK_IMAGE:-p4-vision-playback:local}
+    build: !override
+      context: ./services/vision
+      dockerfile: ../../docker/vision-playback.Dockerfile
+    entrypoint: !reset []
+    command: [ "python", "run.py", "--no-tls" ]
+    depends_on: !reset []
+    environment: !override
+      VISION_SOURCE: server
+      VISION_INFERENCE_MODE: cached
+      SERVER_DATASET_DIR: /data/vision-dataset
+      VISION_CACHE_DIR: ${VISION_CACHE_DIR:-/data/vision-dataset/precomputed}
+      SERVER_VEHICLE_ID: ${SERVER_VEHICLE_ID:-server}
+      SERVER_GPS_FILE: ${SERVER_GPS_FILE:-gps.csv}
+      SERVER_IMU_FILE: ${SERVER_IMU_FILE:-imu.csv}
+      SERVER_SOURCE_START_NS: ${SERVER_SOURCE_START_NS:-}
+      HOST: 0.0.0.0
+      PORT: "39011"
+      RECORDING_ENABLED: "false"
+      LOG_TELEMETRY_ACCESS: ${LOG_TELEMETRY_ACCESS:-false}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      LIVE_VIEW_PARENT_ORIGINS: ${LIVE_VIEW_PARENT_ORIGINS:-https://${TLS_PUBLIC_ADDRESS:-10.174.96.119}:39001}
+    deploy:
+      resources:
+        reservations:
+          devices: !reset []
+    volumes: !override
+      - type: bind
+        source: ${SERVER_DATASET_DIR:-./data/vision_dataset}
+        target: /data/vision-dataset
+        read_only: true

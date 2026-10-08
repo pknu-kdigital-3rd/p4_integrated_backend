@@ -4,15 +4,20 @@ version = "0.1.0"
 description = "WebRTC relay server with YOLO object detection"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "aiortc",
+    "av",
     "fastapi[standard]",
     "httpx",
-    "lap>=0.5.12",
-    "openai",
-    "opencv-python-headless",
     "orjson",
     "psutil",
     "pydantic-settings",
+]
+
+[dependency-groups]
+inference = [
+    "aiortc",
+    "lap>=0.5.12",
+    "openai",
+    "opencv-python-headless",
     "tensorrt-cu13",
     "torch",
     "torchvision",
@@ -27,6 +32,7 @@ dependencies = [
 # project-level opencv-python-headless dependency and remove that transitive
 # GUI package from Ultralytics' dependency graph.
 [tool.uv]
+default-groups = ["inference"]
 exclude-dependencies = [
     "opencv-python",
 ]
