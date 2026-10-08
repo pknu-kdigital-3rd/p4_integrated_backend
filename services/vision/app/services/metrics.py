@@ -9,7 +9,6 @@ import sys
 import tracemalloc
 from time import monotonic, process_time
 
-import torch
 
 try:
     import psutil
@@ -44,7 +43,10 @@ def _rss_bytes() -> int:
 def _cuda_memory() -> tuple[int, int, int, int]:
     """Return current allocated/reserved and process peak CUDA bytes."""
 
-    if not settings.YOLO_DEVICE.startswith("cuda") or not torch.cuda.is_available():
+    if settings.VISION_INFERENCE_MODE == "cached" or not settings.YOLO_DEVICE.startswith("cuda"):
+        return 0, 0, 0, 0
+    import torch
+    if not torch.cuda.is_available():
         return 0, 0, 0, 0
     try:
         device = torch.device(settings.YOLO_DEVICE)

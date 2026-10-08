@@ -9,11 +9,9 @@ from app.api.internal import sync_android_live_from_relay
 from app.core.state import AppState
 from app.core.settings import settings
 from app.services.access_logs import configure_telemetry_access_logging
-from app.services.depth import load_depth_estimator, load_depth_on_worker, make_depth_executor
 from app.services.gc_runtime import _freeze_loaded_objects, configure_gc
 from app.services.metrics import metrics_worker
 from app.services.recording_detections import RecordingDetectionWriter
-from app.services.yolo import frame_receiver, load_yolo_model, yolo_worker
 
 configure_telemetry_access_logging(settings.LOG_TELEMETRY_ACCESS)
 
@@ -24,7 +22,8 @@ async def lifespan(app: FastAPI):
     app.state.app_state = state
     detection_writer = RecordingDetectionWriter(
         settings.NODE_INTERNAL_BASE_URL,
-        settings.NODE_INTERNAL_SERVICE_TOKEN if settings.RECORDING_ENABLED else None,
+        settings.NODE_INTERNAL_SERVICE_TOKEN
+        if settings.RECORDING_ENABLED and settings.VISION_INFERENCE_MODE == "inference" else None,
         settings.RECORDING_DETECTION_QUEUE_SIZE,
         sample_every_n_frames=settings.RECORDING_DETECTION_SAMPLE_EVERY_N_FRAMES,
     )
@@ -42,11 +41,14 @@ async def lifespan(app: FastAPI):
     # Explicit device selection rather than relying on Ultralytics' implicit
     # per-call auto-detection, so the chosen device is logged once at startup
     # and stays fixed for the life of the process.
-    state.yolo_model = load_yolo_model()
-    state.depth_executor = make_depth_executor()
-    state.depth_model = await load_depth_on_worker(state.depth_executor, load_depth_estimator)
+    if settings.VISION_INFERENCE_MODE == "inference":
+        from app.services.depth import load_depth_estimator, load_depth_on_worker, make_depth_executor
+        from app.services.yolo import load_yolo_model
+        state.yolo_model = load_yolo_model()
+        state.depth_executor = make_depth_executor()
+        state.depth_model = await load_depth_on_worker(state.depth_executor, load_depth_estimator)
     configure_gc(settings.VISION_GC_GEN0_THRESHOLD)
-    _freeze_loaded_objects("Vision model startup")
+    _freeze_loaded_objects("Vision cached startup" if settings.VISION_INFERENCE_MODE == "cached" else "Vision model startup")
 
     # Reference the tasks for the lifetime of the app (held by this suspended
     # generator frame across the yield below) - asyncio only keeps a weak
@@ -58,10 +60,18 @@ async def lifespan(app: FastAPI):
     if settings.VISION_SOURCE == "server":
         from app.services.server_source import ServerSource, server_frame_receiver
         state.server_source = ServerSource(settings)
+        if settings.VISION_INFERENCE_MODE == "cached":
+            # Validate the bundle before reporting startup success. No models
+            # or inference imports are permitted along this path.
+            await asyncio.to_thread(state.server_source.load)
         frame_receiver_task = asyncio.create_task(server_frame_receiver(state))
     else:
+        from app.services.yolo import frame_receiver
         frame_receiver_task = asyncio.create_task(frame_receiver(state))
-    yolo_worker_task = asyncio.create_task(yolo_worker(state))
+    yolo_worker_task = None
+    if settings.VISION_INFERENCE_MODE == "inference":
+        from app.services.yolo import yolo_worker
+        yolo_worker_task = asyncio.create_task(yolo_worker(state))
     metrics_task = asyncio.create_task(metrics_worker(state))
     detection_writer_task = (
         asyncio.create_task(detection_writer.run(state.metrics))
@@ -80,13 +90,14 @@ async def lifespan(app: FastAPI):
     # exit cleanly. CancelledError isn't an Exception subclass (Python 3.8+),
     # so none of these tasks' own exception handling swallows this.
     frame_receiver_task.cancel()
-    yolo_worker_task.cancel()
+    if yolo_worker_task is not None:
+        yolo_worker_task.cancel()
     metrics_task.cancel()
     if android_live_sync_task is not None:
         android_live_sync_task.cancel()
     await asyncio.gather(
         frame_receiver_task,
-        yolo_worker_task,
+        *([yolo_worker_task] if yolo_worker_task is not None else []),
         metrics_task,
         *([android_live_sync_task] if android_live_sync_task is not None else []),
         return_exceptions=True,

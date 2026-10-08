@@ -4,13 +4,13 @@ import asyncio
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from time import monotonic
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from av import VideoFrame
 from starlette.requests import HTTPConnection
-from ultralytics import YOLO
-
-from app.services.frame_preparation import PreparedInputs
+if TYPE_CHECKING:
+    from ultralytics import YOLO
+    from app.services.frame_preparation import PreparedInputs
 from app.services.source_timeline import SourceTimelineResolver
 from app.services.telemetry import TelemetryStore
 from app.services.model_timing import ModelTimelineMetrics

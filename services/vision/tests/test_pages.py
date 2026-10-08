@@ -34,6 +34,13 @@ class LiveViewPageTests(unittest.TestCase):
         self.assertTrue(response.headers["content-type"].startswith("text/javascript"))
         self.assertIn("LiveViewDistanceColors", response.text)
 
+    def test_shared_cached_overlay_renderer_is_loaded_and_served(self):
+        self.assertIn('<script src="live-view-overlay.js"></script>', self.client.get('/').text)
+        response = self.client.get('/live-view-overlay.js')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers['content-type'].startswith('text/javascript'))
+        self.assertIn('LiveViewOverlay', response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

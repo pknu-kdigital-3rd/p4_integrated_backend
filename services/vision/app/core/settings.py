@@ -2,7 +2,6 @@ from pathlib import Path
 import re
 from typing import Literal
 
-import torch
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,6 +11,7 @@ INDEX_HTML_PATH = BASE_DIR / "index.html"
 
 def _default_yolo_device() -> str:
     """Use CUDA only when this PyTorch wheel supports the installed GPU."""
+    import torch
     if not torch.cuda.is_available():
         return "cpu"
     try:
@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     VISION_SOURCE: Literal["server", "relay"] = "server"
+    VISION_INFERENCE_MODE: Literal["inference", "cached"] = "inference"
+    VISION_CACHE_DIR: str = ""
     SERVER_DATASET_DIR: str = str(BASE_DIR / "dataset")
     SERVER_VIDEO_FILE: str = "video.mp4"
     SERVER_GPS_FILE: str = "gps.csv"
@@ -47,7 +49,7 @@ class Settings(BaseSettings):
     YOLO_MODEL: str = str(BASE_DIR / "models" / "yolo26s-seg.pt")
     # Comma-separated model class names (or numeric IDs). Empty keeps all classes.
     YOLO_CLASSES: str = ""
-    YOLO_DEVICE: str = _default_yolo_device()
+    YOLO_DEVICE: str = "auto"
     # Frames larger than this are aspect-preservingly scaled before BGR
     # materialization, then Ultralytics letterboxes the smaller image to its
     # stride-aligned input. Normalized outputs remain source-size invariant;
@@ -292,6 +294,16 @@ class Settings(BaseSettings):
         if not 32 <= height <= 4096 or not 32 <= width <= 4096:
             raise ValueError("YOLO_INFERENCE_SIZE dimensions must be between 32 and 4096")
         return f"{height}x{width}"
+
+    @model_validator(mode="after")
+    def _resolve_inference_mode(self) -> "Settings":
+        if self.VISION_INFERENCE_MODE == "cached":
+            if self.VISION_SOURCE != "server":
+                raise ValueError("cached inference requires VISION_SOURCE=server")
+            self.YOLO_DEVICE = "cpu"
+        elif self.YOLO_DEVICE == "auto":
+            self.YOLO_DEVICE = _default_yolo_device()
+        return self
 
     @model_validator(mode="after")
     def _validate_turn_credentials(self) -> "Settings":

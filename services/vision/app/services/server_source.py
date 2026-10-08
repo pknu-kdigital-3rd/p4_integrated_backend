@@ -11,7 +11,8 @@ from time import monotonic
 
 import av
 
-from app.core.state import InferenceFrame
+from app.core.state import InferenceFrame, PlaybackItem
+from app.services.inference_bundle import InferenceBundle, source_metadata
 from app.services.telemetry import GpsSampleIn, ImuSampleIn, SessionTelemetry, TelemetryStore
 
 
@@ -45,20 +46,29 @@ class ServerSource:
         self.gps_file = self.directory / config.SERVER_GPS_FILE
         self.imu_file = self.directory / config.SERVER_IMU_FILE
         self.start_ns = config.SERVER_SOURCE_START_NS
+        self.configured_start_ns = config.SERVER_SOURCE_START_NS
         self.duration = 0.0
         self.fps = 30.0
         self.position = 0.0
         self.loop = None
         self.ready = False
+        self.cached = getattr(config, "VISION_INFERENCE_MODE", "inference") == "cached"
+        self.cache_directory = getattr(config, "VISION_CACHE_DIR", "") or self.directory / "precomputed"
+        self.cache = None
         self.end_seq = None
         self.telemetry = TelemetryStore()
         # Local playback identity is display-only; never persisted as a real trip.
         self.identity = {"tripId": None, "vehicleId": config.SERVER_VEHICLE_ID, "recordingSessionId": "server-dataset"}
 
     def load(self):
+        if self.cached:
+            self.cache = InferenceBundle(self.cache_directory)
+            self.video = self.cache.video
         gps = read_samples(self.gps_file, GpsSampleIn)
         imu = read_samples(self.imu_file, ImuSampleIn)
-        self.start_ns = self.start_ns or gps[0].timestamp_ns
+        self.start_ns = self.configured_start_ns or gps[0].timestamp_ns
+        if self.cache is not None:
+            self.start_ns += int(self.cache.manifest["source_time_offset_ns"])
         session = SessionTelemetry(None, self.identity["vehicleId"], "REPLAY",
                                    [s.timestamp_ns for s in gps], gps,
                                    [s.timestamp_ns for s in imu], imu)
@@ -69,12 +79,16 @@ class ServerSource:
             self.duration = float(stream.duration * stream.time_base) if stream.duration else float(container.duration or 0) / av.time_base
         if self.duration <= 0:
             raise ValueError("Server video must have a known positive duration")
+        if self.cache is not None:
+            if (stream.width, stream.height) != (self.cache.manifest["width"], self.cache.manifest["height"]):
+                raise ValueError("Cached video dimensions do not match its manifest")
         self.ready = True
 
     def status(self):
         return {"mode": "server", "ready": self.ready, "duration": self.duration,
                 "position": self.position, "loop": self.loop, "video": self.video.name,
-                "end_seq": self.end_seq, "fps": self.fps}
+                "end_seq": self.end_seq, "fps": self.fps,
+                "inference_mode": "cached" if self.cached else "inference"}
 
     def seek(self, value):
         position = float(value)
@@ -164,10 +178,11 @@ class PreparedFrameBuffer:
 
 async def server_frame_receiver(state):
     from app.core.settings import settings
-    from app.services.yolo import _discard_inference_queue, _enqueue_inference_frame, _schedule_playback_deadline, prepare_inference_inputs
     from time import perf_counter
 
     source = state.server_source
+    if not source.cached:
+        from app.services.yolo import _discard_inference_queue, _enqueue_inference_frame, _schedule_playback_deadline, prepare_inference_inputs
     buffer = None
     seq = 0
     active = False
@@ -200,7 +215,9 @@ async def server_frame_receiver(state):
                         await buffer.close()
                     depth_enabled = state.depth_model is not None
                     prepare = None
-                    if settings.VISION_FRAME_PREP_THREAD == "decode":
+                    if source.cached:
+                        prepare = lambda frame: source.cache.result_at(frame.pts)
+                    elif settings.VISION_FRAME_PREP_THREAD == "decode":
                         prepare = lambda frame: prepare_inference_inputs(frame, depth_enabled)
                     buffer = PreparedFrameBuffer(source.frames(pending_seek), prepare)
                     pending_item = None
@@ -211,7 +228,8 @@ async def server_frame_receiver(state):
                         state.clear_all_results()
                         state.clear_completed_sequences()
                         state.queued_sequences.clear()
-                        _discard_inference_queue(state)
+                        if not source.cached:
+                            _discard_inference_queue(state)
                         state.last_presented = None
                         state.fault = None
                         state.result_condition.notify_all()
@@ -266,11 +284,24 @@ async def server_frame_receiver(state):
                     timestamp_us=round(seconds * 1_000_000), keyframe=keyframe,
                     resolved_source_timestamp_ns=source.start_ns + round(seconds * 1_000_000_000),
                     source_timeline_status="server", recording_identity=source.identity,
-                    prepared=prepared)
-                state.queued_sequences.add((state.current_epoch, seq))
+                    prepared=None if source.cached else prepared)
                 state.metrics.decoded_frames_received += 1
-                await _enqueue_inference_frame(state, inference_frame)
-                _schedule_playback_deadline(state, inference_frame, perf_counter())
+                if source.cached:
+                    if prepared is None:
+                        raise ValueError(f"Missing saved inference for frame PTS {inference_frame.pts}")
+                    result = dict(prepared, source=source_metadata(inference_frame),
+                                  frame_seq=seq, frame_epoch=state.current_epoch,
+                                  inference_mode="cached")
+                    async with state.result_condition:
+                        state.put_result(PlaybackItem(state.current_epoch, seq, encoded,
+                                                     inference_frame.timestamp_us, keyframe, result))
+                        state.mark_completed(state.current_epoch, seq)
+                        state.metrics.playback_frames_published += 1
+                        state.result_condition.notify_all()
+                else:
+                    state.queued_sequences.add((state.current_epoch, seq))
+                    await _enqueue_inference_frame(state, inference_frame)
+                    _schedule_playback_deadline(state, inference_frame, perf_counter())
                 seq += 1
                 await asyncio.sleep(0)
             except Exception as exc:

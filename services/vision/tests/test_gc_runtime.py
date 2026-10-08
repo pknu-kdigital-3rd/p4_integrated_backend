@@ -66,15 +66,17 @@ class WorkerGCFreezeTests(unittest.IsolatedAsyncioTestCase):
             return asyncio.sleep(0)
 
         with patch("app.main.RecordingDetectionWriter", return_value=Mock(enabled=False)), patch(
-            "app.main.load_yolo_model", side_effect=lambda: loaded("yolo", Mock())
-        ), patch("app.main.load_depth_estimator", side_effect=lambda: loaded("depth", Mock())), patch(
-            "app.main.make_depth_executor", side_effect=lambda: loaded("executor", executor)
+            "app.services.yolo.load_yolo_model", side_effect=lambda: loaded("yolo", Mock())
+        ), patch("app.services.depth.load_depth_estimator", side_effect=lambda: loaded("depth", Mock())), patch(
+            "app.services.depth.make_depth_executor", side_effect=lambda: loaded("executor", executor)
         ), patch("app.main.configure_gc", side_effect=lambda value: events.append("threshold")), patch(
             "app.main._freeze_loaded_objects", side_effect=lambda label: events.append("freeze")
-        ), patch("app.main.frame_receiver", new=worker), patch(
-            "app.main.yolo_worker", new=worker
+        ), patch("app.services.yolo.frame_receiver", new=worker), patch(
+            "app.services.yolo.yolo_worker", new=worker
         ), patch("app.main.metrics_worker", new=worker), patch(
             "app.main.sync_android_live_from_relay", new=worker
+        ), patch.object(main.settings, "VISION_SOURCE", "relay"), patch.object(
+            main.settings, "VISION_INFERENCE_MODE", "inference"
         ):
             async with main.lifespan(SimpleNamespace(state=SimpleNamespace())):
                 self.assertEqual(events[:5], ["yolo", "executor", "depth", "threshold", "freeze"])

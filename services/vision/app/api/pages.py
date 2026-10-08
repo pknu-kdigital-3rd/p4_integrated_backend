@@ -45,3 +45,9 @@ async def live_view_distance_colors_js():
         media_type="text/javascript",
         headers={"Cache-Control": "no-cache"},
     )
+
+
+@router.get("/live-view-overlay.js")
+async def live_view_overlay_js():
+    return FileResponse(BASE_DIR / "live-view-overlay.js", media_type="text/javascript",
+                        headers={"Cache-Control": "no-cache"})

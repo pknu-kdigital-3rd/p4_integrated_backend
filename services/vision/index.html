@@ -141,7 +141,8 @@
   </section>
 </main>
 <script src="live-view-tracks.js"></script>
-<script src="live-view-distance-colors.js"></script>
+  <script src="live-view-distance-colors.js"></script>
+  <script src="live-view-overlay.js"></script>
 <script>
 (() => {
   const videoCanvas = document.getElementById('video');
@@ -253,6 +254,7 @@
     localStorage.setItem('playback-distance-multiplier', '1');
   });
   let compensationMode = localStorage.getItem('playback-compensation-mode') || 'global';
+  let cachedPlayback = false;
   // Track hold/prediction timing in media milliseconds; see live-view-tracks.js.
   let temporalConfig = temporal.normalizeConfig({
     predictMs: localStorage.getItem('playback-track-predict-ms') ?? undefined,
@@ -885,6 +887,14 @@
     return Array.from(tracks.values()).filter(track => track.confirmed && track.shown);
   }
   function drawOverlay(inference, width, height, nowMs) {
+    if (cachedPlayback && compensationMode === 'raw') {
+      window.LiveViewOverlay.draw(overlayCtx, inference.items, width, height, {
+        boxes: boxesEl.checked, masks: masksEl.checked, minConfidence,
+        distanceMultiplier, distanceColors, distanceSettings: distanceColorSettings,
+        classStyle, classLabel: classDisplayName,
+      });
+      return;
+    }
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     const classColors = {
       person: '#35e18c', chair: '#4dabf7', clock: '#c77dff', car: '#ff922b',
@@ -1170,6 +1180,11 @@
       if (typeof event.data === 'string') {
         const message = JSON.parse(event.data);
         if (message.type === 'source') updateSource(message);
+        if ((message.type === 'source' || message.type === 'session')
+            && (message.inference_mode === 'cached' || message.source?.inference_mode === 'cached') && !cachedPlayback) {
+          cachedPlayback = true;
+          compensationMode = 'raw'; compensationModeEl.value = 'raw'; resetCompensation();
+        }
         if (message.type === 'session' && message.source) updateSource(message.source);
         if (message.type === 'control_error') { awaitingLiveEpoch = false; requestedSeekPosition = null; renderVideoPosition(); setLoading(false); setStatus(message.detail, '#fc6'); }
         if (message.type === 'session' && Array.isArray(message.overlay_classes)) {

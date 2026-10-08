@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Saved inference review</title>
+<style>
+  :root{color-scheme:dark;font:16px system-ui;background:#111827;color:#e5e7eb}
+  body{max-width:1100px;margin:24px auto;padding:0 20px}h1{font-size:24px}
+  fieldset{border:1px solid #475569;border-radius:8px;margin:16px 0;padding:16px}
+  label{display:inline-block;margin:6px 16px 6px 0}button,input{font:inherit}
+  button{padding:7px 14px;margin:4px;border-radius:5px;cursor:pointer}
+  #stage{position:relative;background:#000;aspect-ratio:16/9;width:100%}
+  canvas{position:absolute;inset:0;width:100%;height:100%}#timeline{width:100%}
+  input[type=number]{width:6em}#status{white-space:pre-wrap;color:#93c5fd}
+  #decoder{position:fixed;left:-10000px;width:1px;height:1px;opacity:0;pointer-events:none}
+</style>
+<h1>Saved inference review</h1>
+<p>Select the three files from one generated bundle. Files stay on your computer.</p>
+<fieldset><legend>Result bundle</legend>
+  <label>Video <input id="video-file" type="file" accept="video/mp4"></label>
+  <label>Manifest <input id="manifest-file" type="file" accept=".json"></label>
+  <label>Inference <input id="results-file" type="file" accept=".jsonl"></label>
+  <button id="load">Load bundle</button>
+</fieldset>
+<div id="stage"><canvas id="picture"></canvas><canvas id="overlay"></canvas></div>
+<video id="decoder" muted playsinline preload="auto" aria-hidden="true"></video>
+<fieldset id="controls" disabled><legend>Review</legend>
+  <button id="play">Play / pause</button><button id="previous">Previous frame</button><button id="next">Next frame</button>
+  <input id="timeline" type="range" min="0" max="0" step="0.001" value="0" aria-label="Video position">
+  <output id="position">0.00 s</output>
+  <div><label>Loop start <input id="loop-start" type="number" min="0" step="0.01" value="0"></label>
+    <label>Loop end <input id="loop-end" type="number" min="0" step="0.01" value="0"></label>
+    <button id="loop">Set loop</button><button id="clear-loop">Clear loop</button></div>
+  <label><input id="boxes" type="checkbox" checked> Boxes</label>
+  <label><input id="masks" type="checkbox" checked> Segmentation</label>
+  <label><input id="distances" type="checkbox" checked> Distances</label>
+  <label><input id="distance-colors" type="checkbox" checked> Distance colors</label>
+  <label>Minimum confidence <input id="confidence" type="number" min="0" max="1" step="0.05" value="0"></label>
+</fieldset>
+<p id="status" role="status">No bundle loaded.</p>
+<script>/* INLINE:live-view-distance-colors.js */</script>
+<script>/* INLINE:live-view-overlay.js */</script>
+<script>/* INLINE:inference-review.js */</script>
+</html>

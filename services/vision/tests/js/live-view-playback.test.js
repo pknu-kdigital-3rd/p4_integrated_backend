@@ -4,21 +4,25 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const html = fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8');
+const html = fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8').replace(/\r\n/g, '\n');
+// These transport unit tests exercise relay behavior. Server-video globals
+// are normally initialized by the full page, outside extracted functions.
+const contextWithPageDefaults = values => vm.createContext({ serverMode: false, endSeq: null, ...values });
 // Exercise the page's actual lifecycle functions with controlled transport,
 // decoder, and clocks; no H.264 hardware or camera is needed for these races.
 function functions(...names) {
   return names.map(name => {
     const start = html.indexOf(`  function ${name}(`);
     assert.ok(start >= 0, name);
-    const end = html.indexOf('\n  function ', start + 1);
-    return html.slice(start, end);
+    const end = html.indexOf('\n  }\n', start);
+    assert.ok(end >= 0, name);
+    return html.slice(start, end + 4);
   }).join('\n');
 }
 
 function lifecycle() {
   const calls = [];
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     stopped: false, decoding: false, foregroundResumePending: false, foregroundReconnectAttempts: 0,
     lastForegroundResumeAt: -Infinity, foregroundResumeTimer: null,
     socket: { readyState: 1, close: () => calls.push('close') }, reconnectTimer: null,
@@ -59,7 +63,7 @@ test('watchdog keeps an open socket while waiting for a restarted publisher', ()
 
 test('a stream that stops delivering packets resyncs without reopening the transport', () => {
   let reconnects = 0;
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     stopped: false, playing: true, decoding: false, document: { hidden: false },
     lastPaintedAt: 1000, performance: { now: () => 4100 }, DECODE_STALL_MS: 3000,
     jumpLive: () => reconnects++,
@@ -75,7 +79,7 @@ test('a stream that stops delivering packets resyncs without reopening the trans
 test('decoder skips stale rendering while preserving H.264 decode dependencies', () => {
   let output, closed = 0, pumped = 0;
   const pair = { epoch: 1, seq: 1 };
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     invalidateDecoder() {}, decoderGeneration: 1, decoder: null, playing: true,
     pending: new Map([[123, pair]]), known: new Set(['1:1']), decoding: true,
     bufferedSeconds: () => 0.5, MAX_LIVE_LAG_S: 0.25,
@@ -94,7 +98,7 @@ test('decoder skips stale rendering while preserving H.264 decode dependencies',
 
 test('queued live footage beyond the cap resets rather than draining stale frames', () => {
   let reset = 0;
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     epoch: 1, known: new Set(), queue: [],
     bufferedSeconds: () => 0.8, MAX_QUEUED_LIVE_SECONDS: 0.75,
     MAX_QUEUED_LIVE_FRAMES: 30, maxBufferBytes: 1024, performance: { now: () => 0 },
@@ -118,7 +122,7 @@ test('embedded layout is applied by the head script before the body loads', () =
 
 test('receiving an encoded packet keeps loading active until its frame is painted', () => {
   let watchdogCleared = 0, loadingCleared = 0;
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     stopped: false, socket: null, location: { protocol: 'https:', host: 'example.test' },
     WebSocket: class {}, Uint8Array, DataView, TextDecoder,
     awaitingLiveEpoch: false, foregroundResumePending: true,
@@ -170,7 +174,7 @@ test('watchdog repairs a decoder stall without replacing an open socket', () => 
 });
 
 function playout() {
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     playoutAnchor: null, latePaints: 0,
     PLAYOUT_DELAY_MS: 50, PLAYOUT_REANCHOR_MS: 250, PLAYOUT_ADAPT: 0.1,
   });
@@ -211,7 +215,7 @@ test('decoder output frees the decoder for the next chunk while frames wait to p
   let output, pumped = 0;
   const timers = [];
   const pair = { epoch: 1, seq: 1, timestamp_us: 0 };
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     invalidateDecoder() {}, decoderGeneration: 1, decoder: null, playing: true,
     pending: new Map([[0, pair]]), known: new Set(), decoding: true, awaitingPaint: 0,
     bufferedSeconds: () => 0, MAX_LIVE_LAG_S: 0.25, performance: { now: () => 10 },
@@ -230,7 +234,7 @@ test('decoder output frees the decoder for the next chunk while frames wait to p
 
 test('pump stops decoding ahead once enough frames wait for their slot', () => {
   const decoded = [];
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     stopped: false, decoding: false, playing: true, awaitingPaint: 2, MAX_DECODED_AHEAD: 2,
     queue: [{ timestamp_us: 1, keyframe: false, data: new Uint8Array(1) }], pending: new Map(),
     decoder: { decode: chunk => decoded.push(chunk) }, performance: { now: () => 0 },
@@ -256,7 +260,7 @@ function functionBodies(...names) {
 function distanceColoringPage(parentOrigin = 'https://operator.example') {
   const posted = [], saved = [];
   let synced = 0;
-  const context = vm.createContext({
+  const context = contextWithPageDefaults({
     parentOrigin,
     distanceColorSettings: { enabled: false, nearMaxM: 15, midMaxM: 40, colors: {} },
     distanceColors: { normalizeSettings: value => ({ ...value }) },
@@ -286,4 +290,22 @@ test('a standalone Vision page does not report its coloring mode', () => {
   context.setDistanceColoringEnabled(true);
   assert.deepEqual(saved, [true]);
   assert.deepEqual(posted, []);
+});
+
+test('cached raw playback uses the shared saved-result renderer', () => {
+  const calls = [];
+  const context = contextWithPageDefaults({
+    cachedPlayback: true, compensationMode: 'raw',
+    window: { LiveViewOverlay: { draw: (...args) => calls.push(args) } },
+    overlayCtx: {}, boxesEl: { checked: true }, masksEl: { checked: false },
+    minConfidence: 0.3, distanceMultiplier: 1, distanceColors: {}, distanceColorSettings: {},
+    classStyle: () => ({ box: true, mask: true }), classDisplayName: value => value,
+  });
+  vm.runInContext(functionBodies('drawOverlay'), context);
+  const items = [{ class: 'car' }];
+  context.drawOverlay({ items }, 1280, 720, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1], items);
+  assert.equal(calls[0][4].masks, false);
+  assert.equal(calls[0][4].minConfidence, 0.3);
 });

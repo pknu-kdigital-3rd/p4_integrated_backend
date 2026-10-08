@@ -72,8 +72,10 @@ def _frame_telemetry(state: AppState, source: dict) -> dict:
     return telemetry
 
 
-def _confidence_thresholds() -> dict[str, float | None] | None:
+def _confidence_thresholds(state: AppState | None = None) -> dict[str, float | None] | None:
     """Server-side tracker thresholds, shown next to the viewer's own filter."""
+    if settings.VISION_INFERENCE_MODE == "cached":
+        return state.server_source.cache.manifest.get("confidence_thresholds") if state else None
     if not settings.YOLO_TRACKING:
         return None
     from app.services.yolo import tracker_confidence_config
@@ -90,6 +92,8 @@ def _overlay_classes(state: AppState) -> list[str]:
     Resolved once at model load from YOLO_CLASSES (or the default list);
     computed here only when the model is not loaded yet.
     """
+    if settings.VISION_INFERENCE_MODE == "cached":
+        return state.server_source.cache.manifest.get("overlay_classes", [])
     resolved = getattr(state.yolo_model, "_p4_overlay_classes", None)
     if isinstance(resolved, list):
         return resolved
@@ -104,8 +108,10 @@ def _frame_message(state: AppState, item: PlaybackItem) -> bytes:
     metadata = {
         "type": "frame",
         "session_id": state.session_id,
-        "model_filename": Path(settings.YOLO_MODEL).name,
-        "confidence_thresholds": _confidence_thresholds(),
+        "model_filename": (state.server_source.cache.manifest["model_filename"]
+                           if settings.VISION_INFERENCE_MODE == "cached" else Path(settings.YOLO_MODEL).name),
+        "confidence_thresholds": _confidence_thresholds(state),
+        "inference_mode": settings.VISION_INFERENCE_MODE,
         "epoch": item.epoch,
         "seq": item.seq,
         "source": source,
