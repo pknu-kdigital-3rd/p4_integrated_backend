@@ -64,6 +64,10 @@ to be restarted after code or container configuration changes.
 
 ## Server video inference
 
+To infer a recording once on a GPU, review it in a portable HTML page, and serve
+the saved results without GPU dependencies, see
+[precomputed video playback](docs/vision-precomputed-playback.md).
+
 Vision runs without an Android publisher. Set `SERVER_DATASET_DIR` to the host
 folder containing the recording. Compose mounts it read-only at
 `/data/vision-dataset`. For a direct Python process, the same variable is the
